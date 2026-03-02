@@ -1,0 +1,79 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}{{ customer.name }}{% endblock %}
+
+{% block content %}
+<div class="admin-header">
+  <h1>{{ customer.name }}</h1>
+  <a href="{{ url_for('admin.customers') }}" class="btn btn-ghost" style="font-size:.8rem;padding:.5rem 1.25rem;">← Back to Customers</a>
+</div>
+
+<!-- Customer info -->
+<div class="stat-grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));">
+  <div class="stat-card">
+    <div class="stat-value">{{ customer.total_bookings }}</div>
+    <div class="stat-label">Bookings</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value">${{ '%.0f'|format(customer.total_spent) }}</div>
+    <div class="stat-label">Total Spent</div>
+  </div>
+  <div class="stat-card">
+    <div style="font-size:.9rem;color:var(--color-dark);font-weight:700;">{{ customer.email }}</div>
+    <div class="stat-label">Email</div>
+  </div>
+  <div class="stat-card">
+    <div style="font-size:.9rem;color:var(--color-dark);font-weight:700;">{{ customer.phone or 'N/A' }}</div>
+    <div class="stat-label">Phone</div>
+  </div>
+</div>
+
+<!-- Booking history -->
+<div class="admin-card" style="padding:0;overflow:hidden;">
+  <div style="padding:1.25rem 1.5rem;border-bottom:1px solid var(--color-border);">
+    <h3 style="margin:0;">Booking History</h3>
+  </div>
+  {% if bookings %}
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Ref</th>
+        <th>Date</th>
+        <th>Time</th>
+        <th>Studio(s)</th>
+        <th>Service</th>
+        <th>Duration</th>
+        <th>Total</th>
+        <th>Paid</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for b in bookings %}
+      <tr>
+        <td style="font-family:monospace;font-size:.8rem;">{{ b.booking_ref }}</td>
+        <td style="font-size:.875rem;">{{ b.date.strftime('%b %d, %Y') }}</td>
+        <td style="font-size:.875rem;">{{ b.start_time.strftime('%I:%M %p') }}–{{ b.end_time.strftime('%I:%M %p') }}</td>
+        <td style="font-size:.875rem;">{{ b.studio_names }}</td>
+        <td style="font-size:.875rem;">{{ b.service_type }}</td>
+        <td style="font-size:.875rem;">{{ b.duration_hours }}h</td>
+        <td style="font-size:.875rem;">${{ '%.2f'|format(b.total) }}</td>
+        <td style="font-size:.875rem;">${{ '%.2f'|format(b.amount_paid) }}</td>
+        <td><span class="badge badge-{{ b.status }}">{{ b.status }}</span></td>
+      </tr>
+      {% if b.notes %}
+      <tr>
+        <td colspan="9" style="padding:.5rem 1rem;background:#fafaf8;font-size:.8rem;color:var(--color-muted);">
+          <strong>Notes:</strong> {{ b.notes }}
+        </td>
+      </tr>
+      {% endif %}
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div style="padding:2rem;text-align:center;color:var(--color-muted);">
+    <p>No bookings found.</p>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

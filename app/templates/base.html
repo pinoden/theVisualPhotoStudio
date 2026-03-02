@@ -51,6 +51,21 @@
     </ul>
   </div>
 
+  <!-- Announcement banners -->
+  {% if active_announcements is defined and active_announcements %}
+    {% for ann in active_announcements %}
+    <div class="site-announcement" style="background:{{ ann.bg_color }};color:{{ ann.text_color }};">
+      <div class="announcement-content">
+        <strong>{{ ann.title }}</strong> — {{ ann.message }}
+        {% if ann.link_url and ann.link_text %}
+          <a href="{{ ann.link_url }}" style="color:{{ ann.text_color }};text-decoration:underline;margin-left:.5rem;">{{ ann.link_text }}</a>
+        {% endif %}
+      </div>
+      <button class="announcement-close" onclick="this.parentElement.remove()" style="color:{{ ann.text_color }};" aria-label="Dismiss">&times;</button>
+    </div>
+    {% endfor %}
+  {% endif %}
+
   <!-- Flash messages -->
   {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}

@@ -1,0 +1,58 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Business Hours{% endblock %}
+
+{% block content %}
+<div class="admin-header">
+  <h1>Business Hours</h1>
+</div>
+
+<p style="font-size:.9rem;color:var(--color-muted);margin-bottom:2rem;">
+  Set the opening and closing times for each studio. Check "Closed" to mark a day as unavailable.
+  If no hours are set for a studio, the system defaults are used (Mon–Fri 9AM–7PM, Sat–Sun 8AM–8PM).
+</p>
+
+{% for studio in studios %}
+<div class="admin-card" style="margin-bottom:1.5rem;">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
+    <h3 style="margin:0;">{{ studio.name }}</h3>
+    {% if not studio.is_active %}
+    <span class="badge badge-cancelled">Inactive</span>
+    {% endif %}
+  </div>
+
+  <form method="POST" action="{{ url_for('admin.update_hours', studio_id=studio.id) }}">
+    <table class="data-table" style="margin-bottom:1rem;">
+      <thead>
+        <tr>
+          <th style="width:120px;">Day</th>
+          <th>Opens</th>
+          <th>Closes</th>
+          <th style="width:80px;text-align:center;">Closed</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for day_idx in range(7) %}
+        {% set h = studio.hours_for_day(day_idx) %}
+        <tr>
+          <td style="font-weight:700;font-size:.875rem;">{{ day_names[day_idx] }}</td>
+          <td>
+            <input type="time" name="open_{{ day_idx }}" class="form-control" style="width:auto;"
+                   value="{{ h.open_time.strftime('%H:%M') if h else ('09:00' if day_idx < 5 else '08:00') }}">
+          </td>
+          <td>
+            <input type="time" name="close_{{ day_idx }}" class="form-control" style="width:auto;"
+                   value="{{ h.close_time.strftime('%H:%M') if h else ('19:00' if day_idx < 5 else '20:00') }}">
+          </td>
+          <td style="text-align:center;">
+            <input type="checkbox" name="closed_{{ day_idx }}" style="width:18px;height:18px;"
+                   {{ '' if h else '' }}>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <button type="submit" class="btn btn-outline" style="font-size:.85rem;">Save {{ studio.name }} Hours</button>
+  </form>
+</div>
+{% endfor %}
+{% endblock %}

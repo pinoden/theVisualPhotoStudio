@@ -1,0 +1,68 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Announcements{% endblock %}
+
+{% block content %}
+<div class="admin-header">
+  <h1>Announcements & Banners</h1>
+  <a href="{{ url_for('admin.create_announcement') }}" class="btn btn-primary" style="font-size:.8rem;padding:.5rem 1.25rem;">+ New Announcement</a>
+</div>
+
+<p style="font-size:.875rem;color:var(--color-muted);margin-bottom:1.5rem;">
+  Announcements appear as banners at the top of the website. Use them for seasonal promotions, holiday schedules, or special offers.
+</p>
+
+{% if announcements %}
+<div style="display:grid;gap:1rem;">
+  {% for ann in announcements %}
+  <div class="admin-card" style="position:relative;">
+    <!-- Preview banner -->
+    <div style="background:{{ ann.bg_color }};color:{{ ann.text_color }};padding:.75rem 1.25rem;margin:-1.5rem -1.5rem 1.25rem;font-size:.85rem;display:flex;align-items:center;justify-content:space-between;">
+      <div>
+        <strong>{{ ann.title }}</strong> — {{ ann.message[:80] }}{% if ann.message|length > 80 %}...{% endif %}
+        {% if ann.link_text %}<span style="text-decoration:underline;margin-left:.5rem;">{{ ann.link_text }}</span>{% endif %}
+      </div>
+      {% if ann.is_currently_active %}
+      <span style="background:rgba(255,255,255,.2);padding:.2rem .6rem;border-radius:2px;font-size:.7rem;white-space:nowrap;">LIVE</span>
+      {% endif %}
+    </div>
+
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:1rem;">
+      <div>
+        <div style="font-size:.875rem;">
+          {% if ann.is_active %}
+            <span class="badge badge-confirmed">Active</span>
+          {% else %}
+            <span class="badge badge-cancelled">Inactive</span>
+          {% endif %}
+
+          {% if ann.start_date or ann.end_date %}
+          <span style="font-size:.8rem;color:var(--color-muted);margin-left:.5rem;">
+            {% if ann.start_date %}From {{ ann.start_date.strftime('%b %d') }}{% endif %}
+            {% if ann.end_date %}until {{ ann.end_date.strftime('%b %d, %Y') }}{% endif %}
+          </span>
+          {% endif %}
+        </div>
+      </div>
+
+      <div style="display:flex;gap:.5rem;">
+        <a href="{{ url_for('admin.edit_announcement', ann_id=ann.id) }}" class="btn btn-outline" style="font-size:.75rem;padding:.35rem .8rem;">Edit</a>
+        <form method="POST" action="{{ url_for('admin.toggle_announcement', ann_id=ann.id) }}" style="display:inline;">
+          <button type="submit" class="btn btn-ghost" style="font-size:.75rem;padding:.35rem .8rem;">
+            {{ 'Deactivate' if ann.is_active else 'Activate' }}
+          </button>
+        </form>
+        <form method="POST" action="{{ url_for('admin.delete_announcement', ann_id=ann.id) }}" onsubmit="return confirm('Delete this announcement?')" style="display:inline;">
+          <button type="submit" style="font-size:.72rem;padding:.35rem .7rem;border:1px solid #8b2020;color:#8b2020;background:none;cursor:pointer;border-radius:2px;">Delete</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="admin-card" style="text-align:center;padding:3rem;">
+  <p style="color:var(--color-muted);margin-bottom:1rem;">No announcements yet.</p>
+  <a href="{{ url_for('admin.create_announcement') }}" class="btn btn-outline" style="font-size:.85rem;">Create Your First Announcement</a>
+</div>
+{% endif %}
+{% endblock %}

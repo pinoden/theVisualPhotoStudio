@@ -1,0 +1,64 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Edit {{ studio.name }}{% endblock %}
+
+{% block content %}
+<div class="admin-header">
+  <h1>Edit {{ studio.name }}</h1>
+  <a href="{{ url_for('admin.manage_studios') }}" class="btn btn-ghost" style="font-size:.8rem;padding:.5rem 1.25rem;">← Back to Studios</a>
+</div>
+
+<div style="max-width:640px;">
+  <form method="POST" action="{{ url_for('admin.edit_studio', studio_id=studio.id) }}">
+    <div class="admin-card">
+      <h3>Basic Information</h3>
+
+      <div class="form-group">
+        <label class="form-label">Studio Name</label>
+        <input type="text" name="name" class="form-control" value="{{ studio.name }}" required>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Tagline</label>
+        <input type="text" name="tagline" class="form-control" value="{{ studio.tagline or '' }}" placeholder="A short description shown on studio cards">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Description</label>
+        <textarea name="description" class="form-control" rows="5" placeholder="Full studio description shown on detail page">{{ studio.description or '' }}</textarea>
+      </div>
+
+      <div class="form-group">
+        <label style="display:flex;align-items:center;gap:.75rem;cursor:pointer;">
+          <input type="checkbox" name="is_active" {{ 'checked' if studio.is_active }} style="width:18px;height:18px;">
+          <span class="form-label" style="margin:0;">Studio is active and bookable</span>
+        </label>
+      </div>
+    </div>
+
+    <div class="admin-card">
+      <h3>Pricing</h3>
+
+      <div class="form-group">
+        <label class="form-label">Hourly Rate ($)</label>
+        <input type="number" name="hourly_rate" class="form-control" value="{{ studio.hourly_rate }}" min="0" step="0.01" required>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+        <div class="form-group">
+          <label class="form-label">5h Membership Rate ($/mo)</label>
+          <input type="number" name="member_5h_rate" class="form-control" value="{{ studio.member_5h_rate or '' }}" min="0" step="0.01" placeholder="Leave empty if N/A">
+        </div>
+        <div class="form-group">
+          <label class="form-label">10h Membership Rate ($/mo)</label>
+          <input type="number" name="member_10h_rate" class="form-control" value="{{ studio.member_10h_rate or '' }}" min="0" step="0.01" placeholder="Leave empty if N/A">
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:1rem;">
+      <button type="submit" class="btn btn-dark" style="flex:1;">Save Changes</button>
+      <a href="{{ url_for('admin.manage_studios') }}" class="btn btn-ghost" style="flex:1;text-align:center;">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

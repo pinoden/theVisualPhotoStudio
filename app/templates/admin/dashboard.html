@@ -22,8 +22,8 @@
     <div class="stat-label">Upcoming (Next 10)</div>
   </div>
   <div class="stat-card">
-    <div class="stat-value">{{ studios|length }}</div>
-    <div class="stat-label">Active Studios</div>
+    <div class="stat-value">{{ unique_customers }}</div>
+    <div class="stat-label">Total Customers</div>
   </div>
 </div>
 
@@ -72,20 +72,25 @@
 
 <!-- Quick links -->
 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem;">
-  <a href="{{ url_for('admin.availability') }}" class="admin-card" style="text-decoration:none;color:inherit;transition:transform .2s;" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform=''">
+  <a href="{{ url_for('admin.calendar_view') }}" class="admin-card admin-quick-link">
+    <div style="font-size:1.5rem;margin-bottom:.5rem;">📆</div>
+    <h4 style="margin:0 0 .3rem;">Calendar</h4>
+    <p style="font-size:.8rem;color:var(--color-muted);margin:0;">Visual calendar view of all bookings.</p>
+  </a>
+  <a href="{{ url_for('admin.availability') }}" class="admin-card admin-quick-link">
     <div style="font-size:1.5rem;margin-bottom:.5rem;">🚫</div>
     <h4 style="margin:0 0 .3rem;">Block Dates</h4>
     <p style="font-size:.8rem;color:var(--color-muted);margin:0;">Manage availability and block off times.</p>
   </a>
-  <a href="{{ url_for('admin.bookings') }}" class="admin-card" style="text-decoration:none;color:inherit;transition:transform .2s;" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform=''">
-    <div style="font-size:1.5rem;margin-bottom:.5rem;">📋</div>
-    <h4 style="margin:0 0 .3rem;">All Bookings</h4>
-    <p style="font-size:.8rem;color:var(--color-muted);margin:0;">View, manage, and cancel bookings.</p>
+  <a href="{{ url_for('admin.reports') }}" class="admin-card admin-quick-link">
+    <div style="font-size:1.5rem;margin-bottom:.5rem;">📈</div>
+    <h4 style="margin:0 0 .3rem;">Reports</h4>
+    <p style="font-size:.8rem;color:var(--color-muted);margin:0;">Revenue by studio, month, and service.</p>
   </a>
-  <a href="{{ url_for('admin.manage_studios') }}" class="admin-card" style="text-decoration:none;color:inherit;transition:transform .2s;" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform=''">
-    <div style="font-size:1.5rem;margin-bottom:.5rem;">💰</div>
-    <h4 style="margin:0 0 .3rem;">Update Rates</h4>
-    <p style="font-size:.8rem;color:var(--color-muted);margin:0;">Change hourly rates for each studio.</p>
+  <a href="{{ url_for('admin.customers') }}" class="admin-card admin-quick-link">
+    <div style="font-size:1.5rem;margin-bottom:.5rem;">👥</div>
+    <h4 style="margin:0 0 .3rem;">Customers</h4>
+    <p style="font-size:.8rem;color:var(--color-muted);margin:0;">View customer list and booking history.</p>
   </a>
 </div>
 {% endblock %}

@@ -1,7 +1,18 @@
 from flask import Blueprint, render_template
-from app.models import Studio
+from app.models import Studio, Announcement
 
 main_bp = Blueprint('main', __name__)
+
+
+@main_bp.app_context_processor
+def inject_announcements():
+    """Make active announcements available to all templates."""
+    try:
+        banners = Announcement.query.filter_by(is_active=True).all()
+        active = [a for a in banners if a.is_currently_active]
+    except Exception:
+        active = []
+    return dict(active_announcements=active)
 
 
 @main_bp.route('/')

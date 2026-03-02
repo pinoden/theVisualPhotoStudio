@@ -42,3 +42,6 @@ class Config:
     DEFAULT_WEEKDAY_CLOSE = '19:00'
     DEFAULT_WEEKEND_OPEN = '08:00'
     DEFAULT_WEEKEND_CLOSE = '20:00'
+
+    # iCal feed token (change in production!)
+    ICAL_TOKEN = os.environ.get('ICAL_TOKEN', 'studio-calendar-feed')

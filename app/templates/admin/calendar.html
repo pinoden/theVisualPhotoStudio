@@ -1,0 +1,189 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Calendar{% endblock %}
+
+{% block extra_css %}
+<link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.11/index.global.min.css" rel="stylesheet">
+<style>
+  #calendar {
+    background: #fff;
+    padding: 1.5rem;
+    min-height: 700px;
+  }
+  .fc .fc-toolbar-title {
+    font-family: var(--font-serif);
+    font-weight: 300;
+    font-size: 1.4rem;
+    color: var(--color-dark);
+  }
+  .fc .fc-button {
+    background: var(--color-ivory);
+    border: 1px solid var(--color-border);
+    color: var(--color-dark);
+    font-family: var(--font-sans);
+    font-size: .8rem;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    padding: .4rem .8rem;
+  }
+  .fc .fc-button:hover {
+    background: var(--color-rose-light);
+    border-color: var(--color-rose);
+  }
+  .fc .fc-button-active {
+    background: var(--color-rose) !important;
+    border-color: var(--color-rose) !important;
+    color: #fff !important;
+  }
+  .fc .fc-event {
+    border-radius: 2px;
+    font-size: .78rem;
+    padding: 2px 4px;
+  }
+  .fc .fc-daygrid-day-number {
+    font-family: var(--font-sans);
+    color: var(--color-dark);
+    font-size: .85rem;
+  }
+  .fc .fc-col-header-cell-cushion {
+    font-family: var(--font-sans);
+    font-size: .75rem;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: var(--color-muted);
+  }
+  .fc .fc-day-today {
+    background: rgba(200,168,130,.06) !important;
+  }
+
+  /* Event popup */
+  .event-popup {
+    display: none;
+    position: fixed;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    background: #fff;
+    border: 1px solid var(--color-border);
+    padding: 2rem;
+    z-index: 500;
+    max-width: 400px;
+    width: 90%;
+    box-shadow: 0 16px 48px rgba(0,0,0,.15);
+  }
+  .event-popup.active { display: block; }
+  .event-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,.3);
+    z-index: 499;
+  }
+  .event-overlay.active { display: block; }
+  .popup-row {
+    display: flex;
+    justify-content: space-between;
+    padding: .4rem 0;
+    font-size: .875rem;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .popup-row:last-child { border-bottom: none; }
+  .popup-label { color: var(--color-muted); font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="admin-header">
+  <h1>Calendar</h1>
+  <div style="display:flex;gap:.75rem;">
+    <a href="{{ url_for('admin.availability') }}" class="btn btn-outline" style="font-size:.8rem;padding:.5rem 1.25rem;">Block Dates</a>
+    <a href="{{ url_for('booking.book') }}" target="_blank" class="btn btn-primary" style="font-size:.8rem;padding:.5rem 1.25rem;">+ New Booking</a>
+  </div>
+</div>
+
+<!-- Legend -->
+<div class="admin-card" style="padding:.75rem 1.25rem;display:flex;gap:1.5rem;flex-wrap:wrap;align-items:center;font-size:.8rem;">
+  <span style="display:flex;align-items:center;gap:.4rem;">
+    <span style="width:14px;height:14px;background:#C8A882;display:inline-block;border-radius:2px;"></span> Rental
+  </span>
+  <span style="display:flex;align-items:center;gap:.4rem;">
+    <span style="width:14px;height:14px;background:#8B9E8A;display:inline-block;border-radius:2px;"></span> Photography
+  </span>
+  <span style="display:flex;align-items:center;gap:.4rem;">
+    <span style="width:14px;height:14px;background:#A8BDCA;display:inline-block;border-radius:2px;"></span> Content Creation
+  </span>
+  <span style="display:flex;align-items:center;gap:.4rem;">
+    <span style="width:14px;height:14px;background:#8b2020;display:inline-block;border-radius:2px;"></span> Blocked
+  </span>
+</div>
+
+<div id="calendar"></div>
+
+<!-- Event popup -->
+<div class="event-overlay" id="eventOverlay"></div>
+<div class="event-popup" id="eventPopup">
+  <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:1rem;">
+    <h3 id="popupTitle" style="margin:0;font-size:1.1rem;"></h3>
+    <button id="popupClose" style="background:none;border:none;font-size:1.2rem;cursor:pointer;color:var(--color-muted);padding:0;">&times;</button>
+  </div>
+  <div id="popupBody"></div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.11/index.global.min.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const calendarEl = document.getElementById('calendar');
+  const popup = document.getElementById('eventPopup');
+  const overlay = document.getElementById('eventOverlay');
+  const popupTitle = document.getElementById('popupTitle');
+  const popupBody = document.getElementById('popupBody');
+
+  function closePopup() {
+    popup.classList.remove('active');
+    overlay.classList.remove('active');
+  }
+  document.getElementById('popupClose').addEventListener('click', closePopup);
+  overlay.addEventListener('click', closePopup);
+
+  const calendar = new FullCalendar.Calendar(calendarEl, {
+    initialView: 'dayGridMonth',
+    headerToolbar: {
+      left: 'prev,next today',
+      center: 'title',
+      right: 'dayGridMonth,timeGridWeek,timeGridDay,listWeek'
+    },
+    events: '{{ url_for("admin.calendar_data") }}',
+    eventTimeFormat: {
+      hour: 'numeric',
+      minute: '2-digit',
+      meridiem: 'short',
+    },
+    slotMinTime: '07:00:00',
+    slotMaxTime: '22:00:00',
+    nowIndicator: true,
+    height: 'auto',
+    eventClick: function(info) {
+      info.jsEvent.preventDefault();
+      const props = info.event.extendedProps;
+      if (!props || !props.ref) return;  // skip blocked slots
+
+      popupTitle.textContent = info.event.title;
+      popupBody.innerHTML = `
+        <div class="popup-row"><span class="popup-label">Ref</span><span style="font-family:monospace;">${props.ref}</span></div>
+        <div class="popup-row"><span class="popup-label">Email</span><span>${props.email}</span></div>
+        ${props.phone ? `<div class="popup-row"><span class="popup-label">Phone</span><span>${props.phone}</span></div>` : ''}
+        <div class="popup-row"><span class="popup-label">Service</span><span>${props.service}</span></div>
+        <div class="popup-row"><span class="popup-label">Total</span><span>${props.total}</span></div>
+        <div class="popup-row"><span class="popup-label">Payment</span><span>${props.payment}</span></div>
+        <div class="popup-row"><span class="popup-label">Status</span><span>${props.status}</span></div>
+      `;
+
+      popup.classList.add('active');
+      overlay.classList.add('active');
+    },
+  });
+
+  calendar.render();
+});
+</script>
+{% endblock %}

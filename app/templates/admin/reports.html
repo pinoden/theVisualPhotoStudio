@@ -1,0 +1,173 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Revenue Reports{% endblock %}
+
+{% block content %}
+<div class="admin-header">
+  <h1>Revenue Reports</h1>
+</div>
+
+<!-- Filters -->
+<div class="admin-card" style="padding:1rem 1.5rem;margin-bottom:1.5rem;">
+  <form method="GET" style="display:flex;gap:1rem;flex-wrap:wrap;align-items:flex-end;">
+    <div>
+      <label class="form-label" style="margin-bottom:.3rem;">Year</label>
+      <select name="year" class="form-control" style="width:auto;">
+        {% for y in years %}
+        <option value="{{ y }}" {{ 'selected' if y == year }}>{{ y }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="form-label" style="margin-bottom:.3rem;">Month</label>
+      <select name="month" class="form-control" style="width:auto;">
+        <option value="0" {{ 'selected' if month == 0 }}>Full Year</option>
+        <option value="1" {{ 'selected' if month == 1 }}>January</option>
+        <option value="2" {{ 'selected' if month == 2 }}>February</option>
+        <option value="3" {{ 'selected' if month == 3 }}>March</option>
+        <option value="4" {{ 'selected' if month == 4 }}>April</option>
+        <option value="5" {{ 'selected' if month == 5 }}>May</option>
+        <option value="6" {{ 'selected' if month == 6 }}>June</option>
+        <option value="7" {{ 'selected' if month == 7 }}>July</option>
+        <option value="8" {{ 'selected' if month == 8 }}>August</option>
+        <option value="9" {{ 'selected' if month == 9 }}>September</option>
+        <option value="10" {{ 'selected' if month == 10 }}>October</option>
+        <option value="11" {{ 'selected' if month == 11 }}>November</option>
+        <option value="12" {{ 'selected' if month == 12 }}>December</option>
+      </select>
+    </div>
+    <button type="submit" class="btn btn-outline" style="padding:.6rem 1.25rem;font-size:.85rem;">Apply</button>
+  </form>
+</div>
+
+<!-- Summary stats -->
+<div class="stat-grid">
+  <div class="stat-card">
+    <div class="stat-value">${{ '%.0f'|format(total_revenue) }}</div>
+    <div class="stat-label">Total Revenue</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value">{{ total_bookings_count }}</div>
+    <div class="stat-label">Total Bookings</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value">{{ '%.0f'|format(total_hours) }}h</div>
+    <div class="stat-label">Total Hours</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value">${{ '%.0f'|format(total_revenue / total_bookings_count if total_bookings_count else 0) }}</div>
+    <div class="stat-label">Avg Per Booking</div>
+  </div>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;">
+  <!-- Revenue by Studio -->
+  <div class="admin-card">
+    <h3>Revenue by Studio</h3>
+    {% if studio_revenue %}
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Studio</th>
+          <th>Revenue</th>
+          <th>Bookings</th>
+          <th>Hours</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for name, data in studio_revenue.items() %}
+        <tr>
+          <td style="font-weight:700;font-size:.875rem;">{{ name }}</td>
+          <td style="font-size:.875rem;">${{ '%.2f'|format(data.revenue) }}</td>
+          <td style="font-size:.875rem;">{{ data.bookings }}</td>
+          <td style="font-size:.875rem;">{{ '%.0f'|format(data.hours) }}h</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p style="color:var(--color-muted);font-size:.9rem;">No data for this period.</p>
+    {% endif %}
+  </div>
+
+  <!-- Revenue by Service -->
+  <div class="admin-card">
+    <h3>Revenue by Service Type</h3>
+    {% if service_revenue %}
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Service</th>
+          <th>Revenue</th>
+          <th>Bookings</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for stype, data in service_revenue.items() %}
+        <tr>
+          <td style="font-weight:700;font-size:.875rem;text-transform:capitalize;">{{ stype }}</td>
+          <td style="font-size:.875rem;">${{ '%.2f'|format(data.revenue) }}</td>
+          <td style="font-size:.875rem;">{{ data.bookings }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p style="color:var(--color-muted);font-size:.9rem;">No data for this period.</p>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Monthly breakdown (only for year view) -->
+{% if monthly_data %}
+<div class="admin-card" style="margin-top:1.5rem;">
+  <h3>Monthly Breakdown – {{ year }}</h3>
+
+  <!-- Simple bar chart -->
+  <div style="display:flex;align-items:flex-end;gap:4px;height:200px;margin:1.5rem 0;padding:0 .5rem;">
+    {% set max_rev = monthly_data|map(attribute='revenue')|max or 1 %}
+    {% for m in monthly_data %}
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:.3rem;">
+      <div style="font-size:.7rem;color:var(--color-muted);">
+        {% if m.revenue > 0 %}${{ '%.0f'|format(m.revenue) }}{% endif %}
+      </div>
+      <div style="width:100%;background:{{ 'var(--color-rose)' if m.revenue > 0 else 'var(--color-border)' }};height:{{ (m.revenue / max_rev * 160)|int if m.revenue > 0 else 4 }}px;min-height:4px;border-radius:2px 2px 0 0;transition:height .3s;"></div>
+      <div style="font-size:.68rem;color:var(--color-muted);text-transform:uppercase;letter-spacing:.04em;">{{ m.month_short }}</div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- Table -->
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Month</th>
+        <th>Revenue</th>
+        <th>Bookings</th>
+        <th>Hours</th>
+        <th>Avg/Booking</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for m in monthly_data %}
+      <tr{% if m.revenue == 0 %} style="opacity:.5;"{% endif %}>
+        <td style="font-weight:700;font-size:.875rem;">{{ m.month_name }}</td>
+        <td style="font-size:.875rem;">${{ '%.2f'|format(m.revenue) }}</td>
+        <td style="font-size:.875rem;">{{ m.bookings }}</td>
+        <td style="font-size:.875rem;">{{ '%.0f'|format(m.hours) }}h</td>
+        <td style="font-size:.875rem;">${{ '%.0f'|format(m.revenue / m.bookings if m.bookings else 0) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr style="font-weight:700;border-top:2px solid var(--color-dark);">
+        <td style="font-size:.875rem;">Total</td>
+        <td style="font-size:.875rem;">${{ '%.2f'|format(total_revenue) }}</td>
+        <td style="font-size:.875rem;">{{ total_bookings_count }}</td>
+        <td style="font-size:.875rem;">{{ '%.0f'|format(total_hours) }}h</td>
+        <td style="font-size:.875rem;">${{ '%.0f'|format(total_revenue / total_bookings_count if total_bookings_count else 0) }}</td>
+      </tr>
+    </tfoot>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

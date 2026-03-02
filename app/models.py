@@ -5,6 +5,9 @@ from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
 
 
+DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+
+
 # ─── Studio ─────────────────────────────────────────────────────────────────
 
 class Studio(db.Model):
@@ -35,13 +38,20 @@ class Studio(db.Model):
             'hourly_rate': self.hourly_rate,
         }
 
+    def hours_for_day(self, day_of_week):
+        """Return StudioHours for a given weekday (0=Mon), or None."""
+        for h in self.hours:
+            if h.day_of_week == day_of_week:
+                return h
+        return None
+
 
 class StudioHours(db.Model):
     __tablename__ = 'studio_hours'
 
     id = db.Column(db.Integer, primary_key=True)
     studio_id = db.Column(db.Integer, db.ForeignKey('studio.id'), nullable=False)
-    # 0 = Monday … 6 = Sunday
+    # 0 = Monday ... 6 = Sunday
     day_of_week = db.Column(db.Integer, nullable=False)
     open_time = db.Column(db.Time, nullable=False)
     close_time = db.Column(db.Time, nullable=False)
@@ -49,6 +59,7 @@ class StudioHours(db.Model):
     def to_dict(self):
         return {
             'day_of_week': self.day_of_week,
+            'day_name': DAY_NAMES[self.day_of_week],
             'open_time': self.open_time.strftime('%H:%M'),
             'close_time': self.close_time.strftime('%H:%M'),
         }
@@ -157,6 +168,39 @@ class BlockedSlot(db.Model):
     @property
     def is_full_day(self):
         return self.start_time is None
+
+
+# ─── Announcements / Banners ────────────────────────────────────────────────
+
+class Announcement(db.Model):
+    __tablename__ = 'announcement'
+
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(128), nullable=False)
+    message = db.Column(db.Text, nullable=False)
+    link_url = db.Column(db.String(256))               # optional CTA link
+    link_text = db.Column(db.String(64))                # e.g. "Book Now"
+    bg_color = db.Column(db.String(32), default='#C8A882')  # banner background
+    text_color = db.Column(db.String(32), default='#ffffff')
+    is_active = db.Column(db.Boolean, default=True)
+    start_date = db.Column(db.Date, nullable=True)      # show from this date (NULL = immediately)
+    end_date = db.Column(db.Date, nullable=True)         # hide after this date (NULL = forever)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f'<Announcement {self.title}>'
+
+    @property
+    def is_currently_active(self):
+        """Check if announcement should be shown right now."""
+        if not self.is_active:
+            return False
+        today = date.today()
+        if self.start_date and today < self.start_date:
+            return False
+        if self.end_date and today > self.end_date:
+            return False
+        return True
 
 
 # ─── Admin user ──────────────────────────────────────────────────────────────

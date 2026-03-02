@@ -21,14 +21,29 @@
       <a href="{{ url_for('admin.dashboard') }}" class="{{ 'active' if request.endpoint == 'admin.dashboard' else '' }}">
         📊 Dashboard
       </a>
+      <a href="{{ url_for('admin.calendar_view') }}" class="{{ 'active' if request.endpoint == 'admin.calendar_view' else '' }}">
+        📆 Calendar
+      </a>
       <a href="{{ url_for('admin.bookings') }}" class="{{ 'active' if request.endpoint == 'admin.bookings' else '' }}">
         📅 Bookings
+      </a>
+      <a href="{{ url_for('admin.customers') }}" class="{{ 'active' if request.endpoint in ('admin.customers', 'admin.customer_detail') else '' }}">
+        👥 Customers
       </a>
       <a href="{{ url_for('admin.availability') }}" class="{{ 'active' if request.endpoint == 'admin.availability' else '' }}">
         🚫 Availability
       </a>
-      <a href="{{ url_for('admin.manage_studios') }}" class="{{ 'active' if request.endpoint == 'admin.manage_studios' else '' }}">
+      <a href="{{ url_for('admin.manage_studios') }}" class="{{ 'active' if request.endpoint in ('admin.manage_studios', 'admin.edit_studio') else '' }}">
         🏛️ Studios
+      </a>
+      <a href="{{ url_for('admin.manage_hours') }}" class="{{ 'active' if request.endpoint == 'admin.manage_hours' else '' }}">
+        🕐 Hours
+      </a>
+      <a href="{{ url_for('admin.announcements') }}" class="{{ 'active' if request.endpoint in ('admin.announcements', 'admin.create_announcement', 'admin.edit_announcement') else '' }}">
+        📢 Announcements
+      </a>
+      <a href="{{ url_for('admin.reports') }}" class="{{ 'active' if request.endpoint == 'admin.reports' else '' }}">
+        📈 Reports
       </a>
       <a href="{{ url_for('admin.settings') }}" class="{{ 'active' if request.endpoint == 'admin.settings' else '' }}">
         ⚙️ Settings

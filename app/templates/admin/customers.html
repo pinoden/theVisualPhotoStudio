@@ -1,0 +1,65 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Customers{% endblock %}
+
+{% block content %}
+<div class="admin-header">
+  <h1>Customers</h1>
+  <span style="font-size:.9rem;color:var(--color-muted);">{{ customers|length }} total customer{{ 's' if customers|length != 1 }}</span>
+</div>
+
+<!-- Search -->
+<div class="admin-card" style="padding:.75rem 1.25rem;margin-bottom:1rem;">
+  <input type="text" id="customerSearch" class="form-control" placeholder="Search by name, email, or phone..." style="border:none;padding:.5rem 0;font-size:.9rem;">
+</div>
+
+<div class="admin-card" style="padding:0;overflow:hidden;">
+  {% if customers %}
+  <table class="data-table" id="customerTable">
+    <thead>
+      <tr>
+        <th>Customer</th>
+        <th>Email</th>
+        <th>Phone</th>
+        <th>Bookings</th>
+        <th>Total Spent</th>
+        <th>First Visit</th>
+        <th>Last Visit</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in customers %}
+      <tr class="customer-row">
+        <td style="font-weight:700;font-size:.875rem;">{{ c.name }}</td>
+        <td style="font-size:.875rem;">{{ c.email }}</td>
+        <td style="font-size:.875rem;">{{ c.phone or '—' }}</td>
+        <td style="font-size:.875rem;text-align:center;">{{ c.bookings|length }}</td>
+        <td style="font-size:.875rem;font-weight:700;">${{ '%.2f'|format(c.total_spent) }}</td>
+        <td style="font-size:.85rem;">{{ c.first_booking.strftime('%b %d, %Y') }}</td>
+        <td style="font-size:.85rem;">{{ c.last_booking.strftime('%b %d, %Y') }}</td>
+        <td>
+          <a href="{{ url_for('admin.customer_detail', email=c.email) }}" style="font-size:.78rem;color:var(--color-rose);white-space:nowrap;">View History →</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div style="padding:3rem;text-align:center;color:var(--color-muted);">
+    <p>No customers yet. Bookings will appear here once clients start booking.</p>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.getElementById('customerSearch').addEventListener('input', function() {
+  const query = this.value.toLowerCase();
+  document.querySelectorAll('.customer-row').forEach(row => {
+    const text = row.textContent.toLowerCase();
+    row.style.display = text.includes(query) ? '' : 'none';
+  });
+});
+</script>
+{% endblock %}

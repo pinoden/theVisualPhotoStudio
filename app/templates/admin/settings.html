@@ -6,7 +6,7 @@
   <h1>Account Settings</h1>
 </div>
 
-<div style="max-width:480px;">
+<div style="max-width:640px;">
   <div class="admin-card">
     <h3>Change Password</h3>
     <form method="POST">
@@ -27,16 +27,56 @@
   </div>
 
   <div class="admin-card">
+    <h3>Calendar Sync (iCal)</h3>
+    <p style="font-size:.875rem;color:var(--color-muted);margin-bottom:1rem;">
+      Subscribe to the studio calendar in Google Calendar, Apple Calendar, or Microsoft Outlook.
+      Copy the URL below and add it as a calendar subscription.
+    </p>
+
+    <div class="form-group">
+      <label class="form-label">iCal Feed URL</label>
+      <div style="display:flex;gap:.5rem;">
+        <input type="text" id="icalUrl" class="form-control" value="{{ ical_url }}" readonly style="font-size:.8rem;font-family:monospace;">
+        <button type="button" onclick="copyIcalUrl()" class="btn btn-outline" style="white-space:nowrap;font-size:.8rem;padding:.5rem 1rem;">Copy</button>
+      </div>
+    </div>
+
+    <div style="margin-top:1rem;">
+      <p style="font-size:.8rem;color:var(--color-muted);margin-bottom:.5rem;"><strong>How to subscribe:</strong></p>
+      <ul style="font-size:.8rem;color:var(--color-muted);padding-left:1.5rem;line-height:1.8;">
+        <li><strong>Google Calendar:</strong> Settings → Add calendar → From URL → Paste the URL</li>
+        <li><strong>Apple Calendar:</strong> File → New Calendar Subscription → Paste the URL</li>
+        <li><strong>Outlook:</strong> Add calendar → Subscribe from web → Paste the URL</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="admin-card">
     <h3>Studio Configuration</h3>
     <p style="font-size:.875rem;color:var(--color-muted);">Edit the <code>.env</code> file in the project root to change:</p>
     <ul style="font-size:.875rem;color:var(--color-muted);margin-top:.5rem;">
       <li style="margin-bottom:.4rem;"><code>BUNDLE_DISCOUNT_PCT</code> — Bundle discount % (default: 10)</li>
       <li style="margin-bottom:.4rem;"><code>DEPOSIT_PCT</code> — Deposit % of total (default: 30)</li>
       <li style="margin-bottom:.4rem;"><code>SLOT_INCREMENT_MINUTES</code> — Time slot interval (default: 60)</li>
+      <li style="margin-bottom:.4rem;"><code>ICAL_TOKEN</code> — iCal feed security token</li>
       <li style="margin-bottom:.4rem;"><code>SQUARE_*</code> — Square payment credentials</li>
       <li style="margin-bottom:.4rem;"><code>MAIL_*</code> — Email settings</li>
     </ul>
     <p style="font-size:.8rem;color:var(--color-muted);margin-top:.75rem;">After editing .env, restart the Flask server for changes to take effect.</p>
   </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function copyIcalUrl() {
+  const input = document.getElementById('icalUrl');
+  input.select();
+  navigator.clipboard.writeText(input.value).then(() => {
+    const btn = input.nextElementSibling;
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = 'Copy', 2000);
+  });
+}
+</script>
 {% endblock %}

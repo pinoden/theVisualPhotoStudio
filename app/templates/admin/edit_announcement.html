@@ -1,0 +1,140 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}{{ 'Edit' if announcement else 'New' }} Announcement{% endblock %}
+
+{% block content %}
+<div class="admin-header">
+  <h1>{{ 'Edit Announcement' if announcement else 'New Announcement' }}</h1>
+  <a href="{{ url_for('admin.announcements') }}" class="btn btn-ghost" style="font-size:.8rem;padding:.5rem 1.25rem;">← Back</a>
+</div>
+
+<div style="max-width:640px;">
+  <form method="POST" action="{{ url_for('admin.edit_announcement', ann_id=announcement.id) if announcement else url_for('admin.create_announcement') }}">
+    <div class="admin-card">
+      <h3>Content</h3>
+
+      <div class="form-group">
+        <label class="form-label">Title *</label>
+        <input type="text" name="title" class="form-control" value="{{ announcement.title if announcement else '' }}" required placeholder="e.g. Holiday Special">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Message *</label>
+        <textarea name="message" class="form-control" rows="3" required placeholder="e.g. Book any studio this holiday season and get 15% off!">{{ announcement.message if announcement else '' }}</textarea>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+        <div class="form-group">
+          <label class="form-label">Link URL (optional)</label>
+          <input type="url" name="link_url" class="form-control" value="{{ announcement.link_url or '' }}" placeholder="https://...">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Link Text (optional)</label>
+          <input type="text" name="link_text" class="form-control" value="{{ announcement.link_text or '' }}" placeholder="e.g. Book Now">
+        </div>
+      </div>
+    </div>
+
+    <div class="admin-card">
+      <h3>Appearance</h3>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+        <div class="form-group">
+          <label class="form-label">Background Color</label>
+          <div style="display:flex;align-items:center;gap:.75rem;">
+            <input type="color" name="bg_color" value="{{ announcement.bg_color if announcement else '#C8A882' }}" style="width:48px;height:36px;border:1px solid var(--color-border);cursor:pointer;">
+            <div style="display:flex;gap:.4rem;flex-wrap:wrap;">
+              <button type="button" class="color-preset" data-target="bg_color" data-color="#C8A882" style="width:24px;height:24px;background:#C8A882;border:1px solid var(--color-border);cursor:pointer;border-radius:2px;" title="Gold"></button>
+              <button type="button" class="color-preset" data-target="bg_color" data-color="#2C2420" style="width:24px;height:24px;background:#2C2420;border:1px solid var(--color-border);cursor:pointer;border-radius:2px;" title="Dark"></button>
+              <button type="button" class="color-preset" data-target="bg_color" data-color="#8B9E8A" style="width:24px;height:24px;background:#8B9E8A;border:1px solid var(--color-border);cursor:pointer;border-radius:2px;" title="Sage"></button>
+              <button type="button" class="color-preset" data-target="bg_color" data-color="#8b2020" style="width:24px;height:24px;background:#8b2020;border:1px solid var(--color-border);cursor:pointer;border-radius:2px;" title="Red"></button>
+            </div>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Text Color</label>
+          <div style="display:flex;align-items:center;gap:.75rem;">
+            <input type="color" name="text_color" value="{{ announcement.text_color if announcement else '#ffffff' }}" style="width:48px;height:36px;border:1px solid var(--color-border);cursor:pointer;">
+            <div style="display:flex;gap:.4rem;">
+              <button type="button" class="color-preset" data-target="text_color" data-color="#ffffff" style="width:24px;height:24px;background:#ffffff;border:1px solid var(--color-border);cursor:pointer;border-radius:2px;" title="White"></button>
+              <button type="button" class="color-preset" data-target="text_color" data-color="#2C2420" style="width:24px;height:24px;background:#2C2420;border:1px solid var(--color-border);cursor:pointer;border-radius:2px;" title="Dark"></button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Preview -->
+      <div style="margin-top:1rem;">
+        <label class="form-label">Preview</label>
+        <div id="bannerPreview" style="padding:.75rem 1.25rem;text-align:center;font-size:.85rem;transition:all .2s;">
+          <strong id="previewTitle">Title</strong> — <span id="previewMessage">Message text</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="admin-card">
+      <h3>Schedule</h3>
+
+      <div class="form-group">
+        <label style="display:flex;align-items:center;gap:.75rem;cursor:pointer;">
+          <input type="checkbox" name="is_active" {{ 'checked' if (announcement and announcement.is_active) or not announcement }} style="width:18px;height:18px;">
+          <span class="form-label" style="margin:0;">Announcement is active</span>
+        </label>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+        <div class="form-group">
+          <label class="form-label">Start Date (optional)</label>
+          <input type="date" name="start_date" class="form-control" value="{{ announcement.start_date.isoformat() if announcement and announcement.start_date else '' }}">
+          <small style="color:var(--color-muted);">Leave empty to start immediately</small>
+        </div>
+        <div class="form-group">
+          <label class="form-label">End Date (optional)</label>
+          <input type="date" name="end_date" class="form-control" value="{{ announcement.end_date.isoformat() if announcement and announcement.end_date else '' }}">
+          <small style="color:var(--color-muted);">Leave empty to run indefinitely</small>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:1rem;">
+      <button type="submit" class="btn btn-dark" style="flex:1;">{{ 'Save Changes' if announcement else 'Create Announcement' }}</button>
+      <a href="{{ url_for('admin.announcements') }}" class="btn btn-ghost" style="flex:1;text-align:center;">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Live preview
+const titleInput = document.querySelector('input[name="title"]');
+const messageInput = document.querySelector('textarea[name="message"]');
+const bgInput = document.querySelector('input[name="bg_color"]');
+const textInput = document.querySelector('input[name="text_color"]');
+const preview = document.getElementById('bannerPreview');
+const previewTitle = document.getElementById('previewTitle');
+const previewMessage = document.getElementById('previewMessage');
+
+function updatePreview() {
+  preview.style.background = bgInput.value;
+  preview.style.color = textInput.value;
+  previewTitle.textContent = titleInput.value || 'Title';
+  previewMessage.textContent = messageInput.value || 'Message text';
+}
+
+[titleInput, messageInput].forEach(el => el.addEventListener('input', updatePreview));
+[bgInput, textInput].forEach(el => el.addEventListener('input', updatePreview));
+
+// Color presets
+document.querySelectorAll('.color-preset').forEach(btn => {
+  btn.addEventListener('click', (e) => {
+    e.preventDefault();
+    const target = btn.dataset.target;
+    const color = btn.dataset.color;
+    document.querySelector(`input[name="${target}"]`).value = color;
+    updatePreview();
+  });
+});
+
+updatePreview();
+</script>
+{% endblock %}
