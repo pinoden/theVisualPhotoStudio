@@ -1,0 +1,661 @@
+{% extends "base.html" %}
+{% block title %}Book a Studio – The Visuals Photo Studio{% endblock %}
+
+{% block extra_css %}
+{% if square_env == 'sandbox' %}
+<script src="https://sandbox.web.squarecdn.com/v1/square.js"></script>
+{% else %}
+<script src="https://web.squarecdn.com/v1/square.js"></script>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="page-banner">
+  <p class="section-eyebrow">Online Booking</p>
+  <h1>Reserve Your Studio</h1>
+  <p>Complete your booking in a few simple steps. Instant confirmation.</p>
+</div>
+
+<section class="section section-cream">
+  <div class="wizard-container">
+
+    <!-- Progress bar -->
+    <div class="wizard-progress" id="wizardProgress">
+      <div class="wizard-step-label active" data-step="1">Studios</div>
+      <div class="wizard-connector"></div>
+      <div class="wizard-step-label" data-step="2">Date</div>
+      <div class="wizard-connector"></div>
+      <div class="wizard-step-label" data-step="3">Time</div>
+      <div class="wizard-connector"></div>
+      <div class="wizard-step-label" data-step="4">Details</div>
+      <div class="wizard-connector"></div>
+      <div class="wizard-step-label" data-step="5">Payment</div>
+    </div>
+
+    <!-- Error banner -->
+    <div id="wizardError" class="flash flash-error hidden" role="alert"></div>
+
+    <!-- ────────────── STEP 1: Studios & Service ────────────── -->
+    <div class="wizard-panel active" id="step1">
+      <h3 style="font-size:1.6rem;margin-bottom:.5rem;">Select Studio(s)</h3>
+      <p class="text-muted mb-3">Choose one or more studios. Booking multiple gives you a <strong>10% bundle discount</strong>.</p>
+
+      <div class="studio-selector" id="studioSelector">
+        {% for studio in studios %}
+        <label class="studio-option">
+          <input type="checkbox" name="studio" value="{{ studio.id }}" data-rate="{{ studio.hourly_rate }}" data-name="{{ studio.name }}">
+          <div class="studio-option-card {{ studio.slug }}-bg" style="background:none;">
+            <div class="studio-check-mark">✓</div>
+            <h4>{{ studio.name }}</h4>
+            <p style="font-size:.82rem;margin:.35rem 0 .6rem;color:var(--color-muted);">{{ studio.tagline or '' }}</p>
+            <div class="studio-option-rate">${{ studio.hourly_rate|int }} / hour</div>
+          </div>
+        </label>
+        {% endfor %}
+      </div>
+
+      <h3 style="font-size:1.3rem;margin-bottom:.75rem;">Service Type</h3>
+      <div class="service-options" id="serviceOptions">
+        <label class="service-option">
+          <input type="radio" name="service_type" value="rental" checked>
+          <div class="service-option-label">
+            <strong>Studio Rental</strong>
+            Use the space, bring your own camera
+          </div>
+        </label>
+        <label class="service-option">
+          <input type="radio" name="service_type" value="photography">
+          <div class="service-option-label">
+            <strong>Photography</strong>
+            from $300/hr — photographer included
+          </div>
+        </label>
+        <label class="service-option">
+          <input type="radio" name="service_type" value="content">
+          <div class="service-option-label">
+            <strong>Content Creation</strong>
+            from $200/hr — creator included
+          </div>
+        </label>
+      </div>
+
+      <div style="display:flex;justify-content:flex-end;margin-top:2rem;">
+        <button class="btn btn-dark" onclick="goToStep(2)" id="step1Next">Next: Choose Date →</button>
+      </div>
+    </div>
+
+    <!-- ────────────── STEP 2: Date & Duration ────────────── -->
+    <div class="wizard-panel" id="step2">
+      <h3 style="font-size:1.6rem;margin-bottom:.5rem;">Select Date & Duration</h3>
+      <p class="text-muted mb-3">Choose when and how long you need the studio.</p>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:2rem;">
+        <div class="form-group">
+          <label class="form-label">Date</label>
+          <input type="date" class="form-control" id="bookingDate" min="">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Duration</label>
+          <div class="duration-grid" id="durationGrid">
+            <button class="duration-btn" data-hours="1" onclick="selectDuration(this)">1 hr</button>
+            <button class="duration-btn" data-hours="1.5" onclick="selectDuration(this)">1½ hr</button>
+            <button class="duration-btn" data-hours="2" onclick="selectDuration(this)">2 hr</button>
+            <button class="duration-btn" data-hours="2.5" onclick="selectDuration(this)">2½ hr</button>
+            <button class="duration-btn" data-hours="3" onclick="selectDuration(this)">3 hr</button>
+            <button class="duration-btn" data-hours="4" onclick="selectDuration(this)">4 hr</button>
+            <button class="duration-btn" data-hours="5" onclick="selectDuration(this)">5 hr</button>
+            <button class="duration-btn" data-hours="6" onclick="selectDuration(this)">6 hr</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live price preview -->
+      <div class="price-summary" id="priceSummary2" style="display:none;">
+        <div class="price-row">
+          <span id="priceStudioLabel">Studios</span>
+          <span id="priceSubtotal">—</span>
+        </div>
+        <div class="price-row price-discount" id="priceDiscountRow" style="display:none;">
+          <span>Bundle discount (10%)</span>
+          <span id="priceDiscount">—</span>
+        </div>
+        <div class="price-row total">
+          <span>Estimated Total</span>
+          <span id="priceTotal">—</span>
+        </div>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;margin-top:2rem;">
+        <button class="btn btn-outline" onclick="goToStep(1)">← Back</button>
+        <button class="btn btn-dark" onclick="goToStep(3)" id="step2Next" disabled>Next: Choose Time →</button>
+      </div>
+    </div>
+
+    <!-- ────────────── STEP 3: Time Slot ────────────── -->
+    <div class="wizard-panel" id="step3">
+      <h3 style="font-size:1.6rem;margin-bottom:.5rem;">Choose a Time</h3>
+      <p class="text-muted mb-3">Available slots for <strong id="step3DateDisplay">—</strong>, <strong id="step3DurationDisplay">—</strong>.</p>
+
+      <div id="slotsLoading" style="text-align:center;padding:3rem;display:none;">
+        <div class="spinner"></div>
+        <p style="margin-top:1rem;font-size:.9rem;color:var(--color-muted);">Checking availability…</p>
+      </div>
+
+      <div class="time-slots" id="timeSlots"></div>
+
+      <div id="noSlots" class="hidden" style="padding:2rem;background:var(--color-ivory);border:1px solid var(--color-border);text-align:center;">
+        <p style="margin:0;">No available slots for this date. Please try another day.</p>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;margin-top:2rem;">
+        <button class="btn btn-outline" onclick="goToStep(2)">← Back</button>
+        <button class="btn btn-dark" onclick="goToStep(4)" id="step3Next" disabled>Next: Your Details →</button>
+      </div>
+    </div>
+
+    <!-- ────────────── STEP 4: Customer Details ────────────── -->
+    <div class="wizard-panel" id="step4">
+      <h3 style="font-size:1.6rem;margin-bottom:.5rem;">Your Details</h3>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+        <div class="form-group">
+          <label class="form-label">Full Name *</label>
+          <input type="text" class="form-control" id="customerName" placeholder="Jane Smith" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Email Address *</label>
+          <input type="email" class="form-control" id="customerEmail" placeholder="jane@example.com" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Phone Number</label>
+          <input type="tel" class="form-control" id="customerPhone" placeholder="(407) 000-0000">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Notes / Special Requests</label>
+        <textarea class="form-control" id="customerNotes" rows="3" placeholder="Any special requirements, setup needs, or questions…"></textarea>
+      </div>
+
+      <!-- Booking summary -->
+      <div class="price-summary mt-3">
+        <h4 style="font-size:1rem;margin-bottom:1rem;font-family:var(--font-sans);text-transform:uppercase;letter-spacing:.06em;font-size:.8rem;">Booking Summary</h4>
+        <div class="price-row">
+          <span>Studio(s)</span>
+          <span id="summaryStudios">—</span>
+        </div>
+        <div class="price-row">
+          <span>Date & Time</span>
+          <span id="summaryDateTime">—</span>
+        </div>
+        <div class="price-row">
+          <span>Duration</span>
+          <span id="summaryDuration">—</span>
+        </div>
+        <div class="price-row price-discount" id="summaryDiscountRow" style="display:none;">
+          <span>Bundle discount</span>
+          <span id="summaryDiscount">—</span>
+        </div>
+        <div class="price-row total">
+          <span>Total</span>
+          <span id="summaryTotal">—</span>
+        </div>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;margin-top:2rem;">
+        <button class="btn btn-outline" onclick="goToStep(3)">← Back</button>
+        <button class="btn btn-dark" onclick="goToStep(5)" id="step4Next">Next: Payment →</button>
+      </div>
+    </div>
+
+    <!-- ────────────── STEP 5: Payment ────────────── -->
+    <div class="wizard-panel" id="step5">
+      <h3 style="font-size:1.6rem;margin-bottom:.5rem;">Payment</h3>
+      <p class="text-muted mb-3">Secure payment powered by Square.</p>
+
+      <!-- Payment type toggle -->
+      <div class="payment-toggle" id="paymentTypeGroup">
+        <div class="payment-option">
+          <input type="radio" name="payment_type" id="payDeposit" value="deposit" checked>
+          <label for="payDeposit">
+            Pay Deposit
+            <strong id="depositAmt">—</strong>
+            <span style="font-size:.75rem;color:var(--color-muted);">Balance due at studio</span>
+          </label>
+        </div>
+        <div class="payment-option">
+          <input type="radio" name="payment_type" id="payFull" value="full">
+          <label for="payFull">
+            Pay in Full
+            <strong id="fullAmt">—</strong>
+            <span style="font-size:.75rem;color:var(--color-muted);">Nothing due at studio</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- No payment option (shown when Square not configured) -->
+      <div id="noPaymentMode" class="hidden" style="padding:1rem;background:#fffbec;border:1px solid #e0d080;margin-bottom:1rem;">
+        <strong>⚠️ Payment not yet configured</strong>
+        <p style="font-size:.875rem;margin:.5rem 0 0;">Square credentials are not set up. Your booking will be confirmed without payment. You'll pay at the studio.</p>
+      </div>
+
+      <!-- Square card form -->
+      <div id="squarePaymentSection">
+        <label class="form-label" style="margin-bottom:.5rem;">Card Details</label>
+        <div id="card-container"></div>
+        <p style="font-size:.75rem;color:var(--color-muted);margin-top:.5rem;">Secured by Square. We never store your card details.</p>
+      </div>
+
+      <!-- Final summary -->
+      <div class="price-summary">
+        <div class="price-row">
+          <span>Booking Total</span>
+          <span id="finalTotal">—</span>
+        </div>
+        <div class="price-row total">
+          <span>Charging Today</span>
+          <span id="chargingToday">—</span>
+        </div>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;margin-top:2rem;">
+        <button class="btn btn-outline" onclick="goToStep(4)" id="backFromPayment">← Back</button>
+        <button class="btn btn-dark" id="confirmBtn" onclick="submitBooking()">
+          <span id="confirmBtnText">Confirm & Pay</span>
+          <span id="confirmBtnSpinner" class="spinner hidden" style="width:16px;height:16px;margin-left:.5rem;vertical-align:middle;"></span>
+        </button>
+      </div>
+    </div>
+
+    <!-- ────────────── STEP 6: Confirmation (inline) ────────────── -->
+    <div class="wizard-panel" id="step6">
+      <div class="confirmation-card" style="padding:2rem;text-align:center;">
+        <div class="confirmation-icon">✓</div>
+        <h2>Booking Confirmed!</h2>
+        <div class="booking-ref" id="confirmRef">—</div>
+        <div class="divider"></div>
+        <p style="font-size:.9rem;">A confirmation email has been sent to <strong id="confirmEmail">—</strong>.</p>
+        <div style="display:flex;gap:1rem;justify-content:center;margin-top:2rem;flex-wrap:wrap;">
+          <a href="{{ url_for('main.index') }}" class="btn btn-outline">Back to Home</a>
+          <button class="btn btn-dark" onclick="location.reload()">Book Another</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// ─── State ───────────────────────────────────────────────────────────────────
+const state = {
+  studioIds: [],
+  studioNames: [],
+  serviceType: 'rental',
+  date: '',
+  duration: 0,
+  startTime: '',
+  pricing: {},
+  squareCard: null,
+};
+
+const SQUARE_APP_ID   = '{{ square_app_id }}';
+const SQUARE_LOC_ID   = '{{ square_location_id }}';
+const squareEnabled   = SQUARE_APP_ID && SQUARE_APP_ID !== '';
+
+// Pre-select studio from URL ?studio=ID
+(function () {
+  const params = new URLSearchParams(location.search);
+  const preStudio = params.get('studio');
+  const preService = params.get('service');
+  if (preStudio) {
+    const cb = document.querySelector(`input[name=studio][value="${preStudio}"]`);
+    if (cb) cb.checked = true;
+  }
+  if (preService) {
+    const rb = document.querySelector(`input[name=service_type][value="${preService}"]`);
+    if (rb) rb.checked = true;
+  }
+})();
+
+// Set min booking date to tomorrow
+(function () {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  document.getElementById('bookingDate').min = d.toISOString().split('T')[0];
+})();
+
+// ─── Step navigation ─────────────────────────────────────────────────────────
+function goToStep(n) {
+  if (n === 2 && !validateStep1()) return;
+  if (n === 3 && !validateStep2()) return;
+  if (n === 4 && !validateStep3()) return;
+  if (n === 5 && !validateStep4()) return;
+
+  document.querySelectorAll('.wizard-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('step' + n).classList.add('active');
+
+  const labels = document.querySelectorAll('.wizard-step-label');
+  labels.forEach((l, i) => {
+    l.classList.remove('active', 'completed');
+    const stepNum = i / 2 + 1; // labels are every other element due to connectors
+  });
+  // Re-query just the step labels
+  document.querySelectorAll('.wizard-step-label').forEach(l => {
+    const s = parseInt(l.dataset.step);
+    l.classList.remove('active', 'completed');
+    if (s === n) l.classList.add('active');
+    else if (s < n) l.classList.add('completed');
+  });
+
+  if (n === 3) loadTimeSlots();
+  if (n === 4) populateSummary();
+  if (n === 5) populatePaymentSummary();
+
+  hideError();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// ─── Validation ──────────────────────────────────────────────────────────────
+function validateStep1() {
+  const checked = document.querySelectorAll('input[name=studio]:checked');
+  if (checked.length === 0) { showError('Please select at least one studio.'); return false; }
+  state.studioIds   = Array.from(checked).map(c => parseInt(c.value));
+  state.studioNames = Array.from(checked).map(c => c.dataset.name);
+  state.serviceType = document.querySelector('input[name=service_type]:checked').value;
+  return true;
+}
+
+function validateStep2() {
+  if (!state.date) { showError('Please select a date.'); return false; }
+  if (!state.duration) { showError('Please select a duration.'); return false; }
+  return true;
+}
+
+function validateStep3() {
+  if (!state.startTime) { showError('Please select a time slot.'); return false; }
+  return true;
+}
+
+function validateStep4() {
+  const name  = document.getElementById('customerName').value.trim();
+  const email = document.getElementById('customerEmail').value.trim();
+  if (!name)  { showError('Please enter your name.'); return false; }
+  if (!email || !email.includes('@')) { showError('Please enter a valid email address.'); return false; }
+  return true;
+}
+
+// ─── Duration selector ───────────────────────────────────────────────────────
+function selectDuration(btn) {
+  document.querySelectorAll('.duration-btn').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+  state.duration = parseFloat(btn.dataset.hours);
+  checkStep2Ready();
+  fetchPrice();
+}
+
+document.getElementById('bookingDate').addEventListener('change', (e) => {
+  state.date = e.target.value;
+  checkStep2Ready();
+  fetchPrice();
+});
+
+function checkStep2Ready() {
+  document.getElementById('step2Next').disabled = !(state.date && state.duration);
+}
+
+// ─── Live price fetch ────────────────────────────────────────────────────────
+async function fetchPrice() {
+  if (!state.studioIds.length || !state.duration) return;
+  try {
+    const res = await fetch('/api/price', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        studio_ids: state.studioIds,
+        duration: state.duration,
+        service_type: state.serviceType,
+      }),
+    });
+    const data = await res.json();
+    state.pricing = data;
+    updatePriceDisplay(data);
+  } catch (e) { /* ignore */ }
+}
+
+function updatePriceDisplay(p) {
+  const summary = document.getElementById('priceSummary2');
+  if (!p.total) { summary.style.display = 'none'; return; }
+  summary.style.display = 'block';
+  document.getElementById('priceStudioLabel').textContent =
+    state.studioNames.join(' + ') + (state.duration ? ` × ${state.duration}h` : '');
+  document.getElementById('priceSubtotal').textContent = '$' + p.subtotal.toFixed(2);
+  document.getElementById('priceTotal').textContent = '$' + p.total.toFixed(2);
+  const discRow = document.getElementById('priceDiscountRow');
+  if (p.discount_amount > 0) {
+    discRow.style.display = 'flex';
+    document.getElementById('priceDiscount').textContent = '-$' + p.discount_amount.toFixed(2);
+  } else {
+    discRow.style.display = 'none';
+  }
+}
+
+// ─── Time slot loading ───────────────────────────────────────────────────────
+async function loadTimeSlots() {
+  const container   = document.getElementById('timeSlots');
+  const loading     = document.getElementById('slotsLoading');
+  const noSlots     = document.getElementById('noSlots');
+
+  container.innerHTML = '';
+  noSlots.classList.add('hidden');
+  loading.style.display = 'block';
+  document.getElementById('step3Next').disabled = true;
+  state.startTime = '';
+
+  document.getElementById('step3DateDisplay').textContent = formatDate(state.date);
+  document.getElementById('step3DurationDisplay').textContent = state.duration + ' hour(s)';
+
+  try {
+    const res = await fetch('/api/availability', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        studio_ids: state.studioIds,
+        date: state.date,
+        duration: state.duration,
+      }),
+    });
+    const data = await res.json();
+    loading.style.display = 'none';
+
+    if (!data.slots || data.slots.length === 0) {
+      noSlots.classList.remove('hidden');
+      return;
+    }
+    data.slots.forEach(slot => {
+      const btn = document.createElement('button');
+      btn.className = 'time-slot-btn';
+      btn.textContent = formatTime(slot);
+      btn.dataset.time = slot;
+      btn.addEventListener('click', () => selectTimeSlot(btn, slot));
+      container.appendChild(btn);
+    });
+  } catch (e) {
+    loading.style.display = 'none';
+    showError('Failed to load availability. Please try again.');
+  }
+}
+
+function selectTimeSlot(btn, time) {
+  document.querySelectorAll('.time-slot-btn').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+  state.startTime = time;
+  document.getElementById('step3Next').disabled = false;
+}
+
+// ─── Summary population ──────────────────────────────────────────────────────
+function populateSummary() {
+  const p = state.pricing;
+  document.getElementById('summaryStudios').textContent   = state.studioNames.join(', ');
+  document.getElementById('summaryDateTime').textContent  = `${formatDate(state.date)} at ${formatTime(state.startTime)}`;
+  document.getElementById('summaryDuration').textContent  = state.duration + ' hour(s)';
+  document.getElementById('summaryTotal').textContent     = p.total ? '$' + p.total.toFixed(2) : '—';
+  const discRow = document.getElementById('summaryDiscountRow');
+  if (p.discount_amount > 0) {
+    discRow.style.display = 'flex';
+    document.getElementById('summaryDiscount').textContent = '-$' + p.discount_amount.toFixed(2) + ' (bundle)';
+  } else {
+    discRow.style.display = 'none';
+  }
+}
+
+function populatePaymentSummary() {
+  const p = state.pricing;
+  document.getElementById('finalTotal').textContent    = p.total ? '$' + p.total.toFixed(2) : '—';
+  document.getElementById('depositAmt').textContent    = p.deposit_amount ? '$' + p.deposit_amount.toFixed(2) : '—';
+  document.getElementById('fullAmt').textContent       = p.total ? '$' + p.total.toFixed(2) : '—';
+  updateChargingToday();
+  initSquare();
+}
+
+document.querySelectorAll('input[name=payment_type]').forEach(r => {
+  r.addEventListener('change', updateChargingToday);
+});
+
+function updateChargingToday() {
+  const type = document.querySelector('input[name=payment_type]:checked').value;
+  const p = state.pricing;
+  const amount = type === 'full' ? p.total : p.deposit_amount;
+  document.getElementById('chargingToday').textContent = amount ? '$' + amount.toFixed(2) : '—';
+  document.getElementById('confirmBtnText').textContent =
+    type === 'full' ? 'Confirm & Pay in Full' : 'Confirm & Pay Deposit';
+}
+
+// ─── Square ───────────────────────────────────────────────────────────────────
+async function initSquare() {
+  if (!squareEnabled) {
+    document.getElementById('squarePaymentSection').style.display = 'none';
+    document.getElementById('noPaymentMode').classList.remove('hidden');
+    return;
+  }
+  if (state.squareCard) return; // already init
+  try {
+    const payments = Square.payments(SQUARE_APP_ID, '{{ square_location_id }}');
+    state.squareCard = await payments.card();
+    await state.squareCard.attach('#card-container');
+  } catch (e) {
+    console.error('Square init error', e);
+    document.getElementById('squarePaymentSection').innerHTML =
+      '<p class="flash flash-error">Payment form failed to load. Please refresh the page.</p>';
+  }
+}
+
+// ─── Submit booking ──────────────────────────────────────────────────────────
+async function submitBooking() {
+  if (!validateStep4()) return;
+
+  const confirmBtn = document.getElementById('confirmBtn');
+  const spinner    = document.getElementById('confirmBtnSpinner');
+  const btnText    = document.getElementById('confirmBtnText');
+
+  confirmBtn.disabled = true;
+  spinner.classList.remove('hidden');
+  btnText.textContent = 'Processing…';
+  hideError();
+
+  const paymentType = document.querySelector('input[name=payment_type]:checked').value;
+  const p = state.pricing;
+  const chargeAmount = paymentType === 'full' ? p.total : p.deposit_amount;
+
+  let squareToken = null;
+  if (squareEnabled && chargeAmount > 0) {
+    try {
+      const result = await state.squareCard.tokenize();
+      if (result.status !== 'OK') {
+        showError('Card error: ' + (result.errors || []).map(e => e.message).join(', '));
+        confirmBtn.disabled = false; spinner.classList.add('hidden');
+        btnText.textContent = 'Confirm & Pay';
+        return;
+      }
+      squareToken = result.token;
+    } catch (e) {
+      showError('Payment tokenization failed. Please check your card details.');
+      confirmBtn.disabled = false; spinner.classList.add('hidden');
+      btnText.textContent = 'Confirm & Pay';
+      return;
+    }
+  }
+
+  const payload = {
+    studio_ids:      state.studioIds,
+    service_type:    state.serviceType,
+    date:            state.date,
+    start_time:      state.startTime,
+    duration:        state.duration,
+    customer_name:   document.getElementById('customerName').value.trim(),
+    customer_email:  document.getElementById('customerEmail').value.trim(),
+    customer_phone:  document.getElementById('customerPhone').value.trim(),
+    notes:           document.getElementById('customerNotes').value.trim(),
+    payment_type:    squareEnabled ? paymentType : 'none',
+    square_token:    squareToken,
+  };
+
+  try {
+    const res = await fetch('/book/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+
+    if (!res.ok || !data.success) {
+      showError(data.error || 'An error occurred. Please try again.');
+      confirmBtn.disabled = false; spinner.classList.add('hidden');
+      btnText.textContent = 'Confirm & Pay';
+      return;
+    }
+
+    // Show inline confirmation
+    document.getElementById('confirmRef').textContent = data.booking_ref;
+    document.getElementById('confirmEmail').textContent = payload.customer_email;
+    goToStep(6);
+
+  } catch (e) {
+    showError('Network error. Please check your connection and try again.');
+    confirmBtn.disabled = false; spinner.classList.add('hidden');
+    btnText.textContent = 'Confirm & Pay';
+  }
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+function showError(msg) {
+  const el = document.getElementById('wizardError');
+  el.textContent = msg;
+  el.classList.remove('hidden');
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+function hideError() {
+  document.getElementById('wizardError').classList.add('hidden');
+}
+function formatDate(iso) {
+  if (!iso) return '—';
+  const [y, m, d] = iso.split('-');
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', { weekday: 'short', month: 'long', day: 'numeric', year: 'numeric' });
+}
+function formatTime(t) {
+  if (!t) return '—';
+  const [h, m] = t.split(':').map(Number);
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  const h12  = h % 12 || 12;
+  return `${h12}:${m.toString().padStart(2, '0')} ${ampm}`;
+}
+
+// Re-fetch price when service type changes
+document.querySelectorAll('input[name=service_type]').forEach(r => {
+  r.addEventListener('change', () => {
+    state.serviceType = r.value;
+    fetchPrice();
+  });
+});
+</script>
+{% endblock %}

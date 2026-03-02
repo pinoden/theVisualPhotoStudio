@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Our Studios – The Visuals Photo Studio{% endblock %}
+{% block content %}
+
+<div class="page-banner">
+  <p class="section-eyebrow">Our Spaces</p>
+  <h1>Three Distinct Studios</h1>
+  <p>Each designed to inspire. Choose one — or bundle multiple for a 10% discount.</p>
+</div>
+
+<section class="section section-cream">
+  <div class="container">
+    {% for studio in studios %}
+    <div style="display:grid;grid-template-columns:{% if loop.index % 2 == 0 %}1fr 1.2fr{% else %}1.2fr 1fr{% endif %};gap:4rem;align-items:center;margin-bottom:6rem;">
+      {% if loop.index % 2 != 0 %}
+      <div class="studio-card-img {{ studio.slug }}-bg" style="height:420px;display:flex;align-items:center;justify-content:center;">
+        <span class="studio-placeholder-text">{{ studio.name }}</span>
+      </div>
+      {% endif %}
+      <div>
+        <p class="section-eyebrow">{{ 'Studio 0' + loop.index|string }}</p>
+        <h2 style="font-size:clamp(2rem,4vw,3rem);">{{ studio.name }}</h2>
+        <div class="divider" style="margin:1rem 0;"></div>
+        <p>{{ studio.description or 'A beautifully curated space designed for creative professionals. This studio offers the perfect blend of natural light, thoughtful styling, and versatile backdrops.' }}</p>
+        <p style="font-size:.875rem;margin-top:1rem;">{{ studio.tagline }}</p>
+        <div style="margin-top:1.5rem;padding:1.25rem;background:var(--color-ivory);border:1px solid var(--color-border);">
+          <div style="font-size:.75rem;text-transform:uppercase;letter-spacing:.1em;color:var(--color-muted);margin-bottom:.5rem;">Starting at</div>
+          <div style="font-family:var(--font-serif);font-size:2.5rem;font-weight:300;color:var(--color-dark);">${{ studio.hourly_rate|int }}<span style="font-size:1rem;"> / hour</span></div>
+        </div>
+        <div style="display:flex;gap:.75rem;margin-top:1.5rem;flex-wrap:wrap;">
+          <a href="{{ url_for('booking.book') }}?studio={{ studio.id }}" class="btn btn-dark">Book {{ studio.name }}</a>
+          <a href="{{ url_for('main.studio_detail', slug=studio.slug) }}" class="btn btn-outline">Learn More</a>
+        </div>
+      </div>
+      {% if loop.index % 2 == 0 %}
+      <div class="studio-card-img {{ studio.slug }}-bg" style="height:420px;display:flex;align-items:center;justify-content:center;">
+        <span class="studio-placeholder-text">{{ studio.name }}</span>
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</section>
+
+<!-- Bundle CTA -->
+<section class="section section-dark" style="text-align:center;">
+  <div class="container-sm">
+    <p class="section-eyebrow" style="color:var(--color-rose);">Bundle & Save</p>
+    <h2>Book Multiple Studios</h2>
+    <div class="divider"></div>
+    <p>Need more than one space? Select multiple studios during booking and automatically receive a <strong>10% bundle discount</strong>. Each studio is blocked for your entire session.</p>
+    <a href="{{ url_for('booking.book') }}" class="btn btn-primary mt-3">Start Booking</a>
+  </div>
+</section>
+
+{% endblock %}

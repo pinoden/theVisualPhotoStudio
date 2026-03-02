@@ -1,0 +1,42 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Settings{% endblock %}
+
+{% block content %}
+<div class="admin-header">
+  <h1>Account Settings</h1>
+</div>
+
+<div style="max-width:480px;">
+  <div class="admin-card">
+    <h3>Change Password</h3>
+    <form method="POST">
+      <div class="form-group">
+        <label class="form-label">Current Password</label>
+        <input type="password" name="current_password" class="form-control" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label">New Password</label>
+        <input type="password" name="new_password" class="form-control" required minlength="8">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Confirm New Password</label>
+        <input type="password" name="confirm_password" class="form-control" required>
+      </div>
+      <button type="submit" class="btn btn-dark" style="width:100%;">Update Password</button>
+    </form>
+  </div>
+
+  <div class="admin-card">
+    <h3>Studio Configuration</h3>
+    <p style="font-size:.875rem;color:var(--color-muted);">Edit the <code>.env</code> file in the project root to change:</p>
+    <ul style="font-size:.875rem;color:var(--color-muted);margin-top:.5rem;">
+      <li style="margin-bottom:.4rem;"><code>BUNDLE_DISCOUNT_PCT</code> — Bundle discount % (default: 10)</li>
+      <li style="margin-bottom:.4rem;"><code>DEPOSIT_PCT</code> — Deposit % of total (default: 30)</li>
+      <li style="margin-bottom:.4rem;"><code>SLOT_INCREMENT_MINUTES</code> — Time slot interval (default: 60)</li>
+      <li style="margin-bottom:.4rem;"><code>SQUARE_*</code> — Square payment credentials</li>
+      <li style="margin-bottom:.4rem;"><code>MAIL_*</code> — Email settings</li>
+    </ul>
+    <p style="font-size:.8rem;color:var(--color-muted);margin-top:.75rem;">After editing .env, restart the Flask server for changes to take effect.</p>
+  </div>
+</div>
+{% endblock %}

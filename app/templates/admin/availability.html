@@ -1,0 +1,94 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Availability{% endblock %}
+
+{% block content %}
+<div class="admin-header">
+  <h1>Manage Availability</h1>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1.5fr;gap:1.5rem;align-items:start;">
+
+  <!-- Block a slot form -->
+  <div class="admin-card">
+    <h3>Block a Date or Time</h3>
+    <p style="font-size:.875rem;color:var(--color-muted);margin-bottom:1.5rem;">Blocked dates will not be bookable by clients. Leave start/end times empty to block the full day.</p>
+
+    <form method="POST" action="{{ url_for('admin.block_slot') }}">
+      <div class="form-group">
+        <label class="form-label">Studio (leave blank for all)</label>
+        <select name="studio_id" class="form-control">
+          <option value="">All Studios</option>
+          {% for studio in studios %}
+          <option value="{{ studio.id }}">{{ studio.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Date *</label>
+        <input type="date" name="date" class="form-control" min="{{ today.isoformat() }}" required>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+        <div class="form-group">
+          <label class="form-label">Start Time (optional)</label>
+          <input type="time" name="start_time" class="form-control">
+        </div>
+        <div class="form-group">
+          <label class="form-label">End Time (optional)</label>
+          <input type="time" name="end_time" class="form-control">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Note (optional)</label>
+        <input type="text" name="note" class="form-control" placeholder="e.g. Holiday, Private event…">
+      </div>
+      <button type="submit" class="btn btn-dark" style="width:100%;">Block This Date/Time</button>
+    </form>
+  </div>
+
+  <!-- Existing blocks -->
+  <div class="admin-card" style="padding:0;overflow:hidden;">
+    <div style="padding:1.25rem 1.5rem;border-bottom:1px solid var(--color-border);">
+      <h3 style="margin:0;">Upcoming Blocks</h3>
+    </div>
+    {% if blocks %}
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Studio</th>
+          <th>Date</th>
+          <th>Time</th>
+          <th>Note</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for b in blocks %}
+        <tr>
+          <td>{{ b.studio.name if b.studio else 'All Studios' }}</td>
+          <td>{{ b.date.strftime('%b %d, %Y') }}</td>
+          <td>
+            {% if b.is_full_day %}
+              <span class="badge badge-cancelled">Full Day</span>
+            {% else %}
+              {{ b.start_time.strftime('%I:%M %p') }} – {{ b.end_time.strftime('%I:%M %p') }}
+            {% endif %}
+          </td>
+          <td style="font-size:.85rem;color:var(--color-muted);">{{ b.note or '—' }}</td>
+          <td>
+            <form method="POST" action="{{ url_for('admin.unblock_slot', block_id=b.id) }}" onsubmit="return confirm('Remove this block?')">
+              <button type="submit" style="font-size:.72rem;padding:.3rem .7rem;border:1px solid #8b2020;color:#8b2020;background:none;cursor:pointer;border-radius:2px;">Remove</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div style="padding:2rem;text-align:center;color:var(--color-muted);">
+      <p>No upcoming blocks. Studios are open during regular hours.</p>
+    </div>
+    {% endif %}
+  </div>
+
+</div>
+{% endblock %}

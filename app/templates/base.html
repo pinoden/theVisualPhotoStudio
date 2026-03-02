@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}The Visuals Photo Studio{% endblock %}</title>
+  <meta name="description" content="{% block meta_description %}Premium photography studios for rent in Winter Park, FL. Studio Blanche, Dayglow, and Paris available by the hour.{% endblock %}">
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=Lato:wght@300;400;700&display=swap" rel="stylesheet">
+
+  <!-- Styles -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  {% block extra_css %}{% endblock %}
+</head>
+<body>
+
+  <!-- Navigation -->
+  <nav class="site-nav">
+    <a href="{{ url_for('main.index') }}" class="site-logo">
+      The Visuals <span>Photo Studio</span>
+    </a>
+
+    <button class="nav-toggle" id="navToggle" aria-label="Menu">
+      <span></span><span></span><span></span>
+    </button>
+
+    <ul class="nav-links" id="navLinks">
+      <li>
+        <a href="{{ url_for('main.studios') }}">Our Studios</a>
+      </li>
+      <li><a href="{{ url_for('main.services') }}">Services</a></li>
+      <li>
+        <a href="#" id="infoToggle">Info ▾</a>
+      </li>
+      <li>
+        <a href="{{ url_for('booking.book') }}" class="btn-book-nav">Book Now</a>
+      </li>
+    </ul>
+  </nav>
+
+  <!-- Info dropdown (simple) -->
+  <div id="infoDropdown" style="display:none;position:fixed;top:72px;right:2rem;background:var(--color-ivory);border:1px solid var(--color-border);padding:1rem 1.5rem;z-index:200;min-width:180px;box-shadow:0 8px 24px rgba(0,0,0,.08);">
+    <ul style="list-style:none;margin:0;padding:0;">
+      <li style="padding:.4rem 0;"><a href="{{ url_for('main.rates') }}" style="color:var(--color-muted);font-size:.875rem;">Rates</a></li>
+      <li style="padding:.4rem 0;"><a href="{{ url_for('main.policies') }}" style="color:var(--color-muted);font-size:.875rem;">Policies</a></li>
+      <li style="padding:.4rem 0;"><a href="{{ url_for('main.faq') }}" style="color:var(--color-muted);font-size:.875rem;">FAQ</a></li>
+      <li style="padding:.4rem 0;"><a href="{{ url_for('main.contact') }}" style="color:var(--color-muted);font-size:.875rem;">Contact</a></li>
+    </ul>
+  </div>
+
+  <!-- Flash messages -->
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <div class="flash-messages" style="padding-top:80px;">
+        {% for category, message in messages %}
+          <div class="flash flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% endwith %}
+
+  <!-- Page content -->
+  <main class="page-content">
+    {% block content %}{% endblock %}
+  </main>
+
+  <!-- Footer -->
+  {% block footer %}
+  <footer class="site-footer">
+    <div class="footer-grid">
+      <div>
+        <div class="footer-logo">The Visuals <span>Photo Studio</span></div>
+        <p class="footer-tagline">Premium photography studios in Winter Park, FL. Designed for photographers, content creators, and brands.</p>
+      </div>
+      <div class="footer-col">
+        <h4>Studios</h4>
+        <ul>
+          <li><a href="{{ url_for('main.studio_detail', slug='blanche') }}">Studio Blanche</a></li>
+          <li><a href="{{ url_for('main.studio_detail', slug='dayglow') }}">Studio Dayglow</a></li>
+          <li><a href="{{ url_for('main.studio_detail', slug='paris') }}">Studio Paris</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4>Info</h4>
+        <ul>
+          <li><a href="{{ url_for('main.rates') }}">Rates</a></li>
+          <li><a href="{{ url_for('main.policies') }}">Policies</a></li>
+          <li><a href="{{ url_for('main.faq') }}">FAQ</a></li>
+          <li><a href="{{ url_for('main.contact') }}">Contact</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4>Visit Us</h4>
+        <p style="font-size:.875rem;">7457 Aloma Ave, Suite 301<br>Winter Park, FL 32792</p>
+        <p style="font-size:.875rem;margin-top:.75rem;"><a href="tel:4076636109">(407) 663-6109</a></p>
+        <p style="font-size:.8rem;margin-top:.75rem;color:rgba(255,255,255,.4);">Mon–Fri 9AM–7PM<br>Sat–Sun 8AM–8PM</p>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <p>&copy; {{ now.year if now else '2025' }} The Visuals Photo Studio. All rights reserved.</p>
+    </div>
+  </footer>
+  {% endblock %}
+
+  <!-- Scripts -->
+  <script>
+    // Mobile nav
+    const navToggle = document.getElementById('navToggle');
+    const navLinks  = document.getElementById('navLinks');
+    navToggle.addEventListener('click', () => navLinks.classList.toggle('open'));
+
+    // Info dropdown
+    const infoToggle   = document.getElementById('infoToggle');
+    const infoDropdown = document.getElementById('infoDropdown');
+    infoToggle.addEventListener('click', (e) => {
+      e.preventDefault();
+      infoDropdown.style.display = infoDropdown.style.display === 'none' ? 'block' : 'none';
+    });
+    document.addEventListener('click', (e) => {
+      if (!infoToggle.contains(e.target) && !infoDropdown.contains(e.target)) {
+        infoDropdown.style.display = 'none';
+      }
+    });
+
+    // Inject current year into footer if needed
+    document.querySelectorAll('.footer-year').forEach(el => {
+      el.textContent = new Date().getFullYear();
+    });
+  </script>
+
+  {% block extra_js %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,96 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Bookings{% endblock %}
+
+{% block content %}
+<div class="admin-header">
+  <h1>All Bookings</h1>
+  <a href="{{ url_for('booking.book') }}" target="_blank" class="btn btn-primary" style="font-size:.8rem;padding:.5rem 1.25rem;">+ New Booking</a>
+</div>
+
+<!-- Filters -->
+<div class="admin-card" style="padding:1rem 1.5rem;margin-bottom:1rem;">
+  <form method="GET" style="display:flex;gap:1rem;flex-wrap:wrap;align-items:flex-end;">
+    <div>
+      <label class="form-label" style="margin-bottom:.3rem;">Status</label>
+      <select name="status" class="form-control" style="width:auto;">
+        <option value="all" {{ 'selected' if filter_status == 'all' }}>All</option>
+        <option value="confirmed" {{ 'selected' if filter_status == 'confirmed' }}>Confirmed</option>
+        <option value="completed" {{ 'selected' if filter_status == 'completed' }}>Completed</option>
+        <option value="cancelled" {{ 'selected' if filter_status == 'cancelled' }}>Cancelled</option>
+      </select>
+    </div>
+    <div>
+      <label class="form-label" style="margin-bottom:.3rem;">Date</label>
+      <input type="date" name="date" class="form-control" style="width:auto;" value="{{ filter_date }}">
+    </div>
+    <button type="submit" class="btn btn-outline" style="padding:.6rem 1.25rem;font-size:.85rem;">Filter</button>
+    <a href="{{ url_for('admin.bookings') }}" class="btn btn-ghost" style="padding:.6rem 1.25rem;font-size:.85rem;">Clear</a>
+  </form>
+</div>
+
+<!-- Table -->
+<div class="admin-card" style="padding:0;overflow:hidden;">
+  {% if bookings %}
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Ref</th>
+        <th>Customer</th>
+        <th>Studio(s)</th>
+        <th>Date</th>
+        <th>Time</th>
+        <th>Duration</th>
+        <th>Total</th>
+        <th>Paid</th>
+        <th>Payment</th>
+        <th>Status</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for b in bookings %}
+      <tr id="booking-{{ b.id }}">
+        <td style="font-family:monospace;font-size:.8rem;">{{ b.booking_ref }}</td>
+        <td>
+          <div style="font-weight:700;font-size:.875rem;">{{ b.customer_name }}</div>
+          <div style="font-size:.78rem;color:var(--color-muted);">{{ b.customer_email }}</div>
+          {% if b.customer_phone %}<div style="font-size:.78rem;color:var(--color-muted);">{{ b.customer_phone }}</div>{% endif %}
+        </td>
+        <td style="font-size:.875rem;">{{ b.studio_names }}</td>
+        <td style="font-size:.875rem;white-space:nowrap;">{{ b.date.strftime('%b %d, %Y') }}</td>
+        <td style="font-size:.875rem;white-space:nowrap;">{{ b.start_time.strftime('%I:%M %p') }}<br>{{ b.end_time.strftime('%I:%M %p') }}</td>
+        <td style="font-size:.875rem;">{{ b.duration_hours }}h</td>
+        <td style="font-size:.875rem;">${{ '%.2f'|format(b.total) }}</td>
+        <td style="font-size:.875rem;">${{ '%.2f'|format(b.amount_paid) }}</td>
+        <td><span class="badge badge-{{ 'paid' if b.payment_status == 'paid' else 'deposit' if 'deposit' in b.payment_status else 'pending' }}">{{ b.payment_status.replace('_', ' ') }}</span></td>
+        <td><span class="badge badge-{{ b.status }}">{{ b.status }}</span></td>
+        <td>
+          {% if b.status == 'confirmed' %}
+          <div style="display:flex;gap:.5rem;flex-direction:column;">
+            <form method="POST" action="{{ url_for('admin.complete_booking', booking_id=b.id) }}" onsubmit="return confirm('Mark as completed?')">
+              <button type="submit" style="font-size:.72rem;padding:.3rem .7rem;border:1px solid #4a8a4a;color:#4a8a4a;background:none;cursor:pointer;border-radius:2px;white-space:nowrap;">✓ Complete</button>
+            </form>
+            <form method="POST" action="{{ url_for('admin.cancel_booking', booking_id=b.id) }}" onsubmit="return confirm('Cancel this booking? An email will be sent to the customer.')">
+              <button type="submit" style="font-size:.72rem;padding:.3rem .7rem;border:1px solid #8b2020;color:#8b2020;background:none;cursor:pointer;border-radius:2px;white-space:nowrap;">✗ Cancel</button>
+            </form>
+          </div>
+          {% endif %}
+        </td>
+      </tr>
+      {% if b.notes %}
+      <tr>
+        <td colspan="11" style="padding:.5rem 1rem;background:#fafaf8;font-size:.8rem;color:var(--color-muted);">
+          <strong>Notes:</strong> {{ b.notes }}
+        </td>
+      </tr>
+      {% endif %}
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div style="padding:3rem;text-align:center;color:var(--color-muted);">
+    <p>No bookings found matching your filters.</p>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

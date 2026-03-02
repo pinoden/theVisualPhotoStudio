@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+
+{% block title %}The Visuals Photo Studio – Winter Park, FL{% endblock %}
+
+{% block content %}
+
+<!-- Hero -->
+<section class="hero">
+  <div class="hero-content">
+    <p class="hero-eyebrow">Winter Park, Florida</p>
+    <h1>Where Every Frame<br><em>Tells a Story</em></h1>
+    <p>Three unique, fully-equipped photography studios available by the hour. For photographers, brands, and content creators.</p>
+    <div style="display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;">
+      <a href="{{ url_for('booking.book') }}" class="btn btn-dark">Book a Studio</a>
+      <a href="{{ url_for('main.studios') }}" class="btn btn-ghost">Explore Studios</a>
+    </div>
+  </div>
+</section>
+
+<!-- Studios overview -->
+<section class="section section-cream">
+  <div class="container">
+    <div class="section-header">
+      <p class="section-eyebrow">Our Spaces</p>
+      <h2>Three Studios, One Vision</h2>
+      <div class="divider"></div>
+      <p>Each studio is designed with a distinct aesthetic, offering the perfect backdrop for any creative project.</p>
+    </div>
+    <div class="studios-grid">
+      {% for studio in studios %}
+      <div class="studio-card">
+        <div class="studio-card-img {{ studio.slug }}-bg">
+          <span class="studio-placeholder-text">{{ studio.name }}</span>
+        </div>
+        <div class="studio-card-body">
+          <h3>{{ studio.name }}</h3>
+          <p>{{ studio.tagline or 'A beautifully designed space for your creative vision.' }}</p>
+          <p class="studio-price">${{ studio.hourly_rate|int }}/hour</p>
+          <div style="margin-top:1.25rem;display:flex;gap:.75rem;">
+            <a href="{{ url_for('main.studio_detail', slug=studio.slug) }}" class="btn btn-outline" style="padding:.5rem 1.25rem;font-size:.78rem;">View Studio</a>
+            <a href="{{ url_for('booking.book') }}?studio={{ studio.id }}" class="btn btn-primary" style="padding:.5rem 1.25rem;font-size:.78rem;">Book Now</a>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<!-- Why us -->
+<section class="section section-ivory">
+  <div class="container">
+    <div class="section-header">
+      <p class="section-eyebrow">Why Choose Us</p>
+      <h2>Everything You Need</h2>
+      <div class="divider"></div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:2rem;">
+      <div style="text-align:center;padding:1.5rem;">
+        <div style="font-size:2rem;margin-bottom:1rem;">✦</div>
+        <h4 style="font-size:1.2rem;margin-bottom:.5rem;">Natural Light</h4>
+        <p style="font-size:.875rem;">Floor-to-ceiling windows flood each studio with beautiful, diffused natural light.</p>
+      </div>
+      <div style="text-align:center;padding:1.5rem;">
+        <div style="font-size:2rem;margin-bottom:1rem;">✦</div>
+        <h4 style="font-size:1.2rem;margin-bottom:.5rem;">Fully Equipped</h4>
+        <p style="font-size:.875rem;">Curated props, furniture, and backdrops included with every booking.</p>
+      </div>
+      <div style="text-align:center;padding:1.5rem;">
+        <div style="font-size:2rem;margin-bottom:1rem;">✦</div>
+        <h4 style="font-size:1.2rem;margin-bottom:.5rem;">Flexible Hours</h4>
+        <p style="font-size:.875rem;">Book by the hour, any day of the week. Memberships available for regulars.</p>
+      </div>
+      <div style="text-align:center;padding:1.5rem;">
+        <div style="font-size:2rem;margin-bottom:1rem;">✦</div>
+        <h4 style="font-size:1.2rem;margin-bottom:.5rem;">Bundle & Save</h4>
+        <p style="font-size:.875rem;">Book multiple studios at once and receive a 10% bundle discount automatically.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Rates preview -->
+<section class="section section-dark">
+  <div class="container" style="text-align:center;">
+    <p class="section-eyebrow" style="color:var(--color-rose);">Transparent Pricing</p>
+    <h2 style="font-size:clamp(1.8rem,3vw,2.8rem);">Simple Hourly Rates</h2>
+    <div class="divider" style="margin:1rem auto;"></div>
+    <div style="display:flex;justify-content:center;gap:3rem;flex-wrap:wrap;margin:2.5rem 0;">
+      {% for studio in studios %}
+      <div>
+        <div style="font-family:var(--font-serif);font-size:.9rem;color:rgba(255,255,255,.6);letter-spacing:.08em;text-transform:uppercase;margin-bottom:.4rem;">{{ studio.name }}</div>
+        <div style="font-family:var(--font-serif);font-size:3rem;font-weight:300;color:#fff;">${{ studio.hourly_rate|int }}</div>
+        <div style="font-size:.8rem;color:rgba(255,255,255,.5);">per hour</div>
+      </div>
+      {% endfor %}
+    </div>
+    <div style="display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;">
+      <a href="{{ url_for('main.rates') }}" class="btn btn-ghost">See All Rates</a>
+      <a href="{{ url_for('booking.book') }}" class="btn btn-primary">Book Now</a>
+    </div>
+  </div>
+</section>
+
+<!-- Location -->
+<section class="section section-cream">
+  <div class="container">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:4rem;align-items:center;">
+      <div>
+        <p class="section-eyebrow">Find Us</p>
+        <h2>Conveniently Located in Winter Park</h2>
+        <div class="divider" style="margin:1rem 0;"></div>
+        <div class="contact-detail">
+          <div class="contact-icon">📍</div>
+          <div>
+            <strong style="color:var(--color-dark);">Address</strong><br>
+            7457 Aloma Ave, Suite 301<br>Winter Park, FL 32792
+          </div>
+        </div>
+        <div class="contact-detail">
+          <div class="contact-icon">📞</div>
+          <div>
+            <strong style="color:var(--color-dark);">Phone</strong><br>
+            <a href="tel:4076636109">(407) 663-6109</a>
+          </div>
+        </div>
+        <div class="contact-detail">
+          <div class="contact-icon">🕐</div>
+          <div>
+            <strong style="color:var(--color-dark);">Hours</strong><br>
+            Mon–Fri: 9:00 AM – 7:00 PM<br>
+            Sat–Sun: 8:00 AM – 8:00 PM<br>
+            <em style="font-size:.8rem;">By appointment only</em>
+          </div>
+        </div>
+        <a href="{{ url_for('main.contact') }}" class="btn btn-outline mt-3">Get in Touch</a>
+      </div>
+      <div style="background:var(--color-ivory);border:1px solid var(--color-border);height:320px;display:flex;align-items:center;justify-content:center;">
+        <div style="text-align:center;color:var(--color-muted);">
+          <div style="font-size:2.5rem;margin-bottom:.75rem;">📍</div>
+          <p style="font-size:.9rem;">7457 Aloma Ave, Suite 301<br>Winter Park, FL 32792</p>
+          <a href="https://maps.google.com/?q=7457+Aloma+Ave+Winter+Park+FL" target="_blank" rel="noopener" class="btn btn-primary mt-2" style="font-size:.78rem;padding:.5rem 1.25rem;">Open in Maps</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA banner -->
+<section class="section section-ivory" style="text-align:center;">
+  <div class="container-sm">
+    <p class="section-eyebrow">Ready to Create?</p>
+    <h2 style="font-size:clamp(2rem,4vw,3.5rem);">Book Your Session Today</h2>
+    <div class="divider"></div>
+    <p style="max-width:480px;margin:0 auto 2rem;">Reserve your studio in minutes. Choose your space, pick a time, and get instant confirmation.</p>
+    <a href="{{ url_for('booking.book') }}" class="btn btn-dark" style="font-size:.95rem;padding:.9rem 2.5rem;">Book a Studio →</a>
+  </div>
+</section>
+
+{% endblock %}

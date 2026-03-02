@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}Contact – The Visuals Photo Studio{% endblock %}
+{% block content %}
+
+<div class="page-banner">
+  <p class="section-eyebrow">Get in Touch</p>
+  <h1>Contact Us</h1>
+  <p>Have a question or want to discuss a custom booking? We'd love to hear from you.</p>
+</div>
+
+<section class="section section-cream">
+  <div class="container">
+    <div class="contact-grid">
+      <div>
+        <h2 style="margin-bottom:2rem;">Say Hello</h2>
+
+        <div class="contact-detail">
+          <div class="contact-icon">📍</div>
+          <div>
+            <strong style="color:var(--color-dark);">Address</strong><br>
+            7457 Aloma Ave, Suite 301<br>
+            Winter Park, FL 32792
+          </div>
+        </div>
+
+        <div class="contact-detail">
+          <div class="contact-icon">📞</div>
+          <div>
+            <strong style="color:var(--color-dark);">Phone</strong><br>
+            <a href="tel:4076636109">(407) 663-6109</a>
+          </div>
+        </div>
+
+        <div class="contact-detail">
+          <div class="contact-icon">✉️</div>
+          <div>
+            <strong style="color:var(--color-dark);">Email</strong><br>
+            <a href="mailto:studio@thevisualsphotostudio.com">studio@thevisualsphotostudio.com</a>
+          </div>
+        </div>
+
+        <div class="contact-detail">
+          <div class="contact-icon">🕐</div>
+          <div>
+            <strong style="color:var(--color-dark);">Studio Hours</strong><br>
+            Monday – Friday: 9:00 AM – 7:00 PM<br>
+            Saturday – Sunday: 8:00 AM – 8:00 PM<br>
+            <em style="font-size:.85rem;color:var(--color-muted);">By appointment only</em>
+          </div>
+        </div>
+
+        <div style="margin-top:2rem;">
+          <a href="{{ url_for('booking.book') }}" class="btn btn-dark">Book a Studio Now</a>
+        </div>
+      </div>
+
+      <div>
+        <div style="background:var(--color-ivory);border:1px solid var(--color-border);padding:2.5rem;">
+          <h3 style="margin-bottom:1.5rem;font-size:1.5rem;">Send a Message</h3>
+          <form id="contactForm" onsubmit="handleContact(event)">
+            <div class="form-group">
+              <label class="form-label">Your Name</label>
+              <input type="text" class="form-control" name="name" placeholder="Jane Smith" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Email Address</label>
+              <input type="email" class="form-control" name="email" placeholder="jane@example.com" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Subject</label>
+              <select class="form-control" name="subject">
+                <option value="">Select a topic…</option>
+                <option>Studio Rental Inquiry</option>
+                <option>Photography Services</option>
+                <option>Content Creation</option>
+                <option>Membership Inquiry</option>
+                <option>General Question</option>
+                <option>Other</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Message</label>
+              <textarea class="form-control" name="message" rows="5" placeholder="Tell us about your project or question…" required></textarea>
+            </div>
+            <button type="submit" class="btn btn-primary" style="width:100%;">Send Message</button>
+          </form>
+          <div id="contactSuccess" class="hidden" style="text-align:center;padding:2rem;">
+            <div style="font-size:2rem;margin-bottom:1rem;">✓</div>
+            <h4>Message Sent!</h4>
+            <p style="font-size:.9rem;">Thank you for reaching out. We'll get back to you within 24 hours.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  function handleContact(e) {
+    e.preventDefault();
+    // In production, wire this up to a Flask route that sends the email.
+    // For now, show the success message.
+    document.getElementById('contactForm').classList.add('hidden');
+    document.getElementById('contactSuccess').classList.remove('hidden');
+  }
+</script>
+{% endblock %}

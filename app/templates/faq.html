@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% block title %}FAQ – The Visuals Photo Studio{% endblock %}
+{% block content %}
+
+<div class="page-banner">
+  <p class="section-eyebrow">Common Questions</p>
+  <h1>Frequently Asked Questions</h1>
+  <p>Everything you need to know before your session.</p>
+</div>
+
+<section class="section section-cream">
+  <div class="container-sm">
+
+    <div class="faq-item">
+      <button class="faq-question">
+        How far in advance should I book?
+        <span class="faq-icon">+</span>
+      </button>
+      <div class="faq-answer">
+        Please book at least 24 hours in advance to secure your preferred time slot. Popular weekend hours fill up quickly, so we recommend booking as early as possible.
+      </div>
+    </div>
+
+    <div class="faq-item">
+      <button class="faq-question">
+        What is included with a studio rental?
+        <span class="faq-icon">+</span>
+      </button>
+      <div class="faq-answer">
+        All studio rentals include the space itself, curated furniture and props, access to natural window lighting, a private changing area, climate control, and free parking. You bring your own camera equipment.
+      </div>
+    </div>
+
+    <div class="faq-item">
+      <button class="faq-question">
+        Can I bring my own props or equipment?
+        <span class="faq-icon">+</span>
+      </button>
+      <div class="faq-answer">
+        Absolutely! You are welcome to bring your own props, equipment, and styling. Please ensure everything fits within your booked time and that the studio is returned to its original condition when you leave.
+      </div>
+    </div>
+
+    <div class="faq-item">
+      <button class="faq-question">
+        What is the cancellation policy?
+        <span class="faq-icon">+</span>
+      </button>
+      <div class="faq-answer">
+        Cancellations made at least 24 hours before the booking start time are eligible for a full refund. Cancellations made within 24 hours of the booking are non-refundable. No-shows forfeit the full booking amount.
+      </div>
+    </div>
+
+    <div class="faq-item">
+      <button class="faq-question">
+        How does the bundle discount work?
+        <span class="faq-icon">+</span>
+      </button>
+      <div class="faq-answer">
+        When you select two or more studios during a single booking, a 10% discount is automatically applied to your total. All selected studios will be reserved for your entire booked period — perfect for large productions or when you need multiple setups.
+      </div>
+    </div>
+
+    <div class="faq-item">
+      <button class="faq-question">
+        Are memberships available?
+        <span class="faq-icon">+</span>
+      </button>
+      <div class="faq-answer">
+        Yes! We offer monthly memberships at discounted hourly rates. 5-hour and 10-hour plans are available for each studio. Contact us to discuss membership options and get started.
+      </div>
+    </div>
+
+    <div class="faq-item">
+      <button class="faq-question">
+        What are the studio hours?
+        <span class="faq-icon">+</span>
+      </button>
+      <div class="faq-answer">
+        Studios are available Monday through Friday from 9:00 AM to 7:00 PM, and Saturday through Sunday from 8:00 AM to 8:00 PM. All bookings are by appointment only.
+      </div>
+    </div>
+
+    <div class="faq-item">
+      <button class="faq-question">
+        Is parking available?
+        <span class="faq-icon">+</span>
+      </button>
+      <div class="faq-answer">
+        Yes, free parking is available on-site. Our studio is located at 7457 Aloma Ave, Suite 301, Winter Park, FL 32792.
+      </div>
+    </div>
+
+    <div class="faq-item">
+      <button class="faq-question">
+        Can I extend my booking on the day?
+        <span class="faq-icon">+</span>
+      </button>
+      <div class="faq-answer">
+        Extensions are subject to availability. If the studio is not booked after your session, we can often accommodate an extension. Please check with us by phone at (407) 663-6109 on the day of your booking.
+      </div>
+    </div>
+
+    <div class="faq-item">
+      <button class="faq-question">
+        Do you offer photography or videography services?
+        <span class="faq-icon">+</span>
+      </button>
+      <div class="faq-answer">
+        Yes! We offer professional photography starting at $300/hour and content creation services starting at $200/hour. These can be booked directly through our booking system, or you can contact us for a custom quote.
+      </div>
+    </div>
+
+    <div style="text-align:center;margin-top:3rem;padding:2rem;background:var(--color-ivory);border:1px solid var(--color-border);">
+      <h3 style="margin-bottom:.5rem;">Still Have Questions?</h3>
+      <p style="margin-bottom:1.5rem;">We're happy to help. Reach out and we'll get back to you as soon as possible.</p>
+      <div style="display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;">
+        <a href="{{ url_for('main.contact') }}" class="btn btn-outline">Contact Us</a>
+        <a href="{{ url_for('booking.book') }}" class="btn btn-primary">Book Now</a>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  document.querySelectorAll('.faq-question').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const item = btn.closest('.faq-item');
+      const isOpen = item.classList.contains('open');
+      document.querySelectorAll('.faq-item').forEach(i => i.classList.remove('open'));
+      if (!isOpen) item.classList.add('open');
+    });
+  });
+</script>
+{% endblock %}

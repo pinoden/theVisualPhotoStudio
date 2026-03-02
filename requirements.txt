@@ -1,0 +1,10 @@
+Flask>=2.3.0
+Flask-SQLAlchemy>=3.1.0
+Flask-Migrate>=4.0.0
+Flask-Login>=0.6.0
+Flask-Mail>=0.9.1
+Flask-WTF>=1.1.0
+python-dotenv>=1.0.0
+squareup>=35.0.0
+Werkzeug>=2.3.0
+email-validator>=2.0.0

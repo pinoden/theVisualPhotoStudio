@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Booking Confirmed – The Visuals Photo Studio{% endblock %}
+{% block content %}
+
+<section class="section section-cream">
+  <div class="container-sm" style="text-align:center;padding:5rem 1.5rem;">
+
+    <div class="confirmation-card">
+      <div class="confirmation-icon">✓</div>
+      <p class="section-eyebrow">You're all set</p>
+      <h1 style="font-size:2.2rem;margin-bottom:.5rem;">Booking Confirmed</h1>
+      <div class="booking-ref">{{ booking.booking_ref }}</div>
+      <div class="divider"></div>
+
+      <div style="text-align:left;margin:2rem 0;">
+        <div style="display:flex;justify-content:space-between;padding:.6rem 0;border-bottom:1px solid var(--color-border);">
+          <span style="color:var(--color-muted);font-size:.875rem;">Studio(s)</span>
+          <strong>{{ booking.studio_names }}</strong>
+        </div>
+        <div style="display:flex;justify-content:space-between;padding:.6rem 0;border-bottom:1px solid var(--color-border);">
+          <span style="color:var(--color-muted);font-size:.875rem;">Date</span>
+          <strong>{{ booking.date.strftime('%A, %B %d, %Y') }}</strong>
+        </div>
+        <div style="display:flex;justify-content:space-between;padding:.6rem 0;border-bottom:1px solid var(--color-border);">
+          <span style="color:var(--color-muted);font-size:.875rem;">Time</span>
+          <strong>{{ booking.start_time.strftime('%I:%M %p') }} – {{ booking.end_time.strftime('%I:%M %p') }}</strong>
+        </div>
+        <div style="display:flex;justify-content:space-between;padding:.6rem 0;border-bottom:1px solid var(--color-border);">
+          <span style="color:var(--color-muted);font-size:.875rem;">Duration</span>
+          <strong>{{ booking.duration_hours }} hour(s)</strong>
+        </div>
+        <div style="display:flex;justify-content:space-between;padding:.6rem 0;border-bottom:1px solid var(--color-border);">
+          <span style="color:var(--color-muted);font-size:.875rem;">Total</span>
+          <strong>${{ '%.2f'|format(booking.total) }}</strong>
+        </div>
+        <div style="display:flex;justify-content:space-between;padding:.6rem 0;">
+          <span style="color:var(--color-muted);font-size:.875rem;">Amount Paid</span>
+          <strong style="color:#2d6a2d;">${{ '%.2f'|format(booking.amount_paid) }}</strong>
+        </div>
+      </div>
+
+      <div style="background:rgba(200,168,130,.1);border:1px solid var(--color-rose-light);padding:1.25rem;text-align:left;margin-bottom:2rem;">
+        <p style="font-size:.875rem;margin:0;">
+          📧 A confirmation email has been sent to <strong>{{ booking.customer_email }}</strong>.
+        </p>
+        {% if booking.amount_paid < booking.total %}
+        <p style="font-size:.875rem;margin:.5rem 0 0;color:var(--color-muted);">
+          Remaining balance: <strong>${{ '%.2f'|format(booking.total - booking.amount_paid) }}</strong> due at the studio.
+        </p>
+        {% endif %}
+      </div>
+
+      <div style="padding:1rem;background:var(--color-cream);border:1px solid var(--color-border);text-align:left;margin-bottom:2rem;">
+        <strong style="font-size:.875rem;display:block;margin-bottom:.5rem;">📍 Studio Location</strong>
+        <p style="font-size:.875rem;margin:0;">7457 Aloma Ave, Suite 301, Winter Park, FL 32792<br>
+        Phone: <a href="tel:4076636109">(407) 663-6109</a></p>
+      </div>
+
+      <div style="display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;">
+        <a href="{{ url_for('booking.book') }}" class="btn btn-outline">Book Another Session</a>
+        <a href="{{ url_for('main.index') }}" class="btn btn-dark">Back to Home</a>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+{% endblock %}

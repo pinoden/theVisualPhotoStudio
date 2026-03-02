@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}{{ studio.name }} – The Visuals Photo Studio{% endblock %}
+{% block content %}
+
+<div class="page-banner">
+  <p class="section-eyebrow">Studio</p>
+  <h1>{{ studio.name }}</h1>
+  <p>{{ studio.tagline }}</p>
+</div>
+
+<section class="section section-cream">
+  <div class="container">
+    <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:4rem;align-items:start;">
+      <div>
+        <div class="studio-card-img {{ studio.slug }}-bg" style="height:480px;margin-bottom:1rem;display:flex;align-items:center;justify-content:center;">
+          <span class="studio-placeholder-text">{{ studio.name }}</span>
+        </div>
+      </div>
+      <div>
+        <h2 style="font-size:2rem;margin-bottom:1rem;">About This Studio</h2>
+        <p>{{ studio.description or 'A beautifully curated space designed for creative professionals. This studio offers the perfect blend of natural light, thoughtful styling, and versatile backdrops to bring your vision to life.' }}</p>
+
+        <div style="margin:2rem 0;padding:1.5rem;background:var(--color-ivory);border:1px solid var(--color-border);">
+          <h4 style="font-size:.9rem;letter-spacing:.1em;text-transform:uppercase;margin-bottom:1rem;">Pricing</h4>
+          <div style="display:flex;justify-content:space-between;padding:.5rem 0;border-bottom:1px solid var(--color-border);">
+            <span style="font-size:.9rem;">Hourly Rate</span>
+            <strong style="color:var(--color-dark);">${{ studio.hourly_rate|int }}/hr</strong>
+          </div>
+          {% if studio.member_5h_rate %}
+          <div style="display:flex;justify-content:space-between;padding:.5rem 0;border-bottom:1px solid var(--color-border);">
+            <span style="font-size:.9rem;">5-Hour Membership</span>
+            <strong style="color:var(--color-dark);">${{ studio.member_5h_rate|int }}/mo</strong>
+          </div>
+          {% endif %}
+          {% if studio.member_10h_rate %}
+          <div style="display:flex;justify-content:space-between;padding:.5rem 0;">
+            <span style="font-size:.9rem;">10-Hour Membership</span>
+            <strong style="color:var(--color-dark);">${{ studio.member_10h_rate|int }}/mo</strong>
+          </div>
+          {% endif %}
+        </div>
+
+        <div style="margin-bottom:2rem;">
+          <h4 style="font-size:.9rem;letter-spacing:.1em;text-transform:uppercase;margin-bottom:1rem;">What's Included</h4>
+          <ul style="list-style:none;padding:0;margin:0;">
+            <li style="padding:.4rem 0;font-size:.9rem;">✓ Natural window lighting</li>
+            <li style="padding:.4rem 0;font-size:.9rem;">✓ Curated furniture & props</li>
+            <li style="padding:.4rem 0;font-size:.9rem;">✓ Private changing area</li>
+            <li style="padding:.4rem 0;font-size:.9rem;">✓ Climate controlled</li>
+            <li style="padding:.4rem 0;font-size:.9rem;">✓ Free parking</li>
+          </ul>
+        </div>
+
+        <a href="{{ url_for('booking.book') }}?studio={{ studio.id }}" class="btn btn-dark" style="width:100%;text-align:center;">Book {{ studio.name }}</a>
+        <a href="{{ url_for('booking.book') }}" class="btn btn-ghost mt-2" style="width:100%;text-align:center;">Bundle with Other Studios (10% off)</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section section-ivory" style="text-align:center;">
+  <div class="container-sm">
+    <p class="section-eyebrow">Other Studios</p>
+    <h2>Explore More Spaces</h2>
+    <div class="divider"></div>
+    <div style="display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;margin-top:2rem;">
+      <a href="{{ url_for('main.studios') }}" class="btn btn-outline">View All Studios</a>
+      <a href="{{ url_for('booking.book') }}" class="btn btn-primary">Book Now</a>
+    </div>
+  </div>
+</section>
+
+{% endblock %}

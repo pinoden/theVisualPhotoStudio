@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Services – The Visuals Photo Studio{% endblock %}
+{% block content %}
+
+<div class="page-banner">
+  <p class="section-eyebrow">What We Offer</p>
+  <h1>Services</h1>
+  <p>From self-directed studio rentals to full-service photography and content creation.</p>
+</div>
+
+<section class="section section-cream">
+  <div class="container">
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:2rem;">
+
+      <div style="background:var(--color-ivory);border:1px solid var(--color-border);padding:2.5rem;text-align:center;">
+        <div style="font-size:2.5rem;margin-bottom:1.5rem;">🏛️</div>
+        <h3 style="font-size:1.5rem;margin-bottom:.75rem;">Studio Rental</h3>
+        <div style="font-family:var(--font-serif);font-size:2rem;color:var(--color-rose);margin-bottom:.5rem;">from $68</div>
+        <div style="font-size:.8rem;text-transform:uppercase;letter-spacing:.08em;color:var(--color-muted);margin-bottom:1.5rem;">per hour</div>
+        <p style="font-size:.9rem;margin-bottom:1.5rem;">Rent one of our three beautifully designed studios by the hour. Bring your own photographer or shoot solo. Full access to props and natural light.</p>
+        <ul style="list-style:none;padding:0;margin:0 0 1.5rem;text-align:left;">
+          <li style="padding:.35rem 0;font-size:.875rem;border-bottom:1px solid var(--color-border);">✓ Studio Blanche – $88/hr</li>
+          <li style="padding:.35rem 0;font-size:.875rem;border-bottom:1px solid var(--color-border);">✓ Studio Dayglow – $78/hr</li>
+          <li style="padding:.35rem 0;font-size:.875rem;">✓ Studio Paris – $68/hr</li>
+        </ul>
+        <a href="{{ url_for('booking.book') }}?service=rental" class="btn btn-primary" style="width:100%;">Book Now</a>
+      </div>
+
+      <div style="background:var(--color-ivory);border:2px solid var(--color-rose);padding:2.5rem;text-align:center;position:relative;">
+        <div style="position:absolute;top:-1px;left:50%;transform:translateX(-50%);background:var(--color-rose);color:#fff;font-size:.7rem;letter-spacing:.12em;text-transform:uppercase;padding:.3rem 1rem;">Popular</div>
+        <div style="font-size:2.5rem;margin-bottom:1.5rem;">📸</div>
+        <h3 style="font-size:1.5rem;margin-bottom:.75rem;">Photography</h3>
+        <div style="font-family:var(--font-serif);font-size:2rem;color:var(--color-rose);margin-bottom:.5rem;">from $300</div>
+        <div style="font-size:.8rem;text-transform:uppercase;letter-spacing:.08em;color:var(--color-muted);margin-bottom:1.5rem;">per hour</div>
+        <p style="font-size:.9rem;margin-bottom:1.5rem;">Professional photographer included. Studio access, styling direction, and a curated edited gallery delivered within 5–7 business days.</p>
+        <ul style="list-style:none;padding:0;margin:0 0 1.5rem;text-align:left;">
+          <li style="padding:.35rem 0;font-size:.875rem;border-bottom:1px solid var(--color-border);">✓ Professional photographer</li>
+          <li style="padding:.35rem 0;font-size:.875rem;border-bottom:1px solid var(--color-border);">✓ Studio included</li>
+          <li style="padding:.35rem 0;font-size:.875rem;border-bottom:1px solid var(--color-border);">✓ High-res digital delivery</li>
+          <li style="padding:.35rem 0;font-size:.875rem;">✓ Edited gallery (5–7 days)</li>
+        </ul>
+        <a href="{{ url_for('booking.book') }}?service=photography" class="btn btn-primary" style="width:100%;">Book Now</a>
+      </div>
+
+      <div style="background:var(--color-ivory);border:1px solid var(--color-border);padding:2.5rem;text-align:center;">
+        <div style="font-size:2.5rem;margin-bottom:1.5rem;">🎬</div>
+        <h3 style="font-size:1.5rem;margin-bottom:.75rem;">Content Creation</h3>
+        <div style="font-family:var(--font-serif);font-size:2rem;color:var(--color-rose);margin-bottom:.5rem;">from $200</div>
+        <div style="font-size:.8rem;text-transform:uppercase;letter-spacing:.08em;color:var(--color-muted);margin-bottom:1.5rem;">per hour</div>
+        <p style="font-size:.9rem;margin-bottom:1.5rem;">Full video and photo content creation for social media, brands, and personal use. Includes a dedicated content creator, studio, and social-ready deliverables.</p>
+        <ul style="list-style:none;padding:0;margin:0 0 1.5rem;text-align:left;">
+          <li style="padding:.35rem 0;font-size:.875rem;border-bottom:1px solid var(--color-border);">✓ Content creator included</li>
+          <li style="padding:.35rem 0;font-size:.875rem;border-bottom:1px solid var(--color-border);">✓ Studio included</li>
+          <li style="padding:.35rem 0;font-size:.875rem;border-bottom:1px solid var(--color-border);">✓ Photo & video content</li>
+          <li style="padding:.35rem 0;font-size:.875rem;">✓ Social-ready formats</li>
+        </ul>
+        <a href="{{ url_for('booking.book') }}?service=content" class="btn btn-primary" style="width:100%;">Book Now</a>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+{% endblock %}

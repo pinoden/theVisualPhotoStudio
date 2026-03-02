@@ -1,0 +1,91 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="admin-header">
+  <h1>Dashboard</h1>
+  <a href="{{ url_for('booking.book') }}" target="_blank" class="btn btn-primary" style="font-size:.8rem;padding:.5rem 1.25rem;">+ New Booking</a>
+</div>
+
+<!-- Stats -->
+<div class="stat-grid">
+  <div class="stat-card">
+    <div class="stat-value">{{ total_bookings }}</div>
+    <div class="stat-label">Total Bookings</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value">${{ '%.0f'|format(monthly_revenue) }}</div>
+    <div class="stat-label">Revenue This Month</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value">{{ upcoming|length }}</div>
+    <div class="stat-label">Upcoming (Next 10)</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value">{{ studios|length }}</div>
+    <div class="stat-label">Active Studios</div>
+  </div>
+</div>
+
+<!-- Upcoming bookings -->
+<div class="admin-card">
+  <h3>Upcoming Bookings</h3>
+  {% if upcoming %}
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Ref</th>
+        <th>Customer</th>
+        <th>Studio(s)</th>
+        <th>Date</th>
+        <th>Time</th>
+        <th>Total</th>
+        <th>Payment</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for b in upcoming %}
+      <tr>
+        <td style="font-family:monospace;font-size:.8rem;">{{ b.booking_ref }}</td>
+        <td>
+          <div>{{ b.customer_name }}</div>
+          <div style="font-size:.78rem;color:var(--color-muted);">{{ b.customer_email }}</div>
+        </td>
+        <td style="font-size:.875rem;">{{ b.studio_names }}</td>
+        <td style="font-size:.875rem;">{{ b.date.strftime('%b %d, %Y') }}</td>
+        <td style="font-size:.875rem;">{{ b.start_time.strftime('%I:%M %p') }}–{{ b.end_time.strftime('%I:%M %p') }}</td>
+        <td style="font-size:.875rem;">${{ '%.2f'|format(b.total) }}</td>
+        <td><span class="badge badge-{{ b.payment_status.replace('_paid','').replace('deposit','deposit') }}">{{ b.payment_status.replace('_', ' ') }}</span></td>
+        <td><span class="badge badge-{{ b.status }}">{{ b.status }}</span></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <div style="margin-top:1rem;">
+    <a href="{{ url_for('admin.bookings') }}" style="font-size:.85rem;color:var(--color-rose);">View all bookings →</a>
+  </div>
+  {% else %}
+  <p style="color:var(--color-muted);font-size:.9rem;">No upcoming bookings.</p>
+  {% endif %}
+</div>
+
+<!-- Quick links -->
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem;">
+  <a href="{{ url_for('admin.availability') }}" class="admin-card" style="text-decoration:none;color:inherit;transition:transform .2s;" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform=''">
+    <div style="font-size:1.5rem;margin-bottom:.5rem;">🚫</div>
+    <h4 style="margin:0 0 .3rem;">Block Dates</h4>
+    <p style="font-size:.8rem;color:var(--color-muted);margin:0;">Manage availability and block off times.</p>
+  </a>
+  <a href="{{ url_for('admin.bookings') }}" class="admin-card" style="text-decoration:none;color:inherit;transition:transform .2s;" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform=''">
+    <div style="font-size:1.5rem;margin-bottom:.5rem;">📋</div>
+    <h4 style="margin:0 0 .3rem;">All Bookings</h4>
+    <p style="font-size:.8rem;color:var(--color-muted);margin:0;">View, manage, and cancel bookings.</p>
+  </a>
+  <a href="{{ url_for('admin.manage_studios') }}" class="admin-card" style="text-decoration:none;color:inherit;transition:transform .2s;" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform=''">
+    <div style="font-size:1.5rem;margin-bottom:.5rem;">💰</div>
+    <h4 style="margin:0 0 .3rem;">Update Rates</h4>
+    <p style="font-size:.8rem;color:var(--color-muted);margin:0;">Change hourly rates for each studio.</p>
+  </a>
+</div>
+{% endblock %}

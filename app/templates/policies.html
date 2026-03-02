@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Policies – The Visuals Photo Studio{% endblock %}
+{% block content %}
+
+<div class="page-banner">
+  <p class="section-eyebrow">Studio Rules</p>
+  <h1>Policies</h1>
+  <p>Please review our policies before booking.</p>
+</div>
+
+<section class="section section-cream">
+  <div class="container-sm">
+    <div style="background:var(--color-ivory);border:1px solid var(--color-border);padding:3rem;">
+
+      <h2 style="font-size:1.6rem;margin-bottom:1rem;">Booking & Cancellations</h2>
+      <ul style="margin:0 0 2rem 1.25rem;">
+        <li style="margin-bottom:.6rem;">Bookings must be made at least 24 hours in advance.</li>
+        <li style="margin-bottom:.6rem;">Cancellations made more than 24 hours before the session start time will receive a full refund.</li>
+        <li style="margin-bottom:.6rem;">Cancellations within 24 hours of the session are non-refundable.</li>
+        <li style="margin-bottom:.6rem;">No-shows forfeit the full booking amount with no refund or rescheduling.</li>
+        <li style="margin-bottom:.6rem;">Rescheduling is permitted with at least 24 hours notice, subject to availability.</li>
+      </ul>
+
+      <h2 style="font-size:1.6rem;margin-bottom:1rem;">Studio Use</h2>
+      <ul style="margin:0 0 2rem 1.25rem;">
+        <li style="margin-bottom:.6rem;">Please arrive no more than 5 minutes before your scheduled start time.</li>
+        <li style="margin-bottom:.6rem;">Your booking time includes setup and teardown. Please plan accordingly.</li>
+        <li style="margin-bottom:.6rem;">Clients are responsible for leaving the studio in the same condition as found.</li>
+        <li style="margin-bottom:.6rem;">Any damage to props, furniture, or the studio itself will be billed to the client.</li>
+        <li style="margin-bottom:.6rem;">No smoking, vaping, or open flames inside the studio.</li>
+        <li style="margin-bottom:.6rem;">Food and drinks are permitted in the studio common area; please use care near props and furniture.</li>
+        <li style="margin-bottom:.6rem;">The maximum number of people in any studio is 10.</li>
+      </ul>
+
+      <h2 style="font-size:1.6rem;margin-bottom:1rem;">Overtime</h2>
+      <ul style="margin:0 0 2rem 1.25rem;">
+        <li style="margin-bottom:.6rem;">Sessions running over the booked time will be charged at the standard hourly rate in 30-minute increments.</li>
+        <li style="margin-bottom:.6rem;">If a subsequent booking follows yours, overtime may not be possible. Please communicate promptly.</li>
+      </ul>
+
+      <h2 style="font-size:1.6rem;margin-bottom:1rem;">Props & Equipment</h2>
+      <ul style="margin:0 0 2rem 1.25rem;">
+        <li style="margin-bottom:.6rem;">All studio props and furniture are to be used gently and returned to their original placement.</li>
+        <li style="margin-bottom:.6rem;">You are welcome to bring your own equipment and props.</li>
+        <li style="margin-bottom:.6rem;">Please do not move or remove built-in fixtures without prior approval.</li>
+      </ul>
+
+      <h2 style="font-size:1.6rem;margin-bottom:1rem;">Respectful Environment</h2>
+      <ul style="margin:0 0 2rem 1.25rem;">
+        <li style="margin-bottom:.6rem;">We are a safe and inclusive space. Disrespectful or inappropriate behavior will result in immediate removal without refund.</li>
+        <li style="margin-bottom:.6rem;">Content of an explicit or illegal nature is strictly prohibited.</li>
+        <li style="margin-bottom:.6rem;">Please keep noise levels considerate of neighboring suites.</li>
+      </ul>
+
+      <div style="padding:1.5rem;background:var(--color-rose-light);border-left:3px solid var(--color-rose);margin-top:1rem;">
+        <strong style="color:var(--color-dark);">Questions?</strong>
+        <p style="margin:.5rem 0 0;font-size:.9rem;">If you have any questions about our policies, please <a href="{{ url_for('main.contact') }}">contact us</a> before booking.</p>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+{% endblock %}

@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}Rates & Pricing – The Visuals Photo Studio{% endblock %}
+{% block content %}
+
+<div class="page-banner">
+  <p class="section-eyebrow">Transparent Pricing</p>
+  <h1>Studio Rates</h1>
+  <p>Straightforward hourly pricing. No hidden fees. Book as little as one hour.</p>
+</div>
+
+<!-- Hourly rates -->
+<section class="section section-cream">
+  <div class="container">
+    <div class="section-header">
+      <p class="section-eyebrow">Hourly Rental</p>
+      <h2>Studio Rental Rates</h2>
+      <div class="divider"></div>
+    </div>
+    <div class="rates-grid">
+      {% for studio in studios %}
+      <div class="rate-card {% if loop.index == 2 %}featured{% endif %}">
+        <h3>{{ studio.name }}</h3>
+        <div class="rate-price">${{ studio.hourly_rate|int }}</div>
+        <div class="rate-unit">per hour</div>
+        <hr class="rate-divider">
+        <ul class="rate-details" style="list-style:none;padding:0;margin:0;">
+          <li>Natural window lighting</li>
+          <li>Curated props included</li>
+          <li>Minimum 1 hour</li>
+          <li>Book by the hour</li>
+        </ul>
+        <a href="{{ url_for('booking.book') }}?studio={{ studio.id }}" class="btn btn-primary mt-3" style="width:100%;">Book Now</a>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<!-- Bundle -->
+<section class="section section-ivory">
+  <div class="container-sm" style="text-align:center;">
+    <p class="section-eyebrow">Bundle Discount</p>
+    <h2>Book Multiple Studios & Save</h2>
+    <div class="divider"></div>
+    <p>Select 2 or 3 studios in a single booking and receive an automatic <strong>10% discount</strong> on the total. Each studio is exclusively blocked for your session.</p>
+    <a href="{{ url_for('booking.book') }}" class="btn btn-dark mt-3">Bundle Studios →</a>
+  </div>
+</section>
+
+<!-- Memberships -->
+<section class="section section-cream">
+  <div class="container">
+    <div class="section-header">
+      <p class="section-eyebrow">Memberships</p>
+      <h2>Monthly Membership Plans</h2>
+      <div class="divider"></div>
+      <p>Regular users save more with a monthly membership. Hours roll in each month; use them whenever you like.</p>
+    </div>
+    <div class="rates-grid">
+      {% for studio in studios %}
+      {% if studio.member_5h_rate or studio.member_10h_rate %}
+      <div class="rate-card">
+        <h3>{{ studio.name }}</h3>
+        {% if studio.member_5h_rate %}
+        <div style="margin-bottom:1.5rem;">
+          <div style="font-size:.75rem;text-transform:uppercase;letter-spacing:.1em;color:var(--color-muted);">5-Hour Plan</div>
+          <div class="rate-price" style="font-size:2.2rem;">${{ studio.member_5h_rate|int }}</div>
+          <div class="rate-unit">/month · ${{ (studio.member_5h_rate / 5)|int }}/hr effective</div>
+        </div>
+        {% endif %}
+        {% if studio.member_10h_rate %}
+        <div>
+          <div style="font-size:.75rem;text-transform:uppercase;letter-spacing:.1em;color:var(--color-muted);">10-Hour Plan</div>
+          <div class="rate-price" style="font-size:2.2rem;">${{ studio.member_10h_rate|int }}</div>
+          <div class="rate-unit">/month · ${{ (studio.member_10h_rate / 10)|int }}/hr effective</div>
+        </div>
+        {% endif %}
+        <a href="{{ url_for('main.contact') }}" class="btn btn-outline mt-3" style="width:100%;font-size:.78rem;">Inquire About Membership</a>
+      </div>
+      {% endif %}
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<!-- Services -->
+<section class="section section-ivory">
+  <div class="container">
+    <div class="section-header">
+      <p class="section-eyebrow">Professional Services</p>
+      <h2>Photography & Content Creation</h2>
+      <div class="divider"></div>
+    </div>
+    <div class="rates-grid">
+      <div class="rate-card">
+        <h3>Photography</h3>
+        <div class="rate-price">$300</div>
+        <div class="rate-unit">starting per hour</div>
+        <hr class="rate-divider">
+        <ul class="rate-details" style="list-style:none;padding:0;margin:0;">
+          <li>Professional photographer</li>
+          <li>Studio included</li>
+          <li>High-resolution delivery</li>
+          <li>Edited gallery</li>
+        </ul>
+        <a href="{{ url_for('booking.book') }}?service=photography" class="btn btn-primary mt-3" style="width:100%;">Book Now</a>
+      </div>
+      <div class="rate-card">
+        <h3>Content Creation</h3>
+        <div class="rate-price">$200</div>
+        <div class="rate-unit">starting per hour</div>
+        <hr class="rate-divider">
+        <ul class="rate-details" style="list-style:none;padding:0;margin:0;">
+          <li>Content creator included</li>
+          <li>Studio included</li>
+          <li>Video & photo</li>
+          <li>Social-ready edits</li>
+        </ul>
+        <a href="{{ url_for('booking.book') }}?service=content" class="btn btn-primary mt-3" style="width:100%;">Book Now</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+{% endblock %}
