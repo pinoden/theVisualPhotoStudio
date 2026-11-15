@@ -273,6 +273,7 @@ const NUMBER_SETTINGS = [
   "maxAdvanceDays",
   "holdMinutes",
   "refundWindowHours",
+  "photoRefundWindowHours",
   "refundFeePercent",
   "rescheduleCutoffHours",
   "maxReschedules",

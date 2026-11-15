@@ -26,6 +26,8 @@ export interface CalendarAppointment {
   studioIds: string[];
   customerName: string;
   label: LabelKey;
+  /** A photography session: the photographer is held for it too. */
+  photography: boolean;
 }
 
 export interface CalendarBlock {
@@ -102,6 +104,7 @@ export async function loadCalendar(
       studioIds: holds.filter((hold) => hold.bookingId === row.id && known.has(hold.studioId)).map((hold) => hold.studioId),
       customerName: row.customerName,
       label: labelOf(row),
+      photography: row.photographerId !== null,
     };
   });
 

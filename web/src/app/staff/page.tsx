@@ -158,6 +158,7 @@ async function DaySheet({ searchParams }: Pick<PageProps<"/staff">, "searchParam
                           {addon.quantity > 1 ? ` × ${addon.quantity}` : ""}
                         </div>
                       ))}
+                      {entry.photography && <div>Photography session</div>}
                       {entry.notes && <div style={{ fontStyle: "italic" }}>{entry.notes}</div>}
                     </td>
                     <td>

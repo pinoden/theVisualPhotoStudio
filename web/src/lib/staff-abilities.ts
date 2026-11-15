@@ -10,6 +10,7 @@ export const STAFF_ABILITIES = {
   staffSeesPrices: "See what a booking cost",
   staffMovesBookings: "Move a booking to a new time",
   staffCreatesBookings: "Make a booking for a client",
+  staffSetsPhotographerTimes: "Set the hours the photographer works, and block their time",
 } as const;
 
 export type StaffAbility = keyof typeof STAFF_ABILITIES;

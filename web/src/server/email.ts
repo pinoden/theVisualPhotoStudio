@@ -170,6 +170,8 @@ export function bookingConfirmationEmail(input: {
   cardCents: number;
   /** The studio made the booking for the client: nothing was charged, the total is paid at the studio. */
   payAtStudio?: boolean;
+  /** A photography session: what it includes. */
+  photoIncludes?: string;
   manageUrl: string;
   /** How to get into the building, when the owner has set it. */
   access?: string;
@@ -186,6 +188,12 @@ export function bookingConfirmationEmail(input: {
       `Reference: ${input.ref}`,
       `Studio: ${input.studios}`,
       `When: ${input.when} (${input.duration})`,
+      ...(input.photoIncludes !== undefined
+        ? [
+            `Photography session with our in-house photographer, studio included${input.photoIncludes ? `: ${input.photoIncludes}` : ""}.`,
+            "Your edited images are delivered within 7 to 14 days.",
+          ]
+        : []),
       input.payAtStudio ? `To pay at the studio: ${money(input.totalCents)}` : `Total: ${money(input.totalCents)}`,
       ...(input.creditCents > 0
         ? [`Paid with your reschedule code: ${money(input.creditCents)}`, `Charged to your card: ${money(input.cardCents)}`]

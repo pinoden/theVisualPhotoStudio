@@ -23,6 +23,8 @@ export interface Settings {
   // ── Cancelling and moving ──
   /** A cancellation at least this many hours before the start is refunded automatically. */
   refundWindowHours: number;
+  /** The same for a photography session, which the photographer has set time aside for. */
+  photoRefundWindowHours: number;
   /** Percent of the card payment kept as a processing fee when refunding. */
   refundFeePercent: number;
   /** A customer can ask for a reschedule code until this many hours before the start. */
@@ -55,6 +57,8 @@ export interface Settings {
   staffMovesBookings: boolean;
   /** Whether staff can make a booking for a client. */
   staffCreatesBookings: boolean;
+  /** Whether staff can set the photographer's working hours and block their time. */
+  staffSetsPhotographerTimes: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -65,6 +69,7 @@ export const DEFAULT_SETTINGS: Settings = {
   multiStudioPercent: { 2: 20, 3: 22 },
 
   refundWindowHours: 168,
+  photoRefundWindowHours: 336, // 14 days, as on the live site
   refundFeePercent: 5,
   rescheduleCutoffHours: 24,
   maxReschedules: 1,
@@ -81,6 +86,7 @@ export const DEFAULT_SETTINGS: Settings = {
   staffSeesPrices: false,
   staffMovesBookings: false,
   staffCreatesBookings: false,
+  staffSetsPhotographerTimes: false,
 };
 
 const int = (min: number, max: number) => (v: unknown) =>
@@ -106,6 +112,7 @@ const VALIDATORS: { [K in Exclude<keyof Settings, "multiStudioPercent">]: (v: un
   maxAdvanceDays: int(1, 730),
   holdMinutes: int(1, 60),
   refundWindowHours: int(0, 24 * 365),
+  photoRefundWindowHours: int(0, 24 * 365),
   refundFeePercent: int(0, 100),
   rescheduleCutoffHours: int(0, 24 * 365),
   maxReschedules: int(0, 20),
@@ -120,6 +127,7 @@ const VALIDATORS: { [K in Exclude<keyof Settings, "multiStudioPercent">]: (v: un
   staffSeesPrices: bool,
   staffMovesBookings: bool,
   staffCreatesBookings: bool,
+  staffSetsPhotographerTimes: bool,
 };
 
 export type SettingKey = keyof Settings;

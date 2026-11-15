@@ -28,6 +28,8 @@ export interface DaySheetEntry {
   status: "confirmed" | "completed" | "no_show";
   /** The status label shown for it. */
   label: LabelKey;
+  /** A session with the photographer. */
+  photography: boolean;
 }
 
 /** Dates from `from` on that a staff member is assigned to. */
@@ -106,6 +108,7 @@ export async function getDaySheet(db: DbLike, viewer: AuthUser, date: string): P
       notes: b.notes,
       status: b.status as DaySheetEntry["status"],
       label: labelOf(b),
+      photography: b.photographerId !== null,
     })),
   };
 }

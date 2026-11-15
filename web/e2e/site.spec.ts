@@ -33,6 +33,7 @@ const WITHDRAWN_DAY = dateAhead(31); // likewise, for the add-on withdrawn durin
 const MOVE_FROM = dateAhead(38); // and for the discounted booking that is moved
 const MOVE_TO = dateAhead(45);
 const FREE_HOUR_DAY = dateAhead(52); // and for the bookings made with a free hour
+const PHOTO_DAY = dateAhead(59); // and for the photography sessions
 
 const jane = { name: "Jane Smith", email: "jane.e2e@example.com", phone: "407-555-0100" };
 const bob = { name: "Bob Brown", email: "bob.e2e@example.com", phone: "407-555-0111" };
@@ -82,13 +83,13 @@ test("public pages show the studios and the live price list", async ({ page }) =
   await page.goto("/studios");
   await expect(page.getByRole("heading", { name: "Studio Paris" })).toBeVisible();
 
-  // Photography sessions are described, and asked for by message.
+  // Photography sessions are described, and booked online.
   await page.goto("/services");
   await expect(page.getByRole("heading", { name: "Professional Photography" })).toBeVisible();
   await expect(page.getByRole("row", { name: /2 hours/ })).toContainText("30");
   await shot(page, "02a-photography");
-  await page.getByRole("link", { name: "Ask About a Session" }).click();
-  await expect(page.getByRole("heading", { name: "Contact Us" })).toBeVisible();
+  await page.getByRole("link", { name: "Book a Photographer" }).click();
+  await expect(page.getByRole("heading", { name: "Book a Photographer" })).toBeVisible();
 });
 
 test("guest information answers with the current rules and prices", async ({ page }) => {
@@ -838,4 +839,85 @@ test("a free hour takes one hour off a booking of one studio, and is not for sev
   await expect(byText(page, "Nothing to pay: your code covers this booking. No card is needed.")).toBeVisible();
   await expect(totalRow(page)).toContainText("$0");
   await confirmAndGetRef(page, "Confirm booking");
+});
+
+test("a client without a photographer books a session, and the photographer cannot be booked twice", async ({ page }) => {
+  // The way in is on the studio booking page.
+  await page.goto("/book");
+  const callout = page.getByRole("complementary", { name: "Don’t have a photographer?" });
+  await expect(callout).toContainText(
+    "No problem! You can book a professional photoshoot with our in-house photographer, including studio rental.",
+  );
+  await callout.getByRole("link", { name: "Book a Photographer" }).click();
+  await expect(page.getByRole("heading", { name: "Book a Photographer" })).toBeVisible();
+
+  // A session in Studio Blanche: its length, its price and what it includes.
+  await pickStudio(page, "Studio Blanche");
+  await next(page);
+  await byLabel(page, "Date").fill(PHOTO_DAY);
+  const oneHour = page.getByRole("button", { name: /1 hour · \$375/ });
+  await expect(oneHour).toContainText("Studio included. 1–2 outfits, 20 edited images.");
+  await oneHour.click();
+  await next(page);
+  await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
+  await next(page);
+  await fillDetails(page, jane);
+  await agreeToPolicies(page);
+  await next(page);
+  await expect(byText(page, /Photography session, Studio Blanche, 1 hour/)).toBeVisible();
+  await expect(totalRow(page)).toContainText("$375");
+  await shot(page, "21-photography-pay");
+  await confirmAndGetRef(page, "Confirm & pay $375");
+  await expect(byText(page, /With our in-house photographer, studio included/)).toBeVisible();
+  const mail = await latestEmail(page, "booking_confirmation", jane.email);
+  expect(mail.body).toContain("Photography session with our in-house photographer, studio included: 1–2 outfits, 20 edited images.");
+
+  // The photographer is taken from 10:00 to 11:00 and for 15 minutes after, whatever the studio.
+  await page.goto("/book/photography");
+  await pickStudio(page, "Studio Paris");
+  await next(page);
+  await byLabel(page, "Date").fill(PHOTO_DAY);
+  await page.getByRole("button", { name: /1 hour · \$315/ }).click();
+  await next(page);
+  await expect(page.getByRole("button", { name: "11:15 AM", exact: true })).toBeVisible();
+  for (const taken of ["9:15 AM", "10:00 AM", "11:00 AM"]) {
+    await expect(page.getByRole("button", { name: taken, exact: true })).toHaveCount(0);
+  }
+
+  // Studio Paris itself is free at 10:00, for someone who brings their own photographer.
+  await page.goto("/book");
+  await pickStudio(page, "Studio Paris");
+  await next(page);
+  await byLabel(page, "Date").fill(PHOTO_DAY);
+  await page.getByRole("button", { name: "1 hr", exact: true }).click();
+  await next(page);
+  await expect(page.getByRole("button", { name: "10:00 AM", exact: true })).toBeVisible();
+
+  // The owners block the photographer's afternoon. (The third and last sign-in code of this address.)
+  await signIn(page, THIRD_OWNER, "/admin/photography");
+  await byLabel(page, "Date").fill(PHOTO_DAY);
+  await byLabel(page, "From").fill("13:00");
+  await byLabel(page, "To").fill("16:00");
+  await byLabel(page, "Note").fill("Wedding");
+  await page.getByRole("button", { name: "Block", exact: true }).click();
+  await expect(byText(page, "Time blocked. No session can be booked in it.")).toBeVisible();
+  await expect(page.getByRole("row", { name: /Wedding/ })).toContainText("1:00 PM");
+  await shot(page, "22-admin-photography");
+
+  // The session is on the calendar, marked as photography.
+  await page.goto(`/admin/calendar?view=day&date=${PHOTO_DAY}`);
+  await expect(page.getByRole("link", { name: /Jane Smith/ })).toContainText("Photography");
+
+  // The blocked afternoon is gone from the sessions on offer, in a studio that is itself free all day.
+  await page.goto("/book/photography");
+  await pickStudio(page, "Studio Dayglow");
+  await next(page);
+  await byLabel(page, "Date").fill(PHOTO_DAY);
+  await page.getByRole("button", { name: /1 hour · \$315/ }).click();
+  await next(page);
+  await expect(page.getByRole("button", { name: "11:45 AM", exact: true })).toBeVisible();
+  for (const blocked of ["1:00 PM", "2:30 PM", "3:45 PM"]) {
+    await expect(page.getByRole("button", { name: blocked, exact: true })).toHaveCount(0);
+  }
+  await expect(page.getByRole("button", { name: "4:00 PM", exact: true })).toBeVisible();
 });

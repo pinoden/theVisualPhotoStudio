@@ -129,6 +129,58 @@ export const studioHours = pgTable(
   (t) => [primaryKey({ columns: [t.studioId, t.weekday] })],
 );
 
+// ── Photography ──────────────────────────────────────────────────────────────
+
+/**
+ * A photographer who can be booked together with a studio. A resource like a
+ * studio: one photographer cannot be in two places at once, whatever the
+ * studios. The site starts with one, the in-house photographer.
+ */
+export const photographers = pgTable("photographers", {
+  id: id(),
+  name: text("name").notNull(),
+  active: boolean("active").notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(0),
+});
+
+/**
+ * The limits of a photographer's availability: the hours they are ready to
+ * work, by weekday. A missing weekday means they do not work that day.
+ */
+export const photographerHours = pgTable(
+  "photographer_hours",
+  {
+    photographerId: uuid("photographer_id")
+      .notNull()
+      .references(() => photographers.id, { onDelete: "cascade" }),
+    /** ISO weekday: 1 = Monday ... 7 = Sunday. */
+    weekday: integer("weekday").notNull(),
+    openMinute: integer("open_minute").notNull(),
+    closeMinute: integer("close_minute").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.photographerId, t.weekday] })],
+);
+
+/**
+ * A photography session on sale: one studio, one length, one price. The
+ * price includes the studio. Taken from the studio's live price list.
+ */
+export const photoPackages = pgTable(
+  "photo_packages",
+  {
+    id: id(),
+    studioId: uuid("studio_id")
+      .notNull()
+      .references(() => studios.id, { onDelete: "cascade" }),
+    durationMinutes: integer("duration_minutes").notNull(),
+    priceCents: integer("price_cents").notNull(),
+    /** What the session includes, as the customer reads it: "1-2 outfits, 20 edited images". */
+    includes: text("includes").notNull().default(""),
+    active: boolean("active").notNull().default(true),
+  },
+  (t) => [uniqueIndex("photo_packages_studio_duration_idx").on(t.studioId, t.durationMinutes)],
+);
+
 /** Price of one studio for one duration on a weekday or weekend day. */
 export const priceRules = pgTable(
   "price_rules",
@@ -238,6 +290,10 @@ export const bookings = pgTable(
 
     /** A booking that has been moved can no longer be refunded. */
     rescheduledCount: integer("rescheduled_count").notNull().default(0),
+    /** Set on a photography session: the photographer it holds. */
+    photographerId: uuid("photographer_id").references(() => photographers.id, { onDelete: "set null" }),
+    /** What the session includes, as it was sold: kept with the booking when the package changes later. */
+    photoIncludes: text("photo_includes"),
     /**
      * The administrator's address when the booking was made in the admin for a client. Null for a
      * booking the customer made online. Nothing is charged online for an administrator's booking.
@@ -309,6 +365,30 @@ export const studioHolds = pgTable(
     priceCents: integer("price_cents").notNull().default(0),
   },
   (t) => [index("studio_holds_booking_idx").on(t.bookingId)],
+);
+
+/**
+ * Every span of time during which a photographer is taken: by a photography
+ * session (with the gap kept after it), or blocked in the admin (time off).
+ * An exclusion constraint, added by hand in the migration, forbids two active
+ * holds of one photographer from overlapping, as for studios: the same
+ * photographer cannot be booked twice for the same time, whatever the studio.
+ */
+export const photographerHolds = pgTable(
+  "photographer_holds",
+  {
+    id: id(),
+    photographerId: uuid("photographer_id")
+      .notNull()
+      .references(() => photographers.id, { onDelete: "restrict" }),
+    occupied: tstzrange("occupied").notNull(),
+    active: boolean("active").notNull().default(true),
+    /** The session that holds the photographer. Null for time blocked in the admin. */
+    bookingId: uuid("booking_id").references(() => bookings.id, { onDelete: "cascade" }),
+    /** Why the time is blocked, when it is. */
+    note: text("note").notNull().default(""),
+  },
+  (t) => [index("photographer_holds_booking_idx").on(t.bookingId)],
 );
 
 export const bookingAddons = pgTable(

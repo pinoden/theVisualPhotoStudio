@@ -28,6 +28,10 @@ export default function PoliciesPage() {
               at no additional charge.
             </li>
             <li>Once an appointment has been rescheduled, it is no longer eligible for a refund.</li>
+            <li>
+              Photography sessions with our in-house photographer: the same terms, with 14 days in place of 7. A
+              session cancelled less than 14 days before the appointment is non-refundable.
+            </li>
           </ul>
 
           <h2>Rental Time</h2>

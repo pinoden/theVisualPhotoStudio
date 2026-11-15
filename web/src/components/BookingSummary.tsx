@@ -35,7 +35,19 @@ export function BookingSummary({ booking }: { booking: BookingView }) {
       </div>
       {booking.studios.map((studio) => (
         <div className="price-row" key={studio.name}>
-          <span>{studio.name}</span>
+          <span>
+            {booking.photography && "Photography session, "}
+            {studio.name}
+            {booking.photography && (
+              <>
+                <br />
+                <small>
+                  With our in-house photographer, studio included
+                  {booking.photography.includes ? `. ${booking.photography.includes}` : ""}.
+                </small>
+              </>
+            )}
+          </span>
           <span>{formatCents(studio.priceCents)}</span>
         </div>
       ))}

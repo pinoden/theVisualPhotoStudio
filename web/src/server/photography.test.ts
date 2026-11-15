@@ -1,0 +1,329 @@
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { eq, sql } from "drizzle-orm";
+import { bookings, photographerHolds, photographers, settings, studioHolds } from "@/db/schema";
+import { PROMO_MISFIT_TEXT } from "@/lib/domain/pricing";
+import { moveBooking } from "./appointments";
+import type { AuthUser } from "./auth";
+import { loadDayAvailability } from "./availability";
+import { quoteSelection, toBookingViews } from "./bookings";
+import { loadCalendar } from "./calendar";
+import { loadCatalog } from "./catalog";
+import { cancelBooking, getManageChoices, requestRescheduleCode } from "./manage";
+import { MOCK_TOKEN_DECLINED } from "./payments";
+import {
+  blockPhotographer,
+  listPhotoPackages,
+  listPhotographerBlocks,
+  loadPhotographer,
+  savePhotoPackage,
+  savePhotographerHours,
+  unblockPhotographer,
+} from "./photography";
+import { issuePromo } from "./promos";
+import { createTestWorld, daysAfter, expectOk, FAR, h, NEAR, NOW, type TestWorld } from "./testing";
+
+let world: TestWorld;
+let owner: AuthUser;
+let sam: AuthUser; // staff
+let jane: AuthUser; // a customer
+
+beforeAll(async () => {
+  world = await createTestWorld();
+});
+afterAll(() => world.close());
+beforeEach(async () => {
+  await world.reset();
+  owner = await world.addUser("owner@studio.test", "owner", "Olivia");
+  sam = await world.addUser("sam@studio.test", "staff", "Sam");
+  jane = await world.addUser("jane@example.com", "customer", "Jane");
+});
+
+const byToken = (token: string) => ({ kind: "token", token }) as const;
+/** A photography session: Blanche, NEAR (a Wednesday), 10:00, one hour, unless said otherwise. */
+const session = (overrides: Parameters<TestWorld["book"]>[0] = {}) => world.book({ photography: true, durationMinutes: 60, ...overrides });
+const range = (column: typeof studioHolds.occupied | typeof photographerHolds.occupied) => ({
+  from: sql<Date>`lower(${column})`,
+  to: sql<Date>`upper(${column})`,
+});
+const iso = (value: Date) => new Date(value).toISOString();
+
+describe("what is on sale", () => {
+  it("is the packages of the live price list: a price for each studio and length, studio included", async () => {
+    const catalog = await loadCatalog(world.db);
+    const byStudio = (slug: string) =>
+      catalog.photoPackages.filter((p) => p.studioId === world.ids[slug]).map((p) => [p.durationMinutes, p.priceCents, p.includes]);
+    expect(byStudio("blanche")).toEqual([
+      [60, 37500, "1–2 outfits, 20 edited images"],
+      [120, 57500, "2–3 outfits, 30 edited images"],
+      [180, 73000, "3–4 outfits, 40 edited images"],
+      [240, 84000, "4–5 outfits, 50 edited images"],
+    ]);
+    expect(byStudio("dayglow").map((p) => p[1])).toEqual([31500, 51500, 67000, 77500]);
+    expect(byStudio("paris").map((p) => p[1])).toEqual([31500, 51500, 67000]); // no four-hour session in Paris
+  });
+
+  it("is nothing when there is no photographer to book", async () => {
+    await world.db.update(photographers).set({ active: false });
+    expect((await loadCatalog(world.db)).photoPackages).toEqual([]);
+    expect(await session()).toMatchObject({ ok: false, code: "invalid_price" });
+  });
+});
+
+describe("booking a photography session", () => {
+  it("charges the package's price and holds the studio and the photographer for the time", async () => {
+    const booked = expectOk(await session());
+    expect(booked.totalCents).toBe(37500);
+    expect(world.charges.at(-1)?.amountCents).toBe(37500);
+
+    const [booking] = await world.db.select().from(bookings).where(eq(bookings.ref, booked.ref));
+    const photographer = (await loadPhotographer(world.db))!;
+    expect(booking).toMatchObject({ status: "confirmed", photographerId: photographer.id, photoIncludes: "1–2 outfits, 20 edited images" });
+    expect((await toBookingViews(world.db, [booking]))[0].photography).toEqual({ includes: "1–2 outfits, 20 edited images" });
+
+    // Both are held from 10:00 to 11:15: the hour, and the 15 minutes kept free after it.
+    const [studio] = await world.db.select(range(studioHolds.occupied)).from(studioHolds).where(eq(studioHolds.bookingId, booking.id));
+    const [person] = await world.db
+      .select({ ...range(photographerHolds.occupied), photographerId: photographerHolds.photographerId })
+      .from(photographerHolds)
+      .where(eq(photographerHolds.bookingId, booking.id));
+    expect([iso(studio.from), iso(studio.to)]).toEqual(["2026-11-18T15:00:00.000Z", "2026-11-18T16:15:00.000Z"]);
+    expect([iso(person.from), iso(person.to)]).toEqual(["2026-11-18T15:00:00.000Z", "2026-11-18T16:15:00.000Z"]);
+    expect(person.photographerId).toBe(photographer.id);
+
+    const mail = (await world.emails("booking_confirmation")).at(-1)!;
+    expect(mail.body).toContain("Photography session with our in-house photographer, studio included: 1–2 outfits, 20 edited images.");
+    expect(mail.body).toContain("Total: $375");
+  });
+
+  it("holds the photographer whatever the studio: nobody else can book them for the same time", async () => {
+    expectOk(await session({ durationMinutes: 120 })); // Blanche, 10:00 to 12:00
+
+    // Another session, in another studio, at an overlapping time: the studio is free, the photographer is not.
+    const clash = await session({ studioIds: [world.ids.paris], startMinute: h(11) });
+    expect(clash).toMatchObject({ ok: false, code: "slot_taken", message: "Our photographer is not free at that time. Please choose another." });
+    // Nor straight after: the photographer keeps the same 15 minutes between sessions as a studio does.
+    expect(await session({ studioIds: [world.ids.paris], startMinute: h(12) })).toMatchObject({ ok: false, code: "slot_taken" });
+    expect(await session({ studioIds: [world.ids.dayglow], startMinute: h(9) })).toMatchObject({ ok: false, code: "slot_taken" });
+
+    // Renting Paris without a photographer at that time is fine: only the photographer is taken.
+    expect((await world.book({ studioIds: [world.ids.paris], startMinute: h(11), durationMinutes: 60 })).ok).toBe(true);
+    // And a session 15 minutes after the first one ends is fine.
+    expect((await session({ studioIds: [world.ids.dayglow], startMinute: h(12) + 15 })).ok).toBe(true);
+  });
+
+  it("is refused by the database itself when two requests for the photographer arrive at once", async () => {
+    const results = await Promise.all([
+      session({ studioIds: [world.ids.blanche] }),
+      session({ studioIds: [world.ids.dayglow], customer: { name: "Bob Brown", email: "bob@example.com", phone: "407-555-0111" } }),
+      session({ studioIds: [world.ids.paris], customer: { name: "Cleo Cruz", email: "cleo@example.com", phone: "407-555-0122" } }),
+    ]);
+    expect(results.filter((result) => result.ok)).toHaveLength(1);
+    expect(world.charges).toHaveLength(1);
+    expect(await world.db.select().from(photographerHolds).where(eq(photographerHolds.active, true))).toHaveLength(1);
+    // The two that lost hold nothing.
+    expect(await world.db.select().from(studioHolds).where(eq(studioHolds.active, true))).toHaveLength(1);
+  });
+
+  it("needs a studio that is free too", async () => {
+    expectOk(await world.book({ startMinute: h(10), durationMinutes: 60 })); // Blanche is rented
+    expect(await session()).toMatchObject({ ok: false, code: "slot_taken", message: "That time is no longer available. Please choose another." });
+    expect((await session({ studioIds: [world.ids.paris] })).ok).toBe(true);
+  });
+
+  it("is for one studio and a length that is on sale", async () => {
+    expect(await session({ studioIds: [world.ids.blanche, world.ids.paris] })).toMatchObject({ ok: false, code: "invalid_price" });
+    expect(await session({ durationMinutes: 90 })).toMatchObject({ ok: false, code: "invalid_price" });
+    expect(await session({ studioIds: [world.ids.paris], durationMinutes: 240 })).toMatchObject({ ok: false, code: "invalid_price" });
+    expect(world.charges).toHaveLength(0);
+  });
+
+  it("frees the photographer again when the card is declined", async () => {
+    expect(await session({ paymentToken: MOCK_TOKEN_DECLINED })).toMatchObject({ ok: false, code: "payment_failed" });
+    expect(await world.db.select().from(photographerHolds).where(eq(photographerHolds.active, true))).toHaveLength(0);
+    expect((await session({ studioIds: [world.ids.paris] })).ok).toBe(true);
+  });
+
+  it("takes money already paid, but not a discount code or a free hour", async () => {
+    const percent = (await issuePromo(world.db, { kind: "percent", value: 10, source: "manual", email: null, expiresAt: daysAfter(NOW, 30) }))!;
+    const freeHour = (await issuePromo(world.db, { kind: "free_hour", value: 60, source: "loyalty", email: "jane@example.com", expiresAt: daysAfter(NOW, 30) }))!;
+    const refusal = { ok: false, status: 422, code: "invalid_code", message: PROMO_MISFIT_TEXT.photography };
+    expect(await session({ promoCode: percent.code })).toEqual(refusal);
+    expect(await session({ promoCode: freeHour.code })).toEqual(refusal);
+    expect(
+      await quoteSelection(world.db, { studioIds: [world.ids.blanche], date: NEAR, durationMinutes: 60, photography: true, promoCode: freeHour.code, email: "jane@example.com" }, NOW),
+    ).toEqual(refusal);
+
+    // A reschedule credit is the customer's own money: it pays for a session like for anything else.
+    const rental = expectOk(await world.book({ date: FAR }));
+    const credit = expectOk(await requestRescheduleCode(world.db, rental.ref, byToken(rental.manageToken), world.manageDeps()));
+    const booked = expectOk(await session({ promoCode: credit.code }));
+    expect(booked.totalCents).toBe(37500 - 17600);
+  });
+});
+
+describe("the photographer's availability", () => {
+  it("limits sessions to the hours they are ready to work, and leaves rentals alone", async () => {
+    // Wednesdays from 1:00 PM to 5:00 PM only.
+    expect(await savePhotographerHours(world.db, owner, 3, { openMinute: h(13), closeMinute: h(17) })).toBe(true);
+    expect(await session({ startMinute: h(10) })).toMatchObject({ ok: false, code: "slot_taken" });
+    expect(await session({ startMinute: h(16) + 15 })).toMatchObject({ ok: false, code: "slot_taken" }); // would run past 5:00
+    expect((await session({ startMinute: h(13) })).ok).toBe(true);
+    expect((await world.book({ studioIds: [world.ids.paris], startMinute: h(10), durationMinutes: 60 })).ok).toBe(true);
+
+    // A day off: no session at all that day.
+    expect(await savePhotographerHours(world.db, owner, 4, null)).toBe(true);
+    expect(await session({ date: "2026-11-19" })).toMatchObject({ ok: false, code: "slot_taken" });
+    expect((await loadPhotographer(world.db))!.hours[4]).toBeUndefined();
+  });
+
+  it("follows the studio's start times even when their own hours begin off the quarter hour", async () => {
+    await savePhotographerHours(world.db, owner, 3, { openMinute: h(9) + 40, closeMinute: h(17) });
+    expect(await session({ startMinute: h(9) + 30 })).toMatchObject({ ok: false, code: "slot_taken" }); // before they start
+    expect((await session({ startMinute: h(9) + 45 })).ok).toBe(true);
+  });
+
+  it("can be blocked for part of a day, and opened again", async () => {
+    const blocked = await blockPhotographer(world.db, owner, { date: NEAR, startMinute: h(9), endMinute: h(12), note: "Wedding shoot" });
+    expect(blocked.ok).toBe(true);
+    expect(await session({ startMinute: h(11) })).toMatchObject({ ok: false, code: "slot_taken" });
+    expect(await session({ startMinute: h(8) + 45 })).toMatchObject({ ok: false, code: "slot_taken" });
+    expect((await session({ startMinute: h(12) })).ok).toBe(true); // from the moment the block ends
+
+    const blocks = await listPhotographerBlocks(world.db, NOW);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toMatchObject({ startAt: "2026-11-18T14:00:00.000Z", endAt: "2026-11-18T17:00:00.000Z", note: "Wedding shoot" });
+
+    expect(await unblockPhotographer(world.db, owner, blocks[0].id)).toBe(true);
+    expect(await listPhotographerBlocks(world.db, NOW)).toHaveLength(0);
+    expect((await session({ studioIds: [world.ids.paris], startMinute: h(10) })).ok).toBe(true);
+  });
+
+  it("cannot be blocked over a session that is already booked, and a session's hold is never removed as a block", async () => {
+    const booked = expectOk(await session());
+    expect(await blockPhotographer(world.db, owner, { date: NEAR, startMinute: h(9), endMinute: h(12), note: "" })).toEqual({
+      ok: false,
+      message: "A photography session or another block already takes part of that time.",
+    });
+    expect(await blockPhotographer(world.db, owner, { date: NEAR, startMinute: h(12), endMinute: h(11), note: "" })).toMatchObject({ ok: false });
+    expect(await blockPhotographer(world.db, owner, { date: "tomorrow", startMinute: h(9), endMinute: h(12), note: "" })).toMatchObject({ ok: false });
+
+    const [hold] = await world.db.select().from(photographerHolds);
+    expect(await unblockPhotographer(world.db, owner, hold.id)).toBe(false);
+    expect((await world.db.select().from(photographerHolds))[0]).toMatchObject({ active: true, bookingId: hold.bookingId });
+    expect(booked.ok).toBe(true);
+  });
+
+  it("is reported with the day's availability, for the booking screen", async () => {
+    await blockPhotographer(world.db, owner, { date: NEAR, startMinute: h(14), endMinute: h(15), note: "" });
+    expectOk(await session());
+    const catalog = await loadCatalog(world.db);
+    const day = await loadDayAvailability(world.db, catalog, NEAR, NOW, { withPhotographer: true });
+    expect(day.photographer).toMatchObject({
+      openMinute: h(9),
+      closeMinute: h(19),
+      bufferMinutes: 15,
+      anyStart: true,
+      busy: [
+        { start: h(10), end: h(11) + 15 },
+        { start: h(14), end: h(15) },
+      ],
+    });
+    // It is not part of an ordinary request for a day.
+    expect((await loadDayAvailability(world.db, catalog, NEAR, NOW)).photographer).toBeUndefined();
+  });
+
+  it("is the owners' to set, and staff's only once the owners switch it on", async () => {
+    const block = { date: NEAR, startMinute: h(9), endMinute: h(10), note: "" };
+    expect(await savePhotographerHours(world.db, sam, 3, null)).toBe(false);
+    expect(await blockPhotographer(world.db, sam, block)).toMatchObject({ ok: false });
+    expect(await savePhotographerHours(world.db, jane, 3, null)).toBe(false);
+
+    await world.db.insert(settings).values({ key: "staffSetsPhotographerTimes", value: true });
+    expect(await savePhotographerHours(world.db, sam, 3, { openMinute: h(10), closeMinute: h(18) })).toBe(true);
+    const made = await blockPhotographer(world.db, sam, block);
+    expect(made.ok).toBe(true);
+    expect(await unblockPhotographer(world.db, jane, made.ok ? made.id : "")).toBe(false);
+    expect(await savePhotographerHours(world.db, sam, 8, null)).toBe(false);
+    expect(await savePhotographerHours(world.db, sam, 3, { openMinute: h(18), closeMinute: h(10) })).toBe(false);
+  });
+});
+
+describe("the packages", () => {
+  it("can be repriced and taken off sale by the owners only; a booked session keeps what it was sold with", async () => {
+    const booked = expectOk(await session());
+    const [oneHour] = (await listPhotoPackages(world.db)).filter((p) => p.studioName === "Studio Blanche");
+    expect(oneHour).toMatchObject({ durationMinutes: 60, priceCents: 37500, active: true });
+
+    expect(await savePhotoPackage(world.db, sam, oneHour.id, { priceCents: 100, includes: "", active: true })).toBe(false);
+    expect(await savePhotoPackage(world.db, owner, oneHour.id, { priceCents: 39900, includes: "  2 outfits,  25 edited images ", active: true })).toBe(true);
+    expect((await loadCatalog(world.db)).photoPackages.find((p) => p.id === oneHour.id)).toMatchObject({
+      priceCents: 39900,
+      includes: "2 outfits, 25 edited images",
+    });
+    const [kept] = await world.db.select().from(bookings).where(eq(bookings.ref, booked.ref));
+    expect(kept).toMatchObject({ totalCents: 37500, photoIncludes: "1–2 outfits, 20 edited images" });
+
+    expect(await savePhotoPackage(world.db, owner, oneHour.id, { priceCents: 39900, includes: "", active: false })).toBe(true);
+    expect(await session({ startMinute: h(14) })).toMatchObject({ ok: false, code: "invalid_price" });
+    expect(await savePhotoPackage(world.db, owner, oneHour.id, { priceCents: -1, includes: "", active: true })).toBe(false);
+    expect(await savePhotoPackage(world.db, owner, "not-an-id", { priceCents: 1, includes: "", active: true })).toBe(false);
+  });
+});
+
+describe("after a session is booked", () => {
+  it("is refunded when cancelled 14 days or more ahead, not 7, and frees the studio and the photographer", async () => {
+    // Ten days ahead: a studio rental would be refunded, a session is not.
+    const soon = expectOk(await session({ date: "2026-11-24" }));
+    const choices = await getManageChoices(world.db, soon.ref, byToken(soon.manageToken), NOW);
+    expect(choices?.cancel.text).toBe("No refund is due, because the booking starts in less than 14 days.");
+    const cancelled = expectOk(await cancelBooking(world.db, soon.ref, byToken(soon.manageToken), world.manageDeps()));
+    expect(cancelled.refundCents).toBe(0);
+    expect(await world.db.select().from(photographerHolds).where(eq(photographerHolds.active, true))).toHaveLength(0);
+    // The time can be booked again, by someone else, in another studio.
+    expect((await session({ date: "2026-11-24", studioIds: [world.ids.paris] })).ok).toBe(true);
+
+    // Twenty-five days ahead: refunded, less the fee.
+    const later = expectOk(await session({ date: FAR }));
+    const refunded = expectOk(await cancelBooking(world.db, later.ref, byToken(later.manageToken), world.manageDeps()));
+    expect(refunded.refundCents).toBe(37500 - 1875);
+  });
+
+  it("frees the photographer when the customer takes a reschedule code", async () => {
+    const booked = expectOk(await session());
+    expectOk(await requestRescheduleCode(world.db, booked.ref, byToken(booked.manageToken), world.manageDeps()));
+    expect(await world.db.select().from(photographerHolds).where(eq(photographerHolds.active, true))).toHaveLength(0);
+  });
+
+  it("is moved by an administrator together with its photographer, only to a time when both are free", async () => {
+    const first = expectOk(await session()); // Blanche, 10:00 to 11:00
+    expectOk(await session({ studioIds: [world.ids.paris], startMinute: h(14) })); // Paris, 2:00 to 3:00
+
+    const to = (startMinute: number) => ({ date: NEAR, startMinute, countsAsClientMove: false });
+    // Blanche is free at 2:30, but the photographer is in Paris then.
+    expect(await moveBooking(world.db, owner, first.ref, to(h(14) + 30), NOW)).toEqual({
+      ok: false,
+      reason: "slot_taken",
+      message: "The photographer is not free at that time. Choose another.",
+    });
+    expect(await moveBooking(world.db, owner, first.ref, to(h(15)), NOW)).toMatchObject({ ok: false, reason: "slot_taken" }); // no gap
+    expect(await moveBooking(world.db, owner, first.ref, to(h(15) + 15), NOW)).toMatchObject({ ok: true });
+
+    const [booking] = await world.db.select().from(bookings).where(eq(bookings.ref, first.ref));
+    const [person] = await world.db.select(range(photographerHolds.occupied)).from(photographerHolds).where(eq(photographerHolds.bookingId, booking.id));
+    expect([iso(person.from), iso(person.to)]).toEqual(["2026-11-18T20:15:00.000Z", "2026-11-18T21:30:00.000Z"]); // 3:15 to 4:30 PM
+    // The morning is the photographer's again.
+    expect((await session({ studioIds: [world.ids.dayglow], startMinute: h(10) })).ok).toBe(true);
+  });
+
+  it("is marked as photography on the calendar", async () => {
+    const booked = expectOk(await session());
+    expectOk(await world.book({ studioIds: [world.ids.paris], durationMinutes: 60 }));
+    const calendar = await loadCalendar(world.db, owner, await loadCatalog(world.db), { from: NEAR, to: "2026-11-19" });
+    expect(calendar.appointments.map((entry) => [entry.ref === booked.ref, entry.photography])).toEqual(
+      expect.arrayContaining([
+        [true, true],
+        [false, false],
+      ]),
+    );
+  });
+});

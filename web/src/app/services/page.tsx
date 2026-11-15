@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { formatCents } from "@/lib/domain/pricing";
+import { getCatalog } from "@/server/cached";
 
 export const metadata: Metadata = { title: "Professional Photography" };
 
@@ -12,11 +14,14 @@ const PACKAGES = [
 ];
 
 /**
- * The studio's photography sessions. They cannot be booked on this site yet
- * (see "Photography sessions" in CLAUDE.md), so the page asks for a message
- * and shows no prices.
+ * The studio's photography sessions. They are booked online in the
+ * photography flow (`/book/photography`), which has the price of every
+ * session. This page says what a session is and where the prices start; when
+ * no session is on sale it asks for a message instead.
  */
-export default function ServicesPage() {
+export default async function ServicesPage() {
+  const catalog = await getCatalog();
+  const from = catalog.photoPackages.length > 0 ? Math.min(...catalog.photoPackages.map((p) => p.priceCents)) : null;
   return (
     <>
       <div className="page-banner">
@@ -67,21 +72,43 @@ export default function ServicesPage() {
       <section className="section section-ivory">
         <div className="container-sm" style={{ textAlign: "center" }}>
           <p className="section-eyebrow">How to Book</p>
-          <h2>Choose a Studio, Then Tell Us When</h2>
-          <div className="divider" />
-          <p>
-            Pick the studio you would like to be photographed in; its rental is included in the price. Then send us
-            a message with the session length and the dates that suit you, and we will reply with the price and the
-            times our photographer is free.
-          </p>
-          <div className="mt-3" style={{ display: "flex", gap: "1rem", justifyContent: "center", flexWrap: "wrap" }}>
-            <Link href="/studios" className="btn btn-outline">
-              See the Studios
-            </Link>
-            <Link href="/contact" className="btn btn-dark">
-              Ask About a Session
-            </Link>
-          </div>
+          {from !== null ? (
+            <>
+              <h2>Choose a Studio, a Session and a Time</h2>
+              <div className="divider" />
+              <p>
+                Pick the studio you would like to be photographed in; its rental is included in the price. Then choose
+                the session length and one of the times our photographer is free, and pay online. Sessions start at{" "}
+                {formatCents(from)}.
+              </p>
+              <div className="mt-3" style={{ display: "flex", gap: "1rem", justifyContent: "center", flexWrap: "wrap" }}>
+                <Link href="/studios" className="btn btn-outline">
+                  See the Studios
+                </Link>
+                <Link href="/book/photography" className="btn btn-dark">
+                  Book a Photographer
+                </Link>
+              </div>
+            </>
+          ) : (
+            <>
+              <h2>Choose a Studio, Then Tell Us When</h2>
+              <div className="divider" />
+              <p>
+                Pick the studio you would like to be photographed in; its rental is included in the price. Then send
+                us a message with the session length and the dates that suit you, and we will reply with the price and
+                the times our photographer is free.
+              </p>
+              <div className="mt-3" style={{ display: "flex", gap: "1rem", justifyContent: "center", flexWrap: "wrap" }}>
+                <Link href="/studios" className="btn btn-outline">
+                  See the Studios
+                </Link>
+                <Link href="/contact" className="btn btn-dark">
+                  Ask About a Session
+                </Link>
+              </div>
+            </>
+          )}
           <p style={{ fontSize: ".875rem", marginTop: "1.5rem" }}>
             Bringing your own photographer? <Link href="/book">Book a studio</Link> by the hour.
           </p>

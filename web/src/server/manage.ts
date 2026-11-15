@@ -1,5 +1,5 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { bookings, payments, promoCodes, refunds, studioHolds } from "@/db/schema";
+import { bookings, payments, promoCodes, refunds } from "@/db/schema";
 import type { Db, DbLike } from "@/db/client";
 import { labelOf } from "@/lib/domain/labels";
 import { formatCents } from "@/lib/domain/pricing";
@@ -16,6 +16,7 @@ import {
 import { isBookingRef, tokenMatches } from "./bookings";
 import { cancellationEmail, ownerRefundNotice, queueEmail, rescheduleCodeEmail } from "./email";
 import { BY_CUSTOMER, BY_STUDIO, recordEvent } from "./history";
+import { releaseHolds } from "./holds";
 import type { PaymentProvider } from "./payments";
 import { issuePromo, restorePromo } from "./promos";
 import { loadSettings, type Settings } from "./settings";
@@ -85,14 +86,32 @@ export interface ManageOptions {
   reschedule: RescheduleOutcome;
 }
 
-/** What would happen if the customer cancelled or moved this booking right now. */
-export async function getManageOptions(db: DbLike, ref: string, actor: Actor, now: Date): Promise<ManageOptions | null> {
+/**
+ * The terms that apply to one booking. A photography session has to be
+ * cancelled earlier than a studio rental to be refunded: the photographer has
+ * set the time aside. Everything else is the same.
+ */
+function termsFor(booking: Pick<BookingRow, "photographerId">, settings: Settings): Settings {
+  return booking.photographerId ? { ...settings, refundWindowHours: settings.photoRefundWindowHours } : settings;
+}
+
+async function manageContext(
+  db: DbLike,
+  ref: string,
+  actor: Actor,
+  now: Date,
+): Promise<{ options: ManageOptions; terms: Settings } | null> {
   if (!isBookingRef(ref)) return null;
   const [booking] = await db.select().from(bookings).where(eq(bookings.ref, ref)).limit(1);
   if (!booking || !mayAct(booking, actor)) return null;
-  const settings = await loadSettings(db);
+  const terms = termsFor(booking, await loadSettings(db));
   const facts = await factsFor(db, booking);
-  return { cancel: cancellationOutcome(facts, now, settings), reschedule: rescheduleOutcome(facts, now, settings) };
+  return { options: { cancel: cancellationOutcome(facts, now, terms), reschedule: rescheduleOutcome(facts, now, terms) }, terms };
+}
+
+/** What would happen if the customer cancelled or moved this booking right now. */
+export async function getManageOptions(db: DbLike, ref: string, actor: Actor, now: Date): Promise<ManageOptions | null> {
+  return (await manageContext(db, ref, actor, now))?.options ?? null;
 }
 
 /** The same options in words, ready to show next to the buttons. */
@@ -130,8 +149,8 @@ export function rescheduleOfferText(
 }
 
 export async function getManageChoices(db: DbLike, ref: string, actor: Actor, now: Date): Promise<ManageChoices | null> {
-  const options = await getManageOptions(db, ref, actor, now);
-  return options ? describeManageOptions(options, await loadSettings(db)) : null;
+  const context = await manageContext(db, ref, actor, now);
+  return context ? describeManageOptions(context.options, context.terms) : null;
 }
 
 export function cancelBlockText(reason: CancelBlock): string {
@@ -353,14 +372,15 @@ export async function cancelBooking(db: Db, ref: string, actor: Actor, deps: Man
     const [booking] = await tx.select().from(bookings).where(eq(bookings.ref, ref)).for("update").limit(1);
     if (!booking || !mayAct(booking, actor)) return { kind: "not_found" as const };
 
-    const decision = cancellationOutcome(await factsFor(tx, booking), deps.now, settings);
+    const terms = termsFor(booking, settings);
+    const decision = cancellationOutcome(await factsFor(tx, booking), deps.now, terms);
     if (!decision.allowed) return { kind: "blocked" as const, reason: decision.reason };
 
     await tx
       .update(bookings)
       .set({ status: "cancelled", cancelledAt: deps.now, cancelReason: actor.kind === "owner" ? "owner" : "customer" })
       .where(eq(bookings.id, booking.id));
-    await tx.update(studioHolds).set({ active: false }).where(eq(studioHolds.bookingId, booking.id));
+    await releaseHolds(tx, booking.id);
 
     const codeBack = await giveCodeBack(tx, booking, actor.kind === "owner" ? "studio" : "customer");
     await recordEvent(tx, {
@@ -373,7 +393,7 @@ export async function cancelBooking(db: Db, ref: string, actor: Actor, deps: Man
     });
 
     const refundIds = await recordRefunds(tx, booking.id, decision.refundCents, `Cancellation of ${booking.ref}`, true);
-    const message = `${cancelOutcomeText(decision, settings)}${codeBack ? ` ${CODE_BACK}` : ""}`;
+    const message = `${cancelOutcomeText(decision, terms)}${codeBack ? ` ${CODE_BACK}` : ""}`;
     await queueEmail(
       tx,
       cancellationEmail({
@@ -433,7 +453,7 @@ export async function requestRescheduleCode(db: Db, ref: string, actor: Actor, d
       .update(bookings)
       .set({ status: "cancelled", cancelledAt: deps.now, cancelReason: "rescheduled" })
       .where(eq(bookings.id, booking.id));
-    await tx.update(studioHolds).set({ active: false }).where(eq(studioHolds.bookingId, booking.id));
+    await releaseHolds(tx, booking.id);
 
     await recordEvent(tx, {
       bookingId: booking.id,
@@ -513,7 +533,7 @@ export async function ownerCancelBooking(
       .update(bookings)
       .set({ status: "cancelled", cancelledAt: deps.now, cancelReason: "owner" })
       .where(eq(bookings.id, booking.id));
-    await tx.update(studioHolds).set({ active: false }).where(eq(studioHolds.bookingId, booking.id));
+    await releaseHolds(tx, booking.id);
     const refundIds = await recordRefunds(tx, booking.id, input.refundCents, `Cancelled by the studio: ${booking.ref}`, false);
     await recordEvent(tx, {
       bookingId: booking.id,

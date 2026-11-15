@@ -86,7 +86,7 @@ async function Calendar({ searchParams }: Pick<PageProps<"/admin/calendar">, "se
   const mayBook = can(viewer, "staffCreatesBookings", catalog.settings);
 
   return (
-    <AdminFrame active="/admin/calendar" title="Calendar" query={query} viewer={viewer}>
+    <AdminFrame active="/admin/calendar" title="Calendar" query={query} viewer={viewer} settings={catalog.settings}>
       <div className="cal-toolbar">
         <div className="cal-nav">
           <Link href={href({ date: shiftDate(view, date, -1) })} className="btn btn-outline btn-small" aria-label={`Previous ${view}`}>
@@ -231,7 +231,7 @@ function Month({
 const shortTime = (minute: number) => minutesToLabel(minute).replace(":00", "").replace(" AM", "a").replace(" PM", "p");
 
 const describe = (entry: Entry) =>
-  `${minutesToLabel(entry.startMinute)} – ${minutesToLabel(entry.endMinute)}, ${entry.customerName}, ${entry.studio.name}, ${LABEL_TEXT[entry.label]}`;
+  `${minutesToLabel(entry.startMinute)} – ${minutesToLabel(entry.endMinute)}, ${entry.customerName}, ${entry.studio.name}, ${LABEL_TEXT[entry.label]}${entry.photography ? ", photography session" : ""}`;
 
 /** An appointment as one line: its time and the client's name, in its studio's colour, with a dot for its status. */
 function AppointmentChip({ entry }: { entry: Entry }) {
@@ -309,6 +309,7 @@ function GridAppointment({ entry, gridStart, lane, lanes, full }: { entry: Entry
           {full ? `${minutesToLabel(entry.startMinute)} – ${minutesToLabel(entry.endMinute)}` : shortTime(entry.startMinute)}
         </span>
         <span className="cal-appt-name">{entry.customerName}</span>
+        {entry.photography && <span className="cal-tag">Photography</span>}
         {full ? (
           <StatusBadge label={entry.label} />
         ) : (

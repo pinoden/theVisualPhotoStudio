@@ -1,5 +1,5 @@
 import { eq, sql } from "drizzle-orm";
-import { bookings, studioHolds } from "@/db/schema";
+import { bookings, photographerHolds, studioHolds } from "@/db/schema";
 import { PG_EXCLUSION_VIOLATION, pgErrorCode, type Db, type DbLike } from "@/db/client";
 import { combinedStarts, isStartFree } from "@/lib/domain/availability";
 import {
@@ -46,6 +46,8 @@ export interface Appointment {
   durationMinutes: number;
   studios: string[];
   customerName: string;
+  /** Set on a photography session: what it includes. */
+  photography: { includes: string } | null;
   /** Null unless the viewer may see contact details. */
   customerPhone: string | null;
   customerEmail: string | null;
@@ -85,6 +87,7 @@ export async function getAppointment(db: DbLike, viewer: AuthUser, ref: string, 
     durationMinutes: booking.durationMinutes,
     studios: view.studios.map((studio) => studio.name),
     customerName: booking.customerName,
+    photography: view.photography,
     customerPhone: may("staffSeesContact") ? booking.customerPhone : null,
     customerEmail: may("staffSeesContact") ? booking.customerEmail : null,
     notes: booking.notes,
@@ -147,17 +150,22 @@ const WINDOW_PROBLEM = {
  */
 export async function freeStartsFor(
   db: DbLike,
-  selection: { studioIds: string[]; date: string; durationMinutes: number; excludeBookingId?: string },
+  selection: { studioIds: string[]; date: string; durationMinutes: number; excludeBookingId?: string; withPhotographer?: boolean },
   now: Date,
 ): Promise<{ ok: true; starts: number[] } | { ok: false; message: string }> {
   const catalog = await loadCatalog(db);
   const day = await loadDayAvailability(db, catalog, selection.date, now, {
     asAdmin: true,
     excludeBookingId: selection.excludeBookingId,
+    withPhotographer: selection.withPhotographer,
   });
   if (day.problem) return { ok: false, message: WINDOW_PROBLEM[day.problem] };
   const days = selection.studioIds.map((id) => day.days.find((studio) => studio.studioId === id));
   if (days.length === 0 || days.some((studio) => !studio)) return { ok: false, message: "Unknown studio." };
+  if (selection.withPhotographer) {
+    if (!day.photographer) return { ok: false, message: "There is no photographer to book." };
+    days.push(day.photographer); // free for the studio and for the photographer
+  }
   return {
     ok: true,
     starts: combinedStarts(days as NonNullable<(typeof days)[number]>[], {
@@ -188,7 +196,13 @@ export async function moveOptions(
   if (!booking || !(await maySee(db, viewer, booking.startAt))) return { ok: false, message: "Booking not found." };
   return freeStartsFor(
     db,
-    { studioIds: await studioIdsOf(db, booking.id), date, durationMinutes: booking.durationMinutes, excludeBookingId: booking.id },
+    {
+      studioIds: await studioIdsOf(db, booking.id),
+      date,
+      durationMinutes: booking.durationMinutes,
+      excludeBookingId: booking.id,
+      withPhotographer: booking.photographerId !== null,
+    },
     now,
   );
 }
@@ -233,7 +247,11 @@ export async function moveBooking(
   if (startAt.getTime() === found.startAt.getTime()) return refuse("invalid_time", "That is the time the booking already has.");
 
   const catalog = await loadCatalog(db);
-  const day = await loadDayAvailability(db, catalog, input.date, now, { asAdmin: true, excludeBookingId: found.id });
+  const day = await loadDayAvailability(db, catalog, input.date, now, {
+    asAdmin: true,
+    excludeBookingId: found.id,
+    withPhotographer: found.photographerId !== null,
+  });
   if (day.problem) return refuse("invalid_time", WINDOW_PROBLEM[day.problem]);
   const studioIds = await studioIdsOf(db, found.id);
   const slot = {
@@ -246,6 +264,11 @@ export async function moveBooking(
     return studioDay !== undefined && isStartFree(studioDay, input.startMinute, slot);
   });
   if (!free) return refuse("slot_taken", "That time is not free in the studio. Choose another.");
+  // A photography session moves with its photographer, who has to be free at the new time as well.
+  const photographer = found.photographerId !== null ? (day.photographer ?? null) : null;
+  if (found.photographerId !== null && (!photographer || !isStartFree(photographer, input.startMinute, slot))) {
+    return refuse("slot_taken", "The photographer is not free at that time. Choose another.");
+  }
 
   const studioNames = catalog.studios.filter((studio) => studioIds.includes(studio.id)).map((studio) => studio.name).join(" + ");
   try {
@@ -270,6 +293,14 @@ export async function moveBooking(
           .update(studioHolds)
           .set({ occupied: sql`tstzrange(${startAt.toISOString()}::timestamptz, ${occupiedEnd.toISOString()}::timestamptz, '[)')` })
           .where(sql`${studioHolds.bookingId} = ${booking.id} and ${studioHolds.studioId} = ${studioId}`);
+      }
+
+      if (photographer) {
+        const heldUntil = new Date(endAt.getTime() + photographer.bufferMinutes * 60_000);
+        await tx
+          .update(photographerHolds)
+          .set({ occupied: sql`tstzrange(${startAt.toISOString()}::timestamptz, ${heldUntil.toISOString()}::timestamptz, '[)')` })
+          .where(eq(photographerHolds.bookingId, booking.id));
       }
 
       const was = formatInstant(booking.startAt);

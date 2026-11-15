@@ -71,6 +71,13 @@
       "when": 1794762146914,
       "tag": "0009_calendar",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1794763130566,
+      "tag": "0010_photography",
+      "breakpoints": true
     }
   ]
 }

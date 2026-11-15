@@ -27,6 +27,7 @@ const GROUPS: { title: string; fields: { key: NumberKey; label: string; help: st
     title: "Cancelling and rescheduling",
     fields: [
       { key: "refundWindowHours", label: "Refund window (hours before start)", help: "168 is 7 days. Earlier cancellations are refunded automatically." },
+      { key: "photoRefundWindowHours", label: "Refund window for photography (hours before start)", help: "336 is 14 days." },
       { key: "refundFeePercent", label: "Processing fee kept (%)", help: "0 refunds in full." },
       { key: "rescheduleCutoffHours", label: "Reschedule cut-off (hours before start)", help: "After this, customers must call." },
       { key: "maxReschedules", label: "Reschedules allowed per booking", help: "0 switches reschedule codes off." },

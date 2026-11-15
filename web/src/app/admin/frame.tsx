@@ -10,6 +10,7 @@ const LINKS = [
   { href: "/admin/prices", label: "Prices" },
   { href: "/admin/studios", label: "Studios & add-ons" },
   { href: "/admin/hours", label: "Hours & blocks" },
+  { href: "/admin/photography", label: "Photography" },
   { href: "/admin/codes", label: "Codes" },
   { href: "/admin/settings", label: "Settings" },
 ] as const;
@@ -19,6 +20,8 @@ const STAFF_LINKS = [
   { href: "/admin/calendar", label: "Calendar" },
   { href: "/staff", label: "Day sheet" },
 ] as const;
+/** Shown to staff only when the owners have switched the ability on. */
+const STAFF_PHOTOGRAPHY = { href: "/admin/photography", label: "Photography" } as const;
 
 export type AdminQuery = Record<string, string | string[] | undefined>;
 
@@ -34,6 +37,7 @@ export function AdminFrame({
   title,
   query,
   viewer,
+  settings,
   children,
 }: {
   active: (typeof LINKS)[number]["href"];
@@ -42,8 +46,14 @@ export function AdminFrame({
   query: AdminQuery;
   /** Who is looking, on a page that staff can open too. Left out on the owners' own pages. */
   viewer?: { role: string };
+  /** The settings, when the page has them: staff then get a link to each page an ability opens for them. */
+  settings?: { staffSetsPhotographerTimes: boolean };
   children: ReactNode;
 }) {
+  const links =
+    viewer && viewer.role !== "owner"
+      ? [...STAFF_LINKS, ...(settings?.staffSetsPhotographerTimes ? [STAFF_PHOTOGRAPHY] : [])]
+      : LINKS;
   const notice = typeof query.notice === "string" ? query.notice : "";
   const error = typeof query.error === "string" ? query.error : "";
   return (
@@ -51,7 +61,7 @@ export function AdminFrame({
       <aside className="admin-sidebar">
         <div className="admin-sidebar-logo">Studio Admin</div>
         <nav className="admin-nav">
-          {(viewer && viewer.role !== "owner" ? STAFF_LINKS : LINKS).map((link) => (
+          {links.map((link) => (
             <Link key={link.href} href={link.href} className={link.href === active ? "active" : undefined}>
               {link.label}
             </Link>

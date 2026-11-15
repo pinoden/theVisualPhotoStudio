@@ -59,12 +59,20 @@ const catalog: Catalog = {
   ],
   settings: { ...DEFAULT_SETTINGS, slotIncrementMinutes: 60, multiStudioPercent: { 2: 20, 3: 22 } },
   specialDates: {},
+  photoPackages: [
+    { id: "pack-b-60", studioId: B, durationMinutes: 60, priceCents: 37500, includes: "1–2 outfits, 20 edited images" },
+    { id: "pack-b-120", studioId: B, durationMinutes: 120, priceCents: 57500, includes: "2–3 outfits, 30 edited images" },
+    { id: "pack-p-60", studioId: P, durationMinutes: 60, priceCents: 31500, includes: "1–2 outfits, 20 edited images" },
+  ],
   accessInfoSent: false,
 };
 
 /** Taken time per studio that the fake server reports. */
 let busy: Record<string, [number, number][]>;
 let availabilityCalls: number;
+/** What the fake server was last asked for, and when its photographer is taken. */
+let availabilityAsked: string;
+let photographerBusy: [number, number][];
 let posted: Record<string, unknown>[];
 let bookingReply: { status: number; body: Record<string, unknown> };
 
@@ -75,6 +83,8 @@ function reply(body: unknown, status = 200) {
 beforeEach(() => {
   busy = {};
   availabilityCalls = 0;
+  availabilityAsked = "";
+  photographerBusy = [];
   posted = [];
   bookingReply = { status: 201, body: { ok: true, ref: "VS-TEST22", manageToken: "secret-token-1234567890" } };
   nav.push.mockReset();
@@ -85,13 +95,27 @@ beforeEach(() => {
     vi.fn(async (input: string, init?: { body?: string }) => {
       if (input.startsWith("/api/availability")) {
         availabilityCalls++;
-        const date = new URL(input, "http://test").searchParams.get("date")!;
+        availabilityAsked = input;
+        const asked = new URL(input, "http://test").searchParams;
+        const date = asked.get("date")!;
         const open = hours[isoWeekday(date)];
         return reply({
           date,
           dayType: defaultDayType(date),
           problem: null,
           earliestStartMinute: 0,
+          ...(asked.get("photography") === "1"
+            ? {
+                photographer: {
+                  studioId: "the-photographer",
+                  openMinute: open.openMinute,
+                  closeMinute: open.closeMinute,
+                  bufferMinutes: 15,
+                  busy: photographerBusy.map(([start, end]) => ({ start, end })),
+                  anyStart: true,
+                },
+              }
+            : {}),
           days: catalog.studios.map((s) => ({
             studioId: s.id,
             openMinute: open.openMinute,
@@ -509,5 +533,82 @@ describe("switching between the two flows", () => {
     expect(screen.queryByRole("button", { name: /Back/ })).toBeNull();
     await user.click(screen.getByRole("radio", { name: /I know which studio I want/ }));
     expect(studioBox("Studio Paris")).toBeTruthy();
+  });
+});
+
+describe("the photography flow", () => {
+  it("books a session in one studio, at a time when the photographer is free too", async () => {
+    photographerBusy = [[h(9), h(10) + 15]]; // at another session until 10:00, and 15 minutes after it
+    render(<BookingFlow catalog={catalog} navigate={nav.push} photography />);
+
+    // No choice between two ways of booking here, and one studio only: choosing another replaces the first.
+    expect(screen.queryByRole("radiogroup")).toBeNull();
+    const studio = (name: string) => screen.getByRole("radio", { name: new RegExp(name) }) as HTMLInputElement;
+    await user.click(studio("Studio Blanche"));
+    await user.click(studio("Studio Paris"));
+    expect(studio("Studio Blanche").checked).toBe(false);
+    expect(studio("Studio Paris").checked).toBe(true);
+    expect(studio("Studio Dayglow").disabled).toBe(true); // no session is sold there
+    expect(screen.getByText("Sessions from $315")).toBeTruthy();
+    await next();
+
+    // A session in place of a duration: its length, its price and what it includes.
+    pickDate(WED);
+    const oneHour = screen.getByRole("button", { name: /1 hour · \$315/ });
+    expect(oneHour.textContent).toContain("Studio included. 1–2 outfits, 20 edited images.");
+    expect(screen.queryByRole("button", { name: /2 hours/ })).toBeNull(); // not sold in Paris
+    await user.click(oneHour);
+    await next();
+
+    // Paris is free all day. The photographer is not, until a quarter past ten.
+    expect(availabilityAsked).toContain("photography=1");
+    await screen.findByRole("button", { name: /^11:00 AM/ });
+    expect(screen.queryByRole("button", { name: /^9:00 AM/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^10:00 AM/ })).toBeNull();
+    await pickTime("11:00 AM");
+    await next();
+
+    await fillDetails();
+    expect(screen.getByText(/Photography session, Studio Paris, 1 hour/)).toBeTruthy();
+    expect(screen.getByText(/A photography session is refunded when it is cancelled 14 days or more before it starts/)).toBeTruthy();
+    await next();
+    await user.click(await screen.findByRole("button", { name: "Confirm & pay $315" }));
+
+    expect(posted[0]).toMatchObject({
+      photography: true,
+      studioIds: [P],
+      date: WED,
+      startMinute: h(11),
+      durationMinutes: 60,
+      expectedTotalCents: 31500,
+    });
+    expect(nav.push).toHaveBeenCalledWith("/booking/VS-TEST22?t=secret-token-1234567890");
+  });
+
+  it("offers nothing when there is no photographer to book that day", async () => {
+    photographerBusy = [[0, 24 * 60]];
+    render(<BookingFlow catalog={catalog} navigate={nav.push} photography />);
+    await user.click(screen.getByRole("radio", { name: /Studio Blanche/ }));
+    await next();
+    pickDate(WED);
+    await user.click(screen.getByRole("button", { name: /2 hours · \$575/ }));
+    await next();
+    expect(await screen.findByText("No times are available on this date. Please try another day.")).toBeTruthy();
+  });
+
+  it("is not part of renting a studio: the studio flow asks for no photographer and sends none", async () => {
+    render(<BookingFlow catalog={catalog} navigate={nav.push} />);
+    await user.click(studioBox("Studio Paris"));
+    await next();
+    pickDate(WED);
+    await pickDuration("1 hr");
+    await next();
+    await pickTime("9:00 AM");
+    expect(availabilityAsked).not.toContain("photography");
+    await next();
+    await fillDetails();
+    await next();
+    await user.click(await screen.findByRole("button", { name: "Confirm & pay $68" }));
+    expect(posted[0]).toMatchObject({ photography: false, expectedTotalCents: 6800 });
   });
 });

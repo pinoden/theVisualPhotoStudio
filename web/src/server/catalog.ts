@@ -1,5 +1,5 @@
 import { asc, eq } from "drizzle-orm";
-import { addons, priceRules, specialDates, studioHours, studios } from "@/db/schema";
+import { addons, photoPackages, photographers, priceRules, specialDates, studioHours, studios } from "@/db/schema";
 import type { DbLike } from "@/db/client";
 import type { AddonKind } from "@/lib/addon-kinds";
 import type { AddonDef, PriceRule } from "@/lib/domain/pricing";
@@ -27,6 +27,16 @@ export interface CatalogAddon extends AddonDef {
   kind: AddonKind;
 }
 
+/** A photography session on sale: one studio, one length, one price that includes the studio. */
+export interface CatalogPhotoPackage {
+  id: string;
+  studioId: string;
+  durationMinutes: number;
+  priceCents: number;
+  /** What it includes, as the customer reads it. */
+  includes: string;
+}
+
 /** Everything public about what can be booked. Safe to send to the browser. */
 export interface Catalog {
   studios: CatalogStudio[];
@@ -35,6 +45,8 @@ export interface Catalog {
   settings: Settings;
   /** date -> day type, for dates priced differently from their weekday. */
   specialDates: Record<IsoDate, DayType>;
+  /** The photography sessions on sale. Empty when there is no photographer to book. */
+  photoPackages: CatalogPhotoPackage[];
   /**
    * True when the owner has set how to get into the building. Only this fact
    * is public: the text itself (it can hold the door code) never enters the catalog.
@@ -43,7 +55,7 @@ export interface Catalog {
 }
 
 export async function loadCatalog(db: DbLike): Promise<Catalog> {
-  const [studioRows, hourRows, ruleRows, addonRows, specialRows, settings, access] = await Promise.all([
+  const [studioRows, hourRows, ruleRows, addonRows, specialRows, settings, access, packageRows, photographerRows] = await Promise.all([
     db.select().from(studios).where(eq(studios.active, true)).orderBy(asc(studios.sortOrder), asc(studios.name)),
     db.select().from(studioHours),
     db.select().from(priceRules),
@@ -51,6 +63,8 @@ export async function loadCatalog(db: DbLike): Promise<Catalog> {
     db.select().from(specialDates),
     loadSettings(db),
     loadAccessInstructions(db),
+    db.select().from(photoPackages).where(eq(photoPackages.active, true)).orderBy(asc(photoPackages.durationMinutes)),
+    db.select({ id: photographers.id }).from(photographers).where(eq(photographers.active, true)).limit(1),
   ]);
 
   const activeIds = new Set(studioRows.map((s) => s.id));
@@ -92,6 +106,18 @@ export async function loadCatalog(db: DbLike): Promise<Catalog> {
       })),
     settings,
     specialDates: Object.fromEntries(specialRows.map((r) => [r.day, r.dayType])),
+    photoPackages:
+      photographerRows.length === 0
+        ? []
+        : packageRows
+            .filter((row) => activeIds.has(row.studioId))
+            .map((row) => ({
+              id: row.id,
+              studioId: row.studioId,
+              durationMinutes: row.durationMinutes,
+              priceCents: row.priceCents,
+              includes: row.includes,
+            })),
     accessInfoSent: access !== "",
   };
 }

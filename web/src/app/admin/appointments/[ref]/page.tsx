@@ -69,6 +69,15 @@ async function AppointmentDetails({
           </dd>
           <dt>Studio</dt>
           <dd>{appointment.studios.join(" + ")}</dd>
+          {appointment.photography && (
+            <>
+              <dt>Photography</dt>
+              <dd>
+                A session with the photographer, who is held for this time as well
+                {appointment.photography.includes ? `. ${appointment.photography.includes}` : ""}.
+              </dd>
+            </>
+          )}
           <dt>Client</dt>
           <dd>
             {appointment.customerName}
