@@ -50,10 +50,16 @@ Local development needs no database install and no credentials. Without `DATABAS
 - **Booking order in `createBooking`**: validate and price on the server, hold the slot (status `pending_payment`), charge the card with the booking id as idempotency key, then confirm. A failed charge releases the slot. Unpaid holds expire after `holdMinutes`; `releaseExpiredHolds` runs before every availability read and booking attempt, so there is no scheduler.
 - **Prices** are a table of studio × day type (weekday or weekend) × duration in `price_rules`. Only durations with a price can be booked. `special_dates` reprices a date as the other day type. Booking several studios applies the `multiStudioPercent` setting.
 - **The two booking flows** (studio first, time first) are the same steps in a different order in `src/components/BookingFlow.tsx`. Both read one endpoint, `GET /api/availability?date=`, and compute slots in the browser with the domain functions.
-- **Routes**: pages `/`, `/studios`, `/rates`, `/policies`, `/book`, `/booking/[ref]?t=<secret>`; API `GET /api/availability`, `GET /api/booking-config`, `POST /api/bookings`.
+- **Routes**: pages `/`, `/studios`, `/rates`, `/policies`, `/book`, `/booking/[ref]?t=<secret>`, `/account`, `/account/sign-in`, `/staff`, `/admin` (with sub-pages for bookings, prices, hours, staff, codes, settings), `/dev/outbox`; API `GET /api/availability`, `GET /api/booking-config`, `GET /api/quote`, `POST /api/bookings`, `GET /api/cron/tick`.
 - **Payment mode** is chosen in `resolvePayments`: Square when its three credentials are set; the mock when `PAYMENTS_MODE=mock` or outside production; otherwise bookings that cost money are refused. A booking is never confirmed free because payment is unconfigured.
 - **Emails are only queued.** `createBooking` writes the confirmation to `email_outbox`. Nothing sends those rows yet.
-- **Tables without code yet**: `users`, `login_codes`, `sessions`, `staff_shifts`, `promo_codes`, `refunds`, `blocks`. They were designed for requirements 2, 3, 5, 7 and 8 below.
+- **`src/server/auth.ts`** implements passwordless sign-in: emailed six-digit codes, rate-limited to 3 per 15 minutes, hashed in the database. Sessions are 30-day tokens (SHA-256 hashed). `OWNER_EMAILS` controls the owner role; adding or removing an address takes effect at the next request.
+- **`src/server/manage.ts`** handles post-booking changes: customer cancellation (with automatic refund by policy), reschedule codes (release the booking and issue a credit), and owner cancel/refund. Refunds are recorded, then sent to the processor with the refund id as idempotency key; failures are retried by the scheduled task.
+- **`src/server/staff.ts`** serves the staff day sheet: bookings on assigned days only, with contact details controlled by `staffSeesContact`. Attendance marking (came / no-show) is allowed after a booking starts.
+- **`src/server/promos.ts`** manages promo codes: loyalty (percent off, single use), reschedule credits (amount, decremented as spent), and manual codes created by the owner. Redemption is atomic with the booking.
+- **`src/server/tasks.ts`** runs the recurring work: release expired holds, mark visits complete, issue loyalty codes, retry open refunds, deliver queued email. Called by `GET /api/cron/tick`.
+- **`src/server/email.ts`** queues all mail in `email_outbox` (same transaction as the change it reports) and delivers through Resend or the server log.
+- **`src/server/rate-limit.ts`** is an in-memory sliding-window limiter used by the booking endpoint.
 
 ### Conventions and gotchas
 
@@ -125,13 +131,13 @@ Live reference: the public site is Squarespace, with Acuity Scheduling for booki
 ### Requirements from the owner (received 2026-11-14)
 
 1. **Several studios in one booking** — **Built (2026-11-14); discount Open.** Any set of studios can be booked together for the same time. The discount is a setting keyed by studio count. Placeholder: 20% for 2 studios, 22% for 3, chosen to sit near today's bundle prices, which are 10% to 27% below the single-studio sum. Needs the owner's numbers.
-2. **Loyalty codes after a visit** — **Open, not built.** Proposed: single-use codes emailed a few hours after a completed visit, redeemed at checkout. SMS deferred, since it needs US carrier registration and customer opt-in. Needs the reward and how long it lasts. The `promo_codes` table and promo support in `pricing.ts` exist.
-3. **Staff see only their day** — **Open, not built.** Proposed: owner and staff roles. Staff see a day sheet for dates the owner assigns (times, studio, customer name, headcount, add-ons, notes), never revenue or the customer list. Needs: today only or any assigned date; whether phone numbers are shown. The `staff_shifts` table exists.
-4. **Weekday and weekend prices** — **Built (2026-11-14); prices Open.** Prices are stored per studio, day type and duration, and a date can be repriced as the other day type for holidays. Weekend prices were seeded equal to weekday prices. Needs the weekend prices and which days count as weekend (currently Saturday and Sunday). There is no admin screen for editing prices yet.
-5. **Admin and customer accounts** — **Open, not built.** Proposed: one user table with customer, staff and owner roles. Sign-in by emailed one-time code, no passwords. Guest checkout stays. Needs confirmation of passwordless sign-in. Today a customer reaches a booking through the secret link in the confirmation email.
+2. **Loyalty codes after a visit** — **Built (2026-11-14); reward Open.** Single-use percent-off codes emailed automatically after a completed visit. The scheduled task (`runScheduledTasks`) marks visits complete after `loyaltyDelayHours`, then issues and emails the code. Redeemed at checkout like any promo code. Placeholder: 10% off, valid 90 days, enabled by the `loyaltyEnabled` setting. SMS deferred (US carrier registration needed). Needs the owner's reward percentage and validity period.
+3. **Staff see only their day** — **Built (2026-11-14); contact visibility Open.** Owner and staff roles with passwordless sign-in. Staff see a day sheet at `/staff` for dates the owner assigns (times, studio, customer name, add-ons, notes), never revenue or other dates. The owner assigns days in `/admin/staff`. The `staffSeesContact` setting controls whether phone and email are shown. Staff can mark attendance (came / no-show) after a booking's start time. Needs: whether phone numbers are shown by default.
+4. **Weekday and weekend prices** — **Built (2026-11-14); prices Open.** Prices are stored per studio, day type and duration, and a date can be repriced as the other day type for holidays. The owner edits prices in `/admin/prices`. Weekend prices were seeded equal to weekday prices. Needs the weekend prices and which days count as weekend (currently Saturday and Sunday).
+5. **Admin and customer accounts** — **Built (2026-11-14).** One user table with customer, staff and owner roles. Sign-in by emailed six-digit one-time code, no passwords. The first sign-in creates the account; `OWNER_EMAILS` controls who is the owner. Guest checkout stays (the secret link in the confirmation email still works). Customer account at `/account` shows bookings, codes and cancel/reschedule actions.
 6. **Two ways to book** — **Built (2026-11-14).** `/book` offers "I know which studio I want" and "I know when I want to come". The second shows, for a date and duration, how many studios are free at each time, then which ones.
-7. **Reschedule code** — **Open, not built.** Proposed: a Reschedule button in the confirmation email and the account page. It either moves the booking or issues a single-use credit for the amount paid. A rescheduled booking is never refundable, as the current policy says. Needs: how late and how often a booking can move; how long a credit lasts.
-8. **Automatic refunds** — **Open, not built.** Proposed: refunds through the Square API. Automatic only when cancelled 7 or more days ahead and never rescheduled. Owner emailed each time. Every other case is a one-click refund in admin. Needs: keep the 5% processing fee or not.
+7. **Reschedule code** — **Built (2026-11-14); cutoffs Open.** Reschedule button on the confirmation page and the account page. Releases the booking and issues a single-use credit code for the amount paid, emailed to the customer. The customer books a new time and enters the code at checkout; if the new booking costs more they pay the difference, if less the rest stays on the code. A rescheduled booking cannot be refunded and cannot be moved again (one move per booking, `maxReschedules`). Placeholder: cutoff 24 hours before start, credit valid 90 days. Needs: how late and how often a booking can move; how long a credit lasts.
+8. **Automatic refunds** — **Built (2026-11-14); fee Open.** Cancelling 7+ days ahead automatically refunds to the card minus the 5% processing fee, via the Square refund API (or recorded for retry when the processor is not configured). The owner is emailed on every refund and on every failure. Cancelling inside the window or after a reschedule gives no refund. The owner can cancel any booking and choose the refund amount in `/admin/bookings`, or issue a partial refund without cancelling. Failed refunds are retried by the scheduled task. Needs: keep the 5% processing fee or not.
 
 ### Defaults chosen while building (placeholders until the owner decides)
 
@@ -157,11 +163,11 @@ All of these are data or settings, not code, unless noted.
 
 ### Known gaps in what is built
 
-- No email is sent; confirmations wait in `email_outbox`.
-- No rate limiting on `POST /api/bookings`.
+- Email is queued in `email_outbox` and delivered by the scheduled task or after a booking. Resend is the configured provider (`RESEND_API_KEY` + `EMAIL_FROM`); outside production, emails print to the server log. A dev viewer is at `/dev/outbox`.
+- `POST /api/bookings` is rate-limited: 10 requests per minute per IP (in-memory). A distributed deployment would need Redis or the provider's rate limiting instead.
 - A customer whose connection drops after paying sees a network error; retrying is safe (the slot is theirs, so the retry is refused and the card is not charged again) but the message is confusing. A client request id would fix it.
 - If the server stops between a successful charge and confirming the booking, the booking stays `pending_payment` and its slot is released when the hold expires. Nothing reconciles that case yet.
-- The booking screen has automated tests but has not been clicked through in a real browser.
+- Playwright e2e tests cover both booking flows, sign-in, reschedule codes, cancellation with refund, staff access control, owner price editing and blocking. The booking screen has also been tested in jsdom unit tests.
 
 ### Decision log
 
@@ -169,3 +175,4 @@ All of these are data or settings, not code, unless noted.
 - 2026-11-14: Language and framework decided: TypeScript, Next.js (React), PostgreSQL.
 - 2026-11-14: Owner said to start the rebuild. Node.js installed with nvm. New app scaffolded in `web/` on branch `rebuild`.
 - 2026-11-14: First milestone built: data model, prices by weekday and weekend, availability, booking any set of studios, both booking flows, payment through a provider interface. Requirements 1, 4 and 6 are built with placeholder numbers.
+- 2026-11-14: All eight requirements built with placeholder settings. Passwordless sign-in, customer accounts, staff day sheet, loyalty codes, reschedule codes, automatic refunds and retry, email delivery via Resend, owner admin dashboard (bookings, prices, hours, staff, codes, settings). Rate limiting on the booking endpoint. Playwright e2e test suite. 210 unit/integration tests passing.
