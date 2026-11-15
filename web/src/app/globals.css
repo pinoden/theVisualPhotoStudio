@@ -1118,6 +1118,7 @@ button { font-family: inherit; }
 .payment-fixes { display: flex; flex-wrap: wrap; gap: .25rem 1.25rem; margin-top: .35rem; font-size: .82rem; }
 .payment-fixes summary { cursor: pointer; text-decoration: underline; }
 .payment-fixes form { display: grid; gap: .4rem; margin: .5rem 0 .75rem; max-width: 22rem; }
+.link-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
 
 .detail-list { display: grid; grid-template-columns: max-content 1fr; gap: .4rem 1.25rem; margin: 0 0 1rem; }
 .detail-list dt { font-size: .72rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; padding-top: .2rem; }

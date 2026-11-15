@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { squareProvider, type ChargeRequest } from "./payments";
+import { squareProvider, type ChargeRequest, type PayLinkRequest } from "./payments";
 
 /**
  * The Square code against answers shaped like Square's real ones. The
@@ -165,5 +165,112 @@ describe("refunding through Square", () => {
     expect(await square().refund(REFUND)).toEqual({ ok: false, message: "Could not reach the payment processor." });
     stubSquare(json(200, { refund: { id: "PAY1_R1", status: "REJECTED" } }));
     expect(await square().refund(REFUND)).toEqual({ ok: false, message: "Refund was not accepted (REJECTED)." });
+  });
+});
+
+/**
+ * Payment links (Square's Checkout API). The answers below are shaped like
+ * the ones Square's sandbox gave on 2026-11-15, when a link was made, paid in
+ * the sandbox's test panel, read back, refunded and deleted.
+ */
+describe("payment links through Square", () => {
+  const LINK: PayLinkRequest = {
+    amountCents: 6800,
+    idempotencyKey: "7d1c5f0e-52a1-4b8e-9d3f-1c2b3a4d5e6f",
+    title: "Booking VS-ABC234: Studio Paris, Wed, Nov 18, 2026, 2:00 PM",
+    note: "VS-ABC234 Dana Diaz",
+    returnUrl: "https://studio.test/pay/7d1c5f0e-52a1-4b8e-9d3f-1c2b3a4d5e6f",
+  };
+  const made = json(200, {
+    payment_link: {
+      id: "RCJSRNMKSHU7HVHQ",
+      version: 1,
+      order_id: "uZrcoM0Ot4poH31Hq089tLtuSyJZY",
+      checkout_options: { redirect_url: LINK.returnUrl, ask_for_shipping_address: false },
+      url: "https://sandbox.square.link/u/iHSJcdGU",
+      long_url: "https://connect.squareupsandbox.com/v2/online-checkout/sandbox-testing-panel/M/RCJSRNMKSHU7HVHQ",
+      payment_note: LINK.note,
+    },
+    related_resources: { orders: [{ id: "uZrcoM0Ot4poH31Hq089tLtuSyJZY", state: "DRAFT" }] },
+  });
+  const ids = { linkId: "RCJSRNMKSHU7HVHQ", orderId: "uZrcoM0Ot4poH31Hq089tLtuSyJZY" };
+  const order = (state: string, tenders?: unknown[]) => json(200, { order: { id: ids.orderId, state, ...(tenders ? { tenders } : {}) } });
+  const tender = { id: "yAGJqDXaGj3A", payment_id: "yAGJqDXaGj3A", type: "THIRD_PARTY_CARD", amount_money: { amount: 6800, currency: "USD" } };
+  const payment = (status: string) => json(200, { payment: { id: "yAGJqDXaGj3A", status, amount_money: { amount: 6800, currency: "USD" } } });
+
+  it("asks for a link for the amount, with a title, a note and the way back, and never sends the client's email", async () => {
+    const fetchMock = stubSquare(made);
+    expect(await square().createPayLink(LINK)).toEqual({ ok: true, ...ids, url: "https://sandbox.square.link/u/iHSJcdGU" });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://connect.squareupsandbox.com/v2/online-checkout/payment-links");
+    expect(init?.method).toBe("POST");
+    const body = JSON.parse(String(init?.body));
+    expect(body).toEqual({
+      idempotency_key: LINK.idempotencyKey,
+      quick_pay: { name: LINK.title, price_money: { amount: 6800, currency: "USD" }, location_id: "LOC123" },
+      payment_note: "VS-ABC234 Dana Diaz",
+      checkout_options: { redirect_url: LINK.returnUrl, ask_for_shipping_address: false },
+    });
+    // Square refused a whole link over an email address it did not like, so none is sent.
+    expect(JSON.stringify(body)).not.toContain("buyer_email");
+  });
+
+  it("gives Square's own words when it refuses to make a link", async () => {
+    stubSquare(json(400, { errors: [{ category: "INVALID_REQUEST_ERROR", code: "INVALID_VALUE", detail: "The price must be positive." }] }));
+    expect(await square().createPayLink(LINK)).toEqual({ ok: false, message: "INVALID_VALUE: The price must be positive." });
+    stubSquare("down", "down", "down");
+    expect(await square().createPayLink(LINK)).toEqual({ ok: false, message: "Could not reach the payment processor." });
+  });
+
+  it("reads an order nobody has paid as an open link", async () => {
+    const fetchMock = stubSquare(order("DRAFT"));
+    expect(await square().payLinkState(ids)).toEqual({ state: "open" });
+    expect(fetchMock.mock.calls[0][0]).toBe(`https://connect.squareupsandbox.com/v2/orders/${ids.orderId}`);
+    expect(fetchMock.mock.calls[0][1]?.method).toBe("GET");
+    expect(fetchMock.mock.calls[0][1]?.body).toBeUndefined();
+  });
+
+  it("reads a paid order: its tender names the payment, and the payment says the money was taken", async () => {
+    const fetchMock = stubSquare(order("OPEN", [tender]), payment("COMPLETED"));
+    expect(await square().payLinkState(ids)).toEqual({ state: "paid", paymentId: "yAGJqDXaGj3A", amountCents: 6800 });
+    expect(fetchMock.mock.calls[1][0]).toBe("https://connect.squareupsandbox.com/v2/payments/yAGJqDXaGj3A");
+  });
+
+  it("does not call a link paid while the money has not been taken", async () => {
+    stubSquare(order("OPEN", [tender]), payment("APPROVED"));
+    expect(await square().payLinkState(ids)).toEqual({ state: "open" });
+    stubSquare(order("OPEN", [tender]), payment("FAILED"));
+    expect(await square().payLinkState(ids)).toEqual({ state: "open" });
+    stubSquare(order("OPEN")); // open, with nothing paid on it
+    expect(await square().payLinkState(ids)).toEqual({ state: "open" });
+  });
+
+  it("reads a cancelled order as a cancelled link", async () => {
+    stubSquare(order("CANCELED"));
+    expect(await square().payLinkState(ids)).toEqual({ state: "cancelled" });
+  });
+
+  it("concludes nothing when Square does not answer, or the payment cannot be read", async () => {
+    stubSquare("down", "down", "down");
+    expect(await square().payLinkState(ids)).toEqual({ state: "unknown", message: "No answer from Square" });
+    stubSquare(json(404, { errors: [{ code: "NOT_FOUND", detail: "Order not found." }] }));
+    expect(await square().payLinkState(ids)).toEqual({ state: "unknown", message: "NOT_FOUND: Order not found." });
+    stubSquare(order("OPEN", [tender]), "down", "down", "down");
+    expect(await square().payLinkState(ids)).toEqual({ state: "unknown", message: "The payment behind the link could not be read" });
+  });
+
+  it("withdraws a link, and counts one that is already gone as withdrawn", async () => {
+    const fetchMock = stubSquare(json(200, { id: ids.linkId, cancelled_order_id: ids.orderId }));
+    expect(await square().cancelPayLink(ids.linkId)).toEqual({ ok: true });
+    expect(fetchMock.mock.calls[0][0]).toBe(`https://connect.squareupsandbox.com/v2/online-checkout/payment-links/${ids.linkId}`);
+    expect(fetchMock.mock.calls[0][1]?.method).toBe("DELETE");
+
+    stubSquare(json(404, { errors: [{ code: "NOT_FOUND" }] }));
+    expect(await square().cancelPayLink(ids.linkId)).toEqual({ ok: true });
+    stubSquare(json(400, { errors: [{ code: "BAD_REQUEST", detail: "The link cannot be deleted." }] }));
+    expect(await square().cancelPayLink(ids.linkId)).toEqual({ ok: false, message: "BAD_REQUEST: The link cannot be deleted." });
+    stubSquare("down", "down", "down");
+    expect(await square().cancelPayLink(ids.linkId)).toEqual({ ok: false, message: "Could not reach the payment processor." });
   });
 });

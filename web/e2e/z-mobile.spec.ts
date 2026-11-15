@@ -6,6 +6,7 @@ import {
   confirmAndGetRef,
   dateAhead,
   fillDetails,
+  latestEmail,
   next,
   onScreen,
   pickStudio,
@@ -303,7 +304,7 @@ test("the admin fits a phone: the calendar in its three views, an appointment, a
   await page.getByRole("button", { name: "Reschedule Pending", exact: true }).click();
   await expect(byText(page, "Marked Reschedule Pending.")).toBeVisible();
 
-  // A booking made for a client on the phone, and the cash they pay at the studio marked as paid.
+  // A booking made for a client on the phone. They pay by card, through a payment link emailed to them.
   await page.goto("/admin/calendar/new");
   await page.getByRole("checkbox", { name: "Studio Paris" }).check();
   await byLabel(page, "Date").fill(dateAhead(115));
@@ -319,10 +320,39 @@ test("the admin fits a phone: the calendar in its three views, an appointment, a
   await expectFits(page, "an appointment that is still to pay");
   expect(await hardToTouch(page), "the form that marks a booking as paid: hard to use by touch").toEqual([]);
   await shot(page, "m-390-mark-as-paid");
-  await page.getByRole("button", { name: "Record payment" }).click();
+  await page.getByRole("button", { name: "Email a payment link for $68" }).click();
+  await expect(byText(page, /A payment link for \$68 was emailed to the client\./)).toBeVisible();
+  await expect(onScreen(page.locator("#payment-link"))).toContainText("It has not been paid yet.");
+  await expectFits(page, "an appointment with an open payment link");
+  expect(await hardToTouch(page), "the payment link's buttons: hard to use by touch").toEqual([]);
+  // While the link is open, money cannot be recorded by hand as well: the client could pay twice.
+  await expect(page.getByRole("button", { name: "Record payment" })).toHaveCount(0);
+
+  // The client opens the link from their email, on their own phone, and pays. (Test mode: no card is charged.)
+  const linkMail = await latestEmail(page, "payment_link", "pat.phone@example.com");
+  expect(linkMail.subject).toMatch(/^Pay for your booking VS-/);
+  const payPath = new URL(/https?:\/\/\S+\/pay\/[0-9a-f-]{36}/.exec(linkMail.body)![0]).pathname;
+  const client = await page.context().newPage();
+  client.on("pageerror", (error) => browserProblems.push(`script error: ${error.message}`));
+  await client.setViewportSize({ width: 390, height: 844 });
+  await client.goto(payPath);
+  await expect(client.getByRole("heading", { name: "Pay for Your Booking" })).toBeVisible();
+  await expect(onScreen(client.locator(".price-row.total"))).toContainText("$68");
+  await expectFits(client, "the page a payment link leads to");
+  expect(await hardToTouch(client), "the page a payment link leads to: hard to use by touch").toEqual([]);
+  await shot(client, "m-390-pay-link");
+  await client.getByRole("button", { name: "Pay $68 (test mode)" }).click();
+  await expect(client.getByRole("heading", { name: "Payment Received" })).toBeVisible();
+  await expectFits(client, "the page a payment link leads to, once paid");
+  await client.close();
+  expect((await latestEmail(page, "payment_received", "pat.phone@example.com")).body).toContain("Paid by: Card, through the payment link");
+
+  // Back in the admin the payment is on the booking, with nobody having typed it in.
+  await page.reload();
   await expect(onScreen(page.locator("#payment"))).toContainText("Paid in full.");
-  await expectFits(page, "an appointment paid at the studio");
-  expect(await hardToTouch(page), "an appointment paid at the studio: hard to use by touch").toEqual([]);
+  await expect(page.getByRole("row", { name: /\$68 · Card, through the payment link/ })).toBeVisible();
+  await expectFits(page, "an appointment paid through a link");
+  expect(await hardToTouch(page), "an appointment paid through a link: hard to use by touch").toEqual([]);
 
   for (const path of [
     "/admin",

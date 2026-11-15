@@ -16,6 +16,7 @@ const SOURCE_LABEL: Record<string, string> = {
   loyalty: "Earned by visits",
   reschedule: "Reschedule credit",
   manual: "Made by you",
+  pet_fee: "Pet fee returned",
 };
 
 export default function CodesPage(props: PageProps<"/admin/codes">) {

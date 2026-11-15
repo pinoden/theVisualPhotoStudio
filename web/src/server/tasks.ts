@@ -7,6 +7,7 @@ import { labelOf } from "@/lib/domain/labels";
 import { BY_SYSTEM, recordEvent } from "./history";
 import { sendEarnedFreeHours } from "./loyalty";
 import { retryOpenRefunds, type ManageDeps } from "./manage";
+import { checkOpenPayLinks } from "./pay-links";
 import { loadSettings } from "./settings";
 
 /**
@@ -27,6 +28,10 @@ export interface TaskSummary {
   loyaltyCodes: number;
   refundsSucceeded: number;
   refundsFailed: number;
+  /** Payment links found paid at the processor and recorded as payments. */
+  payLinksPaid: number;
+  /** Payment links withdrawn because their booking is no longer active. */
+  payLinksClosed: number;
   emailsSent: number;
   emailsFailed: number;
 }
@@ -157,6 +162,7 @@ export async function runScheduledTasks(db: Db, deps: TaskDeps): Promise<TaskSum
   const paymentsFlagged = await flagInterruptedPayments(db, deps.ownerEmail);
   const visits = await completeVisits(db, deps.now, deps.baseUrl);
   const refundRuns = await retryOpenRefunds(db, deps);
+  const links = await checkOpenPayLinks(db, deps);
   const mail = await deliverPendingEmails(db, deps.email, deps.now);
   return {
     holdsReleased,
@@ -165,6 +171,8 @@ export async function runScheduledTasks(db: Db, deps: TaskDeps): Promise<TaskSum
     loyaltyCodes: visits.codes,
     refundsSucceeded: refundRuns.succeeded,
     refundsFailed: refundRuns.failed,
+    payLinksPaid: links.paid,
+    payLinksClosed: links.closed,
     emailsSent: mail.sent,
     emailsFailed: mail.failed,
   };

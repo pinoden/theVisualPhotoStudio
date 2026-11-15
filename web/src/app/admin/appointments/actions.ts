@@ -7,8 +7,9 @@ import { formatCents } from "@/lib/domain/pricing";
 import { isIsoDate } from "@/lib/domain/time";
 import { dollarsToCents, formText, intInRange } from "@/lib/parse";
 import { createAdminBooking, moveBooking, setLabel } from "@/server/appointments";
+import { cancelPayLink, checkBookingPayLink, sendPayLink } from "@/server/pay-links";
 import { givePetFeeCredit } from "@/server/pet-fee";
-import { flushEmailsSoon, siteUrl } from "@/server/runtime";
+import { flushEmailsSoon, payLinkDeps, siteUrl } from "@/server/runtime";
 import { requireOwner, requireStaff } from "@/server/session";
 import { recordHandRefund, recordStudioPayment, voidStudioPayment } from "@/server/studio-payments";
 import { formatInstant } from "@/server/tz";
@@ -183,4 +184,65 @@ export async function petCreditAction(formData: FormData): Promise<void> {
   if (!result.ok) redirect(withMessage(page, "error", result.message));
   flushEmailsSoon();
   redirect(withMessage(page, "notice", `The pet fee of ${formatCents(result.cents)} is now studio credit. The client has been emailed the code ${result.code}.`));
+}
+
+// ── A payment link for what a booking still owes ─────────────────────────────
+
+/** Email the client a link to pay by card. Pressed again while the link is open, it emails the same link again. */
+export async function sendPayLinkAction(formData: FormData): Promise<void> {
+  const ref = formText(formData.get("ref"));
+  const page = appointmentPage(ref);
+  const viewer = await requireStaff(page);
+  const result = await sendPayLink(await getDb(), viewer, ref, await payLinkDeps());
+  if (!result.ok) redirect(withMessage(page, "error", result.message));
+  flushEmailsSoon();
+  redirect(
+    withMessage(
+      page,
+      "notice",
+      result.again
+        ? `The payment link for ${formatCents(result.amountCents)} was emailed to the client again.`
+        : `A payment link for ${formatCents(result.amountCents)} was emailed to the client. When they have paid, the payment appears here by itself.`,
+    ),
+  );
+}
+
+/** Ask the card processor now whether the link was paid. */
+export async function checkPayLinkAction(formData: FormData): Promise<void> {
+  const ref = formText(formData.get("ref"));
+  const page = appointmentPage(ref);
+  const viewer = await requireStaff(page);
+  const result = await checkBookingPayLink(await getDb(), viewer, ref, await payLinkDeps());
+  if (!result.ok) redirect(withMessage(page, "error", result.message));
+  flushEmailsSoon();
+  redirect(
+    withMessage(
+      page,
+      "notice",
+      result.status === "paid"
+        ? "The client has paid through the link. The payment is recorded."
+        : result.status === "cancelled"
+          ? "The link was cancelled at the card processor."
+          : "The link has not been paid yet.",
+    ),
+  );
+}
+
+/** Withdraw the link, for example to record cash instead. A link that turns out to be paid is recorded as paid. */
+export async function cancelPayLinkAction(formData: FormData): Promise<void> {
+  const ref = formText(formData.get("ref"));
+  const page = appointmentPage(ref);
+  const viewer = await requireStaff(page);
+  const result = await cancelPayLink(await getDb(), viewer, ref, await payLinkDeps());
+  if (!result.ok) redirect(withMessage(page, "error", result.message));
+  flushEmailsSoon();
+  redirect(
+    withMessage(
+      page,
+      "notice",
+      result.outcome === "was_paid"
+        ? "The client had already paid through the link: the payment is recorded, and nothing was cancelled."
+        : "The payment link was cancelled. It can no longer be paid.",
+    ),
+  );
 }

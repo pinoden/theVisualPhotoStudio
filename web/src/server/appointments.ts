@@ -27,6 +27,7 @@ import {
 import { loadCatalog } from "./catalog";
 import { bookingMovedEmail, queueEmail } from "./email";
 import { listEvents, recordEvent, type BookingEvent } from "./history";
+import { openPayLinkOf, type PayLinkView } from "./pay-links";
 import { PET_CREDIT_BLOCK_TEXT, petCreditStanding } from "./pet-fee";
 import { loadSettings } from "./settings";
 import { canViewDay } from "./staff";
@@ -62,6 +63,8 @@ export interface Appointment {
    * unless the viewer may see prices or may record payments.
    */
   payments: BookingMoney | null;
+  /** The payment link that is open for the booking, if one was emailed and not yet paid. Null when `payments` is. */
+  payLink: PayLinkView | null;
   /**
    * The pet fee on the booking, and whether it can be returned as studio
    * credit now. Null when there is none, and for staff: returning it is the
@@ -92,6 +95,7 @@ export async function getAppointment(db: DbLike, viewer: AuthUser, ref: string, 
   const [view] = await toBookingViews(db, [booking]);
   const active = ["confirmed", "completed", "no_show"].includes(booking.status);
   const money = await moneyOf(db, booking);
+  const seesPayments = may("staffSeesPrices") || may("staffRecordsPayments");
   const pet = viewer.role === "owner" ? await petCreditStanding(db, booking) : null;
 
   return {
@@ -108,7 +112,8 @@ export async function getAppointment(db: DbLike, viewer: AuthUser, ref: string, 
     notes: booking.notes,
     addons: view.addons.map((addon) => ({ name: addon.name, quantity: addon.quantity })),
     money: may("staffSeesPrices") ? view : null,
-    payments: may("staffSeesPrices") || may("staffRecordsPayments") ? money : null,
+    payments: seesPayments ? money : null,
+    payLink: seesPayments ? await openPayLinkOf(db, booking.id) : null,
     petFee:
       pet && pet.feeCents > 0
         ? {

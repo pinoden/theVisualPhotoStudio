@@ -1,5 +1,5 @@
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
-import { bookings, payments, refunds } from "@/db/schema";
+import { and, asc, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { bookings, paymentLinks, payments, refunds } from "@/db/schema";
 import type { Db, DbLike } from "@/db/client";
 import { labelOf } from "@/lib/domain/labels";
 import { formatCents } from "@/lib/domain/pricing";
@@ -9,6 +9,7 @@ import type { AuthUser } from "./auth";
 import { isBookingRef } from "./bookings";
 import { paymentReceivedEmail, queueEmail } from "./email";
 import { recordEvent } from "./history";
+import { openPayLinkOf } from "./pay-links";
 import { loadSettings } from "./settings";
 import { canViewDay } from "./staff";
 import { formatInstant, localDateOf } from "./tz";
@@ -62,6 +63,15 @@ export async function moneyOf(db: DbLike, booking: Pick<BookingRow, "id" | "tota
     .where(and(eq(payments.bookingId, booking.id), inArray(payments.status, ["succeeded", "voided"])))
     .orderBy(asc(payments.createdAt));
   const receivedCents = rows.filter((row) => row.status === "succeeded").reduce((sum, row) => sum + row.amountCents, 0);
+  // The card payments that came in through a payment link, to say so beside them.
+  const throughLink = new Set(
+    (
+      await db
+        .select({ paymentId: paymentLinks.paymentId })
+        .from(paymentLinks)
+        .where(and(eq(paymentLinks.bookingId, booking.id), isNotNull(paymentLinks.paymentId)))
+    ).map((row) => row.paymentId),
+  );
   return {
     totalCents: booking.totalCents,
     receivedCents,
@@ -71,7 +81,14 @@ export async function moneyOf(db: DbLike, booking: Pick<BookingRow, "id" | "tota
       id: row.id,
       at: row.createdAt.toISOString(),
       byHand: row.provider === MANUAL_PROVIDER,
-      how: row.provider === MANUAL_PROVIDER ? (isPaymentMethod(row.method) ? PAYMENT_METHODS[row.method] : "At the studio") : "Card, online",
+      how:
+        row.provider === MANUAL_PROVIDER
+          ? isPaymentMethod(row.method)
+            ? PAYMENT_METHODS[row.method]
+            : "At the studio"
+          : throughLink.has(row.id)
+            ? "Card, through the payment link"
+            : "Card, online",
       amountCents: row.amountCents,
       refundedCents: row.refundedCents,
       voided: row.status === "voided",
@@ -81,7 +98,16 @@ export async function moneyOf(db: DbLike, booking: Pick<BookingRow, "id" | "tota
   };
 }
 
-export type StudioPaymentBlock = "forbidden" | "not_found" | "not_active" | "bad_amount" | "bad_method" | "nothing_due" | "too_much";
+export type StudioPaymentBlock =
+  | "forbidden"
+  | "not_found"
+  | "not_active"
+  | "bad_amount"
+  | "bad_method"
+  | "nothing_due"
+  | "too_much"
+  /** A payment link is open for the booking: the client could pay it as well. */
+  | "link_open";
 
 export type StudioPaymentResult =
   | { ok: true; amountCents: number; dueCents: number }
@@ -121,6 +147,13 @@ export async function recordStudioPayment(
     }
     const money = await moneyOf(tx, booking);
     if (money.dueCents <= 0) return refuse("nothing_due", "Nothing is owed for this booking.");
+    const link = await openPayLinkOf(tx, booking.id);
+    if (link) {
+      return refuse(
+        "link_open",
+        `A payment link for ${formatCents(link.amountCents)} is open for this booking. Cancel the link before recording a payment by hand, so that the client cannot pay twice.`,
+      );
+    }
     if (input.amountCents > money.dueCents) {
       return refuse("too_much", `Only ${formatCents(money.dueCents)} is still to pay for this booking.`);
     }

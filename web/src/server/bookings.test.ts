@@ -31,6 +31,7 @@ let ids: Record<string, string>;
 let charges: { amountCents: number; idempotencyKey: string }[];
 
 const countingProvider: PaymentProvider = {
+  ...mockProvider,
   name: "mock",
   async charge(request) {
     const result = await mockProvider.charge(request);
@@ -221,6 +222,7 @@ describe("double booking is impossible", () => {
   it("refuses a second request that arrives while the first card is being charged", async () => {
     let nested: Awaited<ReturnType<typeof book>> | undefined;
     const slowProvider: PaymentProvider = {
+      ...mockProvider,
       name: "mock",
       async charge(request) {
         // The exact interleaving that double-booked the old site.
@@ -267,6 +269,7 @@ describe("payment", () => {
 
   it("does not claim the card was spared when the processor gave no answer, and asks the owner to check", async () => {
     const silent: PaymentProvider = {
+      ...mockProvider,
       name: "square",
       charge: async () => ({
         ok: false,
@@ -301,6 +304,7 @@ describe("payment", () => {
 
   it("records the processor's own words for a refused card, and shows the customer a sentence", async () => {
     const refusing: PaymentProvider = {
+      ...mockProvider,
       name: "square",
       charge: async () => ({
         ok: false,

@@ -146,6 +146,8 @@ describe("the scheduled run", () => {
       loyaltyCodes: 1,
       refundsSucceeded: 0,
       refundsFailed: 0,
+      payLinksPaid: 0,
+      payLinksClosed: 0,
       emailsSent: 2, // the booking confirmation and the free hour
       emailsFailed: 0,
     });
@@ -157,6 +159,7 @@ describe("the scheduled run", () => {
 describe("a charge that was interrupted", () => {
   // The server stopping mid-charge looks, from the inside, like the charge never returning.
   const crashing: PaymentProvider = {
+    ...mockProvider,
     name: "mock",
     charge: async () => {
       throw new Error("the server stopped");

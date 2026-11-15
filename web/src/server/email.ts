@@ -331,6 +331,8 @@ export function paymentReceivedEmail(input: {
   method: string;
   /** What is still to pay after this payment. */
   dueCents: number;
+  /** True when it was paid by card through a payment link, not at the studio. */
+  online?: boolean;
 }): QueuedEmail {
   return {
     to: input.to,
@@ -341,8 +343,38 @@ export function paymentReceivedEmail(input: {
       "",
       `We received your payment of ${money(input.amountCents)} for booking ${input.ref} on ${input.when}.`,
       "",
-      `Paid at the studio: ${input.method}`,
+      input.online ? `Paid by: ${input.method}` : `Paid at the studio: ${input.method}`,
       input.dueCents > 0 ? `Still to pay: ${money(input.dueCents)}` : "Your booking is paid in full.",
+      "",
+      SIGN_OFF,
+    ].join("\n"),
+  };
+}
+
+/** The link an administrator sends so that a client can pay by card what their booking still owes. */
+export function payLinkEmail(input: {
+  to: string;
+  name: string;
+  ref: string;
+  when: string;
+  amountCents: number;
+  /** The page on this site that leads to the processor's payment page. */
+  payUrl: string;
+}): QueuedEmail {
+  return {
+    to: input.to,
+    kind: "payment_link",
+    subject: `Pay for your booking ${input.ref}`,
+    body: [
+      `Hi ${input.name},`,
+      "",
+      `You can pay for your booking ${input.ref} on ${input.when} by card here:`,
+      "",
+      input.payUrl,
+      "",
+      `Amount: ${money(input.amountCents)}`,
+      "",
+      "The card payment page is run by Square, our card processor: your card details never reach us. If you would rather pay at the studio, you still can.",
       "",
       SIGN_OFF,
     ].join("\n"),

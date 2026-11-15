@@ -13,14 +13,18 @@ import { centsToInput, MONEY_FIELD } from "@/lib/parse";
 import { PAYMENT_METHODS } from "@/lib/payment-methods";
 import { getAppointment, moveOptions } from "@/server/appointments";
 import { BY_CUSTOMER, BY_SYSTEM } from "@/server/history";
+import { resolvePayments } from "@/server/payments";
 import { requireStaff } from "@/server/session";
 import { formatInstant, formatRange, localDateOf } from "@/server/tz";
 import { AdminFrame, AdminLoading } from "../../frame";
 import {
+  cancelPayLinkAction,
+  checkPayLinkAction,
   handRefundAction,
   moveBookingAction,
   petCreditAction,
   recordPaymentAction,
+  sendPayLinkAction,
   setLabelAction,
   voidPaymentAction,
 } from "../actions";
@@ -60,6 +64,8 @@ async function AppointmentDetails({
 
   const when = formatRange(new Date(appointment.startAt), new Date(appointment.endAt));
   const day = localDateOf(new Date(appointment.startAt));
+  // A payment link needs a card processor. In test mode the pretend one stands in, and says so to the client.
+  const cardProcessor = resolvePayments().client.mode;
 
   return (
     <AdminFrame
@@ -326,7 +332,46 @@ async function AppointmentDetails({
             </div>
           )}
 
-          {appointment.may.recordPayment && (
+          {appointment.payLink && (
+            <div className="payment-form" id="payment-link">
+              <h4>Payment link</h4>
+              <p>
+                A link to pay {formatCents(appointment.payLink.amountCents)} by card was emailed to the client on{" "}
+                {formatInstant(new Date(appointment.payLink.createdAt))} by {appointment.payLink.createdBy}. It has not been
+                paid yet.
+              </p>
+              {appointment.may.recordPayment && (
+                <>
+                  <div className="link-actions">
+                    <form action={checkPayLinkAction}>
+                      <input type="hidden" name="ref" value={appointment.ref} />
+                      <button type="submit" className="btn btn-dark btn-small">
+                        Check whether it was paid
+                      </button>
+                    </form>
+                    <form action={sendPayLinkAction}>
+                      <input type="hidden" name="ref" value={appointment.ref} />
+                      <button type="submit" className="btn btn-outline btn-small">
+                        Email it again
+                      </button>
+                    </form>
+                    <form action={cancelPayLinkAction}>
+                      <input type="hidden" name="ref" value={appointment.ref} />
+                      <button type="submit" className="btn btn-outline btn-small">
+                        Cancel the link
+                      </button>
+                    </form>
+                  </div>
+                  <p style={{ fontSize: ".78rem", margin: ".5rem 0 0" }}>
+                    When the client pays, the payment appears here by itself within a few minutes. To record money
+                    taken at the studio instead, cancel the link first, so that the client cannot pay twice.
+                  </p>
+                </>
+              )}
+            </div>
+          )}
+
+          {appointment.may.recordPayment && !appointment.payLink && (
             <form action={recordPaymentAction} className="payment-form">
               <input type="hidden" name="ref" value={appointment.ref} />
               <h4>Mark as paid</h4>
@@ -369,6 +414,21 @@ async function AppointmentDetails({
               <p style={{ fontSize: ".78rem", margin: ".5rem 0 0" }}>
                 This records money you took at the studio. Nothing is charged, and the client is emailed a confirmation.
                 The amount can be part of what is owed.
+              </p>
+            </form>
+          )}
+
+          {appointment.may.recordPayment && !appointment.payLink && cardProcessor !== "disabled" && (
+            <form action={sendPayLinkAction} className="payment-form">
+              <input type="hidden" name="ref" value={appointment.ref} />
+              <h4>Or let the client pay by card</h4>
+              <button type="submit" className="btn btn-outline btn-small">
+                Email a payment link for {formatCents(appointment.payments.dueCents)}
+              </button>
+              <p style={{ fontSize: ".78rem", margin: ".5rem 0 0" }}>
+                The client is emailed a link to a card payment page
+                {cardProcessor === "mock" ? " (test mode: no card processor is connected, so no card is charged)" : " run by Square"}.
+                When they have paid, the payment appears here by itself.
               </p>
             </form>
           )}

@@ -19,6 +19,7 @@ import { cancellationEmail, ownerHandRefundNotice, ownerRefundNotice, queueEmail
 import { BY_CUSTOMER, BY_STUDIO, recordEvent } from "./history";
 import { releaseHolds } from "./holds";
 import { netCardPaidCents, paidAtStudioCents } from "./money";
+import { closePayLinkOf } from "./pay-links";
 import type { PaymentProvider } from "./payments";
 import { issuePetCredit, petCreditOf, petFeeCentsOf } from "./pet-fee";
 import { issuePromo, restorePromo } from "./promos";
@@ -457,13 +458,15 @@ export async function cancelBooking(db: Db, ref: string, actor: Actor, deps: Man
         }),
       );
     }
-    return { kind: "done" as const, decision, refundIds, message, creditCents: petCredit ? decision.creditCents : 0 };
+    return { kind: "done" as const, decision, refundIds, message, creditCents: petCredit ? decision.creditCents : 0, bookingId: booking.id };
   });
 
   if (outcome.kind === "not_found") return { ok: false, status: 404, code: "not_found", message: "Booking not found." };
   if (outcome.kind === "blocked") {
     return { ok: false, status: 409, code: outcome.reason, message: cancelBlockText(outcome.reason) };
   }
+  // A payment link still open for the booking is withdrawn, so that nobody pays for it now.
+  await closePayLinkOf(db, outcome.bookingId, deps);
 
   let refund: "sent" | "pending" | "none" = outcome.refundIds.length === 0 ? "none" : "sent";
   for (const id of outcome.refundIds) {
@@ -543,13 +546,14 @@ export async function requestRescheduleCode(db: Db, ref: string, actor: Actor, d
         bookUrl: `${deps.baseUrl.replace(/\/$/, "")}/book`,
       }),
     );
-    return { kind: "done" as const, code: issued.code, valueCents: decision.creditCents, expiresAt };
+    return { kind: "done" as const, code: issued.code, valueCents: decision.creditCents, expiresAt, bookingId: booking.id };
   });
 
   if (outcome.kind === "not_found") return { ok: false, status: 404, code: "not_found", message: "Booking not found." };
   if (outcome.kind === "blocked") {
     return { ok: false, status: 409, code: outcome.reason, message: rescheduleBlockText(outcome.reason, settings) };
   }
+  await closePayLinkOf(db, outcome.bookingId, deps);
   return { ok: true, code: outcome.code, valueCents: outcome.valueCents, expiresAt: outcome.expiresAt };
 }
 
@@ -610,7 +614,7 @@ export async function ownerCancelBooking(
         note: `The studio cancelled this booking.${codeBack ? ` ${CODE_BACK}` : ""} Please contact us with any questions.`,
       }),
     );
-    return { kind: "done" as const, refundIds };
+    return { kind: "done" as const, refundIds, bookingId: booking.id };
   });
 
   if (outcome.kind === "not_found") return { ok: false, status: 404, code: "not_found", message: "Booking not found." };
@@ -625,6 +629,7 @@ export async function ownerCancelBooking(
       message: `At most ${formatCents(outcome.available)} can be refunded to the card for this booking.`,
     };
   }
+  await closePayLinkOf(db, outcome.bookingId, deps);
   let refund: "sent" | "pending" | "none" = outcome.refundIds.length === 0 ? "none" : "sent";
   for (const id of outcome.refundIds) {
     if ((await processRefund(db, id, deps)) !== "succeeded") refund = "pending";

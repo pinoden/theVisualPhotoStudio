@@ -39,6 +39,7 @@ export const bookingStatus = pgEnum("booking_status", [
 /** `voided`: a payment recorded by hand in error, and taken back by an owner. */
 export const paymentStatus = pgEnum("payment_status", ["pending", "succeeded", "failed", "voided"]);
 export const refundStatus = pgEnum("refund_status", ["pending", "succeeded", "failed"]);
+export const paymentLinkStatus = pgEnum("payment_link_status", ["open", "paid", "cancelled"]);
 export const promoKind = pgEnum("promo_kind", ["percent", "amount", "free_hour"]);
 /** `pet_fee`: the pet fee of a booking, given back as studio credit because the pet did not come. */
 export const promoSource = pgEnum("promo_source", ["loyalty", "reschedule", "manual", "pet_fee"]);
@@ -434,6 +435,40 @@ export const payments = pgTable("payments", {
   note: text("note").notNull().default(""),
   createdAt: createdAt(),
 });
+
+/**
+ * A request for payment emailed to a client: a page of the card processor
+ * where they pay, by card, what a booking made in the admin still owes. Once
+ * paid it becomes an ordinary row in `payments`. A booking has at most one
+ * open link (an index written by hand in the migration), and while one is
+ * open no payment can be recorded by hand: the client could pay twice.
+ * See src/server/pay-links.ts.
+ */
+export const paymentLinks = pgTable(
+  "payment_links",
+  {
+    id: id(),
+    bookingId: uuid("booking_id")
+      .notNull()
+      .references(() => bookings.id, { onDelete: "restrict" }),
+    provider: text("provider").notNull(), // 'square' | 'mock'
+    /** The processor's ids of the link and of the order it stands for. The order says whether it was paid. */
+    providerLinkId: text("provider_link_id").notNull(),
+    providerOrderId: text("provider_order_id").notNull(),
+    /** The processor's page where the client pays. */
+    url: text("url").notNull(),
+    amountCents: integer("amount_cents").notNull(),
+    status: paymentLinkStatus("status").notNull().default("open"),
+    /** The administrator who sent it. */
+    createdBy: text("created_by").notNull(),
+    /** The payment it became, once paid. */
+    paymentId: uuid("payment_id").references(() => payments.id, { onDelete: "set null" }),
+    paidAt: ts("paid_at"),
+    cancelledAt: ts("cancelled_at"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("payment_links_booking_idx").on(t.bookingId)],
+);
 
 export const refunds = pgTable("refunds", {
   id: id(),
