@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { connection } from "next/server";
 import { Suspense } from "react";
 import { statusLabel } from "@/components/BookingSummary";
+import { StatusBadge } from "@/components/StatusBadge";
 import { getDb } from "@/db/client";
 import { formatCents } from "@/lib/domain/pricing";
 import { addDays, isIsoDate } from "@/lib/domain/time";
@@ -92,7 +94,9 @@ async function Bookings({ searchParams }: Pick<PageProps<"/admin/bookings">, "se
                       ))}
                     </td>
                     <td>
-                      <strong style={{ color: "var(--color-dark)" }}>{b.customerName}</strong>
+                      <Link href={`/admin/appointments/${b.ref}`}>
+                        <strong>{b.customerName}</strong>
+                      </Link>
                       <br />
                       {b.customerEmail}
                       <br />
@@ -111,7 +115,10 @@ async function Bookings({ searchParams }: Pick<PageProps<"/admin/bookings">, "se
                       {b.refundProblem && <div className="badge badge-cancelled">refund failed</div>}
                     </td>
                     <td>
-                      {statusLabel(b)}
+                      <StatusBadge label={b.label} />
+                      {b.status === "cancelled" && b.cancelReason === "rescheduled" && (
+                        <div style={{ fontSize: ".8rem" }}>{statusLabel(b)}</div>
+                      )}
                       {b.rescheduledCount > 0 && <div style={{ fontSize: ".8rem" }}>moved, not refundable</div>}
                     </td>
                     <td>

@@ -38,6 +38,8 @@ const bob = { name: "Bob Brown", email: "bob.e2e@example.com", phone: "407-555-0
 const OWNER = "owner@studio.test";
 // The first owner has used up the three sign-in codes an address may ask for in 15 minutes.
 const SECOND_OWNER = "owner2@studio.test";
+// And so has the second, by the end of the run.
+const THIRD_OWNER = "owner3@studio.test";
 const STAFF = "sam.e2e@studio.test";
 
 let rescheduleCode = "";
@@ -395,6 +397,31 @@ test("staff see the day sheet of their assigned day and nothing else", async ({ 
   expect(table).not.toContain(bob.email);
   expect(table).not.toContain(bob.phone);
 
+  // Staff can change the status label, from the day sheet. Bob has asked to move his booking.
+  await row.getByRole("combobox", { name: "Status label for Bob Brown" }).selectOption({ label: "Reschedule Pending" });
+  await row.getByRole("button", { name: "Set" }).click();
+  await expect(byText(page, "Marked Reschedule Pending.")).toBeVisible();
+  await expect(onScreen(page.locator(".status-reschedule_pending"))).toHaveText("Reschedule Pending");
+  // A visit that has not started cannot be marked as finished.
+  await page.getByRole("row", { name: /Bob Brown/ }).getByRole("combobox").selectOption({ label: "Completed" });
+  await page.getByRole("row", { name: /Bob Brown/ }).getByRole("button", { name: "Set" }).click();
+  await expect(onScreen(page.locator(".flash-error"))).toContainText("can be set once the appointment has started");
+
+  // The appointment page: details, the label, and the history of its changes. Still no price and no contact details.
+  await page.getByRole("link", { name: "Bob Brown" }).click();
+  await expect(page.getByRole("heading", { name: "Bob Brown" })).toBeVisible();
+  await expect(page.getByRole("row", { name: /Booked/ })).toContainText("The customer");
+  await expect(page.getByRole("row", { name: /Confirmed → Reschedule Pending/ })).toContainText(STAFF);
+  const appointment = await onScreen(page.locator(".admin-main")).innerText();
+  expect(appointment).not.toContain("$");
+  expect(appointment).not.toContain(bob.email);
+  // The second level of the admin has its own short menu.
+  await expect(onScreen(page.locator(".admin-nav"))).toHaveText("Day sheet");
+  await shot(page, "16b-staff-appointment");
+  await page.getByRole("button", { name: "Confirmed", exact: true }).click();
+  await expect(byText(page, "Marked Confirmed.")).toBeVisible();
+  await expect(page.getByRole("row", { name: /Reschedule Pending → Confirmed/ })).toContainText(STAFF);
+
   // Any other day is refused, and so are the owner's pages.
   await page.goto(`/staff?date=${FAR}`);
   await expect(onScreen(page.locator(".flash-error"))).toContainText("is not assigned to you");
@@ -423,6 +450,35 @@ test("a customer cannot open the staff or owner areas", async ({ page }) => {
   await page.goto("/admin/bookings");
   await page.waitForURL(/\/account\/sign-in\?next=%2Fadmin%2Fbookings/);
   await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
+});
+
+test("the owners switch on what staff can do, and it applies at once", async ({ page }) => {
+  await signIn(page, THIRD_OWNER, "/admin/staff");
+  // What staff did is in the booking's history, with their address.
+  await page.getByRole("link", { name: "Bookings", exact: true }).click();
+  await page.getByRole("link", { name: "Bob Brown" }).first().click();
+  await expect(page.getByRole("row", { name: /Confirmed → Reschedule Pending/ })).toContainText(STAFF);
+  await expect(onScreen(page.locator(".admin-main"))).toContainText("$68");
+  await expect(onScreen(page.locator(".admin-main"))).toContainText(bob.email);
+
+  // Two switches: contact details and prices.
+  await page.getByRole("link", { name: "Staff", exact: true }).click();
+  await page.getByRole("checkbox", { name: "See customers' phone numbers and email addresses" }).check();
+  await page.getByRole("checkbox", { name: "See what a booking cost" }).check();
+  await page.getByRole("button", { name: "Save what staff can do" }).click();
+  await expect(byText(page, "Saved. It applies to every member of staff from now on.")).toBeVisible();
+  await shot(page, "17b-admin-staff-abilities");
+
+  // Staff see both the next time they look. Nothing was redeployed.
+  await page.goto("/account");
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await page.waitForURL((url) => url.pathname === "/");
+  await signIn(page, STAFF, `/staff?date=${NEAR}`);
+  await expect(page.getByRole("row", { name: /Bob Brown/ })).toContainText(bob.phone);
+  await page.getByRole("link", { name: "Bob Brown" }).click();
+  await expect(page.getByRole("heading", { name: "Bob Brown" })).toBeVisible();
+  await expect(onScreen(page.locator(".admin-main"))).toContainText("$68");
+  await expect(onScreen(page.locator(".admin-main"))).toContainText(bob.email);
 });
 
 test("the owner sets a weekend price and the booking screen charges it on Saturday only", async ({ page }) => {

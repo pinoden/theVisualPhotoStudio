@@ -1081,3 +1081,41 @@ button { font-family: inherit; }
 .code-row { display: flex; gap: .5rem; }
 .code-row .form-control { flex: 1; min-width: 0; }
 .code-row .btn { padding: .75rem 1.1rem; }
+
+/* ── Status labels of an appointment ─────────────────────────────────────────
+   One small badge per label, each with its own colour, used on the appointment
+   page, the day sheet, the bookings list and the calendar. */
+.status-badge {
+  display: inline-block;
+  padding: .15rem .55rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-family: var(--font-sans);
+  font-size: .68rem;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  line-height: 1.5;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.status-confirmed          { background: #f3efe9; color: #4a443d; border-color: #d8cfc3; }
+.status-checked_in         { background: #e3eefb; color: #17477e; border-color: #a9c8ee; }
+.status-completed          { background: #e4f3e4; color: #24602a; border-color: #a9d3ab; }
+.status-rescheduled        { background: #efe6f8; color: #56307f; border-color: #c9b0e4; }
+.status-no_show            { background: #fbe6e6; color: #8b1f1f; border-color: #eab0b0; }
+.status-reschedule_pending { background: #fff3d6; color: #7a5200; border-color: #e0b955; border-style: dashed; }
+.status-cancelled          { background: #ececec; color: #5c5c5c; border-color: #cfcfcf; text-decoration: line-through; }
+
+.label-buttons { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1rem; }
+.label-buttons .btn:disabled { opacity: .45; cursor: not-allowed; }
+.label-meanings { margin: 0; padding-left: 1.1rem; font-size: .82rem; }
+.label-meanings em { color: var(--color-muted, #7a7168); }
+
+.detail-list { display: grid; grid-template-columns: max-content 1fr; gap: .4rem 1.25rem; margin: 0 0 1rem; }
+.detail-list dt { font-size: .72rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; padding-top: .2rem; }
+.detail-list dd { margin: 0; overflow-wrap: anywhere; }
+@media (max-width: 520px) {
+  .detail-list { grid-template-columns: 1fr; gap: .1rem; }
+  .detail-list dd { margin-bottom: .6rem; }
+}

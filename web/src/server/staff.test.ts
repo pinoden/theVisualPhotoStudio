@@ -1,11 +1,10 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
-import { bookings, settings, staffShifts } from "@/db/schema";
+import { settings, staffShifts } from "@/db/schema";
 import type { AuthUser } from "./auth";
 import { loadCatalog } from "./catalog";
 import { cancelBooking } from "./manage";
-import { canViewDay, getDaySheet, listShiftDays, setAttendance } from "./staff";
-import { createTestWorld, expectOk, h, hoursAfter, NEAR, NOW, type TestWorld } from "./testing";
+import { canViewDay, getDaySheet, listShiftDays } from "./staff";
+import { createTestWorld, expectOk, h, NEAR, type TestWorld } from "./testing";
 
 let world: TestWorld;
 let owner: AuthUser;
@@ -17,7 +16,6 @@ let afternoonRef: string;
 let nextDayRef: string;
 
 const NEXT_DAY = "2026-11-19";
-const MORNING_START = new Date("2026-11-18T14:00:00Z"); // 9:00 local
 
 beforeAll(async () => {
   world = await createTestWorld();
@@ -134,33 +132,21 @@ describe("the day sheet", () => {
   });
 });
 
-describe("recording attendance", () => {
-  const status = async (ref: string) => (await world.db.select().from(bookings).where(eq(bookings.ref, ref)))[0].status;
-  const during = hoursAfter(MORNING_START, 0.5);
+describe("the owners' switch for every day", () => {
+  it("lets staff see days that are not assigned to them, from the moment it is switched on", async () => {
+    expect(await canViewDay(world.db, sam, NEXT_DAY)).toBe(false);
+    expect(await canViewDay(world.db, riley, NEAR)).toBe(false);
 
-  it("lets staff mark a no-show or a completed visit once the booking has started", async () => {
-    expect(await setAttendance(world.db, sam, morningRef, "no_show", hoursAfter(MORNING_START, -1))).toEqual({ ok: false, reason: "too_early" });
-    expect(await setAttendance(world.db, sam, morningRef, "no_show", during)).toEqual({ ok: true });
-    expect(await status(morningRef)).toBe("no_show");
-    expect(await setAttendance(world.db, sam, morningRef, "completed", during)).toEqual({ ok: true }); // a correction
-    expect(await status(morningRef)).toBe("completed");
+    await world.db.insert(settings).values({ key: "staffSeesAllDays", value: true });
+    expect(await canViewDay(world.db, sam, NEXT_DAY)).toBe(true);
+    expect(await canViewDay(world.db, riley, NEAR)).toBe(true);
+    expect(await getDaySheet(world.db, riley, NEXT_DAY)).toMatchObject({ ok: true });
+    // It is a switch for staff: a customer still sees nothing.
+    expect(await canViewDay(world.db, jane, NEAR)).toBe(false);
   });
 
-  it("refuses bookings on days the staff member is not assigned to, without revealing whether they exist", async () => {
-    const later = hoursAfter(NOW, 24 * 10);
-    expect(await setAttendance(world.db, sam, nextDayRef, "no_show", later)).toEqual({ ok: false, reason: "forbidden" });
-    expect(await setAttendance(world.db, sam, "VS-AAAAAA", "no_show", later)).toEqual({ ok: false, reason: "forbidden" });
-    expect(await setAttendance(world.db, riley, morningRef, "no_show", later)).toEqual({ ok: false, reason: "forbidden" });
-    expect(await setAttendance(world.db, jane, afternoonRef, "completed", later)).toEqual({ ok: false, reason: "forbidden" });
-    expect(await status(nextDayRef)).toBe("confirmed");
-    expect(await status(afternoonRef)).toBe("confirmed");
-  });
-
-  it("lets the owner record attendance on any day, but not on a cancelled booking", async () => {
-    const later = hoursAfter(NOW, 24 * 10);
-    expect(await setAttendance(world.db, owner, nextDayRef, "no_show", later)).toEqual({ ok: true });
-    await cancelBooking(world.db, afternoonRef, { kind: "owner" }, world.manageDeps());
-    expect(await setAttendance(world.db, owner, afternoonRef, "completed", later)).toEqual({ ok: false, reason: "not_changeable" });
-    expect(await setAttendance(world.db, owner, "VS-AAAAAA", "completed", later)).toEqual({ ok: false, reason: "not_found" });
+  it("shows each booking with its status label", async () => {
+    const sheet = await getDaySheet(world.db, sam, NEAR);
+    expect(sheet.ok && sheet.entries.map((entry) => entry.label)).toEqual(["confirmed", "confirmed"]);
   });
 });

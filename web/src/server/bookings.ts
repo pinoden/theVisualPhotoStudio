@@ -12,6 +12,7 @@ import {
   type DbLike,
 } from "@/db/client";
 import { isStartFree } from "@/lib/domain/availability";
+import { labelOf, type LabelKey } from "@/lib/domain/labels";
 import { formatCents, PricingError, PROMO_MISFIT_TEXT, quote, type PromoKind, type Quote } from "@/lib/domain/pricing";
 import { formText } from "@/lib/parse";
 import { count } from "@/lib/words";
@@ -19,6 +20,7 @@ import { durationLabel, isIsoDate } from "@/lib/domain/time";
 import { loadDayAvailability, releaseExpiredHolds } from "./availability";
 import { dayTypeFor, loadCatalog } from "./catalog";
 import { bookingConfirmationEmail, ownerPaymentUnknownNotice, queueEmail } from "./email";
+import { BY_CUSTOMER, recordEvent } from "./history";
 import type { PaymentProvider } from "./payments";
 import { findUsablePromo, PROMO_PROBLEM_TEXT, redeemPromo, restorePromo, toPromoDef, type UsablePromo } from "./promos";
 import { loadAccessInstructions } from "./settings";
@@ -382,9 +384,13 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
         .set({ status: "succeeded", providerPaymentId: charge.paymentId })
         .where(eq(payments.id, payment.id));
       await tx.update(bookings).set({ status: "confirmed", holdExpiresAt: null }).where(eq(bookings.id, bookingId));
+      await recordEvent(tx, { bookingId, from: "new", to: "confirmed", actor: BY_CUSTOMER, at: now, note: "Booked online" });
     });
   } else {
-    await db.update(bookings).set({ status: "confirmed", holdExpiresAt: null }).where(eq(bookings.id, bookingId));
+    await db.transaction(async (tx) => {
+      await tx.update(bookings).set({ status: "confirmed", holdExpiresAt: null }).where(eq(bookings.id, bookingId));
+      await recordEvent(tx, { bookingId, from: "new", to: "confirmed", actor: BY_CUSTOMER, at: now, note: "Booked online" });
+    });
   }
 
   // ── Confirmation email (queued; a failure here never undoes the booking) ──
@@ -437,6 +443,8 @@ export interface BookingView {
   creditAppliedCents: number;
   /** The kind of code used on the booking, if any. */
   promoKind: PromoKind | null;
+  /** The status label an administrator sees. */
+  label: LabelKey;
   totalCents: number;
   rescheduledCount: number;
 }
@@ -482,6 +490,7 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[]): Promise<Bo
     promoDiscountCents: booking.promoDiscountCents,
     creditAppliedCents: booking.creditAppliedCents,
     promoKind: codeRows.find((code) => code.id === booking.promoCodeId)?.kind ?? null,
+    label: labelOf(booking),
     totalCents: booking.totalCents,
     rescheduledCount: booking.rescheduledCount,
   }));

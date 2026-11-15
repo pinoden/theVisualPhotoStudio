@@ -41,6 +41,8 @@ export const refundStatus = pgEnum("refund_status", ["pending", "succeeded", "fa
 export const promoKind = pgEnum("promo_kind", ["percent", "amount", "free_hour"]);
 export const promoSource = pgEnum("promo_source", ["loyalty", "reschedule", "manual"]);
 export const cancelReason = pgEnum("cancel_reason", ["customer", "rescheduled", "owner"]);
+/** A label an administrator puts on a confirmed booking. See src/lib/domain/labels.ts. */
+export const bookingLabel = pgEnum("booking_label", ["checked_in", "reschedule_pending", "rescheduled"]);
 
 // ── People ───────────────────────────────────────────────────────────────────
 
@@ -216,6 +218,8 @@ export const bookings = pgTable(
     endAt: ts("end_at").notNull(),
     durationMinutes: integer("duration_minutes").notNull(),
     status: bookingStatus("status").notNull().default("pending_payment"),
+    /** Set by an administrator while the booking is confirmed; it keeps holding its time. */
+    label: bookingLabel("label"),
     /** While pending_payment, the slot is released after this moment. */
     holdExpiresAt: ts("hold_expires_at"),
 
@@ -243,6 +247,31 @@ export const bookings = pgTable(
     createdAt: createdAt(),
   },
   (t) => [index("bookings_email_idx").on(t.customerEmail), index("bookings_start_idx").on(t.startAt)],
+);
+
+/**
+ * The history of a booking's status label: one row for every change, with who
+ * made it and when. Written by the same transaction as the change itself.
+ */
+export const bookingEvents = pgTable(
+  "booking_events",
+  {
+    id: id(),
+    bookingId: uuid("booking_id")
+      .notNull()
+      .references(() => bookings.id, { onDelete: "cascade" }),
+    at: ts("at").notNull(),
+    /** Labels as in LABEL_TEXT: confirmed, checked_in, completed, rescheduled, no_show, reschedule_pending, cancelled. */
+    fromLabel: text("from_label").notNull(),
+    toLabel: text("to_label").notNull(),
+    /** An administrator's email address, or "customer", or "system". */
+    actor: text("actor").notNull(),
+    /** What else happened, for example the old and the new time of a move. */
+    note: text("note").notNull().default(""),
+    /** The clock when the line was written. It orders two changes that carry the same `at`. */
+    recordedAt: ts("recorded_at").notNull().default(sql`clock_timestamp()`),
+  },
+  (t) => [index("booking_events_booking_idx").on(t.bookingId, t.at)],
 );
 
 /** An owner-made block of time (maintenance, private event). */

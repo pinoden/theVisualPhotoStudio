@@ -2,12 +2,16 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { connection } from "next/server";
 import { Suspense } from "react";
+import { StatusBadge } from "@/components/StatusBadge";
 import { getDb } from "@/db/client";
+import { LABEL_TEXT, SETTABLE_LABELS } from "@/lib/domain/labels";
 import { isIsoDate, longDateLabel } from "@/lib/domain/time";
+import { can } from "@/lib/staff-abilities";
 import { requireStaff } from "@/server/session";
+import { loadSettings } from "@/server/settings";
 import { getDaySheet, listShiftDays } from "@/server/staff";
 import { localDateOf } from "@/server/tz";
-import { attendanceAction } from "./actions";
+import { setLabelAction } from "../admin/appointments/actions";
 
 export const metadata: Metadata = { title: "Day Sheet", robots: { index: false } };
 
@@ -29,12 +33,6 @@ export default function StaffPage(props: PageProps<"/staff">) {
   );
 }
 
-const STATUS_BADGE: Record<string, { label: string; className: string }> = {
-  confirmed: { label: "Expected", className: "badge badge-pending" },
-  completed: { label: "Came", className: "badge badge-confirmed" },
-  no_show: { label: "No-show", className: "badge badge-cancelled" },
-};
-
 async function DaySheet({ searchParams }: Pick<PageProps<"/staff">, "searchParams">) {
   await connection();
   const viewer = await requireStaff("/staff");
@@ -42,15 +40,18 @@ async function DaySheet({ searchParams }: Pick<PageProps<"/staff">, "searchParam
   const query = await searchParams;
   const now = new Date();
   const today = localDateOf(now);
-  const isOwner = viewer.role === "owner";
+  const settings = await loadSettings(db);
+  // The owners open any day. Staff open the days assigned to them, or any day when the owners allow it.
+  const anyDay = viewer.role === "owner" || settings.staffSeesAllDays;
+  const mayLabel = can(viewer, "staffSetsLabels", settings);
 
-  // Staff may only open days assigned to them; the owner may open any day.
-  const shiftDays = isOwner ? [] : await listShiftDays(db, viewer.id, today);
+  const shiftDays = anyDay ? [] : await listShiftDays(db, viewer.id, today);
   const requested = typeof query.date === "string" && isIsoDate(query.date) ? query.date : null;
-  const date = requested ?? (isOwner || shiftDays.includes(today) ? today : (shiftDays[0] ?? null));
+  const date = requested ?? (anyDay || shiftDays.includes(today) ? today : (shiftDays[0] ?? null));
   const error = typeof query.error === "string" ? query.error : "";
+  const notice = typeof query.notice === "string" ? query.notice : "";
 
-  const dayPicker = isOwner ? (
+  const dayPicker = anyDay ? (
     <form method="get" className="admin-form-row">
       <div className="form-group">
         <label className="form-label" htmlFor="staff-date">
@@ -99,6 +100,11 @@ async function DaySheet({ searchParams }: Pick<PageProps<"/staff">, "searchParam
   return (
     <>
       {dayPicker}
+      {notice && (
+        <div className="flash flash-success" role="status">
+          {notice}
+        </div>
+      )}
       {error && (
         <div className="flash flash-error" role="alert">
           {error}
@@ -122,14 +128,14 @@ async function DaySheet({ searchParams }: Pick<PageProps<"/staff">, "searchParam
             </thead>
             <tbody>
               {sheet.entries.map((entry) => {
-                const badge = STATUS_BADGE[entry.status];
-                const started = new Date(entry.startAt) <= now;
                 return (
                   <tr key={entry.ref}>
                     <td style={{ whiteSpace: "nowrap" }}>{entry.time}</td>
                     <td>{entry.studios.join(" + ")}</td>
                     <td>
-                      <strong style={{ color: "var(--color-dark)" }}>{entry.customerName}</strong>
+                      <Link href={`/admin/appointments/${entry.ref}`}>
+                        <strong>{entry.customerName}</strong>
+                      </Link>
                       <br />
                       <span style={{ fontSize: ".8rem" }}>{entry.ref}</span>
                       {entry.customerPhone && (
@@ -155,26 +161,29 @@ async function DaySheet({ searchParams }: Pick<PageProps<"/staff">, "searchParam
                       {entry.notes && <div style={{ fontStyle: "italic" }}>{entry.notes}</div>}
                     </td>
                     <td>
-                      <span className={badge.className}>{badge.label}</span>
+                      <StatusBadge label={entry.label} />
                     </td>
-                    <td style={{ whiteSpace: "nowrap" }}>
-                      {started ? (
-                        <form action={attendanceAction} style={{ display: "flex", gap: ".4rem" }}>
+                    <td>
+                      {mayLabel && (
+                        <form action={setLabelAction} className="label-select">
                           <input type="hidden" name="ref" value={entry.ref} />
-                          <input type="hidden" name="date" value={date} />
-                          {entry.status !== "completed" && (
-                            <button type="submit" name="status" value="completed" className="btn btn-dark btn-small">
-                              Came
-                            </button>
-                          )}
-                          {entry.status !== "no_show" && (
-                            <button type="submit" name="status" value="no_show" className="btn btn-outline btn-small">
-                              No-show
-                            </button>
-                          )}
+                          <input type="hidden" name="back" value={`/staff?date=${date}`} />
+                          <select
+                            name="label"
+                            className="form-control"
+                            defaultValue={entry.label}
+                            aria-label={`Status label for ${entry.customerName}`}
+                          >
+                            {SETTABLE_LABELS.map((label) => (
+                              <option key={label} value={label}>
+                                {LABEL_TEXT[label]}
+                              </option>
+                            ))}
+                          </select>
+                          <button type="submit" className="btn btn-dark btn-small">
+                            Set
+                          </button>
                         </form>
-                      ) : (
-                        <span style={{ fontSize: ".8rem" }}>Not started</span>
                       )}
                     </td>
                   </tr>

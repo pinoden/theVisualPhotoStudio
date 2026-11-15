@@ -13,23 +13,31 @@ const LINKS = [
   { href: "/admin/settings", label: "Settings" },
 ] as const;
 
+/** The second level of the admin: what a member of staff can open. Everything else answers "not found" for them. */
+const STAFF_LINKS = [{ href: "/staff", label: "Day sheet" }] as const;
+
 export type AdminQuery = Record<string, string | string[] | undefined>;
 
 /**
- * The admin sidebar and page frame. Rendered by each admin page after its
- * `requireOwner()` check, never from a layout, so nothing about the admin
- * area reaches someone who is not the owner.
+ * The admin sidebar and page frame. Rendered by each admin page after its own
+ * check (`requireOwner`, or `requireStaff` on the pages both levels share),
+ * never from a layout, so nothing about the admin area reaches someone who
+ * may not see it. Pass `viewer` on a shared page: staff then get their own,
+ * shorter menu.
  */
 export function AdminFrame({
   active,
   title,
   query,
+  viewer,
   children,
 }: {
   active: (typeof LINKS)[number]["href"];
   title: string;
   /** The page's search parameters; `notice` and `error` are shown as messages. */
   query: AdminQuery;
+  /** Who is looking, on a page that staff can open too. Left out on the owners' own pages. */
+  viewer?: { role: string };
   children: ReactNode;
 }) {
   const notice = typeof query.notice === "string" ? query.notice : "";
@@ -39,7 +47,7 @@ export function AdminFrame({
       <aside className="admin-sidebar">
         <div className="admin-sidebar-logo">Studio Admin</div>
         <nav className="admin-nav">
-          {LINKS.map((link) => (
+          {(viewer && viewer.role !== "owner" ? STAFF_LINKS : LINKS).map((link) => (
             <Link key={link.href} href={link.href} className={link.href === active ? "active" : undefined}>
               {link.label}
             </Link>

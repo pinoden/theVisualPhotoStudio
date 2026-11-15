@@ -1,6 +1,7 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { bookings, payments, promoCodes, refunds, studioHolds } from "@/db/schema";
 import type { Db, DbLike } from "@/db/client";
+import { labelOf } from "@/lib/domain/labels";
 import { formatCents } from "@/lib/domain/pricing";
 import { count, hoursInWords } from "@/lib/words";
 import {
@@ -14,6 +15,7 @@ import {
 } from "@/lib/domain/policy";
 import { isBookingRef, tokenMatches } from "./bookings";
 import { cancellationEmail, ownerRefundNotice, queueEmail, rescheduleCodeEmail } from "./email";
+import { BY_CUSTOMER, BY_STUDIO, recordEvent } from "./history";
 import type { PaymentProvider } from "./payments";
 import { issuePromo, restorePromo } from "./promos";
 import { loadSettings, type Settings } from "./settings";
@@ -361,6 +363,14 @@ export async function cancelBooking(db: Db, ref: string, actor: Actor, deps: Man
     await tx.update(studioHolds).set({ active: false }).where(eq(studioHolds.bookingId, booking.id));
 
     const codeBack = await giveCodeBack(tx, booking, actor.kind === "owner" ? "studio" : "customer");
+    await recordEvent(tx, {
+      bookingId: booking.id,
+      from: labelOf(booking),
+      to: "cancelled",
+      actor: actor.kind === "owner" ? BY_STUDIO : BY_CUSTOMER,
+      at: deps.now,
+      note: decision.refundCents > 0 ? `Refund ${formatCents(decision.refundCents)}` : "No refund",
+    });
 
     const refundIds = await recordRefunds(tx, booking.id, decision.refundCents, `Cancellation of ${booking.ref}`, true);
     const message = `${cancelOutcomeText(decision, settings)}${codeBack ? ` ${CODE_BACK}` : ""}`;
@@ -424,6 +434,15 @@ export async function requestRescheduleCode(db: Db, ref: string, actor: Actor, d
       .set({ status: "cancelled", cancelledAt: deps.now, cancelReason: "rescheduled" })
       .where(eq(bookings.id, booking.id));
     await tx.update(studioHolds).set({ active: false }).where(eq(studioHolds.bookingId, booking.id));
+
+    await recordEvent(tx, {
+      bookingId: booking.id,
+      from: labelOf(booking),
+      to: "cancelled",
+      actor: actor.kind === "owner" ? BY_STUDIO : BY_CUSTOMER,
+      at: deps.now,
+      note: `Released for a reschedule code worth ${formatCents(decision.creditCents)}`,
+    });
 
     const expiresAt = new Date(deps.now.getTime() + settings.creditValidDays * 86_400_000);
     const issued = await issuePromo(tx, {
@@ -496,6 +515,14 @@ export async function ownerCancelBooking(
       .where(eq(bookings.id, booking.id));
     await tx.update(studioHolds).set({ active: false }).where(eq(studioHolds.bookingId, booking.id));
     const refundIds = await recordRefunds(tx, booking.id, input.refundCents, `Cancelled by the studio: ${booking.ref}`, false);
+    await recordEvent(tx, {
+      bookingId: booking.id,
+      from: labelOf(booking),
+      to: "cancelled",
+      actor: BY_STUDIO,
+      at: deps.now,
+      note: input.refundCents > 0 ? `Refund ${formatCents(input.refundCents)}` : "No refund",
+    });
     // A visit that has not started was taken from the customer, so the code that paid for it goes back to them.
     // After the start the code has done its work: a later cancellation is the owner settling a refund.
     const codeBack = deps.now.getTime() < booking.startAt.getTime() && (await giveCodeBack(tx, booking, "studio"));

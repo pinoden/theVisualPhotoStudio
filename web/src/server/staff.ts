@@ -1,17 +1,18 @@
 import { and, asc, eq, gte, inArray, lt } from "drizzle-orm";
 import { bookingAddons, bookings, staffShifts, studioHolds, studios } from "@/db/schema";
 import type { DbLike } from "@/db/client";
+import { labelOf, type LabelKey } from "@/lib/domain/labels";
 import { isIsoDate, type IsoDate } from "@/lib/domain/time";
 import type { AuthUser } from "./auth";
-import { isBookingRef } from "./bookings";
 import { loadSettings } from "./settings";
-import { dayBoundsUtc, formatRange, localDateOf } from "./tz";
+import { dayBoundsUtc, formatRange } from "./tz";
 
 /**
  * What staff may see: the bookings of the days the owner assigned to them,
- * and nothing else. No prices, no revenue, no customer list, no other days.
- * These functions are the only way staff pages read bookings, and each one
- * checks the viewer itself.
+ * or of every day when the owner has switched that on. No revenue and no
+ * customer list. These functions are the only way the day sheet reads
+ * bookings, and each one checks the viewer itself. What staff may do with an
+ * appointment is in `appointments.ts`.
  */
 export interface DaySheetEntry {
   ref: string;
@@ -25,6 +26,8 @@ export interface DaySheetEntry {
   addons: { name: string; quantity: number }[];
   notes: string;
   status: "confirmed" | "completed" | "no_show";
+  /** The status label shown for it. */
+  label: LabelKey;
 }
 
 /** Dates from `from` on that a staff member is assigned to. */
@@ -41,6 +44,7 @@ export async function canViewDay(db: DbLike, viewer: AuthUser, date: string): Pr
   if (!isIsoDate(date)) return false;
   if (viewer.role === "owner") return true;
   if (viewer.role !== "staff") return false;
+  if ((await loadSettings(db)).staffSeesAllDays) return true;
   const rows = await db
     .select({ day: staffShifts.day })
     .from(staffShifts)
@@ -101,32 +105,7 @@ export async function getDaySheet(db: DbLike, viewer: AuthUser, date: string): P
       addons: addonRows.filter((a) => a.bookingId === b.id).map((a) => ({ name: a.name, quantity: a.quantity })),
       notes: b.notes,
       status: b.status as DaySheetEntry["status"],
+      label: labelOf(b),
     })),
   };
-}
-
-export type AttendanceResult =
-  | { ok: true }
-  | { ok: false; reason: "forbidden" | "not_found" | "too_early" | "not_changeable" };
-
-/**
- * Record whether the customer came. Allowed for a booking on a day the viewer
- * may see, once its start time has passed.
- */
-export async function setAttendance(
-  db: DbLike,
-  viewer: AuthUser,
-  ref: string,
-  status: "confirmed" | "completed" | "no_show",
-  now: Date,
-): Promise<AttendanceResult> {
-  if (!isBookingRef(ref)) return { ok: false, reason: "not_found" };
-  const [booking] = await db.select().from(bookings).where(eq(bookings.ref, ref)).limit(1);
-  // Answer "forbidden" for unknown references too, so staff cannot probe for them.
-  if (!booking) return { ok: false, reason: viewer.role === "owner" ? "not_found" : "forbidden" };
-  if (!(await canViewDay(db, viewer, localDateOf(booking.startAt)))) return { ok: false, reason: "forbidden" };
-  if (!["confirmed", "completed", "no_show"].includes(booking.status)) return { ok: false, reason: "not_changeable" };
-  if (now.getTime() < booking.startAt.getTime()) return { ok: false, reason: "too_early" };
-  await db.update(bookings).set({ status }).where(eq(bookings.id, booking.id));
-  return { ok: true };
 }

@@ -42,9 +42,19 @@ export interface Settings {
   /** Hours after a visit ends before it counts as completed. */
   loyaltyDelayHours: number;
 
-  // ── Staff ──
-  /** Whether staff see customers' phone number and email on the day sheet. */
+  // ── Staff: what the second level of the admin can do (see src/lib/staff-abilities.ts) ──
+  /** Whether staff see customers' phone number and email. */
   staffSeesContact: boolean;
+  /** Whether staff can change the status label of an appointment. */
+  staffSetsLabels: boolean;
+  /** Whether staff see every day, or only the days assigned to them. */
+  staffSeesAllDays: boolean;
+  /** Whether staff see what a booking cost. */
+  staffSeesPrices: boolean;
+  /** Whether staff can move a booking to a new time. */
+  staffMovesBookings: boolean;
+  /** Whether staff can make a booking for a client. */
+  staffCreatesBookings: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -66,6 +76,11 @@ export const DEFAULT_SETTINGS: Settings = {
   loyaltyDelayHours: 2,
 
   staffSeesContact: false,
+  staffSetsLabels: true, // the owner, 2026-11-15: "Staff should be able to change all the labels"
+  staffSeesAllDays: false,
+  staffSeesPrices: false,
+  staffMovesBookings: false,
+  staffCreatesBookings: false,
 };
 
 const int = (min: number, max: number) => (v: unknown) =>
@@ -100,6 +115,11 @@ const VALIDATORS: { [K in Exclude<keyof Settings, "multiStudioPercent">]: (v: un
   loyaltyValidDays: int(1, 730),
   loyaltyDelayHours: int(0, 24 * 14),
   staffSeesContact: bool,
+  staffSetsLabels: bool,
+  staffSeesAllDays: bool,
+  staffSeesPrices: bool,
+  staffMovesBookings: bool,
+  staffCreatesBookings: bool,
 };
 
 export type SettingKey = keyof Settings;

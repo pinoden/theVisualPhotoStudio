@@ -1,8 +1,10 @@
-import { and, asc, eq, gt, inArray, isNull, lte } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull, lte, ne, or } from "drizzle-orm";
 import { bookings, payments } from "@/db/schema";
 import type { Db } from "@/db/client";
 import { releaseExpiredHolds } from "./availability";
 import { deliverPendingEmails, ownerPaymentUnknownNotice, queueEmail, type EmailTransport } from "./email";
+import { labelOf } from "@/lib/domain/labels";
+import { BY_SYSTEM, recordEvent } from "./history";
 import { sendEarnedFreeHours } from "./loyalty";
 import { retryOpenRefunds, type ManageDeps } from "./manage";
 import { loadSettings } from "./settings";
@@ -40,11 +42,35 @@ export async function completeVisits(db: Db, now: Date, baseUrl: string): Promis
   const settings = await loadSettings(db);
   const cutoff = new Date(now.getTime() - settings.loyaltyDelayHours * 3_600_000);
 
-  const done = await db
-    .update(bookings)
-    .set({ status: "completed" })
-    .where(and(eq(bookings.status, "confirmed"), lte(bookings.endAt, cutoff)))
-    .returning({ id: bookings.id });
+  // A booking waiting to be rescheduled is left alone: the client asked to move it, so the visit at the
+  // original time did not happen, and an administrator decides what becomes of it.
+  const done = await db.transaction(async (tx) => {
+    const ended = await tx
+      .select({ id: bookings.id, status: bookings.status, label: bookings.label })
+      .from(bookings)
+      .where(
+        and(
+          eq(bookings.status, "confirmed"),
+          lte(bookings.endAt, cutoff),
+          or(isNull(bookings.label), ne(bookings.label, "reschedule_pending")),
+        ),
+      )
+      .for("update");
+    if (ended.length === 0) return ended;
+    await tx
+      .update(bookings)
+      .set({ status: "completed", label: null })
+      .where(
+        inArray(
+          bookings.id,
+          ended.map((booking) => booking.id),
+        ),
+      );
+    for (const booking of ended) {
+      await recordEvent(tx, { bookingId: booking.id, from: labelOf(booking), to: "completed", actor: BY_SYSTEM, at: now });
+    }
+    return ended;
+  });
 
   if (!settings.loyaltyEnabled) return { completed: done.length, codes: 0 };
 

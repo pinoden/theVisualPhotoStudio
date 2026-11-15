@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { getDb } from "@/db/client";
 import { isAddonKind } from "@/lib/addon-kinds";
 import { dollarsToCents, formText, hhmmToMinutes, intInRange } from "@/lib/parse";
+import { STAFF_ABILITY_KEYS } from "@/lib/staff-abilities";
 import { formatCents } from "@/lib/domain/pricing";
 import {
   addStaff,
@@ -56,6 +57,17 @@ export async function addStaffAction(formData: FormData): Promise<void> {
   const result = await addStaff(await getDb(), text(formData, "email"), text(formData, "name"));
   if (!result.ok) failed("/admin/staff", result.message);
   done("/admin/staff", "Staff member added. They sign in with their email address.");
+}
+
+/** The owners' switches for the second level of the admin. A box that is not ticked switches the ability off. */
+export async function saveStaffAbilitiesAction(formData: FormData): Promise<void> {
+  await requireOwner("/admin/staff");
+  const db = await getDb();
+  for (const ability of STAFF_ABILITY_KEYS) {
+    if (!(await saveSetting(db, ability, formData.get(ability) !== null))) failed("/admin/staff", "That could not be saved.");
+  }
+  updateTag(CATALOG_TAG); // the settings travel with the catalog
+  done("/admin/staff", "Saved. It applies to every member of staff from now on.");
 }
 
 export async function removeStaffAction(formData: FormData): Promise<void> {
@@ -269,7 +281,8 @@ const NUMBER_SETTINGS = [
   "loyaltyValidDays",
   "loyaltyDelayHours",
 ] as const;
-const SWITCH_SETTINGS = ["loyaltyEnabled", "staffSeesContact"] as const;
+// What staff can do is set on the Staff page (saveStaffAbilitiesAction), not here.
+const SWITCH_SETTINGS = ["loyaltyEnabled"] as const;
 
 export async function saveSettingsAction(formData: FormData): Promise<void> {
   await requireOwner("/admin/settings");

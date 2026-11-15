@@ -113,14 +113,6 @@ async function SettingsForm({ searchParams }: Pick<PageProps<"/admin/settings">,
           </div>
         ))}
 
-        <div className="admin-card">
-          <h3>Staff</h3>
-          <label style={{ fontSize: ".9rem" }}>
-            <input type="checkbox" name="staffSeesContact" defaultChecked={settings.staffSeesContact} /> Staff can see
-            customers&rsquo; phone numbers and email addresses on the day sheet
-          </label>
-        </div>
-
         <button type="submit" className="btn btn-dark">
           Save settings
         </button>
