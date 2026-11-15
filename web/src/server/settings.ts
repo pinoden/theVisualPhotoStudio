@@ -48,7 +48,7 @@ export interface Settings {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  slotIncrementMinutes: 30,
+  slotIncrementMinutes: 15,
   minLeadHours: 24,
   maxAdvanceDays: 180,
   holdMinutes: 10,

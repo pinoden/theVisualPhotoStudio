@@ -102,7 +102,11 @@ export const studios = pgTable("studios", {
   /** Guests included in the price. */
   includedGuests: integer("included_guests").notNull().default(6),
   /** Clean-up minutes kept free after each booking. */
-  bufferMinutes: integer("buffer_minutes").notNull().default(10),
+  /**
+   * Minutes kept free after every booking, so that appointments are at least this far apart.
+   * 15 is the owner's rule: 7 minutes before and 7 after each appointment, drawn so in the calendar.
+   */
+  bufferMinutes: integer("buffer_minutes").notNull().default(15),
   sortOrder: integer("sort_order").notNull().default(0),
   active: boolean("active").notNull().default(true),
 });

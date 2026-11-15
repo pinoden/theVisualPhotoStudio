@@ -19,7 +19,7 @@ const GROUPS: { title: string; fields: { key: NumberKey; label: string; help: st
     fields: [
       { key: "minLeadHours", label: "Minimum notice (hours)", help: "How far ahead a booking must be made." },
       { key: "maxAdvanceDays", label: "Booking horizon (days)", help: "How far ahead the calendar is open." },
-      { key: "slotIncrementMinutes", label: "Start times every (minutes)", help: "30 offers 9:00, 9:30, 10:00 and so on." },
+      { key: "slotIncrementMinutes", label: "Start times every (minutes)", help: "15 offers 9:00, 9:15, 9:30 and so on." },
       { key: "holdMinutes", label: "Hold while paying (minutes)", help: "How long a slot is kept for a customer at checkout." },
     ],
   },

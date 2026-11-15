@@ -156,7 +156,7 @@ async function StudiosAndAddons({ searchParams }: Pick<PageProps<"/admin/studios
             </div>
             <div className="form-group">
               <label className="form-label" htmlFor={`studio-${studio.slug}-buffer`}>
-                Clean-up after a booking (minutes)
+                Kept free after a booking (minutes)
               </label>
               <input
                 id={`studio-${studio.slug}-buffer`}
@@ -175,8 +175,9 @@ async function StudiosAndAddons({ searchParams }: Pick<PageProps<"/admin/studios
             </button>
           </div>
           <div style={HELP}>
-            The guest number is shown to customers and is not enforced. A new clean-up time applies to bookings made
-            from now on.
+            The guest number is shown to customers and is not enforced. The time kept free after a booking is the
+            least gap between two appointments: 15 is 7 minutes before and 7 after each, as the calendar draws them. A
+            new value applies to bookings made from now on.
           </div>
         </form>
       ))}

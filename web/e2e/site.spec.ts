@@ -208,7 +208,7 @@ test("books two studios together, starting from the studios", async ({ page }) =
   expect(mail.body).toContain("Studio Blanche + Studio Dayglow");
 });
 
-test("a taken time is no longer offered, including the clean-up time around it", async ({ page }) => {
+test("a taken time is no longer offered, nor any time within 15 minutes of it", async ({ page }) => {
   await page.goto("/book");
   await pickStudio(page, "Studio Blanche");
   await next(page);
@@ -216,10 +216,15 @@ test("a taken time is no longer offered, including the clean-up time around it",
   await page.getByRole("button", { name: "1 hr", exact: true }).click();
   await next(page);
   await expect(page.getByRole("button", { name: "12:00 PM", exact: true })).toBeVisible();
-  for (const taken of ["9:30 AM", "10:00 AM", "10:30 AM", "11:00 AM"]) {
+  // Blanche is booked from 10:00 to 11:00. An hour that overlaps it is not offered.
+  for (const taken of ["9:15 AM", "10:00 AM", "10:45 AM"]) {
     await expect(page.getByRole("button", { name: taken, exact: true })).toHaveCount(0);
   }
-  await expect(page.getByRole("button", { name: "9:00 AM", exact: true })).toHaveCount(0); // would end with no clean-up time
+  // Nor one that would leave less than 15 minutes between the two appointments.
+  await expect(page.getByRole("button", { name: "9:00 AM", exact: true })).toHaveCount(0); // would end as the next begins
+  await expect(page.getByRole("button", { name: "11:00 AM", exact: true })).toHaveCount(0); // would begin as the last ends
+  // Start times come every 15 minutes: the first free one is a quarter past.
+  await expect(page.getByRole("button", { name: "11:15 AM", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "11:30 AM", exact: true })).toBeVisible();
 });
 

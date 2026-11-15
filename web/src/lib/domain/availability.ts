@@ -15,7 +15,7 @@ export interface StudioDay {
   /** null when the studio is closed that day. */
   openMinute: number | null;
   closeMinute: number | null;
-  /** Clean-up time kept free after every booking. */
+  /** Minutes kept free after every booking: the least gap between two appointments. */
   bufferMinutes: number;
   /** Time already taken (bookings including their buffer, and blocks). */
   busy: Interval[];
@@ -41,7 +41,7 @@ export function isStartFree(day: StudioDay, start: number, opts: SlotOptions): b
   if (start < day.openMinute || start + durationMinutes > day.closeMinute) return false;
   if ((start - day.openMinute) % incrementMinutes !== 0) return false;
   if (opts.earliestStartMinute !== undefined && start < opts.earliestStartMinute) return false;
-  // The new booking also needs its own clean-up time before the next one.
+  // The new booking needs the same gap before the next one as every booking keeps after itself.
   const occupiedEnd = start + durationMinutes + day.bufferMinutes;
   return !day.busy.some((b) => overlaps(start, occupiedEnd, b));
 }

@@ -48,6 +48,8 @@ export default defineConfig({
       NEXT_DIST_DIR: `.next-${NAME}`,
       // Two owners: sign-in codes are limited to three per address in 15 minutes.
       OWNER_EMAILS: "owner@studio.test,owner2@studio.test",
+      // The whole suite books from one address, more often than the ten times a minute a visitor is allowed.
+      BOOKING_REQUESTS_PER_MINUTE: "200",
       NEXT_TELEMETRY_DISABLED: "1",
     },
   },

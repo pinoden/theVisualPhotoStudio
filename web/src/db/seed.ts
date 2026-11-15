@@ -55,7 +55,7 @@ export async function seed(db: Db): Promise<boolean> {
           tagline: s.tagline,
           description: s.description,
           includedGuests: s.includedGuests,
-          bufferMinutes: 10,
+          bufferMinutes: 15,
           sortOrder: index,
         })
         .returning({ id: studios.id });

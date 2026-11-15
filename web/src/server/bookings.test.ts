@@ -17,7 +17,7 @@ import { createBooking, getBookingByToken, hashToken, type BookingInput } from "
 import { loadDayAvailability } from "./availability";
 import { loadCatalog } from "./catalog";
 import { MOCK_TOKEN_DECLINED, MOCK_TOKEN_OK, mockProvider, type PaymentProvider } from "./payments";
-import { combinedStarts } from "@/lib/domain/availability";
+import { combinedStarts, freeStarts } from "@/lib/domain/availability";
 
 // Saturday 2026-11-14, 10:00 in Winter Park (EST, UTC-5).
 const NOW = new Date("2026-11-14T15:00:00Z");
@@ -180,16 +180,32 @@ describe("double booking is impossible", () => {
     expect(charges).toHaveLength(1);
   });
 
-  it("refuses overlaps, including the clean-up buffer, but allows other studios", async () => {
-    expect((await book()).ok).toBe(true); // Blanche 10:00-12:00, clean until 12:10
+  it("refuses overlaps and keeps appointments at least 15 minutes apart, but allows other studios", async () => {
+    expect((await book()).ok).toBe(true); // Blanche 10:00-12:00, kept free until 12:15
     expect(await book({ startMinute: h(11), durationMinutes: 60 })).toMatchObject({ code: "slot_taken" });
-    expect(await book({ startMinute: h(9), durationMinutes: 60 })).toMatchObject({ code: "slot_taken" }); // ends 10:00, no clean-up time
-    expect(await book({ startMinute: h(12), durationMinutes: 60 })).toMatchObject({ code: "slot_taken" }); // still cleaning
-    expect((await book({ startMinute: h(12) + 30, durationMinutes: 60 })).ok).toBe(true);
+    expect(await book({ startMinute: h(9), durationMinutes: 60 })).toMatchObject({ code: "slot_taken" }); // ends 10:00, no gap before the next
+    expect(await book({ startMinute: h(12), durationMinutes: 60 })).toMatchObject({ code: "slot_taken" }); // no gap after the last
+    expect((await book({ startMinute: h(12) + 15, durationMinutes: 60 })).ok).toBe(true); // exactly 15 minutes later
     expect((await book({ studioIds: [ids.paris] })).ok).toBe(true); // other studio, same time
     // A bundle that includes the taken studio is refused as a whole.
     expect(await book({ studioIds: [ids.blanche, ids.dayglow], durationMinutes: 60 })).toMatchObject({ code: "slot_taken" });
     expect(await db.select().from(studioHolds).where(eq(studioHolds.studioId, ids.dayglow))).toHaveLength(0);
+  });
+
+  it("offers start times every 15 minutes, leaving out the ones that would come within 15 minutes of a booking", async () => {
+    await book(); // Blanche 10:00-12:00
+    const catalog = await loadCatalog(db);
+    expect(catalog.settings.slotIncrementMinutes).toBe(15);
+    expect(catalog.studios.map((studio) => studio.bufferMinutes)).toEqual([15, 15, 15]);
+
+    const day = await loadDayAvailability(db, catalog, WED, NOW);
+    const options = { durationMinutes: 60, incrementMinutes: 15, earliestStartMinute: day.earliestStartMinute };
+    const blanche = freeStarts(day.days.find((d) => d.studioId === ids.blanche)!, options);
+    // Nothing before the booking: 9:00 to 10:00 would leave no gap. Then every quarter of an hour from 12:15.
+    expect(blanche.slice(0, 4)).toEqual([h(12) + 15, h(12) + 30, h(12) + 45, h(13)]);
+    // Each studio has its own calendar: Paris is free from opening time.
+    const paris = freeStarts(day.days.find((d) => d.studioId === ids.paris)!, options);
+    expect(paris.slice(0, 3)).toEqual([h(9), h(9) + 15, h(9) + 30]);
   });
 
   it("lets only one of many simultaneous requests win, and charges only that one", async () => {
@@ -445,7 +461,7 @@ describe("opening hours", () => {
     const catalog = await loadCatalog(db);
     const day = await loadDayAvailability(db, catalog, WED, NOW);
     const blanche = day.days.find((d) => d.studioId === ids.blanche)!;
-    expect(blanche.busy).toEqual([{ start: h(10), end: h(12) + 10 }]);
+    expect(blanche.busy).toEqual([{ start: h(10), end: h(12) + 15 }]);
     expect(blanche.openMinute).toBe(h(9));
     expect(day.dayType).toBe("weekday");
   });
