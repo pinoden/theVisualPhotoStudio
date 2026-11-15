@@ -471,3 +471,34 @@ test("the owner sets how to get in, and only a customer with a confirmed booking
   await expect(page.getByRole("heading", { name: "Booking Cancelled" })).toBeVisible();
   await expect(byText(page, GETTING_IN)).toHaveCount(0);
 });
+
+test("the owner changes an add-on's price and a studio's guest number, and customers see both", async ({ page }) => {
+  await signIn(page, SECOND_OWNER, "/admin/studios");
+  await expect(page.getByRole("heading", { name: "Studios & add-ons" })).toBeVisible();
+
+  await onScreen(page.locator("#addon-pet-fee-price")).fill("45");
+  await page.getByRole("button", { name: "Save Pet fee" }).click();
+  await expect(byText(page, "Add-on saved.")).toBeVisible();
+
+  await onScreen(page.locator("#studio-paris-guests")).fill("5");
+  await page.getByRole("button", { name: "Save Studio Paris" }).click();
+  await expect(byText(page, "Studio saved.")).toBeVisible();
+  await shot(page, "19-admin-studios");
+
+  await page.goto("/rates");
+  await expect(page.getByRole("row", { name: /Pet fee/ })).toContainText("$45");
+  await expect(page.locator(".rate-card", { hasText: "Studio Paris" })).toContainText("Up to 5 guests included.");
+  await page.goto("/faq");
+  const pets = page.locator("details.faq-item", { hasText: "Can I bring my pet?" });
+  await pets.locator("summary").click();
+  await expect(pets.locator(".faq-answer")).toContainText("A $45 pet fee applies");
+
+  // An add-on that is no longer offered disappears for customers, and stays in the admin.
+  await page.goto("/admin/studios");
+  await page.getByRole("button", { name: "Stop offering Pet fee" }).click();
+  await expect(byText(page, /The add-on is no longer offered/)).toBeVisible();
+  await expect(byText(page, "Not offered at the moment.")).toBeVisible();
+  await page.goto("/rates");
+  await expect(page.getByRole("heading", { name: "Studio Rates" })).toBeVisible();
+  await expect(page.getByRole("row", { name: /Pet fee/ })).toHaveCount(0);
+});

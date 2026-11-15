@@ -7,6 +7,7 @@ const LINKS = [
   { href: "/staff", label: "Day sheet" },
   { href: "/admin/staff", label: "Staff" },
   { href: "/admin/prices", label: "Prices" },
+  { href: "/admin/studios", label: "Studios & add-ons" },
   { href: "/admin/hours", label: "Hours & blocks" },
   { href: "/admin/codes", label: "Codes" },
   { href: "/admin/settings", label: "Settings" },

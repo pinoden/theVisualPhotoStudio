@@ -11,8 +11,11 @@ import {
   createManualCode,
   removeBlock,
   removeStaff,
+  saveAddon,
   savePrice,
+  saveStudioDetails,
   saveStudioHours,
+  setAddonActive,
   setShift,
   setSpecialDate,
   voidCode,
@@ -287,4 +290,64 @@ export async function saveAccessInstructionsAction(formData: FormData): Promise<
   }
   updateTag(CATALOG_TAG); // the guest information page says whether this is sent
   done("/admin/settings", "Saved. New confirmation emails and every confirmed booking's page now show it.");
+}
+
+// ── Studios and add-ons ──────────────────────────────────────────────────────
+
+export async function saveStudioDetailsAction(formData: FormData): Promise<void> {
+  await requireOwner("/admin/studios");
+  const includedGuests = intInRange(text(formData, "includedGuests"), 1, 100);
+  const bufferMinutes = intInRange(text(formData, "bufferMinutes"), 0, 240);
+  if (includedGuests === null || bufferMinutes === null) {
+    failed("/admin/studios", "Not saved: guests must be 1 to 100, and clean-up time 0 to 240 minutes.");
+  }
+  const saved = await saveStudioDetails(await getDb(), text(formData, "studioId"), {
+    tagline: text(formData, "tagline"),
+    description: text(formData, "description"),
+    includedGuests,
+    bufferMinutes,
+  });
+  if (!saved) failed("/admin/studios", "Not saved: the tagline or the description is too long.");
+  updateTag(CATALOG_TAG);
+  done("/admin/studios", "Studio saved.");
+}
+
+export async function saveAddonAction(formData: FormData): Promise<void> {
+  await requireOwner("/admin/studios");
+  const priceCents = dollarsToCents(text(formData, "price"));
+  const maxQuantity = intInRange(text(formData, "maxQuantity"), 1, 50);
+  if (priceCents === null) failed("/admin/studios", "Enter the price as an amount, for example 40 or 40.50.");
+  if (maxQuantity === null) failed("/admin/studios", "The most per booking must be between 1 and 50.");
+  const addonId = text(formData, "addonId") || null;
+  const result = await saveAddon(await getDb(), addonId, {
+    name: text(formData, "name"),
+    description: text(formData, "description"),
+    priceCents,
+    maxQuantity,
+    studioId: text(formData, "studioId") || null,
+  });
+  if (!result.ok) failed("/admin/studios", result.message);
+  updateTag(CATALOG_TAG);
+  done("/admin/studios", addonId ? "Add-on saved." : "Add-on added.");
+}
+
+async function offerAddon(formData: FormData, active: boolean): Promise<void> {
+  await requireOwner("/admin/studios");
+  if (!(await setAddonActive(await getDb(), text(formData, "addonId"), active))) {
+    failed("/admin/studios", "Unknown add-on.");
+  }
+  updateTag(CATALOG_TAG);
+  done(
+    "/admin/studios",
+    active ? "The add-on is offered again." : "The add-on is no longer offered. Bookings that already have it keep it.",
+  );
+}
+
+// Two actions rather than one with a named button: a button whose formAction is a function cannot carry a name.
+export async function stopOfferingAddonAction(formData: FormData): Promise<void> {
+  await offerAddon(formData, false);
+}
+
+export async function offerAddonAgainAction(formData: FormData): Promise<void> {
+  await offerAddon(formData, true);
 }

@@ -1,5 +1,6 @@
 import { and, asc, desc, eq, gte, inArray, isNotNull, lt, sql } from "drizzle-orm";
 import {
+  addons,
   blocks,
   bookings,
   payments,
@@ -439,4 +440,116 @@ export async function countLiveCodes(db: DbLike): Promise<number> {
     .from(promoCodes)
     .where(and(isNotNull(promoCodes.originBookingId), sql`${promoCodes.voidedAt} is null`));
   return row.n;
+}
+
+// ── Studios and add-ons ──────────────────────────────────────────────────────
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export interface StudioDetails {
+  tagline: string;
+  description: string;
+  /** Guests included in the price. Shown to customers; not enforced. */
+  includedGuests: number;
+  /** Clean-up minutes kept free after each booking. */
+  bufferMinutes: number;
+}
+
+/**
+ * Change what the site says about a studio, how many guests its price
+ * includes, and its clean-up time. A new clean-up time applies to bookings
+ * made from then on: existing bookings keep the time already held for them.
+ */
+export async function saveStudioDetails(db: DbLike, studioId: string, input: StudioDetails): Promise<boolean> {
+  const tagline = input.tagline.trim();
+  const description = input.description.trim();
+  if (!UUID.test(studioId) || tagline.length > 200 || description.length > 2000) return false;
+  if (!Number.isInteger(input.includedGuests) || input.includedGuests < 1 || input.includedGuests > 100) return false;
+  if (!Number.isInteger(input.bufferMinutes) || input.bufferMinutes < 0 || input.bufferMinutes > 240) return false;
+  const updated = await db
+    .update(studios)
+    .set({ tagline, description, includedGuests: input.includedGuests, bufferMinutes: input.bufferMinutes })
+    .where(eq(studios.id, studioId))
+    .returning({ id: studios.id });
+  return updated.length === 1;
+}
+
+export interface AddonInput {
+  name: string;
+  description: string;
+  priceCents: number;
+  /** The most of this add-on one booking can have. */
+  maxQuantity: number;
+  /** null = any booking; otherwise only bookings that include this studio. */
+  studioId: string | null;
+}
+
+export interface AdminAddon extends AddonInput {
+  id: string;
+  slug: string;
+  /** False when it is no longer offered. */
+  active: boolean;
+}
+
+/** Every add-on, including the ones no longer offered. */
+export async function listAddons(db: DbLike): Promise<AdminAddon[]> {
+  const rows = await db.select().from(addons).orderBy(asc(addons.sortOrder), asc(addons.name));
+  return rows.map((row) => ({
+    id: row.id,
+    slug: row.slug,
+    name: row.name,
+    description: row.description,
+    priceCents: row.priceCents,
+    maxQuantity: row.maxQuantity,
+    studioId: row.studioId,
+    active: row.active,
+  }));
+}
+
+export type SaveAddonResult = { ok: true; id: string } | { ok: false; message: string };
+
+/**
+ * Change an add-on, or create one when `addonId` is null. Bookings already
+ * made keep the name and price they were made with.
+ */
+export async function saveAddon(db: DbLike, addonId: string | null, input: AddonInput): Promise<SaveAddonResult> {
+  const name = input.name.replace(/\s+/g, " ").trim();
+  const description = input.description.trim();
+  if (name.length < 1 || name.length > 80) return { ok: false, message: "Give the add-on a name of up to 80 characters." };
+  if (description.length > 300) return { ok: false, message: "Keep the description under 300 characters." };
+  if (!Number.isInteger(input.priceCents) || input.priceCents < 0 || input.priceCents > 10_000_000) {
+    return { ok: false, message: "Enter the price as an amount, for example 40 or 40.50." };
+  }
+  if (!Number.isInteger(input.maxQuantity) || input.maxQuantity < 1 || input.maxQuantity > 50) {
+    return { ok: false, message: "The most per booking must be between 1 and 50." };
+  }
+  if (input.studioId !== null) {
+    const [studio] = UUID.test(input.studioId)
+      ? await db.select({ id: studios.id }).from(studios).where(eq(studios.id, input.studioId)).limit(1)
+      : [];
+    if (!studio) return { ok: false, message: "Unknown studio." };
+  }
+  const values = { name, description, priceCents: input.priceCents, maxQuantity: input.maxQuantity, studioId: input.studioId };
+
+  if (addonId !== null) {
+    const updated = UUID.test(addonId)
+      ? await db.update(addons).set(values).where(eq(addons.id, addonId)).returning({ id: addons.id })
+      : [];
+    return updated.length === 1 ? { ok: true, id: addonId } : { ok: false, message: "Unknown add-on." };
+  }
+
+  const existing = await db.select({ slug: addons.slug, sortOrder: addons.sortOrder }).from(addons);
+  const base = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "add-on";
+  let slug = base;
+  for (let n = 2; existing.some((addon) => addon.slug === slug); n++) slug = `${base}-${n}`;
+  const sortOrder = Math.max(-1, ...existing.map((addon) => addon.sortOrder)) + 1;
+  const [row] = await db.insert(addons).values({ ...values, slug, sortOrder }).returning({ id: addons.id });
+  return { ok: true, id: row.id };
+}
+
+/** Offer an add-on, or stop offering it. It is never deleted: past bookings refer to it. */
+export async function setAddonActive(db: DbLike, addonId: string, active: boolean): Promise<boolean> {
+  if (!UUID.test(addonId)) return false;
+  const updated = await db.update(addons).set({ active }).where(eq(addons.id, addonId)).returning({ id: addons.id });
+  return updated.length === 1;
 }
