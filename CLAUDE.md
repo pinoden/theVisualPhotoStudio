@@ -24,6 +24,9 @@ npm run dev          # http://localhost:3000 with an embedded database and a pre
 npm test             # every test (vitest)
 npx vitest run src/server/bookings.test.ts            # one file
 npx vitest run -t "refuses a second booking"          # tests whose name matches
+npm run test:e2e     # browser tests (Playwright); starts its own server on port 3211
+E2E_SHOTS=1 npm run test:e2e                          # also saves full-page pictures to test-results/shots
+npx playwright test -g "staff see the day sheet"      # one browser test by name (they build on each other; see below)
 npm run typecheck    # generates Next.js route types, then runs tsc
 npm run lint
 npm run build
@@ -47,13 +50,22 @@ Local development needs no database install and no credentials. Without `DATABAS
   - `cached.ts` exposes `getCatalog()` with `'use cache'` and the tag `catalog` for prerendered pages.
 - **`src/db/`**: `schema.ts` (Drizzle), `client.ts` (`getDb()` picks PostgreSQL or PGlite; `createMemoryDb()` for tests), `seed.ts` (starting catalog, taken from the studio's live price list).
 - **Double booking is prevented by the database.** Every span of time a studio is taken is a row in `studio_holds`, written by bookings and by owner blocks. An exclusion constraint in `drizzle/0001_constraints.sql` rejects two active holds that overlap on one studio. A hold covers the booking plus the studio's clean-up buffer.
-- **Booking order in `createBooking`**: validate and price on the server, hold the slot (status `pending_payment`), charge the card with the booking id as idempotency key, then confirm. A failed charge releases the slot. Unpaid holds expire after `holdMinutes`; `releaseExpiredHolds` runs before every availability read and booking attempt, so there is no scheduler.
+- **Booking order in `createBooking`**: validate and price on the server, hold the slot (status `pending_payment`), charge the card with the booking id as idempotency key, then confirm. A failed charge releases the slot and gives back any code that was spent. Unpaid holds expire after `holdMinutes`; `releaseExpiredHolds` runs before every availability read and booking attempt, so freeing slots does not depend on the scheduler. After a successful booking the browser loads the booking page as a new document (`navigate` in `BookingFlow`), not through the router, so the finished selection is not kept alive behind it.
 - **Prices** are a table of studio × day type (weekday or weekend) × duration in `price_rules`. Only durations with a price can be booked. `special_dates` reprices a date as the other day type. Booking several studios applies the `multiStudioPercent` setting.
 - **The two booking flows** (studio first, time first) are the same steps in a different order in `src/components/BookingFlow.tsx`. Both read one endpoint, `GET /api/availability?date=`, and compute slots in the browser with the domain functions.
-- **Routes**: pages `/`, `/studios`, `/rates`, `/policies`, `/book`, `/booking/[ref]?t=<secret>`; API `GET /api/availability`, `GET /api/booking-config`, `POST /api/bookings`.
+- **Routes**: pages `/`, `/studios`, `/rates`, `/policies`, `/book`, `/booking/[ref]?t=<secret>`, `/account`, `/account/sign-in`, `/staff`, `/admin` (with sub-pages for bookings, prices, hours, staff, codes, settings), `/dev/outbox`; API `GET /api/availability`, `GET /api/booking-config`, `POST /api/quote`, `POST /api/bookings`, `GET /api/cron/tick`. Everything a signed-in person changes goes through server actions (`actions.ts` next to the pages).
 - **Payment mode** is chosen in `resolvePayments`: Square when its three credentials are set; the mock when `PAYMENTS_MODE=mock` or outside production; otherwise bookings that cost money are refused. A booking is never confirmed free because payment is unconfigured.
-- **Emails are only queued.** `createBooking` writes the confirmation to `email_outbox`. Nothing sends those rows yet.
-- **Tables without code yet**: `users`, `login_codes`, `sessions`, `staff_shifts`, `promo_codes`, `refunds`, `blocks`. They were designed for requirements 2, 3, 5, 7 and 8 below.
+- **Access control lives in each page and each action**, never in a layout: `requireUser`, `requireStaff` and `requireOwner` in `src/server/session.ts`. Someone without the role gets the ordinary not-found page. The admin sidebar (`src/app/admin/frame.tsx`) is rendered by each admin page after its check for the same reason. The services in `staff.ts` and `manage.ts` check the viewer or actor again themselves; the functions in `admin.ts` do not, so every caller must run `requireOwner` first.
+- **`src/server/runtime.ts`** is the glue for requests: site address, which processor and mail service to use, who gets refund notices, and `flushEmailsSoon()` (delivers queued mail after the response).
+- **`src/server/auth.ts`** implements passwordless sign-in: emailed six-digit codes, rate-limited to 3 per 15 minutes, hashed in the database. Sessions are 30-day tokens (SHA-256 hashed). `OWNER_EMAILS` controls the owner role; adding or removing an address takes effect at the next request.
+- **`src/server/manage.ts`** handles post-booking changes: customer cancellation (with automatic refund by policy), reschedule codes (release the booking and issue a credit), and owner cancel/refund. Refunds are recorded, then sent to the processor with the refund id as idempotency key; failures are retried by the scheduled task.
+- **`src/server/staff.ts`** serves the staff day sheet: bookings on assigned days only, with contact details controlled by `staffSeesContact`. Attendance marking (came / no-show) is allowed after a booking starts.
+- **`src/server/promos.ts`** manages promo codes: loyalty (percent off, single use), reschedule credits (amount, decremented as spent), and manual codes created by the owner. Redemption is atomic with the booking.
+- **`src/server/tasks.ts`** runs the recurring work: release expired holds, mark visits complete, issue loyalty codes, retry open refunds, deliver queued email. Called by `GET /api/cron/tick`.
+- **`src/server/email.ts`** queues all mail in `email_outbox` (same transaction as the change it reports). Delivery happens right after the response and again from the scheduled task: through Resend when `RESEND_API_KEY` and `EMAIL_FROM` are set, to the server log outside production, and not at all in production without those two (mail then waits in the table).
+- **`src/server/admin.ts`** holds what only the owner can do: staff and shifts, prices, special dates, opening hours, blocked time, the bookings list, codes.
+- **`src/server/rate-limit.ts`** is an in-memory sliding-window limiter used by the booking endpoint.
+- **`/dev/outbox`** lists queued emails, including sign-in codes, and can run the scheduled tasks on demand. It answers "not found" in production. Never expose a non-production build to the internet.
 
 ### Conventions and gotchas
 
@@ -64,7 +76,11 @@ Local development needs no database install and no credentials. Without `DATABAS
 - **Never trust totals from the browser.** `POST /api/bookings` recomputes the price and compares it with `expectedTotalCents`, so a customer is never charged an amount they did not see.
 - **Constraints written by hand are not in `schema.ts`.** Add new ones with `npx drizzle-kit generate --custom --name <name>`.
 - **PGlite's data folder can be opened by one process at a time.** Stop `npm run dev` before running anything else against `web/.data`. `next build` without `DATABASE_URL` prerenders from an in-memory copy of the starting catalog.
-- **Tests**: domain unit tests, server tests against an in-memory PGlite (the real constraint is exercised), and component tests of the booking screen in jsdom. There is no real-browser test yet, and Square has never been called with real credentials.
+- **Tests** come in four kinds: domain unit tests; server tests against an in-memory PGlite, set up by `src/server/testing.ts` (the real constraints are exercised); component tests of the booking screen in jsdom; and browser tests in `web/e2e/`. Square and Resend have never been called with real credentials.
+- **Browser tests** start their own dev server on port 3211 with a throwaway database (`.data/e2e`), their own build folder (`.next-e2e`), the mock processor and `OWNER_EMAILS=owner@studio.test`. They read sign-in codes from `/dev/outbox`. They share one database and run in order, so a single test run with `-g` only works if it does not depend on an earlier one. Any error in the browser console fails the test.
+- **Earlier pages stay in the document, hidden.** With Cache Components, the router keeps recently visited pages mounted (`display: none`) so their state survives going back. Client state therefore outlives navigation: reset it deliberately where that matters. In browser tests use role locators, or `byLabel`, `byText` and `onScreen` from `e2e/helpers.ts`; a plain text or label locator also matches the hidden copies.
+- **One build folder, one process.** A dev server started on a build folder that another process is still writing to corrupts the cache, and every page then reloads in a loop (about 30 times a second, with nothing in the log but "Compiled"). It happened twice: with two sessions active, and when a server was started within a second of killing the previous one. Wait for the old process to exit before starting a new one. To recover, stop the servers and delete `web/.next/dev`. The browser tests avoid it by building into their own folder, `.next-e2e` (`NEXT_DIST_DIR`), which they delete at every start.
+- **More than one Claude Code session may be working in this checkout.** Before committing, run `git status` and `git log -5`, and commit only what you changed and verified.
 - Next.js telemetry was turned off on this machine with `npx next telemetry disable`.
 
 ## Flask prototype (repository root, reference only)
@@ -125,13 +141,13 @@ Live reference: the public site is Squarespace, with Acuity Scheduling for booki
 ### Requirements from the owner (received 2026-11-14)
 
 1. **Several studios in one booking** — **Built (2026-11-14); discount Open.** Any set of studios can be booked together for the same time. The discount is a setting keyed by studio count. Placeholder: 20% for 2 studios, 22% for 3, chosen to sit near today's bundle prices, which are 10% to 27% below the single-studio sum. Needs the owner's numbers.
-2. **Loyalty codes after a visit** — **Open, not built.** Proposed: single-use codes emailed a few hours after a completed visit, redeemed at checkout. SMS deferred, since it needs US carrier registration and customer opt-in. Needs the reward and how long it lasts. The `promo_codes` table and promo support in `pricing.ts` exist.
-3. **Staff see only their day** — **Open, not built.** Proposed: owner and staff roles. Staff see a day sheet for dates the owner assigns (times, studio, customer name, headcount, add-ons, notes), never revenue or the customer list. Needs: today only or any assigned date; whether phone numbers are shown. The `staff_shifts` table exists.
-4. **Weekday and weekend prices** — **Built (2026-11-14); prices Open.** Prices are stored per studio, day type and duration, and a date can be repriced as the other day type for holidays. Weekend prices were seeded equal to weekday prices. Needs the weekend prices and which days count as weekend (currently Saturday and Sunday). There is no admin screen for editing prices yet.
-5. **Admin and customer accounts** — **Open, not built.** Proposed: one user table with customer, staff and owner roles. Sign-in by emailed one-time code, no passwords. Guest checkout stays. Needs confirmation of passwordless sign-in. Today a customer reaches a booking through the secret link in the confirmation email.
+2. **Loyalty codes after a visit** — **Built (2026-11-14); reward Open.** Single-use percent-off codes emailed automatically after a completed visit. The scheduled task (`runScheduledTasks`) marks visits complete after `loyaltyDelayHours`, then issues and emails the code. Redeemed at checkout like any promo code, by the customer it was sent to only. Placeholder: 10% off the studio rental, valid 60 days, sent 2 hours after the visit ends, switched by the `loyaltyEnabled` setting. It only happens if something calls `GET /api/cron/tick` on a schedule, which is not set up yet. SMS deferred (US carrier registration needed). Needs the owner's reward percentage and validity period.
+3. **Staff see only their day** — **Built (2026-11-14); contact visibility Open.** Owner and staff roles with passwordless sign-in. Staff see a day sheet at `/staff` for dates the owner assigns (times, studio, customer name, add-ons, notes), never revenue or other dates. The owner assigns days in `/admin/staff`. The `staffSeesContact` setting controls whether phone and email are shown. Staff can mark attendance (came / no-show) after a booking's start time. Needs: whether phone numbers are shown by default.
+4. **Weekday and weekend prices** — **Built (2026-11-14); prices Open.** Prices are stored per studio, day type and duration, and a date can be repriced as the other day type for holidays. The owner edits prices in `/admin/prices`. Weekend prices were seeded equal to weekday prices. Needs the weekend prices and which days count as weekend (currently Saturday and Sunday).
+5. **Admin and customer accounts** — **Built (2026-11-14).** One user table with customer, staff and owner roles. Sign-in by emailed six-digit one-time code, no passwords. The first sign-in creates the account; `OWNER_EMAILS` controls who is the owner. Guest checkout stays (the secret link in the confirmation email still works). Customer account at `/account` shows bookings, codes and cancel/reschedule actions.
 6. **Two ways to book** — **Built (2026-11-14).** `/book` offers "I know which studio I want" and "I know when I want to come". The second shows, for a date and duration, how many studios are free at each time, then which ones.
-7. **Reschedule code** — **Open, not built.** Proposed: a Reschedule button in the confirmation email and the account page. It either moves the booking or issues a single-use credit for the amount paid. A rescheduled booking is never refundable, as the current policy says. Needs: how late and how often a booking can move; how long a credit lasts.
-8. **Automatic refunds** — **Open, not built.** Proposed: refunds through the Square API. Automatic only when cancelled 7 or more days ahead and never rescheduled. Owner emailed each time. Every other case is a one-click refund in admin. Needs: keep the 5% processing fee or not.
+7. **Reschedule code** — **Built (2026-11-14); cutoffs Open.** Reschedule button on the confirmation page and the account page. Releases the booking and issues a single-use credit code for the amount paid, emailed to the customer. The customer books a new time and enters the code at checkout; if the new booking costs more they pay the difference, if less the rest stays on the code. A rescheduled booking cannot be refunded and cannot be moved again (one move per booking, `maxReschedules`). Placeholder: cutoff 24 hours before start, credit valid 90 days. Needs: how late and how often a booking can move; how long a credit lasts.
+8. **Automatic refunds** — **Built (2026-11-14); fee Open.** Cancelling 7+ days ahead automatically refunds to the card minus the 5% processing fee, via the Square refund API (or recorded for retry when the processor is not configured). The owner is emailed on every refund, and once when a refund first fails. Cancelling inside the window or after a reschedule gives no refund, and the customer is told so before confirming. The owner can cancel any booking and choose the refund amount in `/admin/bookings`, or issue a partial refund without cancelling. Failed refunds are retried by the scheduled task. Needs: keep the 5% processing fee or not.
 
 ### Defaults chosen while building (placeholders until the owner decides)
 
@@ -143,7 +159,12 @@ All of these are data or settings, not code, unless noted.
 - **Slots and clean-up** — start times every 30 minutes (`slotIncrementMinutes`); 10 minutes of clean-up after every booking in every studio. The live site uses 7 to 20 minutes depending on the product.
 - **Included guests** — Blanche 6, Dayglow 6, Paris 4. Shown as information; not enforced.
 - **Add-ons** — "1 to 2 extra people" $30 and "3 to 5 extra people" $50 for any studio, pet fee $40 for bookings that include Dayglow. The live site varies the extra-people tiers by studio.
-- **Policies page** — carries the live rental terms (7-day window, 5% fee). It changes when the two policy items below are decided.
+- **Cancelling and moving** — refund when cancelled 168 hours or more ahead, less a 5% fee (`refundWindowHours`, `refundFeePercent`); a reschedule code can be requested until 24 hours before the start (`rescheduleCutoffHours`), once per booking (`maxReschedules`), and is valid 90 days (`creditValidDays`). The first two follow the live terms; the last three are guesses.
+- **Loyalty** — 10% off the next rental, valid 60 days, sent 2 hours after a visit ends (`loyaltyPercent`, `loyaltyValidDays`, `loyaltyDelayHours`).
+- **Staff** — do not see customers' phone numbers or emails (`staffSeesContact` is off); they see any day the owner assigns, not only today.
+- **Sign-in** — codes last 10 minutes, lock after 5 wrong tries, at most 3 per address in 15 minutes; sessions last 30 days. These are constants in `src/server/auth.ts`, not settings.
+- **Owners** — the addresses in the `OWNER_EMAILS` environment variable, and nobody else.
+- **Policies page** — carries the live rental terms (7-day window, 5% fee). Its text is written by hand: it does not follow the settings, so change both together.
 - **Not carried over yet** — photography packages, memberships, seasonal-setup notices, the waitlist, and the pages for FAQ, contact and services.
 
 ### Policies and facts to confirm with the owner
@@ -157,11 +178,22 @@ All of these are data or settings, not code, unless noted.
 
 ### Known gaps in what is built
 
-- No email is sent; confirmations wait in `email_outbox`.
-- No rate limiting on `POST /api/bookings`.
+Not connected to the outside world yet:
+
+- **Square has never been called.** Charging and refunding are written against Square's HTTPS API but were only ever run with the mock. The card form has not been rendered in a test. Needs sandbox credentials and a test pass before real use.
+- **No email has ever been sent.** The Resend transport is written but untried. In production, without `RESEND_API_KEY` and `EMAIL_FROM`, nothing goes out, including sign-in codes, so nobody could sign in.
+- **Nothing calls the scheduled tasks.** `GET /api/cron/tick` must be called every few minutes by a scheduler (with `CRON_SECRET`). Until then visits are not marked completed, no loyalty codes go out, and failed refunds are not retried.
+- **No production database, hosting or domain** has been chosen.
+
+Known weaknesses:
+
+- `POST /api/bookings` is rate-limited to 10 requests a minute per address, in memory. That is per server process, keyed by the `x-forwarded-for` header (everyone shares one bucket when it is missing), and nothing else is limited by address.
 - A customer whose connection drops after paying sees a network error; retrying is safe (the slot is theirs, so the retry is refused and the card is not charged again) but the message is confusing. A client request id would fix it.
 - If the server stops between a successful charge and confirming the booking, the booking stays `pending_payment` and its slot is released when the hold expires. Nothing reconciles that case yet.
-- The booking screen has automated tests but has not been clicked through in a real browser.
+- A loyalty code can reach a customer whom staff mark as a no-show later than `loyaltyDelayHours` after the visit. The owner can cancel the code in `/admin/codes`.
+- The owner cannot yet edit studio texts, photos, add-ons, included guests or clean-up time from the admin; those are database rows. The Flask admin's calendar, reports, customer list, announcements and iCal feed were not carried over.
+- Studio photos are placeholders (tinted boxes).
+- The browser tests run against the development server with the mock processor, not a production build.
 
 ### Decision log
 
@@ -169,3 +201,5 @@ All of these are data or settings, not code, unless noted.
 - 2026-11-14: Language and framework decided: TypeScript, Next.js (React), PostgreSQL.
 - 2026-11-14: Owner said to start the rebuild. Node.js installed with nvm. New app scaffolded in `web/` on branch `rebuild`.
 - 2026-11-14: First milestone built: data model, prices by weekday and weekend, availability, booking any set of studios, both booking flows, payment through a provider interface. Requirements 1, 4 and 6 are built with placeholder numbers.
+- 2026-11-14: All eight requirements built with placeholder settings. Passwordless sign-in, customer accounts, staff day sheet, loyalty codes, reschedule codes, automatic refunds and retry, email delivery via Resend, owner admin dashboard (bookings, prices, hours, staff, codes, settings). Rate limiting on the booking endpoint. Playwright e2e test suite. 210 unit/integration tests passing.
+- 2026-11-15: Verified in a real browser: all 13 browser tests pass from a cold start, with any browser console error failing the test. Found and fixed on the way: the booking screen kept its finished selection after paying (it now loads the booking page as a new document); two processes sharing one build folder corrupted it and made every page reload in a loop (the browser tests now build into `.next-e2e`). Two Claude Code sessions worked in this checkout at the same time that night; the three commits `8a1ab9e`, `54035c1` and `b1de4cd` came from the other one.

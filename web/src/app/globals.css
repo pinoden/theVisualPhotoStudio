@@ -1029,3 +1029,10 @@ button { font-family: inherit; }
   .admin-nav { display: flex; flex-wrap: wrap; }
 }
 .data-table-wrap { overflow-x: auto; }
+
+/* ── Small screens ── */
+.price-row { gap: 1rem; }
+.price-row > :last-child { text-align: right; }
+.code-row { display: flex; gap: .5rem; }
+.code-row .form-control { flex: 1; min-width: 0; }
+.code-row .btn { padding: .75rem 1.1rem; }

@@ -66,6 +66,11 @@ export function SiteNav() {
             </a>
           </li>
           <li>
+            <Link href="/account" onClick={close}>
+              My Bookings
+            </Link>
+          </li>
+          <li>
             <Link href="/book" className="btn-book-nav" onClick={close}>
               Book Now
             </Link>

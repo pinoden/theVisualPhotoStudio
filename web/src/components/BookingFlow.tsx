@@ -79,7 +79,17 @@ function localToday(): string {
 const subscribeNever = () => () => {};
 const serverToday = () => "";
 
-export function BookingFlow({ catalog }: { catalog: Catalog }) {
+/**
+ * After a booking is made the browser loads the confirmation page as a fresh
+ * document. An in-app navigation would keep this screen alive in the
+ * background with its finished selection, and coming back to book again
+ * would show the old, already-paid choices.
+ */
+function loadPage(url: string): void {
+  window.location.assign(url);
+}
+
+export function BookingFlow({ catalog, navigate = loadPage }: { catalog: Catalog; navigate?: (url: string) => void }) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -363,6 +373,7 @@ export function BookingFlow({ catalog }: { catalog: Catalog }) {
     if (!price || start === null || submitting) return;
     setError("");
     setSubmitting(true);
+    let leaving = false;
     try {
       let paymentToken: string | undefined;
       if (price.totalCents > 0) {
@@ -406,7 +417,9 @@ export function BookingFlow({ catalog }: { catalog: Catalog }) {
         message?: string;
       };
       if (response.ok && data.ok && data.ref && data.manageToken) {
-        router.push(`/booking/${data.ref}?t=${encodeURIComponent(data.manageToken)}`);
+        // Leave the button disabled: the page is about to be replaced.
+        leaving = true;
+        navigate(`/booking/${data.ref}?t=${encodeURIComponent(data.manageToken)}`);
         return;
       }
       if (data.code === "slot_taken") {
@@ -424,7 +437,7 @@ export function BookingFlow({ catalog }: { catalog: Catalog }) {
     } catch {
       setError("Network error. Please check your connection and try again. If you are unsure whether the booking went through, check your email before retrying.");
     } finally {
-      setSubmitting(false);
+      if (!leaving) setSubmitting(false);
     }
   }
 
@@ -817,7 +830,7 @@ export function BookingFlow({ catalog }: { catalog: Catalog }) {
                 </button>
               </div>
             ) : (
-              <div style={{ display: "flex", gap: ".5rem" }}>
+              <div className="code-row">
                 <input
                   id="promo-code"
                   className="form-control"
@@ -850,7 +863,14 @@ export function BookingFlow({ catalog }: { catalog: Catalog }) {
           {summary}
 
           <label className="addon-row" style={{ borderBottom: "none" }}>
-            <input type="checkbox" checked={terms} onChange={(event) => setTerms(event.target.checked)} />
+            <input
+              type="checkbox"
+              checked={terms}
+              onChange={(event) => {
+                setTerms(event.target.checked);
+                setError(""); // the usual reason an error is showing on this step
+              }}
+            />
             <span>
               I have read and agree to the{" "}
               <Link href="/policies" target="_blank">
