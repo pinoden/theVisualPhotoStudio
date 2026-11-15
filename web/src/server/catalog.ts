@@ -1,6 +1,7 @@
 import { asc, eq } from "drizzle-orm";
 import { addons, priceRules, specialDates, studioHours, studios } from "@/db/schema";
 import type { DbLike } from "@/db/client";
+import type { AddonKind } from "@/lib/addon-kinds";
 import type { AddonDef, PriceRule } from "@/lib/domain/pricing";
 import { defaultDayType, type DayType, type IsoDate } from "@/lib/domain/time";
 import { loadAccessInstructions, loadSettings, type Settings } from "./settings";
@@ -20,6 +21,8 @@ export interface CatalogStudio {
 export interface CatalogAddon extends AddonDef {
   slug: string;
   description: string;
+  /** What it is for: see ADDON_KINDS. */
+  kind: AddonKind;
 }
 
 /** Everything public about what can be booked. Safe to send to the browser. */
@@ -82,6 +85,7 @@ export async function loadCatalog(db: DbLike): Promise<Catalog> {
         priceCents: a.priceCents,
         studioId: a.studioId,
         maxQuantity: a.maxQuantity,
+        kind: a.kind,
       })),
     settings,
     specialDates: Object.fromEntries(specialRows.map((r) => [r.day, r.dayType])),

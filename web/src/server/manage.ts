@@ -1,7 +1,8 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { bookings, payments, refunds, studioHolds } from "@/db/schema";
+import { bookings, payments, promoCodes, refunds, studioHolds } from "@/db/schema";
 import type { Db, DbLike } from "@/db/client";
 import { formatCents } from "@/lib/domain/pricing";
+import { count, hoursInWords } from "@/lib/words";
 import {
   cancellationOutcome,
   rescheduleOutcome,
@@ -72,6 +73,8 @@ async function factsFor(db: DbLike, booking: BookingRow): Promise<BookingFacts> 
     rescheduledCount: booking.rescheduledCount,
     cardPaidCents: await netCardPaidCents(db, booking.id),
     creditAppliedCents: booking.creditAppliedCents,
+    // promoDiscountCents holds whatever the code took off: for a credit code that is the credit itself.
+    discountCents: booking.promoDiscountCents - booking.creditAppliedCents,
   };
 }
 
@@ -93,7 +96,8 @@ export async function getManageOptions(db: DbLike, ref: string, actor: Actor, no
 /** The same options in words, ready to show next to the buttons. */
 export interface ManageChoices {
   cancel: { allowed: boolean; text: string };
-  reschedule: { allowed: boolean; text: string };
+  /** `offered` is false when the owner has switched moving off: there is then nothing to show. */
+  reschedule: { allowed: boolean; text: string; offered: boolean };
 }
 
 export function describeManageOptions(options: ManageOptions, settings: Settings): ManageChoices {
@@ -102,12 +106,25 @@ export function describeManageOptions(options: ManageOptions, settings: Settings
       ? { allowed: true, text: cancelOutcomeText(options.cancel, settings) }
       : { allowed: false, text: cancelBlockText(options.cancel.reason) },
     reschedule: options.reschedule.allowed
-      ? {
-          allowed: true,
-          text: `This booking will be released and you will get a code worth ${formatCents(options.reschedule.creditCents)}, valid for ${settings.creditValidDays} days, to book a new time. A booking made with the code cannot be refunded.`,
-        }
-      : { allowed: false, text: rescheduleBlockText(options.reschedule.reason, settings) },
+      ? { allowed: true, offered: true, text: rescheduleOfferText(options.reschedule, settings) }
+      : {
+          allowed: false,
+          offered: options.reschedule.reason !== "not_offered",
+          text: rescheduleBlockText(options.reschedule.reason, settings),
+        },
   };
+}
+
+/** What moving a booking gives the customer, said before they confirm. */
+export function rescheduleOfferText(
+  outcome: Extract<RescheduleOutcome, { allowed: true }>,
+  settings: Pick<Settings, "creditValidDays">,
+): string {
+  const discount =
+    outcome.discountCents > 0
+      ? ` That is what you paid plus the ${formatCents(outcome.discountCents)} your discount code took off.`
+      : "";
+  return `This booking will be released and you will get a code worth ${formatCents(outcome.creditCents)}, valid for ${count(settings.creditValidDays, "day")}, to book a new time.${discount} A booking made with the code cannot be refunded.`;
 }
 
 export async function getManageChoices(db: DbLike, ref: string, actor: Actor, now: Date): Promise<ManageChoices | null> {
@@ -125,8 +142,10 @@ export function rescheduleBlockText(reason: RescheduleBlock, settings: Pick<Sett
       return "This booking has already started.";
     case "not_confirmed":
       return "This booking can no longer be changed.";
+    case "not_offered":
+      return "Bookings cannot be moved online. Please call the studio.";
     case "too_late":
-      return `Bookings can be moved online until ${settings.rescheduleCutoffHours} hours before they start. Please call the studio.`;
+      return `Bookings can be moved online until ${hoursInWords(settings.rescheduleCutoffHours)} before they start. Please call the studio.`;
     case "limit_reached":
       return "This booking was already moved and cannot be moved again online. Please call the studio.";
     case "nothing_paid":
@@ -142,7 +161,7 @@ export function cancelOutcomeText(outcome: Extract<CancelOutcome, { allowed: tru
         ? `You will be refunded ${formatCents(outcome.refundCents)} to your card. The ${settings.refundFeePercent}% processing fee (${formatCents(outcome.feeCents)}) is not refundable.`
         : `You will be refunded ${formatCents(outcome.refundCents)} to your card.`;
     case "inside_window":
-      return `No refund is due, because the booking starts in less than ${Math.round(settings.refundWindowHours / 24)} days.`;
+      return `No refund is due, because the booking starts in less than ${hoursInWords(settings.refundWindowHours)}.`;
     case "rescheduled":
       return "No refund is due, because this booking was made with a reschedule code.";
     case "nothing_paid":
@@ -284,6 +303,33 @@ async function recordRefunds(
 
 // ── Cancelling ───────────────────────────────────────────────────────────────
 
+/**
+ * Give back the code a cancelled booking was made with. Returns whether a
+ * code was given back.
+ *
+ * A discount code gets its use back. A code for an amount gets the amount
+ * back when the studio gave it out, or when it is the studio that cancels. A
+ * customer who cancels a booking made with a reschedule credit gets nothing
+ * back: a moved booking cannot be refunded, which they are told before moving.
+ */
+async function giveCodeBack(tx: DbLike, booking: BookingRow, cancelledBy: "customer" | "studio"): Promise<boolean> {
+  if (!booking.promoCodeId || booking.promoDiscountCents <= 0) return false;
+  if (booking.creditAppliedCents === 0) {
+    await restorePromo(tx, booking.promoCodeId, "percent", 0);
+    return true;
+  }
+  const [code] = await tx
+    .select({ source: promoCodes.source })
+    .from(promoCodes)
+    .where(eq(promoCodes.id, booking.promoCodeId))
+    .limit(1);
+  if (!code || (cancelledBy === "customer" && code.source !== "manual")) return false;
+  await restorePromo(tx, booking.promoCodeId, "amount", booking.creditAppliedCents);
+  return true;
+}
+
+const CODE_BACK = "The code you used for this booking can be used again.";
+
 export type CancelResult =
   | {
       ok: true;
@@ -314,13 +360,10 @@ export async function cancelBooking(db: Db, ref: string, actor: Actor, deps: Man
       .where(eq(bookings.id, booking.id));
     await tx.update(studioHolds).set({ active: false }).where(eq(studioHolds.bookingId, booking.id));
 
-    // A discount code that was used on this booking becomes usable again.
-    if (booking.promoCodeId && booking.creditAppliedCents === 0 && booking.promoDiscountCents > 0) {
-      await restorePromo(tx, booking.promoCodeId, "percent", 0);
-    }
+    const codeBack = await giveCodeBack(tx, booking, actor.kind === "owner" ? "studio" : "customer");
 
     const refundIds = await recordRefunds(tx, booking.id, decision.refundCents, `Cancellation of ${booking.ref}`, true);
-    const message = cancelOutcomeText(decision, settings);
+    const message = `${cancelOutcomeText(decision, settings)}${codeBack ? ` ${CODE_BACK}` : ""}`;
     await queueEmail(
       tx,
       cancellationEmail({
@@ -361,8 +404,8 @@ export type RescheduleResult =
   | { ok: false; status: number; code: "not_found" | RescheduleBlock; message: string };
 
 /**
- * Release a booking and turn what was paid for it into a single-customer
- * credit code, emailed at once. The customer books the new time through the
+ * Release a booking and turn what was paid for it, plus what a discount code
+ * took off it, into a single-customer credit code, emailed at once. The customer books the new time through the
  * normal booking screen and enters the code at checkout.
  */
 export async function requestRescheduleCode(db: Db, ref: string, actor: Actor, deps: ManageDeps): Promise<RescheduleResult> {
@@ -404,6 +447,7 @@ export async function requestRescheduleCode(db: Db, ref: string, actor: Actor, d
         ref: booking.ref,
         code: issued.code,
         valueCents: decision.creditCents,
+        discountCents: decision.discountCents,
         expires: formatInstant(expiresAt),
         bookUrl: `${deps.baseUrl.replace(/\/$/, "")}/book`,
       }),
@@ -452,6 +496,9 @@ export async function ownerCancelBooking(
       .where(eq(bookings.id, booking.id));
     await tx.update(studioHolds).set({ active: false }).where(eq(studioHolds.bookingId, booking.id));
     const refundIds = await recordRefunds(tx, booking.id, input.refundCents, `Cancelled by the studio: ${booking.ref}`, false);
+    // A visit that has not started was taken from the customer, so the code that paid for it goes back to them.
+    // After the start the code has done its work: a later cancellation is the owner settling a refund.
+    const codeBack = deps.now.getTime() < booking.startAt.getTime() && (await giveCodeBack(tx, booking, "studio"));
     await queueEmail(
       tx,
       cancellationEmail({
@@ -461,7 +508,7 @@ export async function ownerCancelBooking(
         when: formatInstant(booking.startAt),
         refundCents: input.refundCents,
         feeCents: 0,
-        note: "The studio cancelled this booking. Please contact us with any questions.",
+        note: `The studio cancelled this booking.${codeBack ? ` ${CODE_BACK}` : ""} Please contact us with any questions.`,
       }),
     );
     return { kind: "done" as const, refundIds };

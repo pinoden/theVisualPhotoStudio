@@ -44,6 +44,30 @@ describe("a message from the contact page", () => {
     expect(row.subject).not.toMatch(/[\r\n]/);
   });
 
+  it("counts a line break once, as the message box does, though the browser sends it as two characters", async () => {
+    // What the box holds at its limit: 3,901 letters and 99 line breaks. The browser sends 4,099 characters.
+    const typed = Array.from({ length: 100 }, () => "x".repeat(39)).join("\n") + "y";
+    expect(typed).toHaveLength(CONTACT_LIMITS.message);
+    const sent = typed.replaceAll("\n", "\r\n");
+    expect(await sendContactMessage(world.db, { ...MESSAGE, message: sent }, TO_OWNER)).toEqual({ ok: true });
+    expect((await queued())[0].body).toContain(typed);
+
+    // One character more than the box holds is still refused.
+    expect(await sendContactMessage(world.db, { ...MESSAGE, message: `${sent}z` }, TO_OWNER)).toMatchObject({
+      ok: false,
+      code: "invalid",
+    });
+    expect(await queued()).toHaveLength(1);
+  });
+
+  it("drops a character the database cannot store instead of failing", async () => {
+    const result = await sendContactMessage(world.db, { ...MESSAGE, name: "Jane\u0000 Smith", message: "Hello\u0000 there" }, TO_OWNER);
+    expect(result).toEqual({ ok: true });
+    const [row] = await queued();
+    expect(row.subject).toBe("Website message from Jane Smith: Photography session");
+    expect(row.body).toContain("Hello there");
+  });
+
   it("is refused, and nothing is queued, when a field is missing or wrong", async () => {
     const result = await sendContactMessage(
       world.db,

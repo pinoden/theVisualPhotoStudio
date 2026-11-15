@@ -12,7 +12,15 @@ const START = new Date("2026-12-10T15:00:00Z");
 const hoursBefore = (hours: number) => new Date(START.getTime() - hours * 3_600_000);
 
 function booking(overrides: Partial<BookingFacts> = {}): BookingFacts {
-  return { status: "confirmed", startAt: START, rescheduledCount: 0, cardPaidCents: 17600, creditAppliedCents: 0, ...overrides };
+  return {
+    status: "confirmed",
+    startAt: START,
+    rescheduledCount: 0,
+    cardPaidCents: 17600,
+    creditAppliedCents: 0,
+    discountCents: 0,
+    ...overrides,
+  };
 }
 
 describe("cancelling", () => {
@@ -77,10 +85,28 @@ describe("cancelling", () => {
 
 describe("moving a booking", () => {
   it("turns everything paid into credit, including credit already used on it", () => {
-    expect(rescheduleOutcome(booking(), hoursBefore(48), settings)).toEqual({ allowed: true, creditCents: 17600 });
+    expect(rescheduleOutcome(booking(), hoursBefore(48), settings)).toEqual({
+      allowed: true,
+      creditCents: 17600,
+      discountCents: 0,
+    });
     expect(
       rescheduleOutcome(booking({ cardPaidCents: 2000, creditAppliedCents: 15600 }), hoursBefore(48), { ...settings, maxReschedules: 2 }),
-    ).toEqual({ allowed: true, creditCents: 17600 });
+    ).toEqual({ allowed: true, creditCents: 17600, discountCents: 0 });
+  });
+
+  it("adds what a discount code took off, so the same booking at a new time costs nothing more", () => {
+    // A $176 booking made with a 10% code: $158.40 was paid, and the code is used up.
+    expect(rescheduleOutcome(booking({ cardPaidCents: 15840, discountCents: 1760 }), hoursBefore(48), settings)).toEqual({
+      allowed: true,
+      creditCents: 17600,
+      discountCents: 1760,
+    });
+    // A booking that a code made free is cancelled instead, which gives the code back.
+    expect(rescheduleOutcome(booking({ cardPaidCents: 0, discountCents: 17600 }), hoursBefore(48), settings)).toEqual({
+      allowed: false,
+      reason: "nothing_paid",
+    });
   });
 
   it("is allowed inside the refund window, which is when it matters most", () => {
@@ -101,9 +127,12 @@ describe("moving a booking", () => {
     expect(rescheduleOutcome(booking({ rescheduledCount: 1 }), hoursBefore(48), { ...settings, maxReschedules: 2 })).toMatchObject({
       allowed: true,
     });
+  });
+
+  it("says moving is not offered, not that the booking was already moved, when the owner switched it off", () => {
     expect(rescheduleOutcome(booking(), hoursBefore(48), { ...settings, maxReschedules: 0 })).toEqual({
       allowed: false,
-      reason: "limit_reached",
+      reason: "not_offered",
     });
   });
 

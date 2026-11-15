@@ -1,12 +1,45 @@
 /** Reading what people type into forms. Each returns null for anything it does not understand. */
 
-/** "88", "88.5", "$1,500.00" -> cents. Never uses floating point. */
+/**
+ * "88", "88.5", "$1,500.00" -> cents. Never uses floating point.
+ *
+ * A comma is accepted only where it separates thousands. "12,50" is how much
+ * of the world writes twelve and a half; reading it as 1250 would save a price
+ * a hundred times too high, so it is not understood at all.
+ */
 export function dollarsToCents(raw: unknown): number | null {
   if (typeof raw !== "string") return null;
-  const text = raw.trim().replace(/^\$/, "").replace(/,/g, "");
-  const match = /^(\d{1,7})(?:\.(\d{1,2}))?$/.exec(text);
+  const match = DOLLARS.exec(raw);
   if (!match) return null;
-  return Number(match[1]) * 100 + Number((match[2] ?? "").padEnd(2, "0"));
+  return Number(match[1].replace(/,/g, "")) * 100 + Number((match[2] ?? "").slice(1).padEnd(2, "0"));
+}
+
+/** What `dollarsToCents` understands, as a pattern. Up to 9,999,999.99. */
+export const DOLLARS_PATTERN = String.raw`\s*\$?(\d{1,7}|\d{1,3},\d{3}|\d,\d{3},\d{3})(\.\d{1,2})?\s*`;
+const DOLLARS = new RegExp(`^${DOLLARS_PATTERN}$`);
+
+/**
+ * Attributes for a money field. The browser checks the same pattern before
+ * the form is sent, so a mistyped amount is pointed out with everything else
+ * on the form still as it was typed.
+ */
+export const MONEY_FIELD = {
+  inputMode: "decimal",
+  pattern: DOLLARS_PATTERN,
+  title: "An amount in dollars, for example 40 or 40.50",
+} as const;
+
+/**
+ * Text from a form field or a request, ready to measure and store.
+ *
+ * A browser sends each line break as two characters (CR LF) while a field's
+ * `maxlength` counts it as one, so line breaks are made single here: otherwise
+ * text the field accepted would be refused as too long. A NUL character, which
+ * PostgreSQL cannot store, is dropped. Anything that is not text becomes "".
+ */
+export function formText(raw: unknown): string {
+  if (typeof raw !== "string") return "";
+  return raw.replaceAll("\u0000", "").replace(/\r\n?/g, "\n").trim();
 }
 
 /** 8800 -> "88", 8850 -> "88.50". For pre-filling money inputs. */

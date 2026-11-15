@@ -146,8 +146,8 @@ async function DaySheet({ searchParams }: Pick<PageProps<"/staff">, "searchParam
                       )}
                     </td>
                     <td>
-                      {entry.addons.map((addon) => (
-                        <div key={addon.name}>
+                      {entry.addons.map((addon, index) => (
+                        <div key={index}>
                           {addon.name}
                           {addon.quantity > 1 ? ` × ${addon.quantity}` : ""}
                         </div>

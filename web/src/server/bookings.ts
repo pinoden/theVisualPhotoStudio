@@ -13,6 +13,8 @@ import {
 } from "@/db/client";
 import { isStartFree } from "@/lib/domain/availability";
 import { formatCents, PricingError, quote, type Quote } from "@/lib/domain/pricing";
+import { formText } from "@/lib/parse";
+import { count } from "@/lib/words";
 import { durationLabel, isIsoDate } from "@/lib/domain/time";
 import { loadDayAvailability, releaseExpiredHolds } from "./availability";
 import { dayTypeFor, loadCatalog } from "./catalog";
@@ -23,6 +25,8 @@ import { loadAccessInstructions } from "./settings";
 import { formatInstant, localToUtc } from "./tz";
 
 const emailField = z.string().trim().toLowerCase().max(200).pipe(z.email());
+/** Text a person typed: trimmed, line breaks made single, and without the NUL character the database refuses. */
+const textField = (min: number, max: number) => z.string().transform(formText).pipe(z.string().min(min).max(max));
 const addonsField = z
   .array(z.object({ addonId: z.uuid(), quantity: z.number().int().min(1).max(20) }))
   .max(20)
@@ -34,14 +38,14 @@ export const bookingInput = z.object({
   startMinute: z.number().int().min(0).max(1439),
   durationMinutes: z.number().int().positive().max(1440),
   customer: z.object({
-    name: z.string().trim().min(2).max(120),
+    name: textField(2, 120),
     email: emailField,
-    phone: z.string().trim().min(7).max(40),
+    phone: textField(7, 40),
   }),
-  notes: z.string().trim().max(2000).default(""),
+  notes: textField(0, 2000).default(""),
   addons: addonsField,
   /** A loyalty or reschedule code. */
-  promoCode: z.string().trim().max(40).optional(),
+  promoCode: textField(0, 40).optional(),
   acceptTerms: z.literal(true),
   paymentToken: z.string().min(1).max(1000).optional(),
   /** The total the customer was shown. A mismatch stops the booking before any charge. */
@@ -108,7 +112,7 @@ export const quoteInput = z.object({
   date: z.string().max(10),
   durationMinutes: z.number().int().positive().max(1440),
   addons: addonsField,
-  promoCode: z.string().trim().max(40).optional(),
+  promoCode: textField(0, 40).optional(),
   email: emailField.optional(),
 });
 
@@ -186,7 +190,7 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
     const text = {
       invalid_date: "That date is not valid.",
       past: "That date has already passed.",
-      too_far: `Bookings open ${catalog.settings.maxAdvanceDays} days ahead.`,
+      too_far: `Bookings open ${count(catalog.settings.maxAdvanceDays, "day")} ahead.`,
     }[day.problem];
     return fail(400, "not_bookable_date", text);
   }
@@ -469,6 +473,17 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[]): Promise<Bo
     totalCents: booking.totalCents,
     rescheduledCount: booking.rescheduledCount,
   }));
+}
+
+/**
+ * True for a confirmed booking whose time has not ended. Only then is its
+ * holder told how to get into the building. The end time is part of the test
+ * because a booking stays "confirmed" after the visit until the scheduled task
+ * marks it completed: without it, an earlier visitor's link would go on
+ * showing the text, including a door code set after their visit.
+ */
+export function isUpcomingVisit(booking: Pick<BookingView, "status" | "endAt">, now: Date): boolean {
+  return booking.status === "confirmed" && now.getTime() < new Date(booking.endAt).getTime();
 }
 
 /** True when `token` is the secret from this booking's manage link. */

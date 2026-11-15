@@ -60,7 +60,7 @@ const fields = (addon: AdminAddon) => ({
   name: addon.name,
   description: addon.description,
   priceCents: addon.priceCents,
-  maxQuantity: addon.maxQuantity,
+  kind: addon.kind,
   studioId: addon.studioId,
 });
 const petFee = async () => (await listAddons(world.db)).find((addon) => addon.slug === "pet-fee")!;
@@ -87,7 +87,7 @@ describe("what the owner can change about add-ons", () => {
       name: "Steamer rental",
       description: "A garment steamer for the session.",
       priceCents: 1500,
-      maxQuantity: 2,
+      kind: "other",
       studioId: null,
     });
     const second = await saveAddon(world.db, null, { ...fields(await petFee()), studioId: null });
@@ -98,7 +98,26 @@ describe("what the owner can change about add-ons", () => {
     expect(await offered()).toContain("steamer-rental");
   });
 
-  it("is refused without a name, with a bad price or quantity, or for an unknown studio or add-on", async () => {
+  it("starts with what each of the first add-ons is for, and lets the owner say it for any other", async () => {
+    expect((await listAddons(world.db)).map((addon) => [addon.slug, addon.kind])).toEqual([
+      ["extra-people-1-2", "people"],
+      ["extra-people-3-5", "people"],
+      ["pet-fee", "pet"],
+    ]);
+    const dogs = await saveAddon(world.db, null, {
+      name: "Dog visit",
+      description: "",
+      priceCents: 2500,
+      kind: "pet",
+      studioId: world.ids.paris,
+    });
+    expect(dogs.ok).toBe(true);
+    // The guest information page reads the kind from the catalog, whatever the add-on is called.
+    const inCatalog = (await loadCatalog(world.db)).addons.find((addon) => addon.slug === "dog-visit")!;
+    expect(inCatalog).toMatchObject({ kind: "pet", studioId: world.ids.paris, maxQuantity: 1 });
+  });
+
+  it("is refused without a name, with a bad price or kind, or for an unknown studio or add-on", async () => {
     const pet = await petFee();
     const good = fields(pet);
     expect(await saveAddon(world.db, pet.id, { ...good, name: "   " })).toMatchObject({ ok: false });
@@ -106,7 +125,10 @@ describe("what the owner can change about add-ons", () => {
     expect(await saveAddon(world.db, pet.id, { ...good, description: "x".repeat(301) })).toMatchObject({ ok: false });
     expect(await saveAddon(world.db, pet.id, { ...good, priceCents: -1 })).toMatchObject({ ok: false });
     expect(await saveAddon(world.db, pet.id, { ...good, priceCents: 40.5 })).toMatchObject({ ok: false });
-    expect(await saveAddon(world.db, pet.id, { ...good, maxQuantity: 0 })).toMatchObject({ ok: false });
+    expect(await saveAddon(world.db, pet.id, { ...good, kind: "gift" as never })).toEqual({
+      ok: false,
+      message: "Choose what the add-on is for.",
+    });
     expect(await saveAddon(world.db, pet.id, { ...good, studioId: "not-a-studio" })).toEqual({ ok: false, message: "Unknown studio." });
     expect(await saveAddon(world.db, "not-an-add-on", good)).toEqual({ ok: false, message: "Unknown add-on." });
     expect(await saveAddon(world.db, "00000000-0000-4000-8000-000000000000", good)).toEqual({

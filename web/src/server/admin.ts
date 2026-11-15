@@ -15,6 +15,7 @@ import {
   users,
 } from "@/db/schema";
 import { PG_EXCLUSION_VIOLATION, pgErrorCode, queryRows, type Db, type DbLike } from "@/db/client";
+import { isAddonKind, type AddonKind } from "@/lib/addon-kinds";
 import { isIsoDate, type DayType, type IsoDate } from "@/lib/domain/time";
 import { deleteAllSessions, normalizeEmail } from "./auth";
 import { toBookingViews, type BookingView } from "./bookings";
@@ -478,8 +479,8 @@ export interface AddonInput {
   name: string;
   description: string;
   priceCents: number;
-  /** The most of this add-on one booking can have. */
-  maxQuantity: number;
+  /** What it is for: see ADDON_KINDS. */
+  kind: AddonKind;
   /** null = any booking; otherwise only bookings that include this studio. */
   studioId: string | null;
 }
@@ -500,7 +501,7 @@ export async function listAddons(db: DbLike): Promise<AdminAddon[]> {
     name: row.name,
     description: row.description,
     priceCents: row.priceCents,
-    maxQuantity: row.maxQuantity,
+    kind: row.kind,
     studioId: row.studioId,
     active: row.active,
   }));
@@ -511,6 +512,10 @@ export type SaveAddonResult = { ok: true; id: string } | { ok: false; message: s
 /**
  * Change an add-on, or create one when `addonId` is null. Bookings already
  * made keep the name and price they were made with.
+ *
+ * An add-on is taken once per booking: the booking screen offers a tick box,
+ * not a quantity, so the table's `max_quantity` stays at its default of 1 and
+ * is not something the owner sets.
  */
 export async function saveAddon(db: DbLike, addonId: string | null, input: AddonInput): Promise<SaveAddonResult> {
   const name = input.name.replace(/\s+/g, " ").trim();
@@ -520,16 +525,14 @@ export async function saveAddon(db: DbLike, addonId: string | null, input: Addon
   if (!Number.isInteger(input.priceCents) || input.priceCents < 0 || input.priceCents > 10_000_000) {
     return { ok: false, message: "Enter the price as an amount, for example 40 or 40.50." };
   }
-  if (!Number.isInteger(input.maxQuantity) || input.maxQuantity < 1 || input.maxQuantity > 50) {
-    return { ok: false, message: "The most per booking must be between 1 and 50." };
-  }
+  if (!isAddonKind(input.kind)) return { ok: false, message: "Choose what the add-on is for." };
   if (input.studioId !== null) {
     const [studio] = UUID.test(input.studioId)
       ? await db.select({ id: studios.id }).from(studios).where(eq(studios.id, input.studioId)).limit(1)
       : [];
     if (!studio) return { ok: false, message: "Unknown studio." };
   }
-  const values = { name, description, priceCents: input.priceCents, maxQuantity: input.maxQuantity, studioId: input.studioId };
+  const values = { name, description, priceCents: input.priceCents, kind: input.kind, studioId: input.studioId };
 
   if (addonId !== null) {
     const updated = UUID.test(addonId)

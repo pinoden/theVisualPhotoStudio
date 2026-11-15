@@ -74,8 +74,8 @@ async function SettingsForm({ searchParams }: Pick<PageProps<"/admin/settings">,
         />
         <div style={{ fontSize: ".78rem", margin: ".25rem 0 1rem" }}>
           For example the code for the building door and the floor. Customers with a confirmed booking get it in
-          their confirmation email and see it on their booking page. It is never shown on a public page. Leave it
-          empty to send nothing.
+          their confirmation email and see it on their booking page until their visit ends. It is never shown on a
+          public page. Leave it empty to send nothing.
         </div>
         <button type="submit" className="btn btn-dark btn-small">
           Save getting-in text

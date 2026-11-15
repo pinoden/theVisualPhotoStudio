@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { multiStudioOffer } from "@/lib/catalog-view";
 import { formatCents } from "@/lib/domain/pricing";
 import { SITE } from "@/lib/site";
+import { count, listInWords as list } from "@/lib/words";
 import { getCatalog } from "@/server/cached";
 
 export const metadata: Metadata = { title: "Guest Information" };
@@ -16,30 +17,39 @@ interface Question {
 /** "7 days (168 hours)" for whole days from two up, otherwise "36 hours". */
 function span(hours: number): string {
   if (hours >= 48 && hours % 24 === 0) return `${hours / 24} days (${hours} hours)`;
-  return `${hours} ${hours === 1 ? "hour" : "hours"}`;
+  return count(hours, "hour");
 }
-
-const list = (names: string[]) =>
-  names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
 
 /**
  * Answers to what guests ask before a visit, following the studio's guest
  * information. Every number that is a setting or a price (refund window and
  * fee, notice, how often and how late a booking can move, discounts, the
  * loyalty reward, the pet fee, included guests) is read from the catalog, so
- * this page follows what the owner changes in the admin. The house rules are
- * written by hand here and on the policies page: change both together.
+ * this page follows what the owner changes in the admin. Whether larger
+ * groups and pets can be booked follows the add-ons on offer, by what the
+ * owner says each one is for (its kind), never by its name. The house rules
+ * are written by hand here and on the policies page: change both together.
  */
 export default async function FaqPage() {
   const catalog = await getCatalog();
   const s = catalog.settings;
   const offer = multiStudioOffer(catalog);
 
-  // The pet fee is the add-on with this slug; pets are welcome in the studio it belongs to.
-  const petFee = catalog.addons.find((addon) => addon.slug === "pet-fee");
-  const petStudio = petFee?.studioId ? catalog.studios.find((studio) => studio.id === petFee.studioId) : undefined;
-  const otherStudios = catalog.studios.filter((studio) => studio.id !== petStudio?.id).map((studio) => studio.name);
-  const extraPeople = catalog.addons.some((addon) => /extra/i.test(addon.name));
+  // Pets are welcome wherever a pet add-on can be booked: in one studio, in several, or in all of them.
+  const petAddons = catalog.addons.filter((addon) => addon.kind === "pet");
+  const petsAnywhere = petAddons.some((addon) => addon.studioId === null);
+  const petStudios = catalog.studios.filter(
+    (studio) => petsAnywhere || petAddons.some((addon) => addon.studioId === studio.id),
+  );
+  const petFreeStudios = catalog.studios.filter((studio) => !petStudios.includes(studio)).map((studio) => studio.name);
+  /** The fee for each studio that takes pets: its own add-on if it has one, else the one for any booking. */
+  const petFees = petStudios.map((studio) => ({
+    studio: studio.name,
+    cents: (petAddons.find((addon) => addon.studioId === studio.id) ?? petAddons.find((addon) => addon.studioId === null))!
+      .priceCents,
+  }));
+  const onePetFee = petFees.every((fee) => fee.cents === petFees[0].cents);
+  const extraPeople = catalog.addons.some((addon) => addon.kind === "people");
 
   const visit: Question[] = [
     {
@@ -86,29 +96,31 @@ export default async function FaqPage() {
         </p>
       ),
     },
-    ...(petFee && petStudio
+    ...(petStudios.length > 0
       ? [
           {
             q: "Can I bring my pet?",
             a: (
               <>
                 <p>
-                  Pets are welcome in {petStudio.name} only.{" "}
-                  {otherStudios.length > 0 && `${list(otherStudios)} and all common areas are pet-free.`}
+                  {petFreeStudios.length === 0
+                    ? "Pets are welcome in every studio. The common areas are pet-free."
+                    : `Pets are welcome in ${list(petStudios.map((studio) => studio.name))} only. ${list([...petFreeStudios, "all common areas"])} are pet-free.`}
                 </p>
                 <ul>
                   <li>A maximum of 2 pets per reservation, up to 70 lbs each.</li>
                   <li>
-                    A {formatCents(petFee.priceCents)} pet fee applies per reservation and must be added when you
-                    book.
+                    {onePetFee
+                      ? `A ${formatCents(petFees[0].cents)} pet fee applies per reservation and must be added when you book.`
+                      : `A pet fee applies per reservation and must be added when you book: ${list(petFees.map((fee) => `${formatCents(fee.cents)} for ${fee.studio}`))}.`}
                   </li>
                   <li>
                     Pets stay on a leash or in a carrier when they are not being photographed, and may not be left
                     unattended.
                   </li>
                   <li>
-                    Bring pets directly into {petStudio.name}. They are not permitted in the reception area, the
-                    shared prep areas or the other studios.
+                    Bring pets directly into the studio you booked. They are not permitted in the reception area
+                    {petFreeStudios.length > 0 ? ", the shared prep areas or the other studios." : " or the shared prep areas."}
                   </li>
                   <li>
                     Owners clean up after their pets and are responsible for any damage or extra cleaning. The pet
@@ -150,7 +162,10 @@ export default async function FaqPage() {
         <p>
           Click <Link href="/book">Book Now</Link> and choose your studio, date and time, or start from the date to
           see which studios are free. After you fill in your details and pay, you receive a confirmation email.
-          Bookings open {s.maxAdvanceDays} days ahead and close {span(s.minLeadHours)} before the start time.
+          Bookings open {count(s.maxAdvanceDays, "day")} ahead
+          {s.minLeadHours > 0
+            ? ` and close ${span(s.minLeadHours)} before the start time.`
+            : " and can be made right up to the start time."}
         </p>
       ),
     },
@@ -178,14 +193,18 @@ export default async function FaqPage() {
       a: (
         <ul>
           <li>
-            Cancel {span(s.refundWindowHours)} or more before your start time and your payment is refunded to your
-            card automatically
+            {s.refundWindowHours > 0
+              ? `Cancel ${span(s.refundWindowHours)} or more before your start time`
+              : "Cancel at any time before your start time"}{" "}
+            and your payment is refunded to your card automatically
             {s.refundFeePercent > 0 && `, less the ${s.refundFeePercent}% payment processing fee`}.
           </li>
-          <li>
-            Closer to the start than that, a cancellation is not refunded
-            {s.maxReschedules > 0 && ". You can move the booking instead: see the next question"}.
-          </li>
+          {s.refundWindowHours > 0 && (
+            <li>
+              Closer to the start than that, a cancellation is not refunded
+              {s.maxReschedules > 0 && ". You can move the booking instead: see the next question"}.
+            </li>
+          )}
           <li>A booking that has been moved can no longer be refunded.</li>
           <li>Cancel from the link in your confirmation email, or from My Bookings.</li>
         </ul>
@@ -197,11 +216,13 @@ export default async function FaqPage() {
             q: "Can I move my booking to another time?",
             a: (
               <p>
-                Yes, {s.maxReschedules === 1 ? "once" : `up to ${s.maxReschedules} times`}, until{" "}
-                {span(s.rescheduleCutoffHours)} before it starts. Press Reschedule on your booking page or in My
-                Bookings. We release your time and email you a code worth what you paid. Book the new time and
-                enter the code at checkout: if the new booking costs more you pay the difference, and if it costs
-                less the rest stays on the code. The code is valid for {s.creditValidDays} days.
+                Yes, {s.maxReschedules === 1 ? "once" : `up to ${s.maxReschedules} times`},{" "}
+                {s.rescheduleCutoffHours > 0 ? `until ${span(s.rescheduleCutoffHours)} before it starts` : "until it starts"}.
+                Press Reschedule on your booking page or in My Bookings. We release your time and email you a code
+                worth what you paid, plus anything a discount code took off that booking, so the same booking at a
+                new time costs nothing more. Book the new time and enter the code at checkout: if the new booking
+                costs more you pay the difference, and if it costs less the rest stays on the code. The code is
+                valid for {count(s.creditValidDays, "day")}.
               </p>
             ),
           },
@@ -223,7 +244,7 @@ export default async function FaqPage() {
             a: (
               <p>
                 Yes. After your visit we email you a code for {s.loyaltyPercent}% off the studio rental of your next
-                booking. It is valid for {s.loyaltyValidDays} days.
+                booking. It is valid for {count(s.loyaltyValidDays, "day")}.
               </p>
             ),
           },

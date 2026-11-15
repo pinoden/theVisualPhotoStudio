@@ -3,7 +3,8 @@
 import { updateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import { getDb } from "@/db/client";
-import { dollarsToCents, hhmmToMinutes, intInRange } from "@/lib/parse";
+import { isAddonKind } from "@/lib/addon-kinds";
+import { dollarsToCents, formText, hhmmToMinutes, intInRange } from "@/lib/parse";
 import { formatCents } from "@/lib/domain/pricing";
 import {
   addStaff,
@@ -39,10 +40,7 @@ function failed(path: string, error: string): never {
   redirect(`${path}${path.includes("?") ? "&" : "?"}error=${encodeURIComponent(error)}`);
 }
 
-const text = (formData: FormData, name: string) => {
-  const value = formData.get(name);
-  return typeof value === "string" ? value.trim() : "";
-};
+const text = (formData: FormData, name: string) => formText(formData.get(name));
 
 /** Where to return after a bookings action. Only the bookings list itself is accepted. */
 function bookingsBack(formData: FormData): string {
@@ -285,11 +283,17 @@ export async function saveSettingsAction(formData: FormData): Promise<void> {
 
 export async function saveAccessInstructionsAction(formData: FormData): Promise<void> {
   await requireOwner("/admin/settings");
-  if (!(await saveAccessInstructions(await getDb(), text(formData, "accessInstructions")))) {
+  const instructions = text(formData, "accessInstructions");
+  if (!(await saveAccessInstructions(await getDb(), instructions))) {
     failed("/admin/settings", `Not saved: the text is longer than ${ACCESS_INSTRUCTIONS_MAX} characters.`);
   }
   updateTag(CATALOG_TAG); // the guest information page says whether this is sent
-  done("/admin/settings", "Saved. New confirmation emails and every confirmed booking's page now show it.");
+  done(
+    "/admin/settings",
+    instructions === ""
+      ? "Saved. No getting-in text is sent or shown any more."
+      : "Saved. New confirmation emails and the page of every confirmed booking that has not ended now show it.",
+  );
 }
 
 // ── Studios and add-ons ──────────────────────────────────────────────────────
@@ -315,15 +319,15 @@ export async function saveStudioDetailsAction(formData: FormData): Promise<void>
 export async function saveAddonAction(formData: FormData): Promise<void> {
   await requireOwner("/admin/studios");
   const priceCents = dollarsToCents(text(formData, "price"));
-  const maxQuantity = intInRange(text(formData, "maxQuantity"), 1, 50);
+  const kind = text(formData, "kind");
   if (priceCents === null) failed("/admin/studios", "Enter the price as an amount, for example 40 or 40.50.");
-  if (maxQuantity === null) failed("/admin/studios", "The most per booking must be between 1 and 50.");
+  if (!isAddonKind(kind)) failed("/admin/studios", "Choose what the add-on is for.");
   const addonId = text(formData, "addonId") || null;
   const result = await saveAddon(await getDb(), addonId, {
     name: text(formData, "name"),
     description: text(formData, "description"),
     priceCents,
-    maxQuantity,
+    kind,
     studioId: text(formData, "studioId") || null,
   });
   if (!result.ok) failed("/admin/studios", result.message);

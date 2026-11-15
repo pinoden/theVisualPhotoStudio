@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import { connection } from "next/server";
 import { Suspense } from "react";
 import { getDb } from "@/db/client";
-import { centsToInput } from "@/lib/parse";
+import { ADDON_KINDS } from "@/lib/addon-kinds";
+import { centsToInput, MONEY_FIELD } from "@/lib/parse";
 import { listAddons, type AdminAddon } from "@/server/admin";
 import { loadCatalog, type CatalogStudio } from "@/server/catalog";
 import { requireOwner } from "@/server/session";
@@ -52,23 +53,22 @@ function AddonFields({ id, addon, studios }: { id: string; addon?: AdminAddon; s
             id={`addon-${id}-price`}
             name="price"
             className="form-control price-input"
-            inputMode="decimal"
+            {...MONEY_FIELD}
             defaultValue={addon ? centsToInput(addon.priceCents) : ""}
             required
           />
         </div>
         <div className="form-group">
-          <label className="form-label" htmlFor={`addon-${id}-max`}>
-            Most per booking
+          <label className="form-label" htmlFor={`addon-${id}-kind`}>
+            What it is for
           </label>
-          <input
-            id={`addon-${id}-max`}
-            name="maxQuantity"
-            className="form-control price-input"
-            inputMode="numeric"
-            defaultValue={addon?.maxQuantity ?? 1}
-            required
-          />
+          <select id={`addon-${id}-kind`} name="kind" className="form-control" defaultValue={addon?.kind ?? "other"}>
+            {Object.entries(ADDON_KINDS).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
         </div>
         <div className="form-group">
           <label className="form-label" htmlFor={`addon-${id}-studio`}>
@@ -146,7 +146,10 @@ async function StudiosAndAddons({ searchParams }: Pick<PageProps<"/admin/studios
                 id={`studio-${studio.slug}-guests`}
                 name="includedGuests"
                 className="form-control price-input"
-                inputMode="numeric"
+                type="number"
+                min={1}
+                max={100}
+                step={1}
                 defaultValue={studio.includedGuests}
                 required
               />
@@ -159,7 +162,10 @@ async function StudiosAndAddons({ searchParams }: Pick<PageProps<"/admin/studios
                 id={`studio-${studio.slug}-buffer`}
                 name="bufferMinutes"
                 className="form-control price-input"
-                inputMode="numeric"
+                type="number"
+                min={0}
+                max={240}
+                step={1}
                 defaultValue={studio.bufferMinutes}
                 required
               />
@@ -178,8 +184,9 @@ async function StudiosAndAddons({ searchParams }: Pick<PageProps<"/admin/studios
       <div className="admin-card">
         <h3>Add-ons</h3>
         <p style={{ fontSize: ".875rem" }}>
-          Extras a customer can add while booking. A change applies to new bookings; bookings already made keep the
-          name and price they were made with.
+          Extras a customer can add while booking, once per booking. A change applies to new bookings; bookings
+          already made keep the name and price they were made with. The Guest Information page uses &ldquo;What it is
+          for&rdquo; to answer whether larger groups and pets can be booked.
         </p>
         {addons.map((addon) => (
           <form

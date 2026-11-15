@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { isUpcomingVisit } from "./bookings";
 import { loadCatalog } from "./catalog";
 import { MOCK_TOKEN_DECLINED } from "./payments";
 import {
@@ -35,6 +36,19 @@ describe("how to get into the building", () => {
 
     expect(await saveAccessInstructions(world.db, "x".repeat(ACCESS_INSTRUCTIONS_MAX + 1))).toBe(false);
     expect(await loadAccessInstructions(world.db)).toBe("Door code 4821#.\nThird floor.");
+  });
+
+  it("is for a confirmed visit that has not ended: an earlier visitor's link must not show today's door code", () => {
+    const endAt = "2026-11-18T17:00:00.000Z";
+    const at = (iso: string) => new Date(iso);
+    expect(isUpcomingVisit({ status: "confirmed", endAt }, at("2026-11-10T12:00:00Z"))).toBe(true);
+    expect(isUpcomingVisit({ status: "confirmed", endAt }, at("2026-11-18T16:59:59Z"))).toBe(true);
+    // The visit is over, but nothing has marked the booking completed yet.
+    expect(isUpcomingVisit({ status: "confirmed", endAt }, at("2026-11-18T17:00:00Z"))).toBe(false);
+    expect(isUpcomingVisit({ status: "confirmed", endAt }, at("2026-12-25T12:00:00Z"))).toBe(false);
+    for (const status of ["cancelled", "completed", "no_show", "expired", "pending_payment"]) {
+      expect(isUpcomingVisit({ status, endAt }, at("2026-11-10T12:00:00Z"))).toBe(false);
+    }
   });
 
   it("never enters the catalog that goes to every browser: only the fact that it is set does", async () => {

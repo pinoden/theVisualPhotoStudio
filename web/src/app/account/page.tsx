@@ -11,7 +11,6 @@ import { getManageChoices } from "@/server/manage";
 import { listCodesForEmail } from "@/server/promos";
 import { requireUser } from "@/server/session";
 import { formatInstant, formatRange } from "@/server/tz";
-import { signOutAction } from "./actions";
 
 export const metadata: Metadata = { title: "My Account", robots: { index: false } };
 
@@ -66,7 +65,8 @@ async function Account() {
             </>
           )}
         </span>
-        <form action={signOutAction}>
+        {/* A plain post, so the browser loads a new document: see account/sign-out/route.ts. */}
+        <form action="/account/sign-out" method="post">
           <button type="submit" className="btn btn-outline" style={{ padding: ".4rem 1rem", fontSize: ".75rem" }}>
             Sign out
           </button>

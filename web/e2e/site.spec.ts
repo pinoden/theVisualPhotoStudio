@@ -28,6 +28,9 @@ const FAR = dateAhead(10); // refundable
 const LATER = dateAhead(17);
 const SATURDAY = dateAhead(3, "saturday");
 const DOOR_DAY = dateAhead(24); // a day no other test books
+const WITHDRAWN_DAY = dateAhead(31); // likewise, for the add-on withdrawn during checkout
+const MOVE_FROM = dateAhead(38); // and for the discounted booking that is moved
+const MOVE_TO = dateAhead(45);
 
 const jane = { name: "Jane Smith", email: "jane.e2e@example.com", phone: "407-555-0100" };
 const bob = { name: "Bob Brown", email: "bob.e2e@example.com", phone: "407-555-0111" };
@@ -101,6 +104,7 @@ test("guest information answers with the current rules and prices", async ({ pag
   const pets = page.locator("details.faq-item", { hasText: "Can I bring my pet?" });
   await pets.locator("summary").click();
   await expect(pets.locator(".faq-answer")).toContainText("Pets are welcome in Studio Dayglow only.");
+  await expect(pets.locator(".faq-answer")).toContainText("Studio Blanche, Studio Paris and all common areas are pet-free.");
   await expect(pets.locator(".faq-answer")).toContainText("A $40 pet fee applies");
   await shot(page, "02b-guest-information");
 
@@ -141,6 +145,18 @@ test("a visitor's message reaches the owner, who can reply straight to the visit
   // The form can be used again.
   await page.getByRole("button", { name: "Send another message" }).click();
   await expect(byLabel(page, "Your name")).toHaveValue("");
+
+  // A message with paragraphs that fills the box to its limit is accepted whole. The browser sends each
+  // line break as two characters, which once made the server refuse it and cut its end off.
+  const long = "Hello.\n\n".repeat(50) + "x".repeat(3600);
+  expect(long).toHaveLength(4000);
+  await byLabel(page, "Your name").fill("Vera Visitor");
+  await byLabel(page, "Email address").fill("vera.e2e@example.com");
+  await byLabel(page, "Topic").selectOption({ label: "Photography session" });
+  await byLabel(page, "Message").fill(long);
+  await page.getByRole("button", { name: "Send Message" }).click();
+  await expect(page.getByRole("heading", { name: "Message Sent" })).toBeVisible();
+  expect((await latestEmail(page, "contact_message", OWNER)).body).toContain(`${"x".repeat(3600)}`);
 });
 
 test("books two studios together, starting from the studios", async ({ page }) => {
@@ -383,8 +399,12 @@ test("a customer cannot open the staff or owner areas", async ({ page }) => {
   }
   // Signed out, the same pages ask to sign in instead of showing anything.
   await page.goto("/account");
+  await expect(byText(page, bob.email)).toBeVisible();
   await page.getByRole("button", { name: "Sign out" }).click();
   await page.waitForURL((url) => url.pathname === "/");
+  // Signing out loads a new document: nothing of the pages just visited stays behind, not even hidden.
+  await expect(page.getByRole("link", { name: "Book Now" }).first()).toBeVisible();
+  await expect(page.getByText(bob.email)).toHaveCount(0);
   await page.goto("/admin/bookings");
   await page.waitForURL(/\/account\/sign-in\?next=%2Fadmin%2Fbookings/);
   await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
@@ -476,14 +496,26 @@ test("the owner changes an add-on's price and a studio's guest number, and custo
   await signIn(page, SECOND_OWNER, "/admin/studios");
   await expect(page.getByRole("heading", { name: "Studios & add-ons" })).toBeVisible();
 
+  // A decimal comma is pointed out by the browser before anything is sent: it is never saved as $1,250.
+  await onScreen(page.locator("#addon-pet-fee-price")).fill("12,50");
+  await page.getByRole("button", { name: "Save Pet fee" }).click();
+  await expect(onScreen(page.locator("#addon-pet-fee-price:invalid"))).toHaveCount(1);
+  await expect(byText(page, "Add-on saved.")).toHaveCount(0);
+
   await onScreen(page.locator("#addon-pet-fee-price")).fill("45");
   await page.getByRole("button", { name: "Save Pet fee" }).click();
   await expect(byText(page, "Add-on saved.")).toBeVisible();
 
+  // A description of several paragraphs, at the box's limit of 2,000 characters, is saved and keeps its paragraphs.
+  const opening = "A vintage Parisian apartment.\n\nNatural light all day.\n\n";
+  const description = opening + "x".repeat(2000 - opening.length);
+  await onScreen(page.locator("#studio-paris-description")).fill(description);
   await onScreen(page.locator("#studio-paris-guests")).fill("5");
   await page.getByRole("button", { name: "Save Studio Paris" }).click();
   await expect(byText(page, "Studio saved.")).toBeVisible();
   await shot(page, "19-admin-studios");
+  await page.goto("/studios");
+  await expect(page.locator("p", { hasText: "A vintage Parisian apartment." })).toHaveCSS("white-space", "pre-line");
 
   await page.goto("/rates");
   await expect(page.getByRole("row", { name: /Pet fee/ })).toContainText("$45");
@@ -493,12 +525,100 @@ test("the owner changes an add-on's price and a studio's guest number, and custo
   await pets.locator("summary").click();
   await expect(pets.locator(".faq-answer")).toContainText("A $45 pet fee applies");
 
-  // An add-on that is no longer offered disappears for customers, and stays in the admin.
+  // The answer about pets follows what the owner says an add-on is for, whatever it is called.
+  await page.goto("/admin/studios");
+  await onScreen(page.locator("#addon-new-name")).fill("Animal guest");
+  await onScreen(page.locator("#addon-new-price")).fill("30");
+  await onScreen(page.locator("#addon-new-kind")).selectOption({ label: "Bringing a pet" });
+  await onScreen(page.locator("#addon-new-studio")).selectOption({ label: "Studio Paris only" });
+  await page.getByRole("button", { name: "Add add-on" }).click();
+  await expect(byText(page, "Add-on added.")).toBeVisible();
+  await page.goto("/faq");
+  await pets.locator("summary").click();
+  await expect(pets.locator(".faq-answer")).toContainText("Pets are welcome in Studio Dayglow and Studio Paris only.");
+  await expect(pets.locator(".faq-answer")).toContainText("Studio Blanche and all common areas are pet-free.");
+  await expect(pets.locator(".faq-answer")).toContainText("$45 for Studio Dayglow and $30 for Studio Paris");
+
+  // A customer reaches the payment step with the pet fee on their booking...
+  const shop = await page.context().newPage();
+  await shop.goto("/book");
+  await pickStudio(shop, "Studio Dayglow");
+  await next(shop);
+  await byLabel(shop, "Date").fill(WITHDRAWN_DAY);
+  await shop.getByRole("button", { name: "1 hr", exact: true }).click();
+  await next(shop);
+  await shop.getByRole("button", { name: "11:00 AM", exact: true }).click();
+  await next(shop);
+  await fillDetails(shop, bob);
+  await shop.getByRole("checkbox", { name: /Pet fee/ }).check();
+  await agreeToPolicies(shop);
+  await next(shop);
+  await expect(shop.getByRole("button", { name: "Confirm & pay $123" })).toBeVisible();
+
+  // ...when the owner stops offering it. It disappears for customers, and stays in the admin.
   await page.goto("/admin/studios");
   await page.getByRole("button", { name: "Stop offering Pet fee" }).click();
   await expect(byText(page, /The add-on is no longer offered/)).toBeVisible();
   await expect(byText(page, "Not offered at the moment.")).toBeVisible();
+
+  // The customer is told why, sees what is offered now, and books without it: they are not left stuck.
+  await shop.getByRole("button", { name: "Confirm & pay $123" }).click();
+  await expect(onScreen(shop.locator(".flash-error"))).toContainText("An add-on you chose is no longer offered.");
+  await shop.getByRole("button", { name: "Confirm & pay $78" }).click();
+  await shop.waitForURL(/\/booking\/VS-[0-9A-Z]{6}\?t=/);
+  await expect(shop.getByRole("heading", { name: "Booking Confirmed" })).toBeVisible();
+  await expect(totalRow(shop)).toContainText("$78");
+  await shop.close();
   await page.goto("/rates");
   await expect(page.getByRole("heading", { name: "Studio Rates" })).toBeVisible();
   await expect(page.getByRole("row", { name: /Pet fee/ })).toHaveCount(0);
+  await page.goto("/faq");
+  await pets.locator("summary").click();
+  await expect(pets.locator(".faq-answer")).toContainText("Pets are welcome in Studio Paris only.");
+});
+
+test("a booking made with a discount code is moved without paying the discount a second time", async ({ page }) => {
+  // The third and last sign-in code this address may ask for in one run.
+  await signIn(page, SECOND_OWNER, "/admin/codes");
+  await onScreen(page.locator("#code-value")).fill("10");
+  await onScreen(page.locator("#code-email")).fill(bob.email);
+  await page.getByRole("button", { name: "Create", exact: true }).click();
+  const created = byText(page, /Code created: VS-[0-9A-Z]{4}-[0-9A-Z]{4}/);
+  await expect(created).toBeVisible();
+  const discountCode = /VS-[0-9A-Z]{4}-[0-9A-Z]{4}/.exec(await created.innerText())![0];
+
+  // Studio Paris for an hour is $68. The code takes 10% off: $61.20 is paid.
+  await bookStudioFirstToPayment(page, {
+    studios: ["Studio Paris"],
+    date: MOVE_FROM,
+    duration: "1 hr",
+    time: "3:00 PM",
+    customer: bob,
+    code: discountCode,
+  });
+  await expect(totalRow(page)).toContainText("$61.20");
+  await confirmAndGetRef(page, "Confirm & pay $61.20");
+
+  // Moving it gives a code for the whole $68: the discount code is used up and checkout takes one code.
+  await page.getByRole("button", { name: "Reschedule" }).click();
+  await expect(
+    byText(page, /you will get a code worth \$68, valid for 90 days.* That is what you paid plus the \$6\.80 your discount code took off\./),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Yes, release it and send my code" }).click();
+  await expect(byText(page, /Your code is worth \$68 /)).toBeVisible();
+  const moveCode = (await onScreen(page.locator(".notice .booking-ref")).innerText()).trim();
+  expect(moveCode).toMatch(/^MOVE-[0-9A-Z]{4}-[0-9A-Z]{4}$/);
+
+  // The same booking a week later costs nothing more.
+  await bookStudioFirstToPayment(page, {
+    studios: ["Studio Paris"],
+    date: MOVE_TO,
+    duration: "1 hr",
+    time: "3:00 PM",
+    customer: bob,
+    code: moveCode,
+  });
+  await expect(byText(page, "Nothing to pay: your code covers this booking. No card is needed.")).toBeVisible();
+  await expect(totalRow(page)).toContainText("$0");
+  await confirmAndGetRef(page, "Confirm booking");
 });

@@ -3,6 +3,7 @@
 import { headers } from "next/headers";
 import { getDb } from "@/db/client";
 import { CONTACT_LIMITS } from "@/lib/contact";
+import { formText } from "@/lib/parse";
 import { SITE } from "@/lib/site";
 import { sendContactMessage, type ContactField } from "@/server/contact";
 import { RateLimiter } from "@/server/rate-limit";
@@ -23,8 +24,9 @@ const EMPTY = { name: "", email: "", topic: "", message: "" };
 // Five messages in ten minutes from one address. Kept in memory, like the booking limit.
 const limiter = new RateLimiter({ windowMs: 10 * 60_000, maxRequests: 5 });
 
+// Line breaks are made single before the cut, as the box counted them, so nothing the box accepted is lost.
 // One character over the limit is kept so an over-long value is refused, not silently cut.
-const field = (formData: FormData, name: string, limit: number) => String(formData.get(name) ?? "").slice(0, limit + 1);
+const field = (formData: FormData, name: string, limit: number) => formText(formData.get(name)).slice(0, limit + 1);
 
 export async function sendMessageAction(previous: ContactState, formData: FormData): Promise<ContactState> {
   const attempt = previous.attempt + 1;

@@ -231,9 +231,15 @@ export function rescheduleCodeEmail(input: {
   ref: string;
   code: string;
   valueCents: number;
+  /** The part of the value that is a discount the customer's code gave, not money paid. */
+  discountCents?: number;
   expires: string;
   bookUrl: string;
 }): QueuedEmail {
+  const credit =
+    (input.discountCents ?? 0) > 0
+      ? `Your booking ${input.ref} has been released. What you paid, plus the ${money(input.discountCents!)} your discount code took off, is now a credit of ${money(input.valueCents)}.`
+      : `Your booking ${input.ref} has been released, and what you paid is now a credit of ${money(input.valueCents)}.`;
   return {
     to: input.to,
     kind: "reschedule_code",
@@ -241,7 +247,7 @@ export function rescheduleCodeEmail(input: {
     body: [
       `Hi ${input.name},`,
       "",
-      `Your booking ${input.ref} has been released, and what you paid is now a credit of ${money(input.valueCents)}.`,
+      credit,
       "",
       `Reschedule code: ${input.code}`,
       `Valid until: ${input.expires}`,

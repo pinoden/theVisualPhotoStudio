@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { DbLike } from "@/db/client";
 import { CONTACT_LIMITS, CONTACT_TOPICS, type ContactTopic } from "@/lib/contact";
+import { formText } from "@/lib/parse";
 import { contactMessageEmail, queueEmail } from "./email";
 
 /**
@@ -32,11 +33,12 @@ const contactInput = z.object({
   // One line: the name goes into the email's subject.
   name: z
     .string()
-    .transform((value) => value.replace(/\s+/g, " ").trim())
+    .transform((value) => formText(value).replace(/\s+/g, " "))
     .pipe(z.string().min(1).max(CONTACT_LIMITS.name)),
   email: z.string().trim().toLowerCase().max(CONTACT_LIMITS.email).pipe(z.email()),
   topic: z.enum(TOPIC_KEYS),
-  message: z.string().trim().min(1).max(CONTACT_LIMITS.message),
+  // formText first: the browser sends a line break as two characters and the box counts it as one.
+  message: z.string().transform(formText).pipe(z.string().min(1).max(CONTACT_LIMITS.message)),
 });
 
 const FIELD_PROBLEMS: Record<ContactField, string> = {

@@ -10,6 +10,8 @@ export interface ManageChoice {
   allowed: boolean;
   /** What will happen, or why it is not possible. */
   text: string;
+  /** False when the studio does not offer this at all: its button is then left out. */
+  offered?: boolean;
 }
 
 /**
@@ -82,9 +84,11 @@ export function ManageBooking({
 
       {asking === null && (
         <div style={{ display: "flex", gap: ".75rem", flexWrap: "wrap" }}>
-          <button type="button" className="btn btn-outline" onClick={() => setAsking("move")} disabled={busy}>
-            Reschedule
-          </button>
+          {choices.reschedule.offered !== false && (
+            <button type="button" className="btn btn-outline" onClick={() => setAsking("move")} disabled={busy}>
+              Reschedule
+            </button>
+          )}
           <button type="button" className="btn btn-outline" onClick={() => setAsking("cancel")} disabled={busy}>
             Cancel booking
           </button>

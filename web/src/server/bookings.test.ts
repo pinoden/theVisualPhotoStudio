@@ -409,6 +409,14 @@ describe("bad input is refused", () => {
     });
   }
 
+  it("a character the database cannot store, which is dropped instead of failing the request", async () => {
+    const result = await book({ customer: { name: "Jane\u0000 Smith", email: "jane@example.com", phone: "407-555-0100" }, notes: "Bring\u0000 props\r\nand lights" });
+    expect(result).toMatchObject({ ok: true });
+    expect((await db.select().from(bookings))[0]).toMatchObject({ customerName: "Jane Smith", notes: "Bring props\nand lights" });
+    // A code is looked up in the database too.
+    expect(await book({ startMinute: h(14), promoCode: "MOVE\u0000-1234" })).toMatchObject({ ok: false, code: "invalid_code" });
+  });
+
   it("the same studio listed twice", async () => {
     expect(await book({ studioIds: [ids.blanche, ids.blanche] })).toMatchObject({ ok: false, code: "invalid_input" });
   });
