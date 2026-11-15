@@ -1,4 +1,4 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 
 const STUDIO_TZ = "America/New_York";
 
@@ -16,6 +16,17 @@ export function dateAhead(minDays: number, kind: "weekday" | "saturday" = "weekd
   throw new Error("no matching date");
 }
 
+/*
+ * After an in-app navigation the framework keeps the previous pages in the
+ * document, hidden, so their state survives going back. A plain text or label
+ * locator would also match those hidden copies. These helpers only see what
+ * is on screen. Role locators (getByRole) already ignore hidden elements.
+ */
+type Scope = Page | Locator;
+export const onScreen = (locator: Locator) => locator.filter({ visible: true });
+export const byLabel = (scope: Scope, label: string) => onScreen(scope.getByLabel(label, { exact: true }));
+export const byText = (scope: Scope, text: string | RegExp) => onScreen(scope.getByText(text));
+
 /**
  * Save a full-page picture for a person to look at. Only when E2E_SHOTS is
  * set, and never allowed to fail a test: the pictures are a review aid.
@@ -23,7 +34,9 @@ export function dateAhead(minDays: number, kind: "weekday" | "saturday" = "weekd
 export async function shot(page: Page, name: string): Promise<void> {
   if (!process.env.E2E_SHOTS) return;
   try {
-    await page.screenshot({ path: `test-results/shots/${name}.png`, fullPage: true, timeout: 15_000 });
+    // caret "initial": the default hides the text cursor by editing the page's
+    // inputs, which the framework then reports as a mismatch with the server's HTML.
+    await page.screenshot({ path: `test-results/shots/${name}.png`, fullPage: true, timeout: 15_000, caret: "initial" });
   } catch (error) {
     console.warn(`screenshot ${name} skipped:`, error instanceof Error ? error.message.split("\n")[0] : error);
   }
@@ -45,24 +58,26 @@ export async function latestEmail(page: Page, kind: string, to: string): Promise
 /** Sign in with an emailed one-time code, the way a person would. */
 export async function signIn(page: Page, email: string, next = "/account"): Promise<void> {
   await page.goto(`/account/sign-in?next=${encodeURIComponent(next)}`);
-  await page.getByLabel("Email address").fill(email);
+  await byLabel(page, "Email address").fill(email);
   await page.getByRole("button", { name: "Email me a code" }).click();
-  await expect(page.getByText(`We sent a 6-digit code to ${email}.`)).toBeVisible();
+  await expect(byText(page, `We sent a 6-digit code to ${email}.`)).toBeVisible();
   const mail = await latestEmail(page, "login_code", email);
   const code = /code: (\d{6})/.exec(mail.subject)?.[1];
   if (!code) throw new Error(`no code in "${mail.subject}"`);
-  await page.getByLabel("6-digit code").fill(code);
+  await byLabel(page, "6-digit code").fill(code);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.waitForURL((url) => url.pathname === next.split("?")[0]);
 }
 
 export const next = (page: Page) => page.getByRole("button", { name: /^Next/ }).click();
-export const pickStudio = (page: Page, name: string) => page.locator("label.studio-option", { hasText: name }).click();
+export const pickStudio = (page: Page, name: string) => onScreen(page.locator("label.studio-option", { hasText: name })).click();
+/** The total row of the price summary currently on screen. */
+export const totalRow = (scope: Scope) => onScreen(scope.locator(".price-row.total"));
 
 export async function fillDetails(page: Page, customer: { name: string; email: string; phone: string }): Promise<void> {
-  await page.getByLabel("Full name *").fill(customer.name);
-  await page.getByLabel("Email address *").fill(customer.email);
-  await page.getByLabel("Phone number *").fill(customer.phone);
+  await byLabel(page, "Full name *").fill(customer.name);
+  await byLabel(page, "Email address *").fill(customer.email);
+  await byLabel(page, "Phone number *").fill(customer.phone);
 }
 
 export const agreeToPolicies = (page: Page) => page.getByRole("checkbox", { name: /I have read and agree/ }).check();
@@ -72,7 +87,7 @@ export async function confirmAndGetRef(page: Page, buttonName: RegExp | string):
   await page.getByRole("button", { name: buttonName }).click();
   await page.waitForURL(/\/booking\/VS-[0-9A-Z]{6}\?t=/);
   await expect(page.getByRole("heading", { name: "Booking Confirmed" })).toBeVisible();
-  return (await page.locator(".booking-ref").first().innerText()).trim();
+  return (await onScreen(page.locator(".booking-ref")).first().innerText()).trim();
 }
 
 /** The whole studio-first flow up to the payment step. */
@@ -90,16 +105,16 @@ export async function bookStudioFirstToPayment(
   await page.goto("/book");
   for (const studio of options.studios) await pickStudio(page, studio);
   await next(page);
-  await page.getByLabel("Date").fill(options.date);
+  await byLabel(page, "Date").fill(options.date);
   await page.getByRole("button", { name: options.duration, exact: true }).click();
   await next(page);
   await page.getByRole("button", { name: options.time, exact: true }).click();
   await next(page);
   await fillDetails(page, options.customer);
   if (options.code) {
-    await page.getByLabel("Have a code?").fill(options.code);
+    await byLabel(page, "Have a code?").fill(options.code);
     await page.getByRole("button", { name: "Apply" }).click();
-    await expect(page.getByText(`Code ${options.code} applied.`)).toBeVisible();
+    await expect(byText(page, `Code ${options.code} applied.`)).toBeVisible();
   }
   await agreeToPolicies(page);
   await next(page);

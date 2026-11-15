@@ -32,7 +32,8 @@ export default defineConfig({
     reuseExistingServer: Boolean(process.env.E2E_REUSE_SERVER),
     timeout: 180_000,
     env: {
-      PGLITE_DATA_DIR: ".data/e2e",
+      PGLITE_DATA_NAME: "e2e",
+      NEXT_DIST_DIR: ".next-e2e",
       OWNER_EMAILS: "owner@studio.test",
       NEXT_TELEMETRY_DISABLED: "1",
     },

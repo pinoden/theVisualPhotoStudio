@@ -131,7 +131,7 @@ async function fillDetails() {
 
 describe("studio-first flow", () => {
   it("books any two studios together and sends what the customer saw", async () => {
-    render(<BookingFlow catalog={catalog} />);
+    render(<BookingFlow catalog={catalog} navigate={nav.push} />);
 
     await user.click(studioBox("Studio Blanche"));
     await user.click(studioBox("Studio Dayglow"));
@@ -170,7 +170,7 @@ describe("studio-first flow", () => {
 
   it("offers only times when every chosen studio is free", async () => {
     busy = { [B]: [[h(10), h(12) + 10]], [D]: [[h(15), h(16) + 10]] };
-    render(<BookingFlow catalog={catalog} />);
+    render(<BookingFlow catalog={catalog} navigate={nav.push} />);
     await user.click(studioBox("Studio Blanche"));
     await user.click(studioBox("Studio Dayglow"));
     await next();
@@ -189,7 +189,7 @@ describe("studio-first flow", () => {
 
   it("explains when the chosen studios are never free together that day", async () => {
     busy = { [B]: [[0, h(14)]], [D]: [[h(13), 1440]] };
-    render(<BookingFlow catalog={catalog} />);
+    render(<BookingFlow catalog={catalog} navigate={nav.push} />);
     await user.click(studioBox("Studio Blanche"));
     await user.click(studioBox("Studio Dayglow"));
     await next();
@@ -200,7 +200,7 @@ describe("studio-first flow", () => {
   });
 
   it("offers only durations every chosen studio has, and prices weekends separately", async () => {
-    render(<BookingFlow catalog={catalog} />);
+    render(<BookingFlow catalog={catalog} navigate={nav.push} />);
     await user.click(studioBox("Studio Blanche"));
     await next();
     expect(screen.getByRole("button", { name: "10 hr" })).toBeTruthy();
@@ -219,7 +219,7 @@ describe("studio-first flow", () => {
   });
 
   it("does not let the customer skip a step", async () => {
-    render(<BookingFlow catalog={catalog} />);
+    render(<BookingFlow catalog={catalog} navigate={nav.push} />);
     await next();
     expect(screen.getByRole("alert").textContent).toBe("Please select at least one studio.");
     await user.click(studioBox("Studio Paris"));
@@ -247,13 +247,13 @@ describe("studio-first flow", () => {
 
   it("preselects the studio named in the page address", async () => {
     nav.search = "studio=paris";
-    render(<BookingFlow catalog={catalog} />);
+    render(<BookingFlow catalog={catalog} navigate={nav.push} />);
     expect((studioBox("Studio Paris") as HTMLInputElement).checked).toBe(true);
     expect((studioBox("Studio Blanche") as HTMLInputElement).checked).toBe(false);
   });
 
   it("shows an add-on only when its studio is booked, and charges it", async () => {
-    render(<BookingFlow catalog={catalog} />);
+    render(<BookingFlow catalog={catalog} navigate={nav.push} />);
     await user.click(studioBox("Studio Dayglow"));
     await next();
     pickDate(WED);
@@ -269,7 +269,7 @@ describe("studio-first flow", () => {
     expect(posted[0]).toMatchObject({ addons: [{ addonId: "addon-pet", quantity: 1 }], expectedTotalCents: 11800 });
 
     cleanup();
-    render(<BookingFlow catalog={catalog} />);
+    render(<BookingFlow catalog={catalog} navigate={nav.push} />);
     await user.click(studioBox("Studio Blanche"));
     await next();
     pickDate(WED);
@@ -283,7 +283,7 @@ describe("studio-first flow", () => {
 
   it("returns to the time step with fresh availability when the slot was just taken", async () => {
     bookingReply = { status: 409, body: { ok: false, code: "slot_taken", message: "That time was just taken. Please choose another." } };
-    render(<BookingFlow catalog={catalog} />);
+    render(<BookingFlow catalog={catalog} navigate={nav.push} />);
     await user.click(studioBox("Studio Paris"));
     await next();
     pickDate(WED);
@@ -306,7 +306,7 @@ describe("studio-first flow", () => {
 
   it("reloads prices when the server says the price changed", async () => {
     bookingReply = { status: 409, body: { ok: false, code: "price_changed", message: "The price is now $75. Please review and confirm again." } };
-    render(<BookingFlow catalog={catalog} />);
+    render(<BookingFlow catalog={catalog} navigate={nav.push} />);
     await user.click(studioBox("Studio Paris"));
     await next();
     pickDate(WED);
@@ -324,7 +324,7 @@ describe("studio-first flow", () => {
 
   it("shows the server's message when payment fails and stays on the payment step", async () => {
     bookingReply = { status: 402, body: { ok: false, code: "payment_failed", message: "Payment failed: Card declined. Your card was not charged." } };
-    render(<BookingFlow catalog={catalog} />);
+    render(<BookingFlow catalog={catalog} navigate={nav.push} />);
     await user.click(studioBox("Studio Paris"));
     await next();
     pickDate(WED);
@@ -344,7 +344,7 @@ describe("studio-first flow", () => {
 describe("time-first flow", () => {
   it("shows which studios are free at the chosen time and books from there", async () => {
     busy = { [B]: [[h(10), h(12) + 10]] };
-    render(<BookingFlow catalog={catalog} />);
+    render(<BookingFlow catalog={catalog} navigate={nav.push} />);
     await user.click(screen.getByRole("radio", { name: /I know when I want to come/ }));
 
     // The first step is now the date, not the studio.
@@ -384,7 +384,7 @@ describe("time-first flow", () => {
 
   it("lists a time only if some studio is free then", async () => {
     busy = { [B]: [[0, 1440]], [D]: [[0, 1440]], [P]: [[h(9), h(15)]] };
-    render(<BookingFlow catalog={catalog} />);
+    render(<BookingFlow catalog={catalog} navigate={nav.push} />);
     await user.click(screen.getByRole("radio", { name: /I know when I want to come/ }));
     pickDate(WED);
     await pickDuration("1 hr");
@@ -395,7 +395,7 @@ describe("time-first flow", () => {
   });
 
   it("counts only studios that offer the chosen duration", async () => {
-    render(<BookingFlow catalog={catalog} />);
+    render(<BookingFlow catalog={catalog} navigate={nav.push} />);
     await user.click(screen.getByRole("radio", { name: /I know when I want to come/ }));
     pickDate(WED);
     await pickDuration("10 hr"); // only Blanche has a 10-hour price
@@ -409,7 +409,7 @@ describe("time-first flow", () => {
 
   it("forgets the studio choice when the customer goes back and changes the time", async () => {
     busy = { [P]: [[h(14), h(15) + 10]] };
-    render(<BookingFlow catalog={catalog} />);
+    render(<BookingFlow catalog={catalog} navigate={nav.push} />);
     await user.click(screen.getByRole("radio", { name: /I know when I want to come/ }));
     pickDate(WED);
     await pickDuration("1 hr");
@@ -429,7 +429,7 @@ describe("time-first flow", () => {
 
 describe("switching between the two flows", () => {
   it("starts over from the first step of the other flow", async () => {
-    render(<BookingFlow catalog={catalog} />);
+    render(<BookingFlow catalog={catalog} navigate={nav.push} />);
     await user.click(studioBox("Studio Paris"));
     await next();
     expect(screen.getByLabelText("Date")).toBeTruthy();
