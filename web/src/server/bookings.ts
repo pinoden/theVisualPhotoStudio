@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto
 import { desc, eq, inArray } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
-import { bookingAddons, bookings, payments, studioHolds, studios } from "@/db/schema";
+import { bookingAddons, bookings, payments, photographerHolds, promoCodes, studioHolds, studios } from "@/db/schema";
 import {
   PG_DEADLOCK_DETECTED,
   PG_EXCLUSION_VIOLATION,
@@ -12,13 +12,16 @@ import {
   type DbLike,
 } from "@/db/client";
 import { isStartFree } from "@/lib/domain/availability";
-import { formatCents, PricingError, quote, type Quote } from "@/lib/domain/pricing";
+import { labelOf, type LabelKey } from "@/lib/domain/labels";
+import { formatCents, PricingError, PROMO_MISFIT_TEXT, quote, type PromoKind, type Quote } from "@/lib/domain/pricing";
 import { formText } from "@/lib/parse";
 import { count } from "@/lib/words";
 import { durationLabel, isIsoDate } from "@/lib/domain/time";
 import { loadDayAvailability, releaseExpiredHolds } from "./availability";
-import { dayTypeFor, loadCatalog } from "./catalog";
+import { dayTypeFor, loadCatalog, type Catalog, type CatalogPhotoPackage } from "./catalog";
 import { bookingConfirmationEmail, ownerPaymentUnknownNotice, queueEmail } from "./email";
+import { BY_CUSTOMER, recordEvent } from "./history";
+import { releaseHolds } from "./holds";
 import type { PaymentProvider } from "./payments";
 import { findUsablePromo, PROMO_PROBLEM_TEXT, redeemPromo, restorePromo, toPromoDef, type UsablePromo } from "./promos";
 import { loadAccessInstructions } from "./settings";
@@ -46,6 +49,12 @@ export const bookingInput = z.object({
   addons: addonsField,
   /** A loyalty or reschedule code. */
   promoCode: textField(0, 40).optional(),
+  /**
+   * A photography session with the in-house photographer, in one studio. The
+   * price is the package's, which includes the studio, and the photographer
+   * is held for the time as well as the studio.
+   */
+  photography: z.boolean().default(false),
   acceptTerms: z.literal(true),
   paymentToken: z.string().min(1).max(1000).optional(),
   /** The total the customer was shown. A mismatch stops the booking before any charge. */
@@ -78,6 +87,12 @@ export interface BookingDeps {
   baseUrl: string;
   /** Who is told when a charge got no answer and a person has to check the processor. */
   ownerEmail?: string | null;
+  /**
+   * The address of the administrator who is making this booking for a client
+   * (see `createAdminBooking`). Nothing is charged online: the client pays at
+   * the studio. The notice period does not apply; every other rule does.
+   */
+  madeBy?: string;
 }
 
 const REF_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
@@ -105,6 +120,14 @@ function firstIssue(error: z.ZodError): string {
 /** Raised inside the booking transaction when the code was spent by another request. */
 class PromoGone extends Error {}
 
+const NO_SUCH_SESSION = "That photography session is not offered. Please choose a studio and a length from the list.";
+
+/** The photography package for one studio and one length, if it is on sale. */
+function photoPackageFor(catalog: Catalog, studioIds: string[], durationMinutes: number): CatalogPhotoPackage | null {
+  if (studioIds.length !== 1) return null;
+  return catalog.photoPackages.find((p) => p.studioId === studioIds[0] && p.durationMinutes === durationMinutes) ?? null;
+}
+
 // ── Price preview ────────────────────────────────────────────────────────────
 
 export const quoteInput = z.object({
@@ -114,10 +137,11 @@ export const quoteInput = z.object({
   addons: addonsField,
   promoCode: textField(0, 40).optional(),
   email: emailField.optional(),
+  photography: z.boolean().default(false),
 });
 
 export type QuoteResult =
-  | { ok: true; quote: Quote; promo: { code: string; kind: "percent" | "amount"; value: number } | null }
+  | { ok: true; quote: Quote; promo: { code: string; kind: PromoKind; value: number } | null }
   | { ok: false; status: number; code: "invalid_input" | "invalid_price" | "invalid_code"; message: string };
 
 /**
@@ -138,6 +162,8 @@ export async function quoteSelection(db: DbLike, rawInput: unknown, now: Date): 
     if (!found.ok) return fail(422, "invalid_code", PROMO_PROBLEM_TEXT[found.problem]);
     promo = found.promo;
   }
+  const session = input.photography ? photoPackageFor(catalog, input.studioIds, input.durationMinutes) : null;
+  if (input.photography && !session) return fail(422, "invalid_price", NO_SUCH_SESSION);
   try {
     const price = quote({
       studioIds: input.studioIds,
@@ -148,7 +174,10 @@ export async function quoteSelection(db: DbLike, rawInput: unknown, now: Date): 
       addons: input.addons,
       addonCatalog: catalog.addons,
       promo: promo ? toPromoDef(promo) : null,
+      photoPackage: session,
     });
+    // A code that exists but cannot be used on this selection is refused with the reason.
+    if (price.promoMisfit) return fail(422, "invalid_code", PROMO_MISFIT_TEXT[price.promoMisfit]);
     return { ok: true, quote: price, promo: promo ? { code: promo.code, kind: promo.kind, value: promo.value } : null };
   } catch (error) {
     if (error instanceof PricingError) return fail(422, "invalid_price", error.message);
@@ -185,7 +214,14 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
   if (chosen.some((s) => !s)) return fail(400, "unknown_studio", "One of the selected studios is not available.");
   const studioNames = chosen.map((s) => s!.name).join(" + ");
 
-  const day = await loadDayAvailability(db, catalog, input.date, now);
+  // A photography session: its package, and the photographer's day beside the studio's.
+  const session = input.photography ? photoPackageFor(catalog, input.studioIds, input.durationMinutes) : null;
+  if (input.photography && !session) return fail(422, "invalid_price", NO_SUCH_SESSION);
+
+  const day = await loadDayAvailability(db, catalog, input.date, now, {
+    asAdmin: Boolean(deps.madeBy),
+    withPhotographer: Boolean(session),
+  });
   if (day.problem) {
     const text = {
       invalid_date: "That date is not valid.",
@@ -213,11 +249,15 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
       addons: input.addons,
       addonCatalog: catalog.addons,
       promo: promo ? toPromoDef(promo) : null,
+      photoPackage: session,
     });
   } catch (error) {
     if (error instanceof PricingError) return fail(422, "invalid_price", error.message);
     throw error;
   }
+  // The booking screen leaves out a code that does not fit the selection. Anything else that
+  // sends one is told why, instead of being charged the full price without a word.
+  if (price.promoMisfit) return fail(422, "invalid_code", PROMO_MISFIT_TEXT[price.promoMisfit]);
   if (input.expectedTotalCents !== undefined && input.expectedTotalCents !== price.totalCents) {
     return fail(409, "price_changed", `The price is now ${formatCents(price.totalCents)}. Please review and confirm again.`);
   }
@@ -232,13 +272,25 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
     return studioDay !== undefined && isStartFree(studioDay, input.startMinute, slot);
   });
   if (!allFree) return fail(409, "slot_taken", "That time is no longer available. Please choose another.");
+  // The photographer has to be free as well: inside their working hours, and not at another session or blocked.
+  const photographer = session ? (day.photographer ?? null) : null;
+  if (session && !photographer) {
+    return fail(409, "slot_taken", "Photography sessions cannot be booked online right now. Please contact the studio.");
+  }
+  if (photographer && !isStartFree(photographer, input.startMinute, slot)) {
+    return fail(409, "slot_taken", "Our photographer is not free at that time. Please choose another.");
+  }
 
-  if (price.totalCents > 0) {
+  const chargesCard = price.totalCents > 0 && !deps.madeBy;
+  if (chargesCard) {
     if (!deps.payments) {
       return fail(503, "payments_unavailable", "Online payment is not available right now. Please contact the studio.");
     }
     if (!input.paymentToken) return fail(400, "payment_required", "Card details are required.");
   }
+  const booked = deps.madeBy
+    ? { actor: deps.madeBy, note: "Booked in the admin for the client" }
+    : { actor: BY_CUSTOMER, note: "Booked online" };
 
   const startAt = localToUtc(input.date, input.startMinute);
   const endAt = localToUtc(input.date, input.startMinute + input.durationMinutes);
@@ -278,7 +330,11 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
             // Money that was already moved once stays "moved" on the new booking.
             rescheduledCount: spendsCode && promo!.source === "reschedule" ? promo!.rescheduleGeneration : 0,
             manageTokenHash: hashToken(manageToken),
-            termsAcceptedAt: now,
+            photographerId: photographer ? photographer.studioId : null,
+            photoIncludes: session ? session.includes : null,
+            madeBy: deps.madeBy ?? null,
+            // The client has not ticked the box themselves when an administrator books for them.
+            termsAcceptedAt: deps.madeBy ? null : now,
             createdAt: now,
           })
           .returning({ id: bookings.id });
@@ -294,6 +350,16 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
             bookingId: row.id,
             priceCents: line.priceCents,
             occupied: sql`tstzrange(${startAt.toISOString()}::timestamptz, ${occupiedEnd.toISOString()}::timestamptz, '[)')`,
+          });
+        }
+        if (photographer) {
+          // The photographer is held for the session and for the gap after it. The database refuses a
+          // second hold of the same photographer for an overlapping time, whatever the studio.
+          const heldUntil = new Date(endAt.getTime() + photographer.bufferMinutes * 60_000);
+          await tx.insert(photographerHolds).values({
+            photographerId: photographer.studioId,
+            bookingId: row.id,
+            occupied: sql`tstzrange(${startAt.toISOString()}::timestamptz, ${heldUntil.toISOString()}::timestamptz, '[)')`,
           });
         }
         if (price.addonLines.length > 0) {
@@ -324,7 +390,7 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
   }
 
   // ── Charge the card ────────────────────────────────────────────────────────
-  if (price.totalCents > 0) {
+  if (chargesCard) {
     const provider = deps.payments!;
     const [payment] = await db
       .insert(payments)
@@ -347,7 +413,7 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
           .set({ status: "failed", error: charge.detail ?? charge.message })
           .where(eq(payments.id, payment.id));
         await tx.update(bookings).set({ status: "expired" }).where(eq(bookings.id, bookingId));
-        await tx.update(studioHolds).set({ active: false }).where(eq(studioHolds.bookingId, bookingId));
+        await releaseHolds(tx, bookingId);
         if (spendsCode) await restorePromo(tx, promo!.id, promo!.kind, price.promoDiscountCents);
         // No answer from the processor: the card may have been charged, and only a person can check.
         if (charge.unknown && deps.ownerEmail) {
@@ -377,9 +443,13 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
         .set({ status: "succeeded", providerPaymentId: charge.paymentId })
         .where(eq(payments.id, payment.id));
       await tx.update(bookings).set({ status: "confirmed", holdExpiresAt: null }).where(eq(bookings.id, bookingId));
+      await recordEvent(tx, { bookingId, from: "new", to: "confirmed", at: now, ...booked });
     });
   } else {
-    await db.update(bookings).set({ status: "confirmed", holdExpiresAt: null }).where(eq(bookings.id, bookingId));
+    await db.transaction(async (tx) => {
+      await tx.update(bookings).set({ status: "confirmed", holdExpiresAt: null }).where(eq(bookings.id, bookingId));
+      await recordEvent(tx, { bookingId, from: "new", to: "confirmed", at: now, ...booked });
+    });
   }
 
   // ── Confirmation email (queued; a failure here never undoes the booking) ──
@@ -396,6 +466,8 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
         totalCents: price.totalCents + (spendsCode && promo!.kind === "amount" ? price.promoDiscountCents : 0),
         creditCents: spendsCode && promo!.kind === "amount" ? price.promoDiscountCents : 0,
         cardCents: price.totalCents,
+        payAtStudio: Boolean(deps.madeBy) && price.totalCents > 0,
+        photoIncludes: session ? session.includes : undefined,
         manageUrl: manageUrl(deps.baseUrl, ref, manageToken),
         access: await loadAccessInstructions(db),
       }),
@@ -430,6 +502,14 @@ export interface BookingView {
   addonsCents: number;
   promoDiscountCents: number;
   creditAppliedCents: number;
+  /** The kind of code used on the booking, if any. */
+  promoKind: PromoKind | null;
+  /** The status label an administrator sees. */
+  label: LabelKey;
+  /** Made in the admin for the client: nothing was charged online, the total is paid at the studio. */
+  madeByAdmin: boolean;
+  /** Set on a photography session: what it includes, as it was sold. */
+  photography: { includes: string } | null;
   totalCents: number;
   rescheduledCount: number;
 }
@@ -440,13 +520,17 @@ type BookingRow = typeof bookings.$inferSelect;
 export async function toBookingViews(db: DbLike, rows: BookingRow[]): Promise<BookingView[]> {
   if (rows.length === 0) return [];
   const ids = rows.map((r) => r.id);
-  const [holdRows, addonRows] = await Promise.all([
+  const codeIds = rows.map((r) => r.promoCodeId).filter((id): id is string => id !== null);
+  const [holdRows, addonRows, codeRows] = await Promise.all([
     db
       .select({ bookingId: studioHolds.bookingId, name: studios.name, priceCents: studioHolds.priceCents, sort: studios.sortOrder })
       .from(studioHolds)
       .innerJoin(studios, eq(studios.id, studioHolds.studioId))
       .where(inArray(studioHolds.bookingId, ids)),
     db.select().from(bookingAddons).where(inArray(bookingAddons.bookingId, ids)),
+    codeIds.length > 0
+      ? db.select({ id: promoCodes.id, kind: promoCodes.kind }).from(promoCodes).where(inArray(promoCodes.id, codeIds))
+      : [],
   ]);
   return rows.map((booking) => ({
     id: booking.id,
@@ -470,6 +554,10 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[]): Promise<Bo
     addonsCents: booking.addonsCents,
     promoDiscountCents: booking.promoDiscountCents,
     creditAppliedCents: booking.creditAppliedCents,
+    promoKind: codeRows.find((code) => code.id === booking.promoCodeId)?.kind ?? null,
+    label: labelOf(booking),
+    madeByAdmin: booking.madeBy !== null,
+    photography: booking.photographerId !== null ? { includes: booking.photoIncludes ?? "" } : null,
     totalCents: booking.totalCents,
     rescheduledCount: booking.rescheduledCount,
   }));

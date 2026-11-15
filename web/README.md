@@ -17,7 +17,7 @@ Locally nothing leaves your machine:
 
 - **Payments** run in test mode, which the payment step says on screen. No card is charged.
 - **Emails** are not sent. Every message the site would send, including sign-in codes, is listed at http://localhost:3000/dev/outbox.
-- **Scheduled work** (marking visits completed, sending loyalty codes) does not run by itself. The "Run scheduled tasks now" button on `/dev/outbox` runs it.
+- **Scheduled work** (marking visits completed, sending the free hours that visits earned) does not run by itself. The "Run scheduled tasks now" button on `/dev/outbox` runs it.
 
 To see the owner's admin at `/admin`, create `.env.local` containing `OWNER_EMAILS=you@example.com`, restart, and sign in with that address at `/account`. The same address receives the messages sent from the contact page; without it the form refuses messages.
 

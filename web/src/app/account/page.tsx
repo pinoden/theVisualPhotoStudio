@@ -6,10 +6,13 @@ import { BookingSummary, statusLabel } from "@/components/BookingSummary";
 import { ManageBooking } from "@/components/ManageBooking";
 import { getDb } from "@/db/client";
 import { formatCents } from "@/lib/domain/pricing";
+import { durationLabel } from "@/lib/domain/time";
 import { listBookingsForEmail } from "@/server/bookings";
+import { loyaltyStandingOf } from "@/server/loyalty";
 import { getManageChoices } from "@/server/manage";
 import { listCodesForEmail } from "@/server/promos";
 import { requireUser } from "@/server/session";
+import { loadSettings } from "@/server/settings";
 import { formatInstant, formatRange } from "@/server/tz";
 
 export const metadata: Metadata = { title: "My Account", robots: { index: false } };
@@ -37,7 +40,12 @@ async function Account() {
   const user = await requireUser("/account");
   const db = await getDb();
   const now = new Date();
-  const [all, codes] = await Promise.all([listBookingsForEmail(db, user.email), listCodesForEmail(db, user.email, now)]);
+  const [all, codes, settings] = await Promise.all([
+    listBookingsForEmail(db, user.email),
+    listCodesForEmail(db, user.email, now),
+    loadSettings(db),
+  ]);
+  const loyalty = settings.loyaltyEnabled ? await loyaltyStandingOf(db, user.email, settings) : null;
 
   const upcoming = all.filter((b) => b.status === "confirmed" && new Date(b.endAt) > now).reverse();
   const earlier = all.filter((b) => !upcoming.includes(b));
@@ -73,6 +81,14 @@ async function Account() {
         </form>
       </div>
 
+      {loyalty && (
+        <p className="notice" style={{ marginBottom: "2rem" }}>
+          <strong>Loyalty:</strong> {loyalty.towardsNext} of {settings.loyaltyVisits} visits towards your next free
+          hour. Every {settings.loyaltyVisits} visits, on separate days, earn one free hour in any studio. We email
+          you the code.
+        </p>
+      )}
+
       {codes.length > 0 && (
         <>
           <h2 style={{ fontSize: "1.6rem" }}>Your codes</h2>
@@ -85,7 +101,9 @@ async function Account() {
                     <br />
                     {code.kind === "percent"
                       ? `${code.value}% off your next studio rental`
-                      : `${formatCents(code.value)} credit from a rescheduled booking`}
+                      : code.kind === "free_hour"
+                        ? `${durationLabel(code.value)} free in any one studio`
+                        : `${formatCents(code.value)} credit from a rescheduled booking`}
                     {code.expiresAt ? `, valid until ${formatInstant(new Date(code.expiresAt))}` : ""}
                   </td>
                   <td>

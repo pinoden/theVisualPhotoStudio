@@ -13,6 +13,7 @@ import {
   pickStudio,
   shot,
   signIn,
+  todayInStudio,
   totalRow,
 } from "./helpers";
 
@@ -31,15 +32,20 @@ const DOOR_DAY = dateAhead(24); // a day no other test books
 const WITHDRAWN_DAY = dateAhead(31); // likewise, for the add-on withdrawn during checkout
 const MOVE_FROM = dateAhead(38); // and for the discounted booking that is moved
 const MOVE_TO = dateAhead(45);
+const FREE_HOUR_DAY = dateAhead(52); // and for the bookings made with a free hour
+const PHOTO_DAY = dateAhead(59); // and for the photography sessions
 
 const jane = { name: "Jane Smith", email: "jane.e2e@example.com", phone: "407-555-0100" };
 const bob = { name: "Bob Brown", email: "bob.e2e@example.com", phone: "407-555-0111" };
 const OWNER = "owner@studio.test";
 // The first owner has used up the three sign-in codes an address may ask for in 15 minutes.
 const SECOND_OWNER = "owner2@studio.test";
+// And so has the second, by the end of the run.
+const THIRD_OWNER = "owner3@studio.test";
 const STAFF = "sam.e2e@studio.test";
 
 let rescheduleCode = "";
+let freeHourCode = "";
 
 // Any error the browser reports (a script error, a mismatch between the
 // server's HTML and the page) fails the test that caused it.
@@ -77,13 +83,13 @@ test("public pages show the studios and the live price list", async ({ page }) =
   await page.goto("/studios");
   await expect(page.getByRole("heading", { name: "Studio Paris" })).toBeVisible();
 
-  // Photography sessions are described, and asked for by message.
+  // Photography sessions are described, and booked online.
   await page.goto("/services");
   await expect(page.getByRole("heading", { name: "Professional Photography" })).toBeVisible();
   await expect(page.getByRole("row", { name: /2 hours/ })).toContainText("30");
   await shot(page, "02a-photography");
-  await page.getByRole("link", { name: "Ask About a Session" }).click();
-  await expect(page.getByRole("heading", { name: "Contact Us" })).toBeVisible();
+  await page.getByRole("link", { name: "Book a Photographer" }).click();
+  await expect(page.getByRole("heading", { name: "Book a Photographer" })).toBeVisible();
 });
 
 test("guest information answers with the current rules and prices", async ({ page }) => {
@@ -100,6 +106,13 @@ test("guest information answers with the current rules and prices", async ({ pag
   const moving = page.locator("details.faq-item", { hasText: "Can I move my booking to another time?" });
   await moving.locator("summary").click();
   await expect(moving.locator(".faq-answer")).toContainText("Yes, once, until 24 hours before it starts.");
+
+  const loyalty = page.locator("details.faq-item", { hasText: "Do returning guests get anything?" });
+  await loyalty.locator("summary").click();
+  await expect(loyalty.locator(".faq-answer")).toContainText(
+    "When you have visited us 5 times, on separate days, we email you a code for one free hour in any studio.",
+  );
+  await expect(loyalty.locator(".faq-answer")).toContainText("It is valid for 60 days.");
 
   const pets = page.locator("details.faq-item", { hasText: "Can I bring my pet?" });
   await pets.locator("summary").click();
@@ -199,7 +212,7 @@ test("books two studios together, starting from the studios", async ({ page }) =
   expect(mail.body).toContain("Studio Blanche + Studio Dayglow");
 });
 
-test("a taken time is no longer offered, including the clean-up time around it", async ({ page }) => {
+test("a taken time is no longer offered, nor any time within 15 minutes of it", async ({ page }) => {
   await page.goto("/book");
   await pickStudio(page, "Studio Blanche");
   await next(page);
@@ -207,10 +220,15 @@ test("a taken time is no longer offered, including the clean-up time around it",
   await page.getByRole("button", { name: "1 hr", exact: true }).click();
   await next(page);
   await expect(page.getByRole("button", { name: "12:00 PM", exact: true })).toBeVisible();
-  for (const taken of ["9:30 AM", "10:00 AM", "10:30 AM", "11:00 AM"]) {
+  // Blanche is booked from 10:00 to 11:00. An hour that overlaps it is not offered.
+  for (const taken of ["9:15 AM", "10:00 AM", "10:45 AM"]) {
     await expect(page.getByRole("button", { name: taken, exact: true })).toHaveCount(0);
   }
-  await expect(page.getByRole("button", { name: "9:00 AM", exact: true })).toHaveCount(0); // would end with no clean-up time
+  // Nor one that would leave less than 15 minutes between the two appointments.
+  await expect(page.getByRole("button", { name: "9:00 AM", exact: true })).toHaveCount(0); // would end as the next begins
+  await expect(page.getByRole("button", { name: "11:00 AM", exact: true })).toHaveCount(0); // would begin as the last ends
+  // Start times come every 15 minutes: the first free one is a quarter past.
+  await expect(page.getByRole("button", { name: "11:15 AM", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "11:30 AM", exact: true })).toBeVisible();
 });
 
@@ -245,6 +263,7 @@ test("starting from the time shows which studios are free, and books one", async
 test("a customer signs in, sees their booking, and turns it into a reschedule code", async ({ page }) => {
   await signIn(page, jane.email);
   await expect(byText(page, `Signed in as ${jane.email}`)).toBeVisible();
+  await expect(byText(page, /0 of 5 visits towards your next free hour/)).toBeVisible();
   const card = onScreen(page.locator(".admin-card", { hasText: "Studio Blanche + Studio Dayglow" }));
   await expect(card).toBeVisible();
   // Bob's booking is not shown to Jane.
@@ -380,6 +399,31 @@ test("staff see the day sheet of their assigned day and nothing else", async ({ 
   expect(table).not.toContain(bob.email);
   expect(table).not.toContain(bob.phone);
 
+  // Staff can change the status label, from the day sheet. Bob has asked to move his booking.
+  await row.getByRole("combobox", { name: "Status label for Bob Brown" }).selectOption({ label: "Reschedule Pending" });
+  await row.getByRole("button", { name: "Set" }).click();
+  await expect(byText(page, "Marked Reschedule Pending.")).toBeVisible();
+  await expect(onScreen(page.locator(".status-reschedule_pending"))).toHaveText("Reschedule Pending");
+  // A visit that has not started cannot be marked as finished.
+  await page.getByRole("row", { name: /Bob Brown/ }).getByRole("combobox").selectOption({ label: "Completed" });
+  await page.getByRole("row", { name: /Bob Brown/ }).getByRole("button", { name: "Set" }).click();
+  await expect(onScreen(page.locator(".flash-error"))).toContainText("can be set once the appointment has started");
+
+  // The appointment page: details, the label, and the history of its changes. Still no price and no contact details.
+  await page.getByRole("link", { name: "Bob Brown" }).click();
+  await expect(page.getByRole("heading", { name: "Bob Brown" })).toBeVisible();
+  await expect(page.getByRole("row", { name: /Booked/ })).toContainText("The customer");
+  await expect(page.getByRole("row", { name: /Confirmed → Reschedule Pending/ })).toContainText(STAFF);
+  const appointment = await onScreen(page.locator(".admin-main")).innerText();
+  expect(appointment).not.toContain("$");
+  expect(appointment).not.toContain(bob.email);
+  // The second level of the admin has its own short menu.
+  await expect(onScreen(page.locator(".admin-nav"))).toHaveText("CalendarDay sheet");
+  await shot(page, "16b-staff-appointment");
+  await page.getByRole("button", { name: "Confirmed", exact: true }).click();
+  await expect(byText(page, "Marked Confirmed.")).toBeVisible();
+  await expect(page.getByRole("row", { name: /Reschedule Pending → Confirmed/ })).toContainText(STAFF);
+
   // Any other day is refused, and so are the owner's pages.
   await page.goto(`/staff?date=${FAR}`);
   await expect(onScreen(page.locator(".flash-error"))).toContainText("is not assigned to you");
@@ -408,6 +452,123 @@ test("a customer cannot open the staff or owner areas", async ({ page }) => {
   await page.goto("/admin/bookings");
   await page.waitForURL(/\/account\/sign-in\?next=%2Fadmin%2Fbookings/);
   await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
+});
+
+test("the owners switch on what staff can do, and it applies at once", async ({ page }) => {
+  await signIn(page, THIRD_OWNER, "/admin/staff");
+  // What staff did is in the booking's history, with their address.
+  await page.getByRole("link", { name: "Bookings", exact: true }).click();
+  await page.getByRole("link", { name: "Bob Brown" }).first().click();
+  await expect(page.getByRole("row", { name: /Confirmed → Reschedule Pending/ })).toContainText(STAFF);
+  await expect(onScreen(page.locator(".admin-main"))).toContainText("$68");
+  await expect(onScreen(page.locator(".admin-main"))).toContainText(bob.email);
+
+  // Two switches: contact details and prices.
+  await page.getByRole("link", { name: "Staff", exact: true }).click();
+  await page.getByRole("checkbox", { name: "See customers' phone numbers and email addresses" }).check();
+  await page.getByRole("checkbox", { name: "See what a booking cost" }).check();
+  await page.getByRole("button", { name: "Save what staff can do" }).click();
+  await expect(byText(page, "Saved. It applies to every member of staff from now on.")).toBeVisible();
+  await shot(page, "17b-admin-staff-abilities");
+
+  // Staff see both the next time they look. Nothing was redeployed.
+  await page.goto("/account");
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await page.waitForURL((url) => url.pathname === "/");
+  await signIn(page, STAFF, `/staff?date=${NEAR}`);
+  await expect(page.getByRole("row", { name: /Bob Brown/ })).toContainText(bob.phone);
+  await page.getByRole("link", { name: "Bob Brown" }).click();
+  await expect(page.getByRole("heading", { name: "Bob Brown" })).toBeVisible();
+  await expect(onScreen(page.locator(".admin-main"))).toContainText("$68");
+  await expect(onScreen(page.locator(".admin-main"))).toContainText(bob.email);
+
+  // Their calendar shows the days they may see, and says so for the others.
+  await page.goto(`/admin/calendar?view=day&date=${NEAR}`);
+  await expect(page.getByRole("link", { name: /Bob Brown/ })).toBeVisible();
+  await page.goto(`/admin/calendar?view=day&date=${FAR}`);
+  await expect(byText(page, /None of these days is assigned to you/)).toBeVisible();
+  await expect(page.getByRole("link", { name: "New booking" })).toHaveCount(0); // not switched on for staff
+});
+
+test("the calendar shows a day, a week and a month, one studio or all, and a booking is moved and made from it", async ({ page }) => {
+  await signIn(page, THIRD_OWNER, `/admin/calendar?view=day&date=${NEAR}`);
+  await expect(page.getByRole("heading", { name: "Calendar", exact: true })).toBeVisible();
+
+  // The day: a column for each studio, and Bob's hour in Studio Paris with its time and its status.
+  const bobs = page.getByRole("link", { name: /Bob Brown/ });
+  await expect(bobs).toContainText("10:00 AM – 11:00 AM");
+  await expect(bobs).toContainText("Confirmed");
+  for (const studio of ["Studio Blanche", "Studio Dayglow", "Studio Paris"]) {
+    await expect(onScreen(page.locator(".cal-head")).getByText(studio)).toBeVisible();
+  }
+  await shot(page, "17c-calendar-day");
+
+  // One studio at a time, or all of them.
+  const filter = page.getByRole("navigation", { name: "Studio" });
+  await filter.getByRole("link", { name: "Studio Blanche" }).click();
+  await expect(page).toHaveURL(/studio=blanche/);
+  await expect(page.getByRole("link", { name: /Bob Brown/ })).toHaveCount(0);
+  await filter.getByRole("link", { name: "Studio Paris" }).click();
+  await expect(page.getByRole("link", { name: /Bob Brown/ })).toBeVisible();
+  await filter.getByRole("link", { name: "All studios" }).click();
+  await expect(page).not.toHaveURL(/studio=/);
+
+  // The week and the month show the same appointment.
+  const views = page.getByRole("navigation", { name: "Calendar view" });
+  await views.getByRole("link", { name: "Week" }).click();
+  await expect(page).toHaveURL(/view=week/);
+  await expect(page.getByRole("link", { name: /Bob Brown/ })).toBeVisible();
+  await shot(page, "17d-calendar-week");
+  await views.getByRole("link", { name: "Month" }).click();
+  await expect(page).toHaveURL(/view=month/);
+  await expect(page.getByRole("link", { name: /Bob Brown/ }).first()).toBeVisible();
+  await shot(page, "17e-calendar-month");
+
+  // Forward a month, and back to today.
+  const [year, month] = NEAR.split("-").map(Number);
+  const nextMonth = new Date(Date.UTC(year, month, 1)).toISOString().slice(0, 10);
+  await page.getByRole("link", { name: "Next month" }).click();
+  await expect(page).toHaveURL(new RegExp(`date=${nextMonth}`));
+  await page.getByRole("link", { name: "Today", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`date=${todayInStudio()}`));
+
+  // Open Bob's appointment from the calendar and move it to the afternoon. The studio needs the change,
+  // so it does not count as Bob's own reschedule.
+  await page.goto(`/admin/calendar?view=day&date=${NEAR}`);
+  await page.getByRole("link", { name: /Bob Brown/ }).click();
+  await expect(page.getByRole("heading", { name: "Bob Brown" })).toBeVisible();
+  await byLabel(page, "New date").fill(NEAR);
+  await page.getByRole("button", { name: "Show free times" }).click();
+  await page.getByLabel(/Free start times on/).selectOption({ label: "2:00 PM – 3:00 PM" });
+  await page.getByRole("checkbox", { name: /The client asked for this move/ }).uncheck();
+  await page.getByRole("button", { name: "Move booking" }).click();
+  await expect(byText(page, /Moved to .* The client has been emailed\./)).toBeVisible();
+  await expect(onScreen(page.locator(".admin-card h3 .status-badge"))).toHaveText("Rescheduled");
+  await expect(page.getByRole("row", { name: /Confirmed → Rescheduled/ })).toContainText("Moved from");
+  expect((await latestEmail(page, "booking_moved", bob.email)).body).toContain("New time: ");
+  await shot(page, "17f-appointment-moved");
+
+  // A booking made for a client, from the calendar: no card, and the price is paid at the studio.
+  await page.goto(`/admin/calendar?view=day&date=${NEAR}`);
+  await expect(page.getByRole("link", { name: /Bob Brown/ })).toContainText("2:00 PM – 3:00 PM");
+  await page.getByRole("link", { name: "New booking" }).click();
+  await page.getByRole("checkbox", { name: "Studio Dayglow" }).check();
+  await byLabel(page, "Length").selectOption({ label: "1 hour" });
+  await page.getByRole("button", { name: "Show free times" }).click();
+  await page.getByLabel("Free start times").selectOption({ label: "4:00 PM – 5:00 PM" });
+  await page.getByLabel("Client’s name").fill("Dana Diaz");
+  await page.getByLabel("Client’s email").fill("dana.e2e@example.com");
+  await page.getByLabel("Client’s phone").fill("407-555-0142");
+  await page.getByRole("button", { name: "Book for the client" }).click();
+  await expect(page.getByRole("heading", { name: "Dana Diaz" })).toBeVisible();
+  await expect(byText(page, /Nothing was charged: the price is paid at the studio\./)).toBeVisible();
+  await expect(onScreen(page.locator(".price-row.total"))).toContainText("To pay at the studio");
+  expect((await latestEmail(page, "booking_confirmation", "dana.e2e@example.com")).body).toContain("To pay at the studio: $78");
+
+  // It is on the calendar, in Studio Dayglow's column, like any other booking.
+  await page.goto(`/admin/calendar?view=day&date=${NEAR}&studio=dayglow`);
+  await expect(page.getByRole("link", { name: /Dana Diaz/ })).toContainText("4:00 PM – 5:00 PM");
+  await expect(page.getByRole("link", { name: /Bob Brown/ })).toHaveCount(0);
 });
 
 test("the owner sets a weekend price and the booking screen charges it on Saturday only", async ({ page }) => {
@@ -587,6 +748,16 @@ test("a booking made with a discount code is moved without paying the discount a
   await expect(created).toBeVisible();
   const discountCode = /VS-[0-9A-Z]{4}-[0-9A-Z]{4}/.exec(await created.innerText())![0];
 
+  // While signed in: a free hour for Jane, usable twice, for the next test. The site sends one by itself
+  // after five visits; the owner can also hand one out.
+  await onScreen(page.locator("#code-kind")).selectOption({ label: "One free hour (one studio)" });
+  await onScreen(page.locator("#code-email")).fill(jane.email);
+  await onScreen(page.locator("#code-uses")).fill("2");
+  await page.getByRole("button", { name: "Create", exact: true }).click();
+  await expect(page.getByRole("row", { name: /1 hour free/ })).toContainText(jane.email);
+  freeHourCode = /VS-[0-9A-Z]{4}-[0-9A-Z]{4}/.exec(await page.getByRole("row", { name: /1 hour free/ }).innerText())![0];
+  expect(freeHourCode).not.toBe(discountCode);
+
   // Studio Paris for an hour is $68. The code takes 10% off: $61.20 is paid.
   await bookStudioFirstToPayment(page, {
     studios: ["Studio Paris"],
@@ -621,4 +792,132 @@ test("a booking made with a discount code is moved without paying the discount a
   await expect(byText(page, "Nothing to pay: your code covers this booking. No card is needed.")).toBeVisible();
   await expect(totalRow(page)).toContainText("$0");
   await confirmAndGetRef(page, "Confirm booking");
+});
+
+test("a free hour takes one hour off a booking of one studio, and is not for several studios", async ({ page }) => {
+  // Two studios together: the code is refused, with the reason.
+  await page.goto("/book");
+  await pickStudio(page, "Studio Blanche");
+  await pickStudio(page, "Studio Dayglow");
+  await next(page);
+  await byLabel(page, "Date").fill(FREE_HOUR_DAY);
+  await page.getByRole("button", { name: "1 hr", exact: true }).click();
+  await next(page);
+  await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
+  await next(page);
+  await fillDetails(page, jane);
+  await byLabel(page, "Have a code?").fill(freeHourCode);
+  await page.getByRole("button", { name: "Apply" }).click();
+  await expect(
+    byText(page, "A free hour is for one studio. It cannot be used when several studios are booked together."),
+  ).toBeVisible();
+
+  // One studio for an hour and a half: the hour is free ($88) and the other half hour is paid ($132 less $88).
+  await bookStudioFirstToPayment(page, {
+    studios: ["Studio Blanche"],
+    date: FREE_HOUR_DAY,
+    duration: "1.5 hr",
+    time: "10:00 AM",
+    customer: jane,
+    code: freeHourCode,
+  });
+  await expect(byText(page, `Free hour, code ${freeHourCode}`)).toBeVisible();
+  await expect(totalRow(page)).toContainText("$44");
+  await confirmAndGetRef(page, "Confirm & pay $44");
+  await expect(page.locator(".price-row", { hasText: "Free hour" })).toContainText("-$88");
+  await shot(page, "20-free-hour");
+
+  // One studio for one hour: nothing to pay, and no card is asked for.
+  await bookStudioFirstToPayment(page, {
+    studios: ["Studio Paris"],
+    date: FREE_HOUR_DAY,
+    duration: "1 hr",
+    time: "2:00 PM",
+    customer: jane,
+    code: freeHourCode,
+  });
+  await expect(byText(page, "Nothing to pay: your code covers this booking. No card is needed.")).toBeVisible();
+  await expect(totalRow(page)).toContainText("$0");
+  await confirmAndGetRef(page, "Confirm booking");
+});
+
+test("a client without a photographer books a session, and the photographer cannot be booked twice", async ({ page }) => {
+  // The way in is on the studio booking page.
+  await page.goto("/book");
+  const callout = page.getByRole("complementary", { name: "Don’t have a photographer?" });
+  await expect(callout).toContainText(
+    "No problem! You can book a professional photoshoot with our in-house photographer, including studio rental.",
+  );
+  await callout.getByRole("link", { name: "Book a Photographer" }).click();
+  await expect(page.getByRole("heading", { name: "Book a Photographer" })).toBeVisible();
+
+  // A session in Studio Blanche: its length, its price and what it includes.
+  await pickStudio(page, "Studio Blanche");
+  await next(page);
+  await byLabel(page, "Date").fill(PHOTO_DAY);
+  const oneHour = page.getByRole("button", { name: /1 hour · \$375/ });
+  await expect(oneHour).toContainText("Studio included. 1–2 outfits, 20 edited images.");
+  await oneHour.click();
+  await next(page);
+  await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
+  await next(page);
+  await fillDetails(page, jane);
+  await agreeToPolicies(page);
+  await next(page);
+  await expect(byText(page, /Photography session, Studio Blanche, 1 hour/)).toBeVisible();
+  await expect(totalRow(page)).toContainText("$375");
+  await shot(page, "21-photography-pay");
+  await confirmAndGetRef(page, "Confirm & pay $375");
+  await expect(byText(page, /With our in-house photographer, studio included/)).toBeVisible();
+  const mail = await latestEmail(page, "booking_confirmation", jane.email);
+  expect(mail.body).toContain("Photography session with our in-house photographer, studio included: 1–2 outfits, 20 edited images.");
+
+  // The photographer is taken from 10:00 to 11:00 and for 15 minutes after, whatever the studio.
+  await page.goto("/book/photography");
+  await pickStudio(page, "Studio Paris");
+  await next(page);
+  await byLabel(page, "Date").fill(PHOTO_DAY);
+  await page.getByRole("button", { name: /1 hour · \$315/ }).click();
+  await next(page);
+  await expect(page.getByRole("button", { name: "11:15 AM", exact: true })).toBeVisible();
+  for (const taken of ["9:15 AM", "10:00 AM", "11:00 AM"]) {
+    await expect(page.getByRole("button", { name: taken, exact: true })).toHaveCount(0);
+  }
+
+  // Studio Paris itself is free at 10:00, for someone who brings their own photographer.
+  await page.goto("/book");
+  await pickStudio(page, "Studio Paris");
+  await next(page);
+  await byLabel(page, "Date").fill(PHOTO_DAY);
+  await page.getByRole("button", { name: "1 hr", exact: true }).click();
+  await next(page);
+  await expect(page.getByRole("button", { name: "10:00 AM", exact: true })).toBeVisible();
+
+  // The owners block the photographer's afternoon. (The third and last sign-in code of this address.)
+  await signIn(page, THIRD_OWNER, "/admin/photography");
+  await byLabel(page, "Date").fill(PHOTO_DAY);
+  await byLabel(page, "From").fill("13:00");
+  await byLabel(page, "To").fill("16:00");
+  await byLabel(page, "Note").fill("Wedding");
+  await page.getByRole("button", { name: "Block", exact: true }).click();
+  await expect(byText(page, "Time blocked. No session can be booked in it.")).toBeVisible();
+  await expect(page.getByRole("row", { name: /Wedding/ })).toContainText("1:00 PM");
+  await shot(page, "22-admin-photography");
+
+  // The session is on the calendar, marked as photography.
+  await page.goto(`/admin/calendar?view=day&date=${PHOTO_DAY}`);
+  await expect(page.getByRole("link", { name: /Jane Smith/ })).toContainText("Photography");
+
+  // The blocked afternoon is gone from the sessions on offer, in a studio that is itself free all day.
+  await page.goto("/book/photography");
+  await pickStudio(page, "Studio Dayglow");
+  await next(page);
+  await byLabel(page, "Date").fill(PHOTO_DAY);
+  await page.getByRole("button", { name: /1 hour · \$315/ }).click();
+  await next(page);
+  await expect(page.getByRole("button", { name: "11:45 AM", exact: true })).toBeVisible();
+  for (const blocked of ["1:00 PM", "2:30 PM", "3:45 PM"]) {
+    await expect(page.getByRole("button", { name: blocked, exact: true })).toHaveCount(0);
+  }
+  await expect(page.getByRole("button", { name: "4:00 PM", exact: true })).toBeVisible();
 });

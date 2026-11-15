@@ -16,6 +16,7 @@ import {
 } from "@/db/schema";
 import { PG_EXCLUSION_VIOLATION, pgErrorCode, queryRows, type Db, type DbLike } from "@/db/client";
 import { isAddonKind, type AddonKind } from "@/lib/addon-kinds";
+import type { PromoKind } from "@/lib/domain/pricing";
 import { isIsoDate, type DayType, type IsoDate } from "@/lib/domain/time";
 import { deleteAllSessions, normalizeEmail } from "./auth";
 import { toBookingViews, type BookingView } from "./bookings";
@@ -357,7 +358,7 @@ export async function listRefundProblems(db: DbLike): Promise<RefundProblem[]> {
 export interface CodeView {
   id: string;
   code: string;
-  kind: "percent" | "amount";
+  kind: PromoKind;
   value: number;
   source: string;
   email: string | null;
@@ -392,13 +393,19 @@ export async function voidCode(db: DbLike, codeId: string, now: Date): Promise<v
 
 export type CreateCodeResult = { ok: true; code: string } | { ok: false; message: string };
 
-/** A code the owner hands out: a percent discount or an amount of credit. */
+/**
+ * A code the owner hands out: a percent discount, an amount of credit, or a
+ * free hour (`value` is then the free minutes, 60), for example for a regular
+ * whose visits were made before the site counted them.
+ */
 export async function createManualCode(
   db: DbLike,
-  input: { kind: "percent" | "amount"; value: number; email: string | null; validDays: number; maxUses: number; note: string },
+  input: { kind: PromoKind; value: number; email: string | null; validDays: number; maxUses: number; note: string },
   now: Date,
 ): Promise<CreateCodeResult> {
-  if (input.kind !== "percent" && input.kind !== "amount") return { ok: false, message: "Choose a kind of code." };
+  if (input.kind !== "percent" && input.kind !== "amount" && input.kind !== "free_hour") {
+    return { ok: false, message: "Choose a kind of code." };
+  }
   if (!Number.isInteger(input.value) || input.value <= 0) return { ok: false, message: "Enter a value above zero." };
   if (input.kind === "percent" && input.value > 100) return { ok: false, message: "A discount cannot exceed 100%." };
   if (!Number.isInteger(input.validDays) || input.validDays < 1 || input.validDays > 730) {

@@ -3,6 +3,7 @@ import { connection } from "next/server";
 import { Suspense } from "react";
 import { getDb } from "@/db/client";
 import { formatCents } from "@/lib/domain/pricing";
+import { durationLabel } from "@/lib/domain/time";
 import { listCodes } from "@/server/admin";
 import { requireOwner } from "@/server/session";
 import { formatInstant } from "@/server/tz";
@@ -12,7 +13,7 @@ import { AdminFrame, AdminLoading } from "../frame";
 export const metadata: Metadata = { title: "Codes", robots: { index: false } };
 
 const SOURCE_LABEL: Record<string, string> = {
-  loyalty: "After a visit",
+  loyalty: "Earned by visits",
   reschedule: "Reschedule credit",
   manual: "Made by you",
 };
@@ -43,13 +44,14 @@ async function Codes({ searchParams }: Pick<PageProps<"/admin/codes">, "searchPa
             <select id="code-kind" name="kind" className="form-control" defaultValue="percent">
               <option value="percent">Percent off the rental</option>
               <option value="amount">Credit in dollars</option>
+              <option value="free_hour">One free hour (one studio)</option>
             </select>
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="code-value">
-              Value (% or $)
+              Value (% or $; none for a free hour)
             </label>
-            <input id="code-value" name="value" className="form-control" inputMode="decimal" required />
+            <input id="code-value" name="value" className="form-control" inputMode="decimal" />
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="code-email">
@@ -65,7 +67,7 @@ async function Codes({ searchParams }: Pick<PageProps<"/admin/codes">, "searchPa
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="code-uses">
-              Uses (percent codes)
+              Uses (not for credit)
             </label>
             <input id="code-uses" name="maxUses" className="form-control" inputMode="numeric" defaultValue="1" />
           </div>
@@ -82,7 +84,7 @@ async function Codes({ searchParams }: Pick<PageProps<"/admin/codes">, "searchPa
       </div>
 
       {codes.length === 0 ? (
-        <div className="admin-card">No codes yet. Loyalty and reschedule codes appear here as they are issued.</div>
+        <div className="admin-card">No codes yet. Free hours and reschedule codes appear here as they are issued.</div>
       ) : (
         <div className="data-table-wrap">
           <table className="data-table">
@@ -108,10 +110,16 @@ async function Codes({ searchParams }: Pick<PageProps<"/admin/codes">, "searchPa
                       <strong style={{ color: "var(--color-dark)" }}>{code.code}</strong>
                       {code.note && <div style={{ fontSize: ".8rem" }}>{code.note}</div>}
                     </td>
-                    <td>{code.kind === "percent" ? `${code.value}%` : `${formatCents(code.value)} left`}</td>
+                    <td>
+                      {code.kind === "percent"
+                        ? `${code.value}%`
+                        : code.kind === "free_hour"
+                          ? `${durationLabel(code.value)} free`
+                          : `${formatCents(code.value)} left`}
+                    </td>
                     <td>{SOURCE_LABEL[code.source] ?? code.source}</td>
                     <td>{code.email ?? "Anyone"}</td>
-                    <td>{code.kind === "percent" ? `${code.usedCount} of ${code.maxUses}` : `${code.usedCount} times`}</td>
+                    <td>{code.kind === "amount" ? `${code.usedCount} times` : `${code.usedCount} of ${code.maxUses}`}</td>
                     <td>{code.expiresAt ? formatInstant(new Date(code.expiresAt)) : "Never"}</td>
                     <td>
                       {live ? (

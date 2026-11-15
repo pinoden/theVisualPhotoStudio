@@ -3,10 +3,12 @@ import { connection } from "next/server";
 import { Suspense } from "react";
 import { getDb } from "@/db/client";
 import { longDateLabel } from "@/lib/domain/time";
+import { STAFF_ABILITIES, STAFF_ABILITY_KEYS } from "@/lib/staff-abilities";
 import { listStaff } from "@/server/admin";
 import { requireOwner } from "@/server/session";
+import { loadSettings } from "@/server/settings";
 import { localDateOf } from "@/server/tz";
-import { addStaffAction, removeStaffAction, shiftAction } from "../actions";
+import { addStaffAction, removeStaffAction, saveStaffAbilitiesAction, shiftAction } from "../actions";
 import { AdminFrame, AdminLoading } from "../frame";
 
 export const metadata: Metadata = { title: "Staff", robots: { index: false } };
@@ -23,18 +25,35 @@ async function Staff({ searchParams }: Pick<PageProps<"/admin/staff">, "searchPa
   await connection();
   await requireOwner("/admin/staff");
   const today = localDateOf(new Date());
-  const staff = await listStaff(await getDb(), today);
+  const db = await getDb();
+  const [staff, settings] = await Promise.all([listStaff(db, today), loadSettings(db)]);
 
   return (
     <AdminFrame active="/admin/staff" title="Staff" query={await searchParams}>
       <div className="admin-card">
         <h3>How staff access works</h3>
         <p style={{ fontSize: ".875rem", margin: 0 }}>
-          A staff member signs in with their email address and sees only the day sheet of the days you assign here:
-          times, studios, customer names, add-ons and notes. They never see prices, revenue, other days or the
-          customer list. Whether they see phone numbers and emails is a switch in Settings.
+          The admin has two levels. You, the owners, have all of it. A staff member signs in with their email address
+          and gets the day sheet and the appointments of the days you assign here: times, studios, customer names,
+          add-ons and notes. What else they can see and do is set by the switches below. They never see revenue, the
+          customer list, prices to edit, codes or these settings.
         </p>
       </div>
+
+      <form action={saveStaffAbilitiesAction} className="admin-card">
+        <h3>What staff can do</h3>
+        {STAFF_ABILITY_KEYS.map((ability) => (
+          <label key={ability} style={{ display: "block", marginBottom: ".5rem", fontSize: ".9rem" }}>
+            <input type="checkbox" name={ability} defaultChecked={settings[ability]} /> {STAFF_ABILITIES[ability]}
+          </label>
+        ))}
+        <div style={{ fontSize: ".78rem", margin: ".5rem 0 1rem" }}>
+          A change applies at once, to every member of staff. Nothing has to be redeployed.
+        </div>
+        <button type="submit" className="btn btn-dark btn-small">
+          Save what staff can do
+        </button>
+      </form>
 
       <div className="admin-card">
         <h3>Add a staff member</h3>

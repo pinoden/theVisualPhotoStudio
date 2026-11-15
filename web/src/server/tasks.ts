@@ -1,18 +1,13 @@
-import { and, eq, gt, isNull, lte } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull, lte, ne, or } from "drizzle-orm";
 import { bookings, payments } from "@/db/schema";
 import type { Db } from "@/db/client";
 import { releaseExpiredHolds } from "./availability";
-import {
-  deliverPendingEmails,
-  loyaltyCodeEmail,
-  ownerPaymentUnknownNotice,
-  queueEmail,
-  type EmailTransport,
-} from "./email";
+import { deliverPendingEmails, ownerPaymentUnknownNotice, queueEmail, type EmailTransport } from "./email";
+import { labelOf } from "@/lib/domain/labels";
+import { BY_SYSTEM, recordEvent } from "./history";
+import { sendEarnedFreeHours } from "./loyalty";
 import { retryOpenRefunds, type ManageDeps } from "./manage";
-import { issuePromo } from "./promos";
 import { loadSettings } from "./settings";
-import { formatInstant } from "./tz";
 
 /**
  * Work that happens on a clock rather than on a request. `runScheduledTasks`
@@ -28,6 +23,7 @@ export interface TaskSummary {
   /** Payments whose result was never recorded; the owner was asked to check each. */
   paymentsFlagged: number;
   visitsCompleted: number;
+  /** Free hours sent to customers who reached five visits. */
   loyaltyCodes: number;
   refundsSucceeded: number;
   refundsFailed: number;
@@ -38,25 +34,51 @@ export interface TaskSummary {
 const DAY = 86_400_000;
 
 /**
- * Mark visits that ended a while ago as completed and thank the customer with
- * a loyalty code. A visit staff marked as a no-show gets nothing.
+ * Mark visits that ended a while ago as completed, and send a free hour to
+ * each customer whose visits have earned one (see `loyalty.ts`). A visit staff
+ * marked as a no-show is not completed, so it counts for nothing.
  */
 export async function completeVisits(db: Db, now: Date, baseUrl: string): Promise<{ completed: number; codes: number }> {
   const settings = await loadSettings(db);
   const cutoff = new Date(now.getTime() - settings.loyaltyDelayHours * 3_600_000);
 
-  const done = await db
-    .update(bookings)
-    .set({ status: "completed" })
-    .where(and(eq(bookings.status, "confirmed"), lte(bookings.endAt, cutoff)))
-    .returning({ id: bookings.id });
+  // A booking waiting to be rescheduled is left alone: the client asked to move it, so the visit at the
+  // original time did not happen, and an administrator decides what becomes of it.
+  const done = await db.transaction(async (tx) => {
+    const ended = await tx
+      .select({ id: bookings.id, status: bookings.status, label: bookings.label })
+      .from(bookings)
+      .where(
+        and(
+          eq(bookings.status, "confirmed"),
+          lte(bookings.endAt, cutoff),
+          or(isNull(bookings.label), ne(bookings.label, "reschedule_pending")),
+        ),
+      )
+      .for("update");
+    if (ended.length === 0) return ended;
+    await tx
+      .update(bookings)
+      .set({ status: "completed", label: null })
+      .where(
+        inArray(
+          bookings.id,
+          ended.map((booking) => booking.id),
+        ),
+      );
+    for (const booking of ended) {
+      await recordEvent(tx, { bookingId: booking.id, from: labelOf(booking), to: "completed", actor: BY_SYSTEM, at: now });
+    }
+    return ended;
+  });
 
   if (!settings.loyaltyEnabled) return { completed: done.length, codes: 0 };
 
-  // Includes visits staff marked completed by hand. Only recent ones, so
-  // switching loyalty on does not mail everyone who ever visited.
+  // Visits not yet looked at for loyalty, including ones staff marked
+  // completed by hand. Only recent ones, so switching loyalty on does not mail
+  // everyone who ever visited: a customer is looked at when they next visit.
   const due = await db
-    .select()
+    .select({ id: bookings.id, email: bookings.customerEmail, name: bookings.customerName })
     .from(bookings)
     .where(
       and(
@@ -66,37 +88,25 @@ export async function completeVisits(db: Db, now: Date, baseUrl: string): Promis
         gt(bookings.endAt, new Date(now.getTime() - 7 * DAY)),
       ),
     )
+    .orderBy(asc(bookings.endAt))
     .limit(200);
 
-  let codes = 0;
+  // One customer at a time: all their visits are counted together, and what they have earned is sent once.
+  const customers = new Map<string, { name: string; bookingIds: string[] }>();
   for (const booking of due) {
-    const issued = await db.transaction(async (tx) => {
-      const expiresAt = new Date(now.getTime() + settings.loyaltyValidDays * DAY);
-      const promo = await issuePromo(tx, {
-        kind: "percent",
-        value: settings.loyaltyPercent,
-        source: "loyalty",
-        email: booking.customerEmail,
-        expiresAt,
-        originBookingId: booking.id,
-        note: `Thank-you code for ${booking.ref}`,
-      });
-      await tx.update(bookings).set({ loyaltyIssuedAt: now }).where(eq(bookings.id, booking.id));
-      if (!promo) return false; // already issued for this visit
-      await queueEmail(
-        tx,
-        loyaltyCodeEmail({
-          to: booking.customerEmail,
-          name: booking.customerName,
-          code: promo.code,
-          percent: settings.loyaltyPercent,
-          expires: formatInstant(expiresAt),
-          bookUrl: `${baseUrl.replace(/\/$/, "")}/book`,
-        }),
-      );
-      return true;
+    const customer = customers.get(booking.email) ?? { name: booking.name, bookingIds: [] };
+    customer.name = booking.name; // the name on their latest visit
+    customer.bookingIds.push(booking.id);
+    customers.set(booking.email, customer);
+  }
+
+  let codes = 0;
+  for (const [email, customer] of customers) {
+    codes += await db.transaction(async (tx) => {
+      const sent = await sendEarnedFreeHours(tx, { email, name: customer.name }, { now, baseUrl, settings });
+      await tx.update(bookings).set({ loyaltyIssuedAt: now }).where(inArray(bookings.id, customer.bookingIds));
+      return sent;
     });
-    if (issued) codes++;
   }
   return { completed: done.length, codes };
 }

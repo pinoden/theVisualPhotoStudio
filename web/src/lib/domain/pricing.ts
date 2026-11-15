@@ -27,13 +27,21 @@ export interface AddonSelection {
   quantity: number;
 }
 
-export type PromoKind = "percent" | "amount";
+export type PromoKind = "percent" | "amount" | "free_hour";
 
 export interface PromoDef {
   kind: PromoKind;
-  /** percent: 1-100. amount: cents available to spend. */
+  /** percent: 1-100. amount: cents available to spend. free_hour: the minutes that are free (60). */
   value: number;
 }
+
+/** Why a code that exists cannot be used on a selection. */
+export type PromoMisfit = "several_studios" | "photography";
+
+export const PROMO_MISFIT_TEXT: Record<PromoMisfit, string> = {
+  several_studios: "A free hour is for one studio. It cannot be used when several studios are booked together.",
+  photography: "That code is for studio rentals. It cannot be used for a photography session.",
+};
 
 export interface QuoteInput {
   studioIds: string[];
@@ -45,6 +53,12 @@ export interface QuoteInput {
   addons?: AddonSelection[];
   addonCatalog?: AddonDef[];
   promo?: PromoDef | null;
+  /**
+   * Set for a photography session: the package's price, which includes the
+   * studio. The booking is then for exactly one studio, and that studio's own
+   * price list is not consulted.
+   */
+  photoPackage?: { priceCents: number } | null;
 }
 
 export interface Quote {
@@ -55,6 +69,11 @@ export interface Quote {
   addonLines: { addonId: string; name: string; quantity: number; unitCents: number; totalCents: number }[];
   addonsCents: number;
   promoDiscountCents: number;
+  /**
+   * Set when a code was given that cannot be used on this selection. The
+   * price is then the price without the code, and the customer is told why.
+   */
+  promoMisfit: PromoMisfit | null;
   totalCents: number;
 }
 
@@ -65,7 +84,8 @@ export type PricingErrorCode =
   | "UNKNOWN_ADDON"
   | "ADDON_NOT_ALLOWED"
   | "BAD_QUANTITY"
-  | "BAD_PROMO";
+  | "BAD_PROMO"
+  | "BAD_PACKAGE";
 
 export class PricingError extends Error {
   constructor(
@@ -129,8 +149,16 @@ export function quote(input: QuoteInput): Quote {
     throw new PricingError("DUPLICATE_STUDIO", "A studio was selected twice.");
   }
 
+  const photoPackage = input.photoPackage ?? null;
+  if (photoPackage) {
+    if (studioIds.length !== 1) throw new PricingError("BAD_PACKAGE", "A photography session is in one studio.");
+    if (!(Number.isInteger(photoPackage.priceCents) && photoPackage.priceCents >= 0)) {
+      throw new PricingError("BAD_PACKAGE", "That photography session is not offered.");
+    }
+  }
   const studioLines = studioIds.map((studioId) => {
-    const priceCents = findPrice(studioId, dayType, durationMinutes, rules);
+    // A session's price includes the studio, so the studio's own price list is not consulted.
+    const priceCents = photoPackage ? photoPackage.priceCents : findPrice(studioId, dayType, durationMinutes, rules);
     if (priceCents === null) {
       throw new PricingError("NO_PRICE", "That duration is not offered for the selected studios.");
     }
@@ -169,15 +197,33 @@ export function quote(input: QuoteInput): Quote {
 
   // A percent code discounts the studio rental only. An amount code is money
   // already owed to the customer, so it can pay for anything on the booking.
+  // A free hour takes the price of one hour of one studio off: it is not for
+  // several studios booked together, and it does not pay for add-ons.
   let promoDiscountCents = 0;
+  let promoMisfit: PromoMisfit | null = null;
   const promo = input.promo;
-  if (promo) {
+  if (promo && photoPackage && promo.kind !== "amount") {
+    // Discount codes and free hours are for renting a studio. Money already paid (a reschedule credit) pays for anything.
+    promoMisfit = "photography";
+  } else if (promo) {
     if (promo.kind === "percent") {
       if (!(promo.value > 0 && promo.value <= 100)) throw new PricingError("BAD_PROMO", "Invalid code.");
       promoDiscountCents = percentOf(studiosNetCents, promo.value);
-    } else {
+    } else if (promo.kind === "amount") {
       if (!(Number.isInteger(promo.value) && promo.value > 0)) throw new PricingError("BAD_PROMO", "Invalid code.");
       promoDiscountCents = Math.min(promo.value, studiosNetCents + addonsCents);
+    } else {
+      if (!(Number.isInteger(promo.value) && promo.value > 0)) throw new PricingError("BAD_PROMO", "Invalid code.");
+      if (studioLines.length !== 1) {
+        promoMisfit = "several_studios";
+      } else {
+        const [line] = studioLines;
+        // The studio's own price for that long on this kind of day. When it is
+        // not sold for exactly that long, the same share of this booking's price.
+        const listed = findPrice(line.studioId, dayType, promo.value, rules);
+        const worth = listed ?? Math.round((line.priceCents * promo.value) / durationMinutes);
+        promoDiscountCents = Math.min(worth, line.priceCents);
+      }
     }
   }
 
@@ -189,6 +235,7 @@ export function quote(input: QuoteInput): Quote {
     addonLines,
     addonsCents,
     promoDiscountCents,
+    promoMisfit,
     totalCents: studiosNetCents + addonsCents - promoDiscountCents,
   };
 }

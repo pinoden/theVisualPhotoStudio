@@ -46,7 +46,7 @@ async function Outbox({ searchParams }: Pick<PageProps<"/dev/outbox">, "searchPa
           Run scheduled tasks now
         </button>
         <span style={{ fontSize: ".8rem", marginLeft: ".75rem" }}>
-          Completes past visits, issues loyalty codes, retries refunds.
+          Completes past visits, sends the free hours they earned, retries refunds.
         </span>
       </form>
       {typeof query.ran === "string" && <div className="flash flash-success">Tasks ran: {query.ran}</div>}

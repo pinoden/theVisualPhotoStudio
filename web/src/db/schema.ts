@@ -38,9 +38,11 @@ export const bookingStatus = pgEnum("booking_status", [
 ]);
 export const paymentStatus = pgEnum("payment_status", ["pending", "succeeded", "failed"]);
 export const refundStatus = pgEnum("refund_status", ["pending", "succeeded", "failed"]);
-export const promoKind = pgEnum("promo_kind", ["percent", "amount"]);
+export const promoKind = pgEnum("promo_kind", ["percent", "amount", "free_hour"]);
 export const promoSource = pgEnum("promo_source", ["loyalty", "reschedule", "manual"]);
 export const cancelReason = pgEnum("cancel_reason", ["customer", "rescheduled", "owner"]);
+/** A label an administrator puts on a confirmed booking. See src/lib/domain/labels.ts. */
+export const bookingLabel = pgEnum("booking_label", ["checked_in", "reschedule_pending", "rescheduled"]);
 
 // ── People ───────────────────────────────────────────────────────────────────
 
@@ -101,8 +103,13 @@ export const studios = pgTable("studios", {
   description: text("description").notNull().default(""),
   /** Guests included in the price. */
   includedGuests: integer("included_guests").notNull().default(6),
-  /** Clean-up minutes kept free after each booking. */
-  bufferMinutes: integer("buffer_minutes").notNull().default(10),
+  /**
+   * Minutes kept free after every booking, so that appointments are at least this far apart.
+   * 15 is the owner's rule: 7 minutes before and 7 after each appointment, drawn so in the calendar.
+   */
+  bufferMinutes: integer("buffer_minutes").notNull().default(15),
+  /** The studio's colour in the admin calendar, the same in every view. A hex colour. */
+  color: text("color").notNull().default("#8a7f72"),
   sortOrder: integer("sort_order").notNull().default(0),
   active: boolean("active").notNull().default(true),
 });
@@ -120,6 +127,58 @@ export const studioHours = pgTable(
     closeMinute: integer("close_minute").notNull(),
   },
   (t) => [primaryKey({ columns: [t.studioId, t.weekday] })],
+);
+
+// ── Photography ──────────────────────────────────────────────────────────────
+
+/**
+ * A photographer who can be booked together with a studio. A resource like a
+ * studio: one photographer cannot be in two places at once, whatever the
+ * studios. The site starts with one, the in-house photographer.
+ */
+export const photographers = pgTable("photographers", {
+  id: id(),
+  name: text("name").notNull(),
+  active: boolean("active").notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(0),
+});
+
+/**
+ * The limits of a photographer's availability: the hours they are ready to
+ * work, by weekday. A missing weekday means they do not work that day.
+ */
+export const photographerHours = pgTable(
+  "photographer_hours",
+  {
+    photographerId: uuid("photographer_id")
+      .notNull()
+      .references(() => photographers.id, { onDelete: "cascade" }),
+    /** ISO weekday: 1 = Monday ... 7 = Sunday. */
+    weekday: integer("weekday").notNull(),
+    openMinute: integer("open_minute").notNull(),
+    closeMinute: integer("close_minute").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.photographerId, t.weekday] })],
+);
+
+/**
+ * A photography session on sale: one studio, one length, one price. The
+ * price includes the studio. Taken from the studio's live price list.
+ */
+export const photoPackages = pgTable(
+  "photo_packages",
+  {
+    id: id(),
+    studioId: uuid("studio_id")
+      .notNull()
+      .references(() => studios.id, { onDelete: "cascade" }),
+    durationMinutes: integer("duration_minutes").notNull(),
+    priceCents: integer("price_cents").notNull(),
+    /** What the session includes, as the customer reads it: "1-2 outfits, 20 edited images". */
+    includes: text("includes").notNull().default(""),
+    active: boolean("active").notNull().default(true),
+  },
+  (t) => [uniqueIndex("photo_packages_studio_duration_idx").on(t.studioId, t.durationMinutes)],
 );
 
 /** Price of one studio for one duration on a weekday or weekend day. */
@@ -175,7 +234,7 @@ export const promoCodes = pgTable("promo_codes", {
   id: id(),
   code: text("code").notNull().unique(),
   kind: promoKind("kind").notNull(),
-  /** percent: 1-100. amount: cents still available. */
+  /** percent: 1-100. amount: cents still available. free_hour: the minutes that are free (60). */
   value: integer("value").notNull(),
   /** When set, only this customer email may use the code. */
   email: text("email"),
@@ -212,6 +271,8 @@ export const bookings = pgTable(
     endAt: ts("end_at").notNull(),
     durationMinutes: integer("duration_minutes").notNull(),
     status: bookingStatus("status").notNull().default("pending_payment"),
+    /** Set by an administrator while the booking is confirmed; it keeps holding its time. */
+    label: bookingLabel("label"),
     /** While pending_payment, the slot is released after this moment. */
     holdExpiresAt: ts("hold_expires_at"),
 
@@ -229,15 +290,50 @@ export const bookings = pgTable(
 
     /** A booking that has been moved can no longer be refunded. */
     rescheduledCount: integer("rescheduled_count").notNull().default(0),
+    /** Set on a photography session: the photographer it holds. */
+    photographerId: uuid("photographer_id").references(() => photographers.id, { onDelete: "set null" }),
+    /** What the session includes, as it was sold: kept with the booking when the package changes later. */
+    photoIncludes: text("photo_includes"),
+    /**
+     * The administrator's address when the booking was made in the admin for a client. Null for a
+     * booking the customer made online. Nothing is charged online for an administrator's booking.
+     */
+    madeBy: text("made_by"),
     cancelReason: cancelReason("cancel_reason"),
     /** Hash of the secret in the customer's manage link. */
     manageTokenHash: text("manage_token_hash").notNull(),
     termsAcceptedAt: ts("terms_accepted_at"),
+    /** When this completed visit was counted for loyalty (a free hour may or may not have followed). */
     loyaltyIssuedAt: ts("loyalty_issued_at"),
     cancelledAt: ts("cancelled_at"),
     createdAt: createdAt(),
   },
   (t) => [index("bookings_email_idx").on(t.customerEmail), index("bookings_start_idx").on(t.startAt)],
+);
+
+/**
+ * The history of a booking's status label: one row for every change, with who
+ * made it and when. Written by the same transaction as the change itself.
+ */
+export const bookingEvents = pgTable(
+  "booking_events",
+  {
+    id: id(),
+    bookingId: uuid("booking_id")
+      .notNull()
+      .references(() => bookings.id, { onDelete: "cascade" }),
+    at: ts("at").notNull(),
+    /** Labels as in LABEL_TEXT: confirmed, checked_in, completed, rescheduled, no_show, reschedule_pending, cancelled. */
+    fromLabel: text("from_label").notNull(),
+    toLabel: text("to_label").notNull(),
+    /** An administrator's email address, or "customer", or "system". */
+    actor: text("actor").notNull(),
+    /** What else happened, for example the old and the new time of a move. */
+    note: text("note").notNull().default(""),
+    /** The clock when the line was written. It orders two changes that carry the same `at`. */
+    recordedAt: ts("recorded_at").notNull().default(sql`clock_timestamp()`),
+  },
+  (t) => [index("booking_events_booking_idx").on(t.bookingId, t.at)],
 );
 
 /** An owner-made block of time (maintenance, private event). */
@@ -269,6 +365,30 @@ export const studioHolds = pgTable(
     priceCents: integer("price_cents").notNull().default(0),
   },
   (t) => [index("studio_holds_booking_idx").on(t.bookingId)],
+);
+
+/**
+ * Every span of time during which a photographer is taken: by a photography
+ * session (with the gap kept after it), or blocked in the admin (time off).
+ * An exclusion constraint, added by hand in the migration, forbids two active
+ * holds of one photographer from overlapping, as for studios: the same
+ * photographer cannot be booked twice for the same time, whatever the studio.
+ */
+export const photographerHolds = pgTable(
+  "photographer_holds",
+  {
+    id: id(),
+    photographerId: uuid("photographer_id")
+      .notNull()
+      .references(() => photographers.id, { onDelete: "restrict" }),
+    occupied: tstzrange("occupied").notNull(),
+    active: boolean("active").notNull().default(true),
+    /** The session that holds the photographer. Null for time blocked in the admin. */
+    bookingId: uuid("booking_id").references(() => bookings.id, { onDelete: "cascade" }),
+    /** Why the time is blocked, when it is. */
+    note: text("note").notNull().default(""),
+  },
+  (t) => [index("photographer_holds_booking_idx").on(t.bookingId)],
 );
 
 export const bookingAddons = pgTable(

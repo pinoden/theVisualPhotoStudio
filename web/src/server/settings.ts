@@ -23,6 +23,8 @@ export interface Settings {
   // ── Cancelling and moving ──
   /** A cancellation at least this many hours before the start is refunded automatically. */
   refundWindowHours: number;
+  /** The same for a photography session, which the photographer has set time aside for. */
+  photoRefundWindowHours: number;
   /** Percent of the card payment kept as a processing fee when refunding. */
   refundFeePercent: number;
   /** A customer can ask for a reschedule code until this many hours before the start. */
@@ -33,39 +35,58 @@ export interface Settings {
   creditValidDays: number;
 
   // ── Loyalty ──
-  /** Send a discount code after each completed visit. */
+  /** Give one free hour for every `loyaltyVisits` visits. */
   loyaltyEnabled: boolean;
-  /** Percent off the next booking. */
-  loyaltyPercent: number;
-  /** Days the loyalty code stays valid. */
+  /** Visits, on separate days, that earn one free hour. */
+  loyaltyVisits: number;
+  /** Days a free hour stays valid after it is earned. */
   loyaltyValidDays: number;
-  /** Hours after a visit ends before it counts as completed and the code is sent. */
+  /** Hours after a visit ends before it counts as completed. */
   loyaltyDelayHours: number;
 
-  // ── Staff ──
-  /** Whether staff see customers' phone number and email on the day sheet. */
+  // ── Staff: what the second level of the admin can do (see src/lib/staff-abilities.ts) ──
+  /** Whether staff see customers' phone number and email. */
   staffSeesContact: boolean;
+  /** Whether staff can change the status label of an appointment. */
+  staffSetsLabels: boolean;
+  /** Whether staff see every day, or only the days assigned to them. */
+  staffSeesAllDays: boolean;
+  /** Whether staff see what a booking cost. */
+  staffSeesPrices: boolean;
+  /** Whether staff can move a booking to a new time. */
+  staffMovesBookings: boolean;
+  /** Whether staff can make a booking for a client. */
+  staffCreatesBookings: boolean;
+  /** Whether staff can set the photographer's working hours and block their time. */
+  staffSetsPhotographerTimes: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  slotIncrementMinutes: 30,
+  slotIncrementMinutes: 15,
   minLeadHours: 24,
   maxAdvanceDays: 180,
   holdMinutes: 10,
   multiStudioPercent: { 2: 20, 3: 22 },
 
   refundWindowHours: 168,
+  photoRefundWindowHours: 336, // 14 days, as on the live site
   refundFeePercent: 5,
   rescheduleCutoffHours: 24,
   maxReschedules: 1,
   creditValidDays: 90,
 
   loyaltyEnabled: true,
-  loyaltyPercent: 10,
+  loyaltyVisits: 5,
   loyaltyValidDays: 60,
   loyaltyDelayHours: 2,
 
   staffSeesContact: false,
+  staffSetsLabels: true, // the owner, 2026-11-15: "Staff should be able to change all the labels"
+  staffSeesAllDays: false,
+  staffSeesPrices: false,
+  staffMovesBookings: false,
+  staffCreatesBookings: false,
+  staffSetsPhotographerTimes: false,
 };
 
 const int = (min: number, max: number) => (v: unknown) =>
@@ -91,15 +112,22 @@ const VALIDATORS: { [K in Exclude<keyof Settings, "multiStudioPercent">]: (v: un
   maxAdvanceDays: int(1, 730),
   holdMinutes: int(1, 60),
   refundWindowHours: int(0, 24 * 365),
+  photoRefundWindowHours: int(0, 24 * 365),
   refundFeePercent: int(0, 100),
   rescheduleCutoffHours: int(0, 24 * 365),
   maxReschedules: int(0, 20),
   creditValidDays: int(1, 730),
   loyaltyEnabled: bool,
-  loyaltyPercent: int(1, 100),
+  loyaltyVisits: int(1, 100),
   loyaltyValidDays: int(1, 730),
   loyaltyDelayHours: int(0, 24 * 14),
   staffSeesContact: bool,
+  staffSetsLabels: bool,
+  staffSeesAllDays: bool,
+  staffSeesPrices: bool,
+  staffMovesBookings: bool,
+  staffCreatesBookings: bool,
+  staffSetsPhotographerTimes: bool,
 };
 
 export type SettingKey = keyof Settings;

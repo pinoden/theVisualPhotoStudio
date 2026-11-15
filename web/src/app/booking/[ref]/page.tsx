@@ -87,6 +87,13 @@ async function BookingDetails({ params, searchParams }: Pick<PageProps<"/booking
 
       <BookingSummary booking={booking} />
 
+      {booking.label === "reschedule_pending" && (
+        <div className="notice" role="status">
+          We have your request to move this booking. Your time is still held for you, and we will confirm the new
+          date and time with you.
+        </div>
+      )}
+
       {booking.status === "confirmed" && (
         <>
           <p style={{ fontSize: ".9rem" }}>

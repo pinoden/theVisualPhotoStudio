@@ -30,88 +30,30 @@ const VISIT_END = new Date("2026-11-18T17:00:00Z");
 const status = async (ref: string) => (await world.db.select().from(bookings).where(eq(bookings.ref, ref)))[0].status;
 
 describe("after a visit", () => {
-  it("marks it completed two hours after it ends and emails a loyalty code, once", async () => {
+  it("marks it completed two hours after it ends", async () => {
     const booked = expectOk(await world.book());
 
     expect(await completeVisits(world.db, hoursAfter(VISIT_END, 1.9), BASE_URL)).toEqual({ completed: 0, codes: 0 });
     expect(await status(booked.ref)).toBe("confirmed");
 
-    const at = hoursAfter(VISIT_END, 2);
-    expect(await completeVisits(world.db, at, BASE_URL)).toEqual({ completed: 1, codes: 1 });
+    // One visit earns nothing yet. What five of them earn is in loyalty.test.ts.
+    expect(await completeVisits(world.db, hoursAfter(VISIT_END, 2), BASE_URL)).toEqual({ completed: 1, codes: 0 });
     expect(await status(booked.ref)).toBe("completed");
+    expect(await world.db.select().from(promoCodes)).toHaveLength(0);
 
-    const [code] = await world.db.select().from(promoCodes);
-    expect(code).toMatchObject({ kind: "percent", value: 10, source: "loyalty", email: "jane@example.com", maxUses: 1, usedCount: 0 });
-    expect(code.code).toMatch(/^THANKS-/);
-    expect(code.expiresAt).toEqual(daysAfter(at, 60));
-
-    const [mail] = await world.emails("loyalty_code");
-    expect(mail.toEmail).toBe("jane@example.com");
-    expect(mail.subject).toBe("Thank you for visiting: 10% off your next booking");
-    expect(mail.body).toContain(`Code: ${code.code}`);
-
-    // Running again, or much later, sends nothing more.
-    expect(await completeVisits(world.db, hoursAfter(at, 1), BASE_URL)).toEqual({ completed: 0, codes: 0 });
-    expect(await completeVisits(world.db, daysAfter(at, 3), BASE_URL)).toEqual({ completed: 0, codes: 0 });
-    expect(await world.emails("loyalty_code")).toHaveLength(1);
+    // Running again, or much later, changes nothing.
+    expect(await completeVisits(world.db, daysAfter(VISIT_END, 3), BASE_URL)).toEqual({ completed: 0, codes: 0 });
   });
 
-  it("gives the customer that discount on their next booking, and nobody else", async () => {
-    expectOk(await world.book());
-    await completeVisits(world.db, hoursAfter(VISIT_END, 2), BASE_URL);
-    const [{ code }] = await world.db.select().from(promoCodes);
-    const later = { now: daysAfter(NOW, 10) };
-
-    const stranger = await world.book(
-      { date: "2026-12-02", promoCode: code, customer: { name: "Eve", email: "eve@example.com", phone: "5550100100" } },
-      later,
-    );
-    expect(stranger).toMatchObject({ ok: false, code: "invalid_code" });
-
-    const next = expectOk(await world.book({ date: "2026-12-02", promoCode: code }, later));
-    expect(next.totalCents).toBe(15840);
-  });
-
-  it("sends nothing for a no-show or a cancelled booking", async () => {
+  it("leaves a no-show and a cancelled booking as they are", async () => {
     const noShow = expectOk(await world.book());
     await world.db.update(bookings).set({ status: "no_show" }).where(eq(bookings.ref, noShow.ref));
     const cancelled = expectOk(await world.book({ startMinute: h(14) }));
     await cancelBooking(world.db, cancelled.ref, { kind: "token", token: cancelled.manageToken }, world.manageDeps());
 
     expect(await completeVisits(world.db, daysAfter(VISIT_END, 1), BASE_URL)).toEqual({ completed: 0, codes: 0 });
-    expect(await world.db.select().from(promoCodes)).toHaveLength(0);
     expect(await status(noShow.ref)).toBe("no_show");
-  });
-
-  it("also rewards a visit that staff marked completed by hand", async () => {
-    const booked = expectOk(await world.book());
-    await world.db.update(bookings).set({ status: "completed" }).where(eq(bookings.ref, booked.ref));
-    expect(await completeVisits(world.db, hoursAfter(VISIT_END, 1), BASE_URL)).toEqual({ completed: 0, codes: 0 }); // too soon
-    expect(await completeVisits(world.db, hoursAfter(VISIT_END, 3), BASE_URL)).toEqual({ completed: 0, codes: 1 });
-  });
-
-  it("follows the owner's loyalty settings", async () => {
-    await world.db.insert(settings).values([
-      { key: "loyaltyPercent", value: 15 },
-      { key: "loyaltyValidDays", value: 30 },
-      { key: "loyaltyDelayHours", value: 0 },
-    ]);
-    expectOk(await world.book());
-    expect(await completeVisits(world.db, VISIT_END, BASE_URL)).toEqual({ completed: 1, codes: 1 });
-    expect((await world.db.select().from(promoCodes))[0]).toMatchObject({ value: 15, expiresAt: daysAfter(VISIT_END, 30) });
-    expect((await world.emails("loyalty_code"))[0].subject).toContain("15% off");
-  });
-
-  it("completes visits but sends no codes while loyalty is switched off, and only rewards recent visits once it is on", async () => {
-    await world.db.insert(settings).values({ key: "loyaltyEnabled", value: false });
-    const booked = expectOk(await world.book());
-    expect(await completeVisits(world.db, hoursAfter(VISIT_END, 2), BASE_URL)).toEqual({ completed: 1, codes: 0 });
-    expect(await status(booked.ref)).toBe("completed");
-    expect(await world.db.select().from(promoCodes)).toHaveLength(0);
-
-    await world.db.update(settings).set({ value: true }).where(eq(settings.key, "loyaltyEnabled"));
-    expect(await completeVisits(world.db, daysAfter(VISIT_END, 8), BASE_URL)).toEqual({ completed: 0, codes: 0 }); // too long ago
-    expect(await completeVisits(world.db, daysAfter(VISIT_END, 6), BASE_URL)).toEqual({ completed: 0, codes: 1 });
+    expect(await status(cancelled.ref)).toBe("cancelled");
   });
 });
 
@@ -193,6 +135,8 @@ describe("the scheduled run", () => {
         return { ok: true };
       },
     };
+    // One visit earns the free hour here, so that the run has one to send.
+    await world.db.insert(settings).values({ key: "loyaltyVisits", value: 1 });
     const booked = expectOk(await world.book());
     const summary = await runScheduledTasks(world.db, { ...world.manageDeps({ now: hoursAfter(VISIT_END, 2) }), email });
     expect(summary).toEqual({
@@ -202,11 +146,11 @@ describe("the scheduled run", () => {
       loyaltyCodes: 1,
       refundsSucceeded: 0,
       refundsFailed: 0,
-      emailsSent: 2, // the booking confirmation and the loyalty code
+      emailsSent: 2, // the booking confirmation and the free hour
       emailsFailed: 0,
     });
     expect(delivered).toContain(`Booking confirmed: ${booked.ref}`);
-    expect(delivered).toContain("Thank you for visiting: 10% off your next booking");
+    expect(delivered).toContain("You have earned a free hour in the studio");
   });
 });
 

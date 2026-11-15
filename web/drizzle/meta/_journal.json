@@ -43,6 +43,41 @@
       "when": 1794756765979,
       "tag": "0005_addon_kind",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1794759458032,
+      "tag": "0006_loyalty_free_hour",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1794760948136,
+      "tag": "0007_start_times_and_gap",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1794761814712,
+      "tag": "0008_booking_labels",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1794762146914,
+      "tag": "0009_calendar",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1794763130566,
+      "tag": "0010_photography",
+      "breakpoints": true
     }
   ]
 }

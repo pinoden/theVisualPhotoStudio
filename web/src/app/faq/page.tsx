@@ -237,15 +237,30 @@ export default async function FaqPage() {
         </p>
       ),
     },
-    ...(s.loyaltyEnabled && s.loyaltyPercent > 0
+    ...(s.loyaltyEnabled
       ? [
           {
             q: "Do returning guests get anything?",
             a: (
-              <p>
-                Yes. After your visit we email you a code for {s.loyaltyPercent}% off the studio rental of your next
-                booking. It is valid for {count(s.loyaltyValidDays, "day")}.
-              </p>
+              <ul>
+                <li>
+                  Yes. When you have visited us {count(s.loyaltyVisits, "time")}, on separate days, we email you a
+                  code for one free hour in any studio. Visits are counted by the email address you book with.
+                </li>
+                <li>
+                  The price of one hour comes off your booking: a one-hour booking is free, and a longer one costs
+                  the rest.
+                </li>
+                <li>
+                  The free hour is for one studio. It cannot be used when you book several studios together, and it
+                  does not pay for add-ons.
+                </li>
+                <li>
+                  It is valid for {count(s.loyaltyValidDays, "day")}. After that the count starts again: every{" "}
+                  {count(s.loyaltyVisits, "visit")} earn another hour, and a visit made with a free hour does not
+                  count.
+                </li>
+              </ul>
             ),
           },
         ]

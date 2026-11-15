@@ -19,7 +19,7 @@ const GROUPS: { title: string; fields: { key: NumberKey; label: string; help: st
     fields: [
       { key: "minLeadHours", label: "Minimum notice (hours)", help: "How far ahead a booking must be made." },
       { key: "maxAdvanceDays", label: "Booking horizon (days)", help: "How far ahead the calendar is open." },
-      { key: "slotIncrementMinutes", label: "Start times every (minutes)", help: "30 offers 9:00, 9:30, 10:00 and so on." },
+      { key: "slotIncrementMinutes", label: "Start times every (minutes)", help: "15 offers 9:00, 9:15, 9:30 and so on." },
       { key: "holdMinutes", label: "Hold while paying (minutes)", help: "How long a slot is kept for a customer at checkout." },
     ],
   },
@@ -27,6 +27,7 @@ const GROUPS: { title: string; fields: { key: NumberKey; label: string; help: st
     title: "Cancelling and rescheduling",
     fields: [
       { key: "refundWindowHours", label: "Refund window (hours before start)", help: "168 is 7 days. Earlier cancellations are refunded automatically." },
+      { key: "photoRefundWindowHours", label: "Refund window for photography (hours before start)", help: "336 is 14 days." },
       { key: "refundFeePercent", label: "Processing fee kept (%)", help: "0 refunds in full." },
       { key: "rescheduleCutoffHours", label: "Reschedule cut-off (hours before start)", help: "After this, customers must call." },
       { key: "maxReschedules", label: "Reschedules allowed per booking", help: "0 switches reschedule codes off." },
@@ -34,11 +35,11 @@ const GROUPS: { title: string; fields: { key: NumberKey; label: string; help: st
     ],
   },
   {
-    title: "Loyalty code after a visit",
+    title: "Loyalty: a free hour for regular visitors",
     fields: [
-      { key: "loyaltyPercent", label: "Discount (%)", help: "Off the studio rental of the next booking." },
-      { key: "loyaltyValidDays", label: "Valid for (days)", help: "" },
-      { key: "loyaltyDelayHours", label: "Send after (hours)", help: "Time after the visit ends, so staff can mark a no-show first." },
+      { key: "loyaltyVisits", label: "Visits that earn a free hour", help: "Counted on separate days. A visit made with a free hour does not count." },
+      { key: "loyaltyValidDays", label: "Free hour valid for (days)", help: "" },
+      { key: "loyaltyDelayHours", label: "A visit counts after (hours)", help: "Time after the visit ends, so staff can mark a no-show first." },
     ],
   },
 ];
@@ -88,8 +89,8 @@ async function SettingsForm({ searchParams }: Pick<PageProps<"/admin/settings">,
             <h3>{group.title}</h3>
             {group.title.startsWith("Loyalty") && (
               <label style={{ display: "block", marginBottom: "1rem", fontSize: ".9rem" }}>
-                <input type="checkbox" name="loyaltyEnabled" defaultChecked={settings.loyaltyEnabled} /> Send a loyalty code
-                after each completed visit
+                <input type="checkbox" name="loyaltyEnabled" defaultChecked={settings.loyaltyEnabled} /> Email a free
+                hour to customers when their visits have earned one
               </label>
             )}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "1rem" }}>
@@ -112,14 +113,6 @@ async function SettingsForm({ searchParams }: Pick<PageProps<"/admin/settings">,
             </div>
           </div>
         ))}
-
-        <div className="admin-card">
-          <h3>Staff</h3>
-          <label style={{ fontSize: ".9rem" }}>
-            <input type="checkbox" name="staffSeesContact" defaultChecked={settings.staffSeesContact} /> Staff can see
-            customers&rsquo; phone numbers and email addresses on the day sheet
-          </label>
-        </div>
 
         <button type="submit" className="btn btn-dark">
           Save settings

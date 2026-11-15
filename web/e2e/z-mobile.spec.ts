@@ -1,0 +1,333 @@
+import { expect, test, type Page } from "@playwright/test";
+import {
+  agreeToPolicies,
+  byLabel,
+  byText,
+  confirmAndGetRef,
+  dateAhead,
+  fillDetails,
+  next,
+  onScreen,
+  pickStudio,
+  shot,
+  signIn,
+  totalRow,
+} from "./helpers";
+
+/**
+ * The owner's requirement 13: the whole site on a phone. Runs after
+ * site.spec.ts (the file name sorts last), on the database that suite left,
+ * so the admin pages have real bookings to lay out. It books on days of its
+ * own, with customers of its own.
+ *
+ * Sizes are CSS pixels, as the phones report them.
+ */
+const SIZES = [
+  { name: "iPhone SE, 1st generation (the smallest still in use)", width: 320, height: 568 },
+  { name: "Galaxy Z Fold, folded", width: 344, height: 882 },
+  { name: "Android phone", width: 360, height: 800 },
+  { name: "iPhone mini and iPhone SE", width: 375, height: 667 },
+  { name: "iPhone", width: 390, height: 844 },
+  { name: "iPhone Plus", width: 428, height: 926 },
+  { name: "iPhone Pro Max", width: 430, height: 932 },
+  { name: "iPad, and a foldable opened", width: 768, height: 1024 },
+] as const;
+
+const PUBLIC_PAGES = ["/", "/studios", "/rates", "/services", "/faq", "/policies", "/contact", "/book", "/book/photography", "/account/sign-in"];
+
+// The owner addresses of site.spec.ts have each used the three sign-in codes an address may ask for.
+const OWNER = "owner4@studio.test";
+const mia = { name: "Mia Mobile", email: "mia.mobile@example.com", phone: "407-555-0177" };
+
+let browserProblems: string[] = [];
+test.beforeEach(({ page }) => {
+  browserProblems = [];
+  page.on("pageerror", (error) => browserProblems.push(`script error: ${error.message}`));
+  page.on("console", (message) => {
+    if (message.type() === "error" && !message.text().startsWith("Failed to load resource")) {
+      browserProblems.push(`console error: ${message.text().slice(0, 400)}`);
+    }
+  });
+});
+test.afterEach(() => {
+  expect(browserProblems, "errors reported by the browser").toEqual([]);
+});
+
+/**
+ * What is wider than the screen. A box that scrolls sideways on purpose (a
+ * wide table inside its own frame) is allowed; the page itself is not.
+ */
+async function widerThanScreen(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const limit = document.documentElement.clientWidth + 1;
+    const found: string[] = [];
+    if (document.documentElement.scrollWidth > limit) {
+      found.push(`the page scrolls sideways (${document.documentElement.scrollWidth}px wide on a ${limit - 1}px screen)`);
+    }
+    for (const el of Array.from(document.querySelectorAll<HTMLElement>("body *"))) {
+      if (el.closest("nextjs-portal")) continue; // the development tools' own button
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) continue;
+      if (rect.right <= limit && rect.left >= -1) continue;
+      const style = getComputedStyle(el);
+      if (style.position === "fixed" || style.clipPath !== "none") continue; // overlays, and text kept for screen readers only
+      let box = el.parentElement;
+      let scrolls = false;
+      while (box && !scrolls) {
+        scrolls = /(auto|scroll|hidden)/.test(getComputedStyle(box).overflowX);
+        box = box.parentElement;
+      }
+      if (!scrolls) found.push(`<${el.tagName.toLowerCase()} class="${el.className}"> reaches ${Math.round(rect.right)}px`);
+    }
+    return [...new Set(found)].slice(0, 6);
+  });
+}
+
+/**
+ * Controls that are hard to use on a phone: shorter than 40px, or a text
+ * field with text under 16px, which makes an iPhone zoom the whole page when
+ * the field is touched and leave it zoomed.
+ */
+async function hardToTouch(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const found: string[] = [];
+    const visible = (el: Element) => {
+      const rect = el.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0 && getComputedStyle(el).visibility !== "hidden";
+    };
+    const name = (el: Element) =>
+      (el.getAttribute("aria-label") || (el as HTMLElement).innerText || (el as HTMLInputElement).name || el.id || el.tagName).trim().slice(0, 40);
+    for (const el of Array.from(document.querySelectorAll("main button, main a.btn, main select, main textarea, main input, .site-nav button, .site-nav a"))) {
+      if (!visible(el) || el.closest("nextjs-portal")) continue;
+      const input = el as HTMLInputElement;
+      if (el.tagName === "INPUT" && ["hidden", "checkbox", "radio"].includes(input.type)) continue;
+      const rect = el.getBoundingClientRect();
+      if (rect.height < 40) found.push(`"${name(el)}" is ${Math.round(rect.height)}px tall`);
+      if (["INPUT", "SELECT", "TEXTAREA"].includes(el.tagName) && parseFloat(getComputedStyle(el).fontSize) < 16) {
+        found.push(`"${name(el)}" has ${getComputedStyle(el).fontSize} text: an iPhone zooms in on it`);
+      }
+    }
+    return [...new Set(found)].slice(0, 10);
+  });
+}
+
+/** Text too small to read without zooming. */
+async function tooSmallToRead(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const found: string[] = [];
+    const walker = document.createTreeWalker(document.querySelector("main") ?? document.body, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const text = (node.textContent ?? "").trim();
+      const el = node.parentElement;
+      if (!el || text.length < 2 || el.closest("nextjs-portal")) continue;
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) continue;
+      const size = parseFloat(getComputedStyle(el).fontSize);
+      if (size < 11) found.push(`"${text.slice(0, 30)}" is ${size}px`);
+    }
+    return [...new Set(found)].slice(0, 6);
+  });
+}
+
+async function expectFits(page: Page, where: string): Promise<void> {
+  expect(await widerThanScreen(page), `${where}: wider than the screen`).toEqual([]);
+}
+
+test("no public page is wider than the screen, and its text can be read, on any phone", async ({ page }) => {
+  test.setTimeout(300_000);
+  for (const size of SIZES) {
+    await page.setViewportSize({ width: size.width, height: size.height });
+    for (const path of PUBLIC_PAGES) {
+      await page.goto(path);
+      await expect(page.locator("main h1, main h2").first()).toBeVisible();
+      await expectFits(page, `${path} on ${size.name} (${size.width}px)`);
+      expect(await tooSmallToRead(page), `${path} on ${size.name}: text too small to read`).toEqual([]);
+    }
+  }
+});
+
+test("the menu opens and leads somewhere on a phone", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 667 });
+  await page.goto("/");
+  const menu = page.locator(".site-nav");
+  await expect(menu.getByRole("link", { name: "Rates", exact: true })).toBeHidden();
+  await menu.getByRole("button", { name: "Menu" }).click();
+  expect(await hardToTouch(page), "the open menu: hard to use by touch").toEqual([]);
+  await menu.getByRole("link", { name: "Rates", exact: true }).click();
+  await expect(page).toHaveURL(/\/rates$/);
+  await expect(page.getByRole("heading", { name: "Studio Rates" })).toBeVisible();
+  // The menu closes after a choice, and can be opened again.
+  await expect(menu.getByRole("link", { name: "Contact", exact: true })).toBeHidden();
+  await menu.getByRole("button", { name: "Menu" }).click();
+  await menu.getByRole("link", { name: "Contact", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Contact Us" })).toBeVisible();
+  await expectFits(page, "/contact with the menu used");
+});
+
+// A whole booking on four iPhones, from the smallest to the largest. Each on a day of its own.
+const BOOKING_SIZES = [SIZES[0], SIZES[3], SIZES[4], SIZES[6]];
+for (const [index, size] of BOOKING_SIZES.entries()) {
+  test(`a whole booking can be made on ${size.name} (${size.width}px)`, async ({ page }) => {
+    await page.setViewportSize({ width: size.width, height: size.height });
+    const date = dateAhead(70 + index * 7);
+    const step = async (name: string) => {
+      await expectFits(page, `the ${name} step`);
+      expect(await hardToTouch(page), `the ${name} step: hard to use by touch`).toEqual([]);
+      expect(await tooSmallToRead(page), `the ${name} step: text too small`).toEqual([]);
+    };
+
+    await page.goto("/book");
+    await step("studios");
+    await pickStudio(page, "Studio Paris");
+    await next(page);
+
+    await byLabel(page, "Date").fill(date);
+    await page.getByRole("button", { name: "1.5 hr", exact: true }).click();
+    await step("date");
+    await next(page);
+
+    // Every start time is a button that can be tapped: a quarter of an hour apart.
+    await expect(page.getByRole("button", { name: "9:15 AM", exact: true })).toBeVisible();
+    await step("time");
+    await shot(page, `m-${size.width}-time`);
+    await page.getByRole("button", { name: "9:15 AM", exact: true }).click();
+    await next(page);
+
+    await fillDetails(page, mia);
+    await agreeToPolicies(page);
+    await step("details");
+    await shot(page, `m-${size.width}-details`);
+    await next(page);
+
+    await expect(totalRow(page)).toContainText("$102");
+    await step("payment");
+    await confirmAndGetRef(page, "Confirm & pay $102");
+    await expectFits(page, "the booking page");
+    await expect(onScreen(page.locator(".price-row", { hasText: "Studio Paris" }))).toBeVisible();
+  });
+}
+
+test("a photographer can be booked on a phone", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 667 });
+  const date = dateAhead(101);
+  await page.goto("/book");
+  // The way to the photography flow is on the first screen, and its button is easy to hit.
+  const callout = page.getByRole("complementary", { name: "Don’t have a photographer?" });
+  await expect(callout).toBeInViewport();
+  await expectFits(page, "/book");
+  await shot(page, "m-375-book-with-photographer-section");
+  await callout.getByRole("link", { name: "Book a Photographer" }).click();
+  await expect(page.getByRole("heading", { name: "Book a Photographer" })).toBeVisible();
+
+  await pickStudio(page, "Studio Dayglow");
+  await next(page);
+  await byLabel(page, "Date").fill(date);
+  await page.getByRole("button", { name: /2 hours · \$515/ }).click();
+  await expectFits(page, "the session step");
+  await shot(page, "m-375-session");
+  expect(await hardToTouch(page), "the session step: hard to use by touch").toEqual([]);
+  await next(page);
+  await page.getByRole("button", { name: "1:00 PM", exact: true }).click();
+  await next(page);
+  await fillDetails(page, mia);
+  await agreeToPolicies(page);
+  await next(page);
+  await expect(totalRow(page)).toContainText("$515");
+  await expectFits(page, "the payment step");
+  await confirmAndGetRef(page, "Confirm & pay $515");
+  await expect(byText(page, /Photography session, Studio Dayglow/)).toBeVisible();
+  await expectFits(page, "the booking page of a session");
+});
+
+test("starting from the time works on a phone", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const date = dateAhead(108);
+  await page.goto("/book");
+  await page.getByRole("radio", { name: /I know when I want to come/ }).click();
+  await byLabel(page, "Date").fill(date);
+  await page.getByRole("button", { name: "1 hr", exact: true }).click();
+  await next(page);
+  await page.getByRole("button", { name: /^10:00 AM/ }).click();
+  await expectFits(page, "the time step, starting from the time");
+  expect(await hardToTouch(page), "the time step: hard to use by touch").toEqual([]);
+  await next(page);
+  await pickStudio(page, "Studio Blanche");
+  await expectFits(page, "the studios step, starting from the time");
+  await next(page);
+  await fillDetails(page, mia);
+  await agreeToPolicies(page);
+  await next(page);
+  await confirmAndGetRef(page, "Confirm & pay $88");
+});
+
+test("the admin fits a phone: the calendar in its three views, an appointment, and every page of the owners", async ({ page }) => {
+  test.setTimeout(300_000);
+  await page.setViewportSize({ width: 390, height: 844 });
+  const day = dateAhead(70); // the day of the first phone booking above
+  await signIn(page, OWNER, `/admin/calendar?view=week&date=${day}`);
+
+  // The week on a phone is a list, day by day, with each appointment a row that can be tapped.
+  const row = onScreen(page.locator(".cal-agenda li", { hasText: "Mia Mobile" }));
+  await expect(row).toContainText("9:15 AM – 10:45 AM");
+  await expect(row).toContainText("Studio Paris");
+  await expect(row).toContainText("Confirmed");
+  await expectFits(page, "the calendar's week");
+  await shot(page, "m-390-calendar-week");
+  expect(await hardToTouch(page), "the calendar's week: hard to use by touch").toEqual([]);
+
+  // The month: tapping a day opens it.
+  await page.getByRole("navigation", { name: "Calendar view" }).getByRole("link", { name: "Month" }).click();
+  await expect(page).toHaveURL(/view=month/);
+  await expectFits(page, "the calendar's month");
+  const dayName = new Date(`${day}T12:00:00Z`).toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+  await page.getByRole("link", { name: dayName, exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`view=day&date=${day}`));
+  // The day keeps a column for each studio.
+  const appointment = page.getByRole("link", { name: /Mia Mobile/ });
+  await expect(appointment).toBeVisible();
+  await expectFits(page, "the calendar's day");
+  expect(await tooSmallToRead(page), "the calendar's day: text too small").toEqual([]);
+
+  // An appointment: its details, the label buttons and the form to move it.
+  await appointment.click();
+  await expect(page.getByRole("heading", { name: "Mia Mobile" })).toBeVisible();
+  await expectFits(page, "an appointment");
+  await shot(page, "m-390-appointment");
+  expect(await hardToTouch(page), "an appointment: hard to use by touch").toEqual([]);
+  await page.getByRole("button", { name: "Reschedule Pending", exact: true }).click();
+  await expect(byText(page, "Marked Reschedule Pending.")).toBeVisible();
+
+  for (const path of [
+    "/admin",
+    "/admin/calendar/new",
+    "/admin/bookings",
+    "/staff",
+    "/admin/staff",
+    "/admin/prices",
+    "/admin/studios",
+    "/admin/hours",
+    "/admin/photography",
+    "/admin/codes",
+    "/admin/settings",
+    "/account",
+  ]) {
+    await page.goto(path);
+    await expect(page.locator("main h1").first()).toBeVisible();
+    await expectFits(page, path);
+    expect(await hardToTouch(page), `${path}: hard to use by touch`).toEqual([]);
+  }
+
+  // The smallest phone too, for the pages an administrator uses on the floor.
+  await page.setViewportSize({ width: 320, height: 568 });
+  for (const path of [`/admin/calendar?view=day&date=${day}`, `/admin/calendar?view=week&date=${day}`, `/staff?date=${day}`, "/admin/calendar/new"]) {
+    await page.goto(path);
+    await expect(page.locator("main h1").first()).toBeVisible();
+    await expectFits(page, `${path} at 320px`);
+  }
+});

@@ -10,7 +10,15 @@ import {
   type SlotOptions,
 } from "@/lib/domain/availability";
 import { multiStudioOffer } from "@/lib/catalog-view";
-import { bookableDurations, findPrice, formatCents, quote, type Quote } from "@/lib/domain/pricing";
+import {
+  bookableDurations,
+  findPrice,
+  formatCents,
+  PROMO_MISFIT_TEXT,
+  quote,
+  type PromoKind,
+  type Quote,
+} from "@/lib/domain/pricing";
 import {
   addDays,
   defaultDayType,
@@ -19,7 +27,7 @@ import {
   minutesToLabel,
   type DayType,
 } from "@/lib/domain/time";
-import { count } from "@/lib/words";
+import { count, hoursInWords } from "@/lib/words";
 import type { DayAvailability } from "@/server/availability";
 import type { Catalog } from "@/server/catalog";
 import type { PaymentClientConfig } from "@/server/payments";
@@ -45,7 +53,7 @@ const MOCK_TOKEN = "mock-card-ok";
 /** A code the server accepted for one email address. */
 interface AppliedCode {
   code: string;
-  kind: "percent" | "amount";
+  kind: PromoKind;
   value: number;
   email: string;
 }
@@ -91,7 +99,20 @@ function loadPage(url: string): void {
   window.location.assign(url);
 }
 
-export function BookingFlow({ catalog, navigate = loadPage }: { catalog: Catalog; navigate?: (url: string) => void }) {
+export function BookingFlow({
+  catalog,
+  navigate = loadPage,
+  photography = false,
+}: {
+  catalog: Catalog;
+  navigate?: (url: string) => void;
+  /**
+   * The photography flow: a session with the in-house photographer in one
+   * studio. The same steps as renting a studio, with a package in place of a
+   * duration, and with times at which the photographer is free too.
+   */
+  photography?: boolean;
+}) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -133,14 +154,25 @@ export function BookingFlow({ catalog, navigate = loadPage }: { catalog: Catalog
   const dayType: DayType = date ? (catalog.specialDates[date] ?? defaultDayType(date)) : "weekday";
 
   // ── What can be chosen ─────────────────────────────────────────────────────
+  /** The session packages of the chosen studio, shortest first. Only in the photography flow. */
+  const packages = useMemo(
+    () =>
+      photography
+        ? catalog.photoPackages.filter((p) => p.studioId === studioIds[0]).sort((a, b) => a.durationMinutes - b.durationMinutes)
+        : [],
+    [photography, catalog.photoPackages, studioIds],
+  );
+
   const durations = useMemo(() => {
+    if (photography) return packages.map((p) => p.durationMinutes);
     if (mode === "studio") return bookableDurations(studioIds, dayType, rules);
     const all = new Set(rules.filter((r) => r.dayType === dayType).map((r) => r.durationMinutes));
     return [...all].sort((a, b) => a - b);
-  }, [mode, studioIds, dayType, rules]);
+  }, [photography, packages, mode, studioIds, dayType, rules]);
 
   /** A chosen duration stops counting once the current selection no longer offers it. */
   const duration = durations.includes(durationChoice) ? durationChoice : 0;
+  const session = photography ? (packages.find((p) => p.durationMinutes === duration) ?? null) : null;
 
   const slotOptions: SlotOptions | null = useMemo(
     () =>
@@ -172,8 +204,13 @@ export function BookingFlow({ catalog, navigate = loadPage }: { catalog: Catalog
     if (!availability || !slotOptions || availability.problem) return [];
     const days = studioIds.map((id) => availability.days.find((d) => d.studioId === id));
     if (days.length === 0 || days.some((d) => !d)) return [];
+    if (photography) {
+      // A session needs the photographer as well: only times at which both are free.
+      if (!availability.photographer) return [];
+      days.push(availability.photographer);
+    }
     return combinedStarts(days as NonNullable<(typeof days)[number]>[], slotOptions);
-  }, [availability, slotOptions, studioIds]);
+  }, [availability, slotOptions, studioIds, photography]);
 
   const freeAtStart = useMemo(
     () => (grid && start !== null ? studiosFreeAt(grid, start) : []),
@@ -189,6 +226,7 @@ export function BookingFlow({ catalog, navigate = loadPage }: { catalog: Catalog
 
   const price: Quote | null = useMemo(() => {
     if (studioIds.length === 0 || duration <= 0) return null;
+    if (photography && !session) return null;
     try {
       return quote({
         studioIds,
@@ -201,13 +239,14 @@ export function BookingFlow({ catalog, navigate = loadPage }: { catalog: Catalog
           .filter((id) => availableAddons.some((a) => a.id === id))
           .map((addonId) => ({ addonId, quantity: 1 })),
         promo: promo ? { kind: promo.kind, value: promo.value } : null,
+        photoPackage: session ? { priceCents: session.priceCents } : null,
       });
     } catch {
       return null;
     }
     // availableAddons is derived from studioIds and the catalog.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [studioIds, dayType, duration, rules, settings.multiStudioPercent, catalog.addons, addonIds, promo]);
+  }, [studioIds, dayType, duration, rules, settings.multiStudioPercent, catalog.addons, addonIds, promo, photography, session]);
 
   const needsCard = price !== null && price.totalCents > 0;
 
@@ -215,7 +254,9 @@ export function BookingFlow({ catalog, navigate = loadPage }: { catalog: Catalog
   const fetchAvailability = useCallback(async (forDate: string) => {
     setLoadingSlots(true);
     try {
-      const response = await fetch(`/api/availability?date=${encodeURIComponent(forDate)}`, { cache: "no-store" });
+      const response = await fetch(`/api/availability?date=${encodeURIComponent(forDate)}${photography ? "&photography=1" : ""}`, {
+        cache: "no-store",
+      });
       if (!response.ok) throw new Error();
       setAvailability((await response.json()) as DayAvailability);
     } catch {
@@ -223,7 +264,7 @@ export function BookingFlow({ catalog, navigate = loadPage }: { catalog: Catalog
     } finally {
       setLoadingSlots(false);
     }
-  }, []);
+  }, [photography]);
 
   useEffect(() => {
     if (step !== "pay" || config) return;
@@ -277,12 +318,13 @@ export function BookingFlow({ catalog, navigate = loadPage }: { catalog: Catalog
           addons: price.addonLines.map((line) => ({ addonId: line.addonId, quantity: line.quantity })),
           promoCode: code,
           email: normalizedEmail,
+          photography,
         }),
       });
       const data = (await response.json().catch(() => ({}))) as {
         ok?: boolean;
         message?: string;
-        promo?: { code: string; kind: "percent" | "amount"; value: number } | null;
+        promo?: { code: string; kind: PromoKind; value: number } | null;
       };
       if (response.ok && data.ok && data.promo) {
         setApplied({ ...data.promo, email: normalizedEmail });
@@ -319,6 +361,12 @@ export function BookingFlow({ catalog, navigate = loadPage }: { catalog: Catalog
   }
 
   function toggleStudio(id: string) {
+    if (photography) {
+      // A session is in one studio: choosing another replaces the choice.
+      setStudioIds([id]);
+      setStart(null);
+      return;
+    }
     setStudioIds((current) => {
       const next = current.includes(id) ? current.filter((x) => x !== id) : [...current, id];
       // Keep the catalog's order so prices and names always list the same way.
@@ -406,7 +454,9 @@ export function BookingFlow({ catalog, navigate = loadPage }: { catalog: Catalog
           customer: { name: name.trim(), email: email.trim(), phone: phone.trim() },
           notes: notes.trim(),
           addons: price.addonLines.map((line) => ({ addonId: line.addonId, quantity: line.quantity })),
-          promoCode: promo?.code,
+          // A code that does not fit this selection is not used, which the summary says.
+          promoCode: promo && !price.promoMisfit ? promo.code : undefined,
+          photography,
           acceptTerms: true,
           paymentToken,
           expectedTotalCents: price.totalCents,
@@ -465,7 +515,14 @@ export function BookingFlow({ catalog, navigate = loadPage }: { catalog: Catalog
       {price.studioLines.map((line) => (
         <div className="price-row" key={line.studioId}>
           <span>
+            {session && "Photography session, "}
             {studioName(line.studioId)}, {durationLabel(duration)}
+            {session && (
+              <>
+                <br />
+                <small>Studio included. {session.includes}.</small>
+              </>
+            )}
           </span>
           <span>{formatCents(line.priceCents)}</span>
         </div>
@@ -485,7 +542,11 @@ export function BookingFlow({ catalog, navigate = loadPage }: { catalog: Catalog
       {promo && price.promoDiscountCents > 0 && (
         <div className="price-row price-discount">
           <span>
-            {promo.kind === "percent" ? `Code ${promo.code} (${promo.value}% off rental)` : `Reschedule code ${promo.code}`}
+            {promo.kind === "percent"
+              ? `Code ${promo.code} (${promo.value}% off rental)`
+              : promo.kind === "free_hour"
+                ? `Free hour, code ${promo.code}`
+                : `Reschedule code ${promo.code}`}
           </span>
           <span>{formatCents(-price.promoDiscountCents)}</span>
         </div>
@@ -494,6 +555,17 @@ export function BookingFlow({ catalog, navigate = loadPage }: { catalog: Catalog
         <span>{promo ? "To pay" : "Total"}</span>
         <span>{formatCents(price.totalCents)}</span>
       </div>
+      {session && (
+        <p style={{ fontSize: ".8rem", margin: ".75rem 0 0" }}>
+          A photography session is refunded when it is cancelled {hoursInWords(settings.photoRefundWindowHours)} or more
+          before it starts{settings.refundFeePercent > 0 ? `, less the ${settings.refundFeePercent}% payment processing fee` : ""}.
+        </p>
+      )}
+      {promo && price.promoMisfit && (
+        <p className="field-error" role="status" style={{ margin: ".75rem 0 0" }}>
+          {PROMO_MISFIT_TEXT[price.promoMisfit]} Code {promo.code} is not used on this booking and stays yours.
+        </p>
+      )}
     </div>
   );
 
@@ -521,35 +593,37 @@ export function BookingFlow({ catalog, navigate = loadPage }: { catalog: Catalog
 
   return (
     <div className="wizard-container" ref={topRef} style={{ scrollMarginTop: 90 }}>
-      <div className="mode-toggle" role="radiogroup" aria-label="How would you like to book?">
-        <button
-          type="button"
-          role="radio"
-          aria-checked={mode === "studio"}
-          className={`mode-option${mode === "studio" ? " selected" : ""}`}
-          onClick={() => switchMode("studio")}
-        >
-          <strong>I know which studio I want</strong>
-          Choose studios, then see when they are free.
-        </button>
-        <button
-          type="button"
-          role="radio"
-          aria-checked={mode === "time"}
-          className={`mode-option${mode === "time" ? " selected" : ""}`}
-          onClick={() => switchMode("time")}
-        >
-          <strong>I know when I want to come</strong>
-          Choose a time, then see which studios are free.
-        </button>
-      </div>
+      {!photography && (
+        <div className="mode-toggle" role="radiogroup" aria-label="How would you like to book?">
+          <button
+            type="button"
+            role="radio"
+            aria-checked={mode === "studio"}
+            className={`mode-option${mode === "studio" ? " selected" : ""}`}
+            onClick={() => switchMode("studio")}
+          >
+            <strong>I know which studio I want</strong>
+            Choose studios, then see when they are free.
+          </button>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={mode === "time"}
+            className={`mode-option${mode === "time" ? " selected" : ""}`}
+            onClick={() => switchMode("time")}
+          >
+            <strong>I know when I want to come</strong>
+            Choose a time, then see which studios are free.
+          </button>
+        </div>
+      )}
 
       <div className="wizard-progress">
         {steps.map((s, i) => (
           <span key={s} style={{ display: "contents" }}>
             {i > 0 && <span className="wizard-connector" />}
             <span className={`wizard-step-label${i === stepIndex ? " active" : i < stepIndex ? " completed" : ""}`}>
-              {STEP_LABEL[s]}
+              <span className="wizard-step-name">{STEP_LABEL[s]}</span>
             </span>
           </span>
         ))}
@@ -565,25 +639,32 @@ export function BookingFlow({ catalog, navigate = loadPage }: { catalog: Catalog
       {step === "studios" && (
         <div className="wizard-panel active">
           <h3 style={{ fontSize: "1.6rem", marginBottom: ".5rem" }}>
-            {mode === "time" ? "Studios free at your time" : "Select studio(s)"}
+            {photography ? "Choose your studio" : mode === "time" ? "Studios free at your time" : "Select studio(s)"}
           </h3>
           <p className="text-muted mb-3">
-            {mode === "time" && start !== null
-              ? `${longDateLabel(date)}, ${minutesToLabel(start)} – ${minutesToLabel(start + duration)}. Choose one or more.`
-              : "Choose one studio, or any combination for the same time."}
+            {photography
+              ? "Your session takes place in one studio. The price of a session includes the studio."
+              : mode === "time" && start !== null
+                ? `${longDateLabel(date)}, ${minutesToLabel(start)} – ${minutesToLabel(start + duration)}. Choose one or more.`
+                : "Choose one studio, or any combination for the same time."}
           </p>
           {mode === "time" && loadingSlots && <p>Checking availability…</p>}
           <div className="studio-selector">
             {catalog.studios.map((studio) => {
-              const unavailable = mode === "time" && !freeAtStart.includes(studio.id);
-              const cents =
-                mode === "time"
+              const sessions = photography ? catalog.photoPackages.filter((p) => p.studioId === studio.id) : [];
+              const unavailable = photography ? sessions.length === 0 : mode === "time" && !freeAtStart.includes(studio.id);
+              const cents = photography
+                ? sessions.length > 0
+                  ? Math.min(...sessions.map((p) => p.priceCents))
+                  : null
+                : mode === "time"
                   ? findPrice(studio.id, dayType, duration, rules)
                   : findPrice(studio.id, "weekday", 60, rules);
               return (
                 <label className={`studio-option${unavailable ? " disabled" : ""}`} key={studio.id}>
                   <input
-                    type="checkbox"
+                    type={photography ? "radio" : "checkbox"}
+                    name={photography ? "session-studio" : undefined}
                     checked={studioIds.includes(studio.id)}
                     disabled={unavailable}
                     onChange={() => toggleStudio(studio.id)}
@@ -593,20 +674,24 @@ export function BookingFlow({ catalog, navigate = loadPage }: { catalog: Catalog
                     <h4>{studio.name}</h4>
                     <p style={{ fontSize: ".82rem", margin: ".35rem 0 .6rem" }}>{studio.tagline}</p>
                     <div className="studio-option-rate">
-                      {unavailable
-                        ? "Not available at this time"
-                        : cents === null
-                          ? ""
-                          : mode === "time"
-                            ? `${formatCents(cents)} for ${durationLabel(duration)}`
-                            : `From ${formatCents(cents)} / hour`}
+                      {photography
+                        ? cents === null
+                          ? "No sessions in this studio"
+                          : `Sessions from ${formatCents(cents)}`
+                        : unavailable
+                          ? "Not available at this time"
+                          : cents === null
+                            ? ""
+                            : mode === "time"
+                              ? `${formatCents(cents)} for ${durationLabel(duration)}`
+                              : `From ${formatCents(cents)} / hour`}
                     </div>
                   </div>
                 </label>
               );
             })}
           </div>
-          {studioOffer && <p style={{ fontSize: ".85rem" }}>Booking several studios together: {studioOffer}.</p>}
+          {studioOffer && !photography && <p style={{ fontSize: ".85rem" }}>Booking several studios together: {studioOffer}.</p>}
           {actions(nextLabelFor("studios"))}
         </div>
       )}
@@ -614,7 +699,7 @@ export function BookingFlow({ catalog, navigate = loadPage }: { catalog: Catalog
       {/* ── Date and duration ── */}
       {step === "when" && (
         <div className="wizard-panel active">
-          <h3 style={{ fontSize: "1.6rem", marginBottom: ".5rem" }}>Select date &amp; duration</h3>
+          <h3 style={{ fontSize: "1.6rem", marginBottom: ".5rem" }}>{photography ? "Select date & session" : "Select date & duration"}</h3>
           <p className="text-muted mb-3">
             {mode === "studio" && chosenNames ? `${chosenNames}. ` : ""}
             {settings.minLeadHours > 0
@@ -636,31 +721,60 @@ export function BookingFlow({ catalog, navigate = loadPage }: { catalog: Catalog
                 onChange={(event) => chooseDate(event.target.value)}
               />
             </div>
-            <div className="form-group">
-              <span className="form-label">Duration</span>
-              <div className="duration-grid">
-                {durations.map((minutes) => (
-                  <button
-                    type="button"
-                    key={minutes}
-                    className={`duration-btn${duration === minutes ? " selected" : ""}`}
-                    aria-pressed={duration === minutes}
-                    onClick={() => chooseDuration(minutes)}
-                  >
-                    {durationLabel(minutes).replace(" hours", " hr").replace(" hour", " hr").replace(/ minutes?/, " min")}
-                  </button>
-                ))}
-                {durations.length === 0 && <p style={{ fontSize: ".85rem" }}>No durations are offered for this selection.</p>}
+            {photography && (
+              <div className="form-group">
+                <span className="form-label">Session</span>
+                <div className="package-list">
+                  {packages.map((pack) => (
+                    <button
+                      type="button"
+                      key={pack.id}
+                      className={`package-btn${duration === pack.durationMinutes ? " selected" : ""}`}
+                      aria-pressed={duration === pack.durationMinutes}
+                      onClick={() => chooseDuration(pack.durationMinutes)}
+                    >
+                      <strong>
+                        {durationLabel(pack.durationMinutes)} · {formatCents(pack.priceCents)}
+                      </strong>
+                      <span>Studio included. {pack.includes}.</span>
+                    </button>
+                  ))}
+                  {packages.length === 0 && <p style={{ fontSize: ".85rem" }}>No sessions are offered in this studio.</p>}
+                </div>
+                <p style={{ fontSize: ".8rem", margin: ".75rem 0 0" }}>
+                  Every session is shot on a professional camera by our in-house photographer. Your edited images are
+                  delivered within 7 to 14 days.
+                </p>
               </div>
-            </div>
+            )}
+            {!photography && (
+              <div className="form-group">
+                <span className="form-label">Duration</span>
+                <div className="duration-grid">
+                  {durations.map((minutes) => (
+                    <button
+                      type="button"
+                      key={minutes}
+                      className={`duration-btn${duration === minutes ? " selected" : ""}`}
+                      aria-pressed={duration === minutes}
+                      onClick={() => chooseDuration(minutes)}
+                    >
+                      {durationLabel(minutes).replace(" hours", " hr").replace(" hour", " hr").replace(/ minutes?/, " min")}
+                    </button>
+                  ))}
+                  {durations.length === 0 && <p style={{ fontSize: ".85rem" }}>No durations are offered for this selection.</p>}
+                </div>
+              </div>
+            )}
           </div>
           {mode === "studio" && price && (
             <div className="price-summary">
               {price.studioLines.map((line) => (
                 <div className="price-row" key={line.studioId}>
                   <span>
+                    {session && "Photography session, "}
                     {studioName(line.studioId)}, {durationLabel(duration)}
-                    {date ? ` (${dayType})` : ""}
+                    {date && !session ? ` (${dayType})` : ""}
                   </span>
                   <span>{formatCents(line.priceCents)}</span>
                 </div>

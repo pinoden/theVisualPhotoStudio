@@ -2,21 +2,22 @@ import { randomInt } from "node:crypto";
 import { and, eq, gt, gte, isNull, lt, or, sql } from "drizzle-orm";
 import { promoCodes } from "@/db/schema";
 import type { DbLike } from "@/db/client";
-import type { PromoDef } from "@/lib/domain/pricing";
+import type { PromoDef, PromoKind } from "@/lib/domain/pricing";
 
 /**
- * Codes customers enter at checkout. Two kinds:
- *  - percent: a discount on the studio rental, usable `maxUses` times
- *    (loyalty codes: once).
+ * Codes customers enter at checkout. Three kinds:
+ *  - percent: a discount on the studio rental, usable `maxUses` times.
  *  - amount: money the customer already paid (a reschedule credit). `value`
  *    is what is left on it and goes down as it is spent.
+ *  - free_hour: the price of one hour of one studio, usable `maxUses` times
+ *    (the loyalty reward: once). `value` is the free minutes, 60.
  */
 export type PromoSource = "loyalty" | "reschedule" | "manual";
 
 export interface UsablePromo {
   id: string;
   code: string;
-  kind: "percent" | "amount";
+  kind: PromoKind;
   value: number;
   source: PromoSource;
   rescheduleGeneration: number;
@@ -76,7 +77,7 @@ export function toPromoDef(promo: UsablePromo): PromoDef {
 
 export interface CustomerCode {
   code: string;
-  kind: "percent" | "amount";
+  kind: PromoKind;
   value: number;
   source: PromoSource;
   expiresAt: string | null;
@@ -133,13 +134,12 @@ export async function redeemPromo(tx: DbLike, promo: UsablePromo, appliedCents: 
   return updated.length === 1;
 }
 
-/** Undo `redeemPromo` after a booking did not go through (declined card, cancellation). */
-export async function restorePromo(
-  tx: DbLike,
-  promoId: string,
-  kind: "percent" | "amount",
-  appliedCents: number,
-): Promise<void> {
+/**
+ * Undo `redeemPromo` after a booking did not go through (declined card,
+ * cancellation). An amount code gets `appliedCents` back; the other kinds get
+ * one use back.
+ */
+export async function restorePromo(tx: DbLike, promoId: string, kind: PromoKind, appliedCents: number): Promise<void> {
   await tx
     .update(promoCodes)
     .set(
@@ -151,7 +151,7 @@ export async function restorePromo(
 }
 
 export interface IssuePromoInput {
-  kind: "percent" | "amount";
+  kind: PromoKind;
   value: number;
   source: PromoSource;
   email: string | null;

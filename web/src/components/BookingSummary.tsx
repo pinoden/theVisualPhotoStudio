@@ -35,7 +35,19 @@ export function BookingSummary({ booking }: { booking: BookingView }) {
       </div>
       {booking.studios.map((studio) => (
         <div className="price-row" key={studio.name}>
-          <span>{studio.name}</span>
+          <span>
+            {booking.photography && "Photography session, "}
+            {studio.name}
+            {booking.photography && (
+              <>
+                <br />
+                <small>
+                  With our in-house photographer, studio included
+                  {booking.photography.includes ? `. ${booking.photography.includes}` : ""}.
+                </small>
+              </>
+            )}
+          </span>
           <span>{formatCents(studio.priceCents)}</span>
         </div>
       ))}
@@ -57,12 +69,18 @@ export function BookingSummary({ booking }: { booking: BookingView }) {
       ))}
       {booking.promoDiscountCents > 0 && (
         <div className="price-row price-discount">
-          <span>{booking.creditAppliedCents > 0 ? "Paid with reschedule code" : "Discount code"}</span>
+          <span>
+            {booking.creditAppliedCents > 0
+              ? "Paid with reschedule code"
+              : booking.promoKind === "free_hour"
+                ? "Free hour"
+                : "Discount code"}
+          </span>
           <span>{formatCents(-booking.promoDiscountCents)}</span>
         </div>
       )}
       <div className="price-row total">
-        <span>{paidStatus ? "Charged to card" : "Total"}</span>
+        <span>{!paidStatus ? "Total" : booking.madeByAdmin ? "To pay at the studio" : "Charged to card"}</span>
         <span>{formatCents(booking.totalCents)}</span>
       </div>
     </div>

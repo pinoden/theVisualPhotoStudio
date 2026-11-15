@@ -8,6 +8,9 @@ function isoInStudio(date: Date): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: STUDIO_TZ, year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
 }
 
+/** Today's date where the studio is. */
+export const todayInStudio = () => isoInStudio(new Date());
+
 /** A studio-local date at least `minDays` ahead that is a weekday, or a Saturday. */
 export function dateAhead(minDays: number, kind: "weekday" | "saturday" = "weekday"): string {
   for (let i = minDays; i < minDays + 14; i++) {

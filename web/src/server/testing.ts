@@ -80,7 +80,7 @@ export async function createTestWorld(): Promise<TestWorld> {
       await db.execute(sql`
         truncate email_outbox, refunds, payments, booking_addons, studio_holds, blocks, bookings,
           promo_codes, special_dates, settings, sessions, login_codes, staff_shifts, users,
-          price_rules, studio_hours, addons, studios cascade
+          price_rules, studio_hours, addons, studios, photographers cascade
       `);
       await seed(db);
       const rows = await db.select({ id: studios.id, slug: studios.slug }).from(studios);
