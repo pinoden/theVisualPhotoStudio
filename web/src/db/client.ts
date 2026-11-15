@@ -74,7 +74,10 @@ export function getDb(): Promise<Db> {
       if (process.env.NODE_ENV === "production" && process.env.ALLOW_PGLITE_IN_PRODUCTION !== "1") {
         throw new Error("DATABASE_URL is required in production.");
       }
-      const dataDir = path.join(process.cwd(), ".data", "pglite");
+      // PGLITE_DATA_DIR lets the browser tests use their own throwaway database.
+      const dataDir = process.env.PGLITE_DATA_DIR
+        ? path.resolve(process.cwd(), process.env.PGLITE_DATA_DIR)
+        : path.join(process.cwd(), ".data", "pglite");
       mkdirSync(dataDir, { recursive: true });
       const { db } = await openPglite(dataDir);
       await seed(db);
