@@ -1,0 +1,522 @@
+import { and, eq, inArray, sql } from "drizzle-orm";
+import { bookings, payments, refunds, studioHolds } from "@/db/schema";
+import type { Db, DbLike } from "@/db/client";
+import { formatCents } from "@/lib/domain/pricing";
+import {
+  cancellationOutcome,
+  rescheduleOutcome,
+  type BookingFacts,
+  type CancelBlock,
+  type CancelOutcome,
+  type RescheduleBlock,
+  type RescheduleOutcome,
+} from "@/lib/domain/policy";
+import { isBookingRef, tokenMatches } from "./bookings";
+import { cancellationEmail, ownerRefundNotice, queueEmail, rescheduleCodeEmail } from "./email";
+import type { PaymentProvider } from "./payments";
+import { issuePromo, restorePromo } from "./promos";
+import { loadSettings, type Settings } from "./settings";
+import { formatInstant } from "./tz";
+
+/**
+ * Changing a booking after it was made: cancelling (with the refund the
+ * policy allows, sent automatically), turning it into a reschedule code, and
+ * the owner's manual refunds.
+ */
+type BookingRow = typeof bookings.$inferSelect;
+
+/** Who is asking. Every function here checks it against the booking. */
+export type Actor =
+  | { kind: "token"; token: string } // the secret link from the confirmation email
+  | { kind: "customer"; email: string } // a signed-in customer
+  | { kind: "owner" };
+
+export interface ManageDeps {
+  now: Date;
+  /** null when no processor is configured: refunds wait as pending. */
+  payments: PaymentProvider | null;
+  /** Where refund notices go. */
+  ownerEmail: string | null;
+  baseUrl: string;
+}
+
+function mayAct(booking: BookingRow, actor: Actor): boolean {
+  switch (actor.kind) {
+    case "owner":
+      return true;
+    case "customer":
+      return booking.customerEmail === actor.email.trim().toLowerCase();
+    case "token":
+      return tokenMatches(booking, actor.token);
+  }
+}
+
+/** Card money still held for a booking: payments that succeeded, less refunds sent or on their way. */
+export async function netCardPaidCents(db: DbLike, bookingId: string): Promise<number> {
+  const [paid] = await db
+    .select({ total: sql<number>`coalesce(sum(${payments.amountCents}), 0)::int` })
+    .from(payments)
+    .where(and(eq(payments.bookingId, bookingId), eq(payments.status, "succeeded")));
+  const [back] = await db
+    .select({ total: sql<number>`coalesce(sum(${refunds.amountCents}), 0)::int` })
+    .from(refunds)
+    .innerJoin(payments, eq(payments.id, refunds.paymentId))
+    .where(and(eq(payments.bookingId, bookingId), inArray(refunds.status, ["pending", "succeeded"])));
+  return paid.total - back.total;
+}
+
+async function factsFor(db: DbLike, booking: BookingRow): Promise<BookingFacts> {
+  return {
+    status: booking.status,
+    startAt: booking.startAt,
+    rescheduledCount: booking.rescheduledCount,
+    cardPaidCents: await netCardPaidCents(db, booking.id),
+    creditAppliedCents: booking.creditAppliedCents,
+  };
+}
+
+export interface ManageOptions {
+  cancel: CancelOutcome;
+  reschedule: RescheduleOutcome;
+}
+
+/** What would happen if the customer cancelled or moved this booking right now. */
+export async function getManageOptions(db: DbLike, ref: string, actor: Actor, now: Date): Promise<ManageOptions | null> {
+  if (!isBookingRef(ref)) return null;
+  const [booking] = await db.select().from(bookings).where(eq(bookings.ref, ref)).limit(1);
+  if (!booking || !mayAct(booking, actor)) return null;
+  const settings = await loadSettings(db);
+  const facts = await factsFor(db, booking);
+  return { cancel: cancellationOutcome(facts, now, settings), reschedule: rescheduleOutcome(facts, now, settings) };
+}
+
+/** The same options in words, ready to show next to the buttons. */
+export interface ManageChoices {
+  cancel: { allowed: boolean; text: string };
+  reschedule: { allowed: boolean; text: string };
+}
+
+export function describeManageOptions(options: ManageOptions, settings: Settings): ManageChoices {
+  return {
+    cancel: options.cancel.allowed
+      ? { allowed: true, text: cancelOutcomeText(options.cancel, settings) }
+      : { allowed: false, text: cancelBlockText(options.cancel.reason) },
+    reschedule: options.reschedule.allowed
+      ? {
+          allowed: true,
+          text: `This booking will be released and you will get a code worth ${formatCents(options.reschedule.creditCents)}, valid for ${settings.creditValidDays} days, to book a new time. A booking made with the code cannot be refunded.`,
+        }
+      : { allowed: false, text: rescheduleBlockText(options.reschedule.reason, settings) },
+  };
+}
+
+export async function getManageChoices(db: DbLike, ref: string, actor: Actor, now: Date): Promise<ManageChoices | null> {
+  const options = await getManageOptions(db, ref, actor, now);
+  return options ? describeManageOptions(options, await loadSettings(db)) : null;
+}
+
+export function cancelBlockText(reason: CancelBlock): string {
+  return reason === "already_started" ? "This booking has already started." : "This booking can no longer be changed.";
+}
+
+export function rescheduleBlockText(reason: RescheduleBlock, settings: Pick<Settings, "rescheduleCutoffHours">): string {
+  switch (reason) {
+    case "already_started":
+      return "This booking has already started.";
+    case "not_confirmed":
+      return "This booking can no longer be changed.";
+    case "too_late":
+      return `Bookings can be moved online until ${settings.rescheduleCutoffHours} hours before they start. Please call the studio.`;
+    case "limit_reached":
+      return "This booking was already moved and cannot be moved again online. Please call the studio.";
+    case "nothing_paid":
+      return "Nothing was paid for this booking, so there is no credit to move. You can cancel it and book again.";
+  }
+}
+
+/** Plain words for why a cancellation refunds what it does. */
+export function cancelOutcomeText(outcome: Extract<CancelOutcome, { allowed: true }>, settings: Settings): string {
+  switch (outcome.why) {
+    case "refund":
+      return outcome.feeCents > 0
+        ? `You will be refunded ${formatCents(outcome.refundCents)} to your card. The ${settings.refundFeePercent}% processing fee (${formatCents(outcome.feeCents)}) is not refundable.`
+        : `You will be refunded ${formatCents(outcome.refundCents)} to your card.`;
+    case "inside_window":
+      return `No refund is due, because the booking starts in less than ${Math.round(settings.refundWindowHours / 24)} days.`;
+    case "rescheduled":
+      return "No refund is due, because this booking was made with a reschedule code.";
+    case "nothing_paid":
+      return "Nothing was charged to a card for this booking, so there is nothing to refund.";
+  }
+}
+
+// ── Refund execution ─────────────────────────────────────────────────────────
+
+/**
+ * Send one recorded refund to the processor. Safe to repeat: the refund's id
+ * is the idempotency key, so the money moves at most once.
+ */
+export async function processRefund(db: Db, refundId: string, deps: ManageDeps): Promise<"succeeded" | "failed" | "pending"> {
+  const [row] = await db
+    .select({
+      refund: refunds,
+      providerPaymentId: payments.providerPaymentId,
+      paymentId: payments.id,
+      ref: bookings.ref,
+      customer: bookings.customerName,
+    })
+    .from(refunds)
+    .innerJoin(payments, eq(payments.id, refunds.paymentId))
+    .innerJoin(bookings, eq(bookings.id, payments.bookingId))
+    .where(eq(refunds.id, refundId))
+    .limit(1);
+  if (!row) return "failed";
+  if (row.refund.status === "succeeded") return "succeeded";
+  if (!deps.payments) return "pending";
+
+  const result = row.providerPaymentId
+    ? await deps.payments.refund({
+        paymentId: row.providerPaymentId,
+        amountCents: row.refund.amountCents,
+        idempotencyKey: row.refund.id,
+        reason: row.refund.reason || `Refund for ${row.ref}`,
+      })
+    : ({ ok: false, message: "The payment has no processor id." } as const);
+
+  if (result.ok) {
+    await db.transaction(async (tx) => {
+      const updated = await tx
+        .update(refunds)
+        .set({ status: "succeeded", providerRefundId: result.refundId, error: null })
+        .where(and(eq(refunds.id, refundId), inArray(refunds.status, ["pending", "failed"])))
+        .returning({ id: refunds.id });
+      if (updated.length === 0) return; // another worker finished it first
+      await tx
+        .update(payments)
+        .set({ refundedCents: sql`${payments.refundedCents} + ${row.refund.amountCents}` })
+        .where(eq(payments.id, row.paymentId));
+      if (deps.ownerEmail) {
+        await queueEmail(
+          tx,
+          ownerRefundNotice({
+            to: deps.ownerEmail,
+            ref: row.ref,
+            customer: row.customer,
+            amountCents: row.refund.amountCents,
+            automatic: row.refund.automatic,
+          }),
+        );
+      }
+    });
+    return "succeeded";
+  }
+
+  // Tell the owner the first time a refund fails, not on every retry.
+  const wasPending = row.refund.status === "pending";
+  await db.update(refunds).set({ status: "failed", error: result.message }).where(eq(refunds.id, refundId));
+  if (wasPending && deps.ownerEmail) {
+    await queueEmail(
+      db,
+      ownerRefundNotice({
+        to: deps.ownerEmail,
+        ref: row.ref,
+        customer: row.customer,
+        amountCents: row.refund.amountCents,
+        automatic: row.refund.automatic,
+        failedReason: result.message,
+      }),
+    );
+  }
+  return "failed";
+}
+
+/** Retry refunds that have not gone through. Run from the scheduled task. */
+export async function retryOpenRefunds(db: Db, deps: ManageDeps): Promise<{ succeeded: number; failed: number }> {
+  const open = await db
+    .select({ id: refunds.id })
+    .from(refunds)
+    .where(inArray(refunds.status, ["pending", "failed"]))
+    .limit(50);
+  let succeeded = 0;
+  let failed = 0;
+  for (const { id } of open) {
+    const status = await processRefund(db, id, deps);
+    if (status === "succeeded") succeeded++;
+    else if (status === "failed") failed++;
+  }
+  return { succeeded, failed };
+}
+
+/** Record refunds of `totalCents` against a booking's payments, newest payment first. */
+async function recordRefunds(
+  tx: DbLike,
+  bookingId: string,
+  totalCents: number,
+  reason: string,
+  automatic: boolean,
+): Promise<string[]> {
+  if (totalCents <= 0) return [];
+  const paid = await tx
+    .select()
+    .from(payments)
+    .where(and(eq(payments.bookingId, bookingId), eq(payments.status, "succeeded")))
+    .orderBy(sql`${payments.createdAt} desc`);
+  const ids: string[] = [];
+  let left = totalCents;
+  for (const payment of paid) {
+    if (left <= 0) break;
+    const [{ already }] = await tx
+      .select({ already: sql<number>`coalesce(sum(${refunds.amountCents}), 0)::int` })
+      .from(refunds)
+      .where(and(eq(refunds.paymentId, payment.id), inArray(refunds.status, ["pending", "succeeded"])));
+    const amount = Math.min(left, payment.amountCents - already);
+    if (amount <= 0) continue;
+    const [refund] = await tx
+      .insert(refunds)
+      .values({ paymentId: payment.id, amountCents: amount, reason, automatic, status: "pending" })
+      .returning({ id: refunds.id });
+    ids.push(refund.id);
+    left -= amount;
+  }
+  if (left > 0) throw new Error("Refund exceeds what was paid.");
+  return ids;
+}
+
+// ── Cancelling ───────────────────────────────────────────────────────────────
+
+export type CancelResult =
+  | {
+      ok: true;
+      refundCents: number;
+      feeCents: number;
+      /** sent: the processor accepted it. pending: recorded, will be retried. none: nothing was due. */
+      refund: "sent" | "pending" | "none";
+      message: string;
+    }
+  | { ok: false; status: number; code: "not_found" | CancelBlock; message: string };
+
+/** Cancel a booking as its customer. Any refund the policy allows is sent right away. */
+export async function cancelBooking(db: Db, ref: string, actor: Actor, deps: ManageDeps): Promise<CancelResult> {
+  if (!isBookingRef(ref)) return { ok: false, status: 404, code: "not_found", message: "Booking not found." };
+  const settings = await loadSettings(db);
+
+  const outcome = await db.transaction(async (tx) => {
+    // Lock the row so two cancellations at once cannot both refund.
+    const [booking] = await tx.select().from(bookings).where(eq(bookings.ref, ref)).for("update").limit(1);
+    if (!booking || !mayAct(booking, actor)) return { kind: "not_found" as const };
+
+    const decision = cancellationOutcome(await factsFor(tx, booking), deps.now, settings);
+    if (!decision.allowed) return { kind: "blocked" as const, reason: decision.reason };
+
+    await tx
+      .update(bookings)
+      .set({ status: "cancelled", cancelledAt: deps.now, cancelReason: actor.kind === "owner" ? "owner" : "customer" })
+      .where(eq(bookings.id, booking.id));
+    await tx.update(studioHolds).set({ active: false }).where(eq(studioHolds.bookingId, booking.id));
+
+    // A discount code that was used on this booking becomes usable again.
+    if (booking.promoCodeId && booking.creditAppliedCents === 0 && booking.promoDiscountCents > 0) {
+      await restorePromo(tx, booking.promoCodeId, "percent", 0);
+    }
+
+    const refundIds = await recordRefunds(tx, booking.id, decision.refundCents, `Cancellation of ${booking.ref}`, true);
+    const message = cancelOutcomeText(decision, settings);
+    await queueEmail(
+      tx,
+      cancellationEmail({
+        to: booking.customerEmail,
+        name: booking.customerName,
+        ref: booking.ref,
+        when: formatInstant(booking.startAt),
+        refundCents: decision.refundCents,
+        feeCents: decision.feeCents,
+        note: message,
+      }),
+    );
+    return { kind: "done" as const, decision, refundIds, message };
+  });
+
+  if (outcome.kind === "not_found") return { ok: false, status: 404, code: "not_found", message: "Booking not found." };
+  if (outcome.kind === "blocked") {
+    return { ok: false, status: 409, code: outcome.reason, message: cancelBlockText(outcome.reason) };
+  }
+
+  let refund: "sent" | "pending" | "none" = outcome.refundIds.length === 0 ? "none" : "sent";
+  for (const id of outcome.refundIds) {
+    if ((await processRefund(db, id, deps)) !== "succeeded") refund = "pending";
+  }
+  return {
+    ok: true,
+    refundCents: outcome.decision.refundCents,
+    feeCents: outcome.decision.feeCents,
+    refund,
+    message: outcome.message,
+  };
+}
+
+// ── Reschedule code ──────────────────────────────────────────────────────────
+
+export type RescheduleResult =
+  | { ok: true; code: string; valueCents: number; expiresAt: Date }
+  | { ok: false; status: number; code: "not_found" | RescheduleBlock; message: string };
+
+/**
+ * Release a booking and turn what was paid for it into a single-customer
+ * credit code, emailed at once. The customer books the new time through the
+ * normal booking screen and enters the code at checkout.
+ */
+export async function requestRescheduleCode(db: Db, ref: string, actor: Actor, deps: ManageDeps): Promise<RescheduleResult> {
+  if (!isBookingRef(ref)) return { ok: false, status: 404, code: "not_found", message: "Booking not found." };
+  const settings = await loadSettings(db);
+
+  const outcome = await db.transaction(async (tx) => {
+    const [booking] = await tx.select().from(bookings).where(eq(bookings.ref, ref)).for("update").limit(1);
+    if (!booking || !mayAct(booking, actor)) return { kind: "not_found" as const };
+
+    const decision = rescheduleOutcome(await factsFor(tx, booking), deps.now, settings);
+    if (!decision.allowed) return { kind: "blocked" as const, reason: decision.reason };
+
+    await tx
+      .update(bookings)
+      .set({ status: "cancelled", cancelledAt: deps.now, cancelReason: "rescheduled" })
+      .where(eq(bookings.id, booking.id));
+    await tx.update(studioHolds).set({ active: false }).where(eq(studioHolds.bookingId, booking.id));
+
+    const expiresAt = new Date(deps.now.getTime() + settings.creditValidDays * 86_400_000);
+    const issued = await issuePromo(tx, {
+      kind: "amount",
+      value: decision.creditCents,
+      source: "reschedule",
+      email: booking.customerEmail,
+      expiresAt,
+      maxUses: 1_000_000, // limited by the money left on it, not by a count
+      rescheduleGeneration: booking.rescheduledCount + 1,
+      originBookingId: booking.id,
+      note: `Credit from ${booking.ref}`,
+    });
+    if (!issued) throw new Error(`A reschedule code already exists for ${booking.ref}.`);
+
+    await queueEmail(
+      tx,
+      rescheduleCodeEmail({
+        to: booking.customerEmail,
+        name: booking.customerName,
+        ref: booking.ref,
+        code: issued.code,
+        valueCents: decision.creditCents,
+        expires: formatInstant(expiresAt),
+        bookUrl: `${deps.baseUrl.replace(/\/$/, "")}/book`,
+      }),
+    );
+    return { kind: "done" as const, code: issued.code, valueCents: decision.creditCents, expiresAt };
+  });
+
+  if (outcome.kind === "not_found") return { ok: false, status: 404, code: "not_found", message: "Booking not found." };
+  if (outcome.kind === "blocked") {
+    return { ok: false, status: 409, code: outcome.reason, message: rescheduleBlockText(outcome.reason, settings) };
+  }
+  return { ok: true, code: outcome.code, valueCents: outcome.valueCents, expiresAt: outcome.expiresAt };
+}
+
+// ── Owner actions ────────────────────────────────────────────────────────────
+
+export type OwnerRefundResult =
+  | { ok: true; refund: "sent" | "pending" | "none"; refundCents: number }
+  | { ok: false; status: number; code: "not_found" | "bad_amount" | "not_cancellable"; message: string };
+
+/**
+ * The owner's cancel: any booking that has not been cancelled already, with
+ * whatever refund the owner chooses, up to what the card still holds.
+ */
+export async function ownerCancelBooking(
+  db: Db,
+  ref: string,
+  input: { refundCents: number },
+  deps: ManageDeps,
+): Promise<OwnerRefundResult> {
+  if (!isBookingRef(ref)) return { ok: false, status: 404, code: "not_found", message: "Booking not found." };
+  if (!Number.isInteger(input.refundCents) || input.refundCents < 0) {
+    return { ok: false, status: 400, code: "bad_amount", message: "Enter a refund amount of zero or more." };
+  }
+
+  const outcome = await db.transaction(async (tx) => {
+    const [booking] = await tx.select().from(bookings).where(eq(bookings.ref, ref)).for("update").limit(1);
+    if (!booking) return { kind: "not_found" as const };
+    if (!["confirmed", "completed", "no_show"].includes(booking.status)) return { kind: "not_cancellable" as const };
+    const available = await netCardPaidCents(tx, booking.id);
+    if (input.refundCents > available) return { kind: "bad_amount" as const, available };
+
+    await tx
+      .update(bookings)
+      .set({ status: "cancelled", cancelledAt: deps.now, cancelReason: "owner" })
+      .where(eq(bookings.id, booking.id));
+    await tx.update(studioHolds).set({ active: false }).where(eq(studioHolds.bookingId, booking.id));
+    const refundIds = await recordRefunds(tx, booking.id, input.refundCents, `Cancelled by the studio: ${booking.ref}`, false);
+    await queueEmail(
+      tx,
+      cancellationEmail({
+        to: booking.customerEmail,
+        name: booking.customerName,
+        ref: booking.ref,
+        when: formatInstant(booking.startAt),
+        refundCents: input.refundCents,
+        feeCents: 0,
+        note: "The studio cancelled this booking. Please contact us with any questions.",
+      }),
+    );
+    return { kind: "done" as const, refundIds };
+  });
+
+  if (outcome.kind === "not_found") return { ok: false, status: 404, code: "not_found", message: "Booking not found." };
+  if (outcome.kind === "not_cancellable") {
+    return { ok: false, status: 409, code: "not_cancellable", message: "This booking is already cancelled or was never confirmed." };
+  }
+  if (outcome.kind === "bad_amount") {
+    return {
+      ok: false,
+      status: 400,
+      code: "bad_amount",
+      message: `At most ${formatCents(outcome.available)} can be refunded to the card for this booking.`,
+    };
+  }
+  let refund: "sent" | "pending" | "none" = outcome.refundIds.length === 0 ? "none" : "sent";
+  for (const id of outcome.refundIds) {
+    if ((await processRefund(db, id, deps)) !== "succeeded") refund = "pending";
+  }
+  return { ok: true, refund, refundCents: input.refundCents };
+}
+
+/** A refund without cancelling, e.g. a goodwill partial refund. */
+export async function ownerRefund(
+  db: Db,
+  ref: string,
+  input: { amountCents: number; reason: string },
+  deps: ManageDeps,
+): Promise<OwnerRefundResult> {
+  if (!isBookingRef(ref)) return { ok: false, status: 404, code: "not_found", message: "Booking not found." };
+  if (!Number.isInteger(input.amountCents) || input.amountCents <= 0) {
+    return { ok: false, status: 400, code: "bad_amount", message: "Enter a refund amount above zero." };
+  }
+  const outcome = await db.transaction(async (tx) => {
+    const [booking] = await tx.select().from(bookings).where(eq(bookings.ref, ref)).for("update").limit(1);
+    if (!booking) return { kind: "not_found" as const };
+    const available = await netCardPaidCents(tx, booking.id);
+    if (input.amountCents > available) return { kind: "bad_amount" as const, available };
+    const refundIds = await recordRefunds(tx, booking.id, input.amountCents, input.reason.slice(0, 180) || `Refund for ${booking.ref}`, false);
+    return { kind: "done" as const, refundIds };
+  });
+  if (outcome.kind === "not_found") return { ok: false, status: 404, code: "not_found", message: "Booking not found." };
+  if (outcome.kind === "bad_amount") {
+    return {
+      ok: false,
+      status: 400,
+      code: "bad_amount",
+      message: `At most ${formatCents(outcome.available)} can be refunded to the card for this booking.`,
+    };
+  }
+  let refund: "sent" | "pending" | "none" = "sent";
+  for (const id of outcome.refundIds) {
+    if ((await processRefund(db, id, deps)) !== "succeeded") refund = "pending";
+  }
+  return { ok: true, refund, refundCents: input.amountCents };
+}

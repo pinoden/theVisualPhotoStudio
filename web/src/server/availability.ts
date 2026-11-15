@@ -1,0 +1,106 @@
+import { and, eq, inArray, lt, sql } from "drizzle-orm";
+import { bookings, studioHolds } from "@/db/schema";
+import { queryRows, type DbLike } from "@/db/client";
+import type { StudioDay } from "@/lib/domain/availability";
+import { daysBetween, isIsoDate, isoWeekday, type DayType, type IsoDate } from "@/lib/domain/time";
+import { dayTypeFor, type Catalog } from "./catalog";
+import { dayBoundsUtc, localDateOf, localMinuteOn, localMinuteOnFloor } from "./tz";
+
+/**
+ * Free the slots of bookings whose payment never completed. Runs before every
+ * availability read and every booking attempt, so no scheduler is needed.
+ */
+export async function releaseExpiredHolds(db: DbLike, now: Date): Promise<number> {
+  const expired = await db
+    .update(bookings)
+    .set({ status: "expired" })
+    .where(and(eq(bookings.status, "pending_payment"), lt(bookings.holdExpiresAt, now)))
+    .returning({ id: bookings.id });
+  if (expired.length === 0) return 0;
+  await db
+    .update(studioHolds)
+    .set({ active: false })
+    .where(
+      inArray(
+        studioHolds.bookingId,
+        expired.map((b) => b.id),
+      ),
+    );
+  return expired.length;
+}
+
+export type WindowProblem = "invalid_date" | "past" | "too_far";
+
+export interface DayAvailability {
+  date: IsoDate;
+  dayType: DayType;
+  /** Set when nothing on this date can be booked at all. */
+  problem: WindowProblem | null;
+  /** Starts earlier than this minute are inside the minimum notice period. */
+  earliestStartMinute: number;
+  days: StudioDay[];
+}
+
+/** Which dates can be booked right now, and from what time on the first day. */
+export function bookingWindow(
+  date: string,
+  now: Date,
+  settings: Catalog["settings"],
+): { problem: WindowProblem | null; earliestStartMinute: number } {
+  if (!isIsoDate(date)) return { problem: "invalid_date", earliestStartMinute: 1440 };
+  const today = localDateOf(now);
+  if (date < today) return { problem: "past", earliestStartMinute: 1440 };
+  if (daysBetween(today, date) > settings.maxAdvanceDays) return { problem: "too_far", earliestStartMinute: 1440 };
+  const earliest = new Date(now.getTime() + settings.minLeadHours * 3_600_000);
+  return { problem: null, earliestStartMinute: localMinuteOn(earliest, date) };
+}
+
+/** Opening hours and taken time for every active studio on one date. */
+export async function loadDayAvailability(
+  db: DbLike,
+  catalog: Catalog,
+  date: string,
+  now: Date,
+): Promise<DayAvailability> {
+  const window = bookingWindow(date, now, catalog.settings);
+  if (window.problem === "invalid_date") {
+    return { date, dayType: "weekday", problem: window.problem, earliestStartMinute: 1440, days: [] };
+  }
+
+  const { start, end } = dayBoundsUtc(date);
+  const holds = await queryRows<{ studio_id: string; start_at: string | Date; end_at: string | Date }>(
+    db,
+    sql`
+      select studio_id, lower(occupied) as start_at, upper(occupied) as end_at
+      from studio_holds
+      where active
+        and occupied && tstzrange(${start.toISOString()}::timestamptz, ${end.toISOString()}::timestamptz, '[)')
+    `,
+  );
+
+  const weekday = isoWeekday(date);
+  const days: StudioDay[] = catalog.studios.map((studio) => {
+    const hours = studio.hours[weekday];
+    return {
+      studioId: studio.id,
+      openMinute: hours ? hours.openMinute : null,
+      closeMinute: hours ? hours.closeMinute : null,
+      bufferMinutes: studio.bufferMinutes,
+      busy: holds
+        .filter((hold) => hold.studio_id === studio.id)
+        .map((hold) => ({
+          start: localMinuteOnFloor(new Date(hold.start_at), date),
+          end: localMinuteOn(new Date(hold.end_at), date),
+        }))
+        .filter((span) => span.end > span.start),
+    };
+  });
+
+  return {
+    date,
+    dayType: dayTypeFor(catalog, date),
+    problem: window.problem,
+    earliestStartMinute: window.earliestStartMinute,
+    days,
+  };
+}

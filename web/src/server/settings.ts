@@ -1,0 +1,138 @@
+import { settings as settingsTable } from "@/db/schema";
+import type { DbLike } from "@/db/client";
+
+/**
+ * Business rules the owner can change without a deploy. Values in the
+ * `settings` table override these defaults. Several defaults are placeholders
+ * for decisions that are still open; see "Rebuild decisions" in CLAUDE.md.
+ */
+export interface Settings {
+  // ── Booking ──
+  /** Start times are offered every N minutes from opening time. */
+  slotIncrementMinutes: number;
+  /** Bookings must be made at least this many hours ahead. */
+  minLeadHours: number;
+  /** Bookings can be made at most this many days ahead. */
+  maxAdvanceDays: number;
+  /** Minutes an unpaid booking keeps its slot while the card is charged. */
+  holdMinutes: number;
+  /** Discount percent by number of studios booked together. */
+  multiStudioPercent: Record<number, number>;
+
+  // ── Cancelling and moving ──
+  /** A cancellation at least this many hours before the start is refunded automatically. */
+  refundWindowHours: number;
+  /** Percent of the card payment kept as a processing fee when refunding. */
+  refundFeePercent: number;
+  /** A customer can ask for a reschedule code until this many hours before the start. */
+  rescheduleCutoffHours: number;
+  /** How many times the same money can be moved to a new booking. */
+  maxReschedules: number;
+  /** Days a reschedule code stays valid. */
+  creditValidDays: number;
+
+  // ── Loyalty ──
+  /** Send a discount code after each completed visit. */
+  loyaltyEnabled: boolean;
+  /** Percent off the next booking. */
+  loyaltyPercent: number;
+  /** Days the loyalty code stays valid. */
+  loyaltyValidDays: number;
+  /** Hours after a visit ends before it counts as completed and the code is sent. */
+  loyaltyDelayHours: number;
+
+  // ── Staff ──
+  /** Whether staff see customers' phone number and email on the day sheet. */
+  staffSeesContact: boolean;
+}
+
+export const DEFAULT_SETTINGS: Settings = {
+  slotIncrementMinutes: 30,
+  minLeadHours: 24,
+  maxAdvanceDays: 180,
+  holdMinutes: 10,
+  multiStudioPercent: { 2: 20, 3: 22 },
+
+  refundWindowHours: 168,
+  refundFeePercent: 5,
+  rescheduleCutoffHours: 24,
+  maxReschedules: 1,
+  creditValidDays: 90,
+
+  loyaltyEnabled: true,
+  loyaltyPercent: 10,
+  loyaltyValidDays: 60,
+  loyaltyDelayHours: 2,
+
+  staffSeesContact: false,
+};
+
+const int = (min: number, max: number) => (v: unknown) =>
+  typeof v === "number" && Number.isInteger(v) && v >= min && v <= max;
+const bool = (v: unknown) => typeof v === "boolean";
+
+function discountTable(v: unknown): Record<number, number> | null {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  const table: Record<number, number> = {};
+  for (const [key, value] of Object.entries(v as Record<string, unknown>)) {
+    const count = Number(key);
+    if (!Number.isInteger(count) || count < 2 || count > 20) return null;
+    if (typeof value !== "number" || !(value >= 0 && value <= 100)) return null;
+    table[count] = value;
+  }
+  return table;
+}
+
+/** Which values are acceptable for each simple setting. Anything else is ignored. */
+const VALIDATORS: { [K in Exclude<keyof Settings, "multiStudioPercent">]: (v: unknown) => boolean } = {
+  slotIncrementMinutes: int(5, 240),
+  minLeadHours: int(0, 24 * 60),
+  maxAdvanceDays: int(1, 730),
+  holdMinutes: int(1, 60),
+  refundWindowHours: int(0, 24 * 365),
+  refundFeePercent: int(0, 100),
+  rescheduleCutoffHours: int(0, 24 * 365),
+  maxReschedules: int(0, 20),
+  creditValidDays: int(1, 730),
+  loyaltyEnabled: bool,
+  loyaltyPercent: int(1, 100),
+  loyaltyValidDays: int(1, 730),
+  loyaltyDelayHours: int(0, 24 * 14),
+  staffSeesContact: bool,
+};
+
+export type SettingKey = keyof Settings;
+export const SETTING_KEYS = Object.keys(DEFAULT_SETTINGS) as SettingKey[];
+
+/** True when `value` is acceptable for `key`. Used when the owner edits settings. */
+export function isValidSetting(key: string, value: unknown): key is SettingKey {
+  if (key === "multiStudioPercent") return discountTable(value) !== null;
+  const check = (VALIDATORS as Record<string, ((v: unknown) => boolean) | undefined>)[key];
+  return check !== undefined && check(value);
+}
+
+/** Merge stored values over the defaults, ignoring anything malformed. */
+export function mergeSettings(rows: { key: string; value: unknown }[]): Settings {
+  const out: Settings = { ...DEFAULT_SETTINGS, multiStudioPercent: { ...DEFAULT_SETTINGS.multiStudioPercent } };
+  for (const { key, value } of rows) {
+    if (!isValidSetting(key, value)) continue;
+    if (key === "multiStudioPercent") out.multiStudioPercent = discountTable(value)!;
+    else (out as unknown as Record<string, unknown>)[key] = value;
+  }
+  return out;
+}
+
+export async function loadSettings(db: DbLike): Promise<Settings> {
+  const rows = await db.select().from(settingsTable);
+  return mergeSettings(rows);
+}
+
+/** Store one setting. Returns false, changing nothing, when the value is not acceptable. */
+export async function saveSetting(db: DbLike, key: string, value: unknown): Promise<boolean> {
+  if (!isValidSetting(key, value)) return false;
+  await db
+    .insert(settingsTable)
+    .values({ key, value })
+    .onConflictDoUpdate({ target: settingsTable.key, set: { value } });
+  return true;
+}
