@@ -207,6 +207,62 @@ Sent by the owner on 2026-11-15, to be recorded here and followed afterwards. **
     - "Staff should be able to change all the labels."
     - **What exists:** owners (the addresses in `OWNER_EMAILS`) have the whole admin. Staff have the day sheet at `/staff` for the days the owner assigns, where they mark "came" or "no-show", and one switch decides whether they see phone numbers and emails (`staffSeesContact`). The abilities are to become switches of that kind, stored in the settings and set by the owners.
 
+### Third set of requirements from the owner (received 2026-11-15): the client portal
+
+Sent by the owner on 2026-11-15, after the second set was built. Recorded as requirements 16 to 20. **Nothing of it is built, and the owner asked for no work on it yet.** Where it conflicts with what exists, the conflict and a proposed solution are listed, as the owner asked. Terms used here: a **stamp** is one counted visit day (the existing loyalty rule). In the spec, **photographers** means the clients who rent studios, not the in-house photographer. A **studio session** is a studio rental. A **reward** is a free-hour code.
+
+16. **Client login, appointments, receipts and payments** (spec section 4, parts 1 to 3) — **Recorded; not started.**
+    - **Asked:** sign-in with an email address, with email and password or Google if supported, and password reset. Appointments connected to the account by verified email, including earlier ones. **My Appointments**: upcoming (studio, date, start and end, duration, status, confirmation and studio instructions, a request to reschedule or cancel within policy) and past (completed, cancelled, rescheduled; filter by date, studio and status; a rescheduled booking keeps its original record). **Receipts & Payments**: by date, with appointment date, studio, amount paid, taxes, discounts and payment status; each receipt viewed, downloaded and printed as a PDF; all receipts of a calendar year at once; an annual payment summary for tax, ideally; refunds and partial refunds; receipts kept apart from unpaid invoices and credits. A receipt shows what was actually paid, never the current price, and no receipt is made from an estimate.
+    - **What exists:** sign-in by emailed six-digit code, which creates the account and proves the email. Bookings are already found by that verified email, and the account page lists upcoming and past bookings. A customer's reschedule releases the booking and issues a credit; the original booking stays in the database. The payments table records each charge, refunds are recorded too, and a booking stores its discounts and credits. No real payment has been taken by this site yet (sandbox only), so there is nothing to reconcile.
+    - **Conflicts and proposed solutions:**
+        - *Passwords.* Requirement 5 chose sign-in without passwords. Proposed: keep emailed codes, which already prove the email and reset sign-in. Passwords would add stored hashes, reset emails and lockouts for the same result. The owner decides.
+        - *Google sign-in.* Not built. Proposed: an optional later addition that only proves the same email address.
+        - *Appointments before the new site.* This site has no history from before its launch. Earlier appointments and payments are in Acuity Scheduling and Square, which the live site uses. Proposed: import them from exports of those two, attach them to an account only once the owner of that email has signed in with a code, and take amounts from Square's payment records, never from current prices. Needs the owner's go-ahead and a privacy policy first.
+        - *PDF receipts.* The site makes no PDFs. Proposed: generate them on the server from the payment records; the library is chosen when building.
+        - *Taxes.* The site has no tax line: prices are final amounts. Proposed: the accountant states whether prices include tax, at what rate, and the format of an annual summary, before any receipt shows tax. No rate goes into the code without that.
+        - *Unpaid invoices.* A booking the owner makes for a client is "to pay at the studio" with no payment record, so it cannot yet be told from a receipt. Proposed: a "mark as paid" record, so each such booking is either a receipt or an invoice.
+        - *"Request" a reschedule or cancellation.* Today both happen at once, within policy. Proposed: a request from the portal sets Reschedule Pending (requirement 10), which keeps the slot until staff choose a new time; the instant reschedule code stays beside it.
+    - **Open:** passwords as well as codes, or codes only; Google sign-in now, later or never; import earlier history or start from launch; the tax rule; instant reschedule, request, or both; receipts as one PDF each, one file per year, or both.
+
+17. **My Rewards and loyalty** (spec section 4, parts 4 and 5, and "My Rewards") — **Recorded; not started.**
+    - **Asked:** a My Rewards section listing each reward's name (for example "Free Studio Hour"), its unique code, its issue date, its expiry if any, and its status: **Available** (not used, usable on an eligible booking), **Redeemed** (with the date and the appointment), **Expired**, or **Canceled** (invalidated by an administrator). A Copy Code button. Eligible rewards applied at checkout. No code redeemed twice. The full history of earned and redeemed rewards kept. Administrators can adjust stamps and reward statuses by hand. Kept in step with the existing Apple Wallet loyalty system where technically supported, with no duplicate rewards and no different balances. Progress shown as five circles with the count and the stamps still needed, and the dates of the qualifying visits. One stamp per day, no duplicate stamps for one visit, and a free-hour reward at five stamps.
+    - **What exists:** stamps are not stored. They are worked out from completed bookings, one per local day (`src/lib/domain/loyalty.ts`), so one visit cannot give two stamps. Five stamps give a free-hour code, which is emailed (`src/server/loyalty.ts`). Each code has a unique reference, an issue date, an expiry, and a status worked out from its uses, its expiry and whether it was cancelled. A code is spent once, inside the booking that uses it. A code used on a booking that is later cancelled becomes usable again.
+    - **Conflicts and proposed solutions:**
+        - *Stamps need completed visits.* The scheduled task marks visits completed, and nothing calls that task yet (see known gaps). Proposed: set up the scheduler before this is built.
+        - *Manual corrections have nowhere to live,* because stamps are calculated, not stored. Proposed: a stamp and reward ledger with one row for each stamp, reward, redemption and manual change, recording who made it, when and why. Balances are sums of the ledger. Existing rewards are copied in from the bookings and codes.
+        - *Redemption date and appointment.* The booking records the code it used, but no redemption date of its own. Proposed: the ledger records it.
+        - *Canceled and Expired stay visible.* The customer's list hides spent, expired and cancelled codes today. Proposed: show the whole history with each status.
+        - *Undoing a redemption.* An administrator can cancel a code but cannot undo a mistaken redemption. Proposed: a restore action that needs a reason and goes into the ledger. Nothing is edited silently.
+        - *More than one use for a free hour.* The Codes page accepts several uses for a free hour. Proposed: a reward is always one use.
+        - *Apple Wallet.* Nothing in the code or here describes that system. Passes are issued by whoever holds the pass certificate, so the system's operator decides what is possible. Options: (a) this site is the source and pushes stamps and rewards to it; (b) the wallet system is the source and this site reads it; (c) no link, and the owner reconciles from a report each week. Duplicates are prevented by using each reward's ID as the key on both sides.
+        - *Colours.* The spec's example uses its own colours. Proposed: the site's brand colours for the progress circles.
+    - **Open:** the name of the Apple Wallet system, who runs it and whether it has an interface; option (a), (b) or (c); whether a code returned by a cancelled booking is Available again (current rule) or stays Canceled; whether an administrator may restore a redeemed code.
+
+18. **Client dashboard** (spec section 6) — **Recorded; not started.**
+    - **Asked:** after sign-in, one clean mobile page with the next appointment, a button to view all appointments, loyalty stamp progress, available reward codes, a shortcut to receipts and payments, and a button to book another studio session.
+    - **What exists:** /account lists all upcoming bookings, the codes, a loyalty line and sign-out. The studio and photography booking pages exist.
+    - **Conflicts and proposed solutions:** the account page has no "next appointment" card: add one above the list, with the full list under "View all appointments". "Book another studio session" is ambiguous now that photography sessions exist: proposed, two buttons, "Book a studio" and "Book a photographer".
+    - **Open:** two buttons, or one.
+
+19. **Admin controls and data security** (spec section 7) — **Recorded; not started.**
+    - **Asked:** administrators see each customer's full booking history, payments and receipts, loyalty stamps and codes; correct loyalty balances; see whether a reward was redeemed; help a client with account problems. Clients see only their own appointments, payments and rewards. Earlier records are linked only after the account's ownership is verified. Financial and personal information is protected by authentication and access control.
+    - **What exists:** the owner sees bookings, codes and the calendar. Customer pages check the signed-in email against each booking. Staff see neither prices nor contact details unless switched on. Sign-in codes and sessions are stored only as hashes. There is no customer page for administrators, no account tools and no record of corrections.
+    - **Conflicts and proposed solutions:**
+        - *Email is the account key* for bookings, codes and loyalty, so a client who changes email would lose their history. Proposed: a verified email change that moves every record and is logged; or only the owner can change it. The owner decides.
+        - *Duplicate accounts* (one person, two emails). Proposed: an owner-only merge, logged.
+        - *Access log.* Proposed: every administrator view of a customer's personal or payment data, and every correction, logged with who and when.
+        - *Earlier records* stay hidden until the owner of that email signs in with a code.
+        - *Staff* never see customer payments or receipts. This is today's rule, and it stays.
+        - *Encryption and hosting* depend on the hosting choice, which is open.
+        - *Privacy policy.* Needed before accounts hold receipts and earlier history. The page is not built.
+    - **Open:** whether clients can change their email themselves; whether duplicate accounts are merged or prevented; whether an access log is wanted.
+
+20. **Testing the client portal** (spec section 8) — **Recorded; not started.**
+    - **Asked:** ten checks: sign-up and sign-in; secure access to earlier appointments; upcoming and past bookings shown correctly; receipts matching payments; annual receipt downloads; stamps calculated correctly; a reward after five stamps; redeemed codes not reusable; balances consistent with the existing loyalty system; the whole portal smooth on desktop and mobile.
+    - **How they can be tested:** checks 1, 3, 4, 6, 7, 8 and 10 with automated tests, extending the existing suites (checks 7 and 8 already have tests of the code rules). Checks 2 and 5 once earlier history is imported and receipts are PDFs. Check 9 only once the Apple Wallet system is known and has an interface; until then, balances can be compared with the owner's report by hand. Mobile checks go into `e2e/z-mobile.spec.ts`.
+
+**Proposed order, when the owner says go:** (1) the stamp and reward ledger, because the reward pages and the corrections read it; (2) My Rewards, with its statuses and the Copy Code button; (3) the dashboard; (4) receipts and PDFs, once the tax rule and the privacy policy exist; (5) earlier history, once the owner agrees to the import; (6) customer pages and corrections for administrators; (7) the Apple Wallet link, once the system is named.
+
 ### Defaults chosen while building (placeholders until the owner decides)
 
 All of these are data or settings, not code, unless noted.
@@ -246,6 +302,8 @@ All of these are data or settings, not code, unless noted.
 - **Food and drinks** — **Open.** The live guest information says they are not allowed in the studios. The live rental terms say not on furniture. The new site says "not on furniture" on both the policies and the guest information page.
 - **Pet fee on a refund** — **Open.** The live terms call the $40 pet fee non-refundable, and the policies page repeats that. The site refunds the whole card payment, pet fee included, when a booking is cancelled in time. The guest information page does not call the fee non-refundable.
 - **Names of the lights** — **Open.** The live page lists the continuous lights as "Amaram 150, Godos, and Neewer". The new page says Amaran 150, Godox and Neewer, on the assumption that the first two were misspelt.
+- **Sales tax on receipts** — **Open (requirement 16).** The site has no tax line. The accountant's rule is needed before receipts show tax.
+- **Apple Wallet loyalty system** — **Open (requirement 17).** Its name, its operator and whether it has an interface are not known.
 
 ### Known gaps in what is built
 
@@ -255,6 +313,7 @@ Not connected to the outside world yet:
 - **No email has ever been sent.** The Resend transport is written but untried. In production, without `RESEND_API_KEY` and `EMAIL_FROM`, nothing goes out, including sign-in codes, so nobody could sign in.
 - **Nothing calls the scheduled tasks.** `GET /api/cron/tick` must be called every few minutes by a scheduler (with `CRON_SECRET`). Until then visits are not marked completed, no free hours go out, and failed refunds are not retried.
 - **No production database, hosting or domain** has been chosen.
+- **The client portal (requirements 16 to 20) is not built.** Earlier appointments and payments from the live site are not in this site yet.
 
 Known weaknesses:
 
@@ -304,3 +363,4 @@ Known weaknesses:
 - 2026-11-15: The admin calendar was built (requirement 9): month, week and day, a colour for each studio, one studio or all, the buffers drawn, and every appointment a link to its page. With it came "move to a new time" for administrators and bookings made in the admin for a client, which finish requirements 10 and 11. Still to build from the second set: photography (12), the mobile pass (13) and the owner's test list (14). 347 unit and integration tests and 21 browser tests pass.
 - 2026-11-15: Photography was built (requirement 12): the section on the booking page, the photography flow, the packages of the live price list, the photographer as a resource that a session holds across all studios, and the admin page for their working hours and blocked time. Still to do from the second set: the mobile pass (13) and the owner's test list (14). 370 unit and integration tests and 22 browser tests pass.
 - 2026-11-15: The mobile pass (requirement 13) and the owner's test list (14). A new browser test file measures every page on eight screen sizes and makes whole bookings at four iPhone sizes; six defects it found were fixed. With that, every item of the second set of requirements (9 to 15) is built and has a test. Open: the photographer's real working hours, the points marked "to confirm" under requirements 2 and 12, and a check on real phones. 370 unit and integration tests and 31 browser tests pass.
+- 2026-11-15: The owner sent a third set of requirements, the client portal: accounts and appointments, receipts and payment history, rewards and loyalty stamps, a client dashboard, administrator controls and data security, and tests. Recorded as requirements 16 to 20, each with what exists, the conflicts and a proposed solution. Nothing is built, and the owner asked for no work on it yet. The spec's "photographers" were read as the clients who rent studios.
