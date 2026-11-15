@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <h1>Payment</h1>
+  <form method="post">
+    {{ form.hidden_tag() }}
+    {{ form.card_number.label }} {{ form.card_number() }}<br>
+    {{ form.expiration_date.label }} {{ form.expiration_date() }}<br>
+    {{ form.cvv.label }} {{ form.cvv() }}<br>
+    {{ form.submit() }}
+  </form>
+{% endblock %}
