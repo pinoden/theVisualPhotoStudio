@@ -234,7 +234,7 @@ async function AppointmentDetails({
           <p style={{ marginBottom: 0 }}>No changes have been recorded for this booking.</p>
         ) : (
           <div className="data-table-wrap">
-            <table className="data-table">
+            <table className="data-table history-table">
               <thead>
                 <tr>
                   <th>When</th>

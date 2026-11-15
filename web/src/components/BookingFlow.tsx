@@ -623,7 +623,7 @@ export function BookingFlow({
           <span key={s} style={{ display: "contents" }}>
             {i > 0 && <span className="wizard-connector" />}
             <span className={`wizard-step-label${i === stepIndex ? " active" : i < stepIndex ? " completed" : ""}`}>
-              {STEP_LABEL[s]}
+              <span className="wizard-step-name">{STEP_LABEL[s]}</span>
             </span>
           </span>
         ))}

@@ -250,7 +250,7 @@ a:hover { color: var(--color-rose-dark); }
 /* ── Studio cards ── */
 .studios-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr));
   gap: 1.5rem;
 }
 
@@ -300,7 +300,7 @@ a:hover { color: var(--color-rose-dark); }
 /* ── Rates table ── */
 .rates-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
   gap: 1.5rem;
 }
 
@@ -539,7 +539,7 @@ details.faq-item[open] .faq-icon { transform: rotate(45deg); }
 /* Studio selector checkboxes */
 .studio-selector {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
   gap: 1rem;
   margin-bottom: 2rem;
 }
@@ -789,7 +789,7 @@ details.faq-item[open] .faq-icon { transform: rotate(45deg); }
 
 .stat-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
   gap: 1.25rem;
   margin-bottom: 2rem;
 }
@@ -1091,7 +1091,7 @@ button { font-family: inherit; }
   border: 1px solid transparent;
   border-radius: 999px;
   font-family: var(--font-sans);
-  font-size: .68rem;
+  font-size: .7rem;
   font-weight: 700;
   letter-spacing: .06em;
   text-transform: uppercase;
@@ -1159,7 +1159,7 @@ button { font-family: inherit; }
 .cal-month th {
   padding: .5rem .25rem;
   border-bottom: 1px solid var(--color-border);
-  font-size: .68rem;
+  font-size: .7rem;
   letter-spacing: .08em;
   text-transform: uppercase;
   color: var(--color-dark);
@@ -1204,7 +1204,7 @@ button { font-family: inherit; }
   overflow: hidden;
 }
 .cal-chip-text { overflow: hidden; text-overflow: ellipsis; }
-.cal-more { font-size: .68rem; }
+.cal-more { font-size: .7rem; }
 
 /* The time grid of the week and the day */
 .cal-grid { --ppm: 1.15px; border: 1px solid var(--color-border); background: #fff; }
@@ -1227,7 +1227,7 @@ button { font-family: inherit; }
   position: absolute;
   top: calc(var(--top) * var(--ppm));
   right: .35rem;
-  font-size: .64rem;
+  font-size: .7rem;
   line-height: 1;
   white-space: nowrap;
 }
@@ -1251,7 +1251,7 @@ button { font-family: inherit; }
   background: #f3efe9;
   background: color-mix(in srgb, var(--studio) 17%, #fff);
   color: var(--color-dark);
-  font-size: .66rem;
+  font-size: .7rem;
   line-height: 1.25;
 }
 .cal-appt:hover { outline: 2px solid var(--studio); }
@@ -1279,7 +1279,7 @@ button { font-family: inherit; }
   padding: 2px 4px;
   background: repeating-linear-gradient(45deg, #e6e2dc 0 6px, #f3f0ec 6px 12px);
   color: #5f5850;
-  font-size: .66rem;
+  font-size: .7rem;
   overflow: hidden;
 }
 .cal-legend { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .6rem; margin-top: .75rem; font-size: .78rem; }
@@ -1331,8 +1331,8 @@ button { font-family: inherit; }
   .cal-more { display: none; }
   .cal-grid { --ppm: 1px; }
   .cal-head, .cal-body { grid-template-columns: 2.6rem repeat(var(--days), minmax(0, 1fr)); }
-  .cal-appt-full { font-size: .7rem; }
-  .cal-appt-full .status-badge { font-size: .56rem; padding: .05rem .3rem; letter-spacing: .02em; }
+  .cal-appt-full { font-size: .72rem; }
+  .cal-appt-full .status-badge { font-size: .7rem; padding: 0 .3rem; letter-spacing: 0; }
 }
 
 .admin-fieldset { margin: 0 0 1rem; padding: 0; border: 0; }
@@ -1341,7 +1341,7 @@ button { font-family: inherit; }
 .label-select .form-control { width: auto; min-width: 9.5rem; padding: .4rem .5rem; font-size: .8rem; }
 @media (max-width: 760px) {
   /* On a phone the day's three studios are narrow: let names, times and badges take two lines. */
-  .cal-head > * { white-space: normal; font-size: .68rem; line-height: 1.2; }
+  .cal-head > * { white-space: normal; font-size: .72rem; line-height: 1.2; }
   .cal-appt-full .cal-appt-in > span { white-space: normal; }
   .cal-appt-full .status-badge { white-space: normal; line-height: 1.2; border-radius: 6px; }
 }
@@ -1383,8 +1383,89 @@ button { font-family: inherit; }
 .package-btn span { font-size: .82rem; color: var(--color-muted); }
 .package-btn:hover { border-color: var(--color-rose); }
 .package-btn.selected { border-color: var(--color-dark); box-shadow: inset 0 0 0 1px var(--color-dark); }
-.cal-tag { font-size: .62rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.cal-tag { font-size: .7rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
 @media (max-width: 560px) {
   .photographer-callout { padding: 1rem; }
   .photographer-callout .btn { width: 100%; text-align: center; }
+}
+
+/* ── Phones ──────────────────────────────────────────────────────────────────
+   What makes the whole site comfortable on a phone (the owner's requirement
+   13). These rules come last so that they win, and e2e/z-mobile.spec.ts checks
+   them on eight screen sizes. Three things: nothing is wider than the screen,
+   everything that is pressed is at least 44px tall, and no field has text
+   under 16px, because an iPhone zooms the whole page when such a field is
+   touched and leaves it zoomed. */
+@media (max-width: 1000px) {
+  /* The menu button: a full target, with its three bars in the middle. */
+  .nav-toggle {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    margin-right: -10px;
+    padding: 0;
+  }
+  .site-logo { display: inline-flex; align-items: center; gap: .3em; min-height: 44px; }
+  .site-nav { padding: 0 1.25rem; }
+  .nav-links { gap: .25rem; padding: 1rem 1.25rem 1.5rem; max-height: calc(100vh - 72px); overflow-y: auto; }
+  .nav-links a, .nav-links button { display: flex; align-items: center; min-height: 44px; }
+}
+
+@media (max-width: 760px), (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]),
+  select,
+  textarea { font-size: 16px !important; min-height: 44px; }
+  .btn, .btn-small { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; text-align: center; }
+  button, .chip, .cal-tabs a, a.cal-studio { min-height: 44px; }
+  .time-slot-btn { min-width: 5.5rem; }
+  .price-input { width: 7.5rem; }
+}
+
+@media (max-width: 760px) {
+  .admin-main { padding: 1.25rem 1rem; }
+  .admin-header { margin-bottom: 1.25rem; }
+  .admin-card { padding: 1rem; }
+  .admin-form-row > .btn { width: 100%; }
+  .wizard-actions .btn { padding-left: 1.1rem; padding-right: 1.1rem; }
+  .label-select { flex-wrap: wrap; }
+}
+
+/* A word longer than its line (a web address in a studio's description, a very long name in a note) is
+   broken, on every screen: left alone, it pushes the whole page wider than a phone. Running text only:
+   a table keeps its words whole and scrolls inside its own box instead. */
+.page-content :is(p, li, dd, h1, h2, h3, h4, summary, blockquote),
+.addon-row span,
+.price-row span,
+.studio-option-card,
+.notice,
+.flash {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 380px) {
+  /* Five step names do not fit side by side on the narrowest phones: the step being done keeps its name,
+     the others keep their number. The names stay in the page for screen readers. */
+  .wizard-progress { margin-bottom: 2rem; }
+  .wizard-step-label { flex: 0 0 auto; }
+  .wizard-step-label:not(.active) .wizard-step-name {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .wizard-connector { min-width: .75rem; }
+}
+
+@media (max-width: 560px) {
+  /* A booking's history on a phone: each change as a block of three lines, not a table to scroll sideways. */
+  .history-table thead { display: none; }
+  .history-table tr { display: block; padding: .6rem 0; border-bottom: 1px solid var(--color-border); }
+  .history-table tr:last-child { border-bottom: 0; }
+  .history-table td { display: block; padding: .05rem 0; border: 0; white-space: normal !important; }
+  .history-table td:first-child { font-size: .78rem; }
 }

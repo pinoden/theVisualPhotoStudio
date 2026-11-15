@@ -96,7 +96,15 @@ export async function getAppointment(db: DbLike, viewer: AuthUser, ref: string, 
     history: await listEvents(db, booking.id),
     labelChoices: SETTABLE_LABELS.map((key) => {
       const change = labelChange(booking, key, now);
-      return { key, allowed: change.ok, why: change.ok ? "" : LABEL_BLOCK_TEXT[change.reason] };
+      if (change.ok) return { key, allowed: true, why: "" };
+      // Beside each button, the reason in a few words. The full sentence is for the message after a refusal.
+      const why =
+        change.reason === "too_early"
+          ? key === "checked_in"
+            ? "From an hour before the appointment."
+            : "Once the appointment has started."
+          : LABEL_BLOCK_TEXT[change.reason];
+      return { key, allowed: false, why };
     }),
     may: {
       setLabels: active && may("staffSetsLabels"),
