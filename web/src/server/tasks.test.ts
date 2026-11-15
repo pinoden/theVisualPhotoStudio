@@ -1,11 +1,22 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-import { bookings, emailOutbox, promoCodes, settings } from "@/db/schema";
+import { bookings, emailOutbox, payments, promoCodes, settings } from "@/db/schema";
 import { deliverPendingEmails, MAX_EMAIL_ATTEMPTS, queueEmail, resolveEmailTransport, type EmailTransport } from "./email";
 import { cancelBooking } from "./manage";
-import { resolvePayments } from "./payments";
+import { MOCK_TOKEN_DECLINED, mockProvider, resolvePayments, type PaymentProvider } from "./payments";
 import { completeVisits, runScheduledTasks } from "./tasks";
-import { BASE_URL, createTestWorld, daysAfter, expectOk, h, hoursAfter, NOW, type TestWorld } from "./testing";
+import {
+  BASE_URL,
+  createTestWorld,
+  daysAfter,
+  expectOk,
+  h,
+  hoursAfter,
+  minutesAfter,
+  NOW,
+  OWNER_EMAIL,
+  type TestWorld,
+} from "./testing";
 
 let world: TestWorld;
 beforeAll(async () => {
@@ -186,6 +197,7 @@ describe("the scheduled run", () => {
     const summary = await runScheduledTasks(world.db, { ...world.manageDeps({ now: hoursAfter(VISIT_END, 2) }), email });
     expect(summary).toEqual({
       holdsReleased: 0,
+      paymentsFlagged: 0,
       visitsCompleted: 1,
       loyaltyCodes: 1,
       refundsSucceeded: 0,
@@ -195,6 +207,48 @@ describe("the scheduled run", () => {
     });
     expect(delivered).toContain(`Booking confirmed: ${booked.ref}`);
     expect(delivered).toContain("Thank you for visiting: 10% off your next booking");
+  });
+});
+
+describe("a charge that was interrupted", () => {
+  // The server stopping mid-charge looks, from the inside, like the charge never returning.
+  const crashing: PaymentProvider = {
+    name: "mock",
+    charge: async () => {
+      throw new Error("the server stopped");
+    },
+    refund: mockProvider.refund,
+  };
+  const email: EmailTransport = { name: "test", send: async () => ({ ok: true }) };
+  const runAt = (minutes: number) =>
+    runScheduledTasks(world.db, { ...world.manageDeps({ now: minutesAfter(NOW, minutes) }), email });
+
+  it("is closed once its hold has expired, and the owner is asked to check it, once", async () => {
+    await expect(world.book({}, { payments: crashing })).rejects.toThrow("the server stopped");
+    expect((await world.db.select().from(payments))[0].status).toBe("pending");
+
+    // While the hold lasts, the charge may still be on its way.
+    expect(await runAt(5)).toMatchObject({ holdsReleased: 0, paymentsFlagged: 0 });
+
+    expect(await runAt(11)).toMatchObject({ holdsReleased: 1, paymentsFlagged: 1 });
+    expect((await world.db.select().from(payments))[0]).toMatchObject({
+      status: "failed",
+      error: "Interrupted: no result was recorded",
+    });
+    const [notice] = await world.emails("owner_payment_unknown");
+    expect(notice.toEmail).toBe(OWNER_EMAIL);
+    expect(notice.subject).toMatch(/^ACTION NEEDED: check a payment for VS-/);
+    expect(notice.body).toContain("A card payment of $176 for booking");
+    expect(notice.body).toContain("was interrupted before its result was recorded.");
+
+    expect((await runAt(12)).paymentsFlagged).toBe(0);
+    expect(await world.emails("owner_payment_unknown")).toHaveLength(1);
+  });
+
+  it("is not confused with a card that was simply refused", async () => {
+    expect((await world.book({ paymentToken: MOCK_TOKEN_DECLINED })).ok).toBe(false);
+    expect((await runAt(11)).paymentsFlagged).toBe(0);
+    expect(await world.emails("owner_payment_unknown")).toHaveLength(0);
   });
 });
 

@@ -1,8 +1,14 @@
 import { and, eq, gt, isNull, lte } from "drizzle-orm";
-import { bookings } from "@/db/schema";
+import { bookings, payments } from "@/db/schema";
 import type { Db } from "@/db/client";
 import { releaseExpiredHolds } from "./availability";
-import { deliverPendingEmails, loyaltyCodeEmail, queueEmail, type EmailTransport } from "./email";
+import {
+  deliverPendingEmails,
+  loyaltyCodeEmail,
+  ownerPaymentUnknownNotice,
+  queueEmail,
+  type EmailTransport,
+} from "./email";
 import { retryOpenRefunds, type ManageDeps } from "./manage";
 import { issuePromo } from "./promos";
 import { loadSettings } from "./settings";
@@ -19,6 +25,8 @@ export interface TaskDeps extends ManageDeps {
 
 export interface TaskSummary {
   holdsReleased: number;
+  /** Payments whose result was never recorded; the owner was asked to check each. */
+  paymentsFlagged: number;
   visitsCompleted: number;
   loyaltyCodes: number;
   refundsSucceeded: number;
@@ -93,13 +101,56 @@ export async function completeVisits(db: Db, now: Date, baseUrl: string): Promis
   return { completed: done.length, codes };
 }
 
+/**
+ * A payment still marked pending on a booking that has expired means the
+ * server stopped while the card was being charged, so nothing recorded how
+ * the charge ended and the processor may have taken the money. Close the
+ * record and ask the owner to look, once.
+ */
+export async function flagInterruptedPayments(db: Db, ownerEmail: string | null): Promise<number> {
+  const stuck = await db
+    .select({ id: payments.id, amountCents: payments.amountCents, ref: bookings.ref, customer: bookings.customerName })
+    .from(payments)
+    .innerJoin(bookings, eq(bookings.id, payments.bookingId))
+    .where(and(eq(payments.status, "pending"), eq(bookings.status, "expired")))
+    .limit(100);
+
+  let flagged = 0;
+  for (const row of stuck) {
+    await db.transaction(async (tx) => {
+      const closed = await tx
+        .update(payments)
+        .set({ status: "failed", error: "Interrupted: no result was recorded" })
+        .where(and(eq(payments.id, row.id), eq(payments.status, "pending")))
+        .returning({ id: payments.id });
+      if (closed.length === 0) return; // another run closed it first
+      flagged++;
+      if (ownerEmail) {
+        await queueEmail(
+          tx,
+          ownerPaymentUnknownNotice({
+            to: ownerEmail,
+            ref: row.ref,
+            customer: row.customer,
+            amountCents: row.amountCents,
+            interrupted: true,
+          }),
+        );
+      }
+    });
+  }
+  return flagged;
+}
+
 export async function runScheduledTasks(db: Db, deps: TaskDeps): Promise<TaskSummary> {
   const holdsReleased = await releaseExpiredHolds(db, deps.now);
+  const paymentsFlagged = await flagInterruptedPayments(db, deps.ownerEmail);
   const visits = await completeVisits(db, deps.now, deps.baseUrl);
   const refundRuns = await retryOpenRefunds(db, deps);
   const mail = await deliverPendingEmails(db, deps.email, deps.now);
   return {
     holdsReleased,
+    paymentsFlagged,
     visitsCompleted: visits.completed,
     loyaltyCodes: visits.codes,
     refundsSucceeded: refundRuns.succeeded,
