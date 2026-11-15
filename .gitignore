@@ -1,9 +1,7 @@
-venv/
-instance/
-__pycache__/
-*.pyc
+# Settings files with keys never go into git. The site's own are covered by web/.gitignore.
 .env
-*.db
+
+# Editor, tool and system files
 .idea/
-.DS_Store
 .claude/
+.DS_Store

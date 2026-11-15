@@ -4,14 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository layout
 
-Two codebases live here while the site is being rebuilt.
+- **`web/`** is the site: Next.js 16, TypeScript, PostgreSQL. All code lives there. Work happens on the `rebuild` branch and reaches `master` through pull requests.
+- **The repository root** holds only this file, a short `README.md` and `.gitignore`.
 
-- **`web/`** is the new site: Next.js 16, TypeScript, PostgreSQL. All new work goes here. It is developed on the `rebuild` branch.
-- **The repository root** (`app/`, `run.py`, `config.py`, `seed.py`, `migrations/`) is the earlier Flask prototype. It is kept as a reference for page design and copy only. Do not add features to it. It has known unfixed defects: card payments cannot succeed, the browser can skip payment, and double booking is possible.
+The site replaced an earlier Flask prototype that lived at the repository root (`app/`, `run.py`, `config.py`, `seed.py`, `migrations/`). It was deleted on 2026-11-15 at the owner's request. Its last version is commit `f1420bc`: list its files with `git ls-tree -r --name-only f1420bc app` and read one with `git show f1420bc:app/templates/faq.html`. It is a reference for page design and copy only. It had unfixed defects: card payments could not succeed, the browser could skip payment, and double booking was possible.
 
 The decisions behind the rebuild, and what is still open, are recorded under "Rebuild decisions" at the end of this file.
 
-## New site (`web/`)
+## The site (`web/`)
 
 ### Commands
 
@@ -81,45 +81,8 @@ Local development needs no database install and no credentials. Without `DATABAS
 - **Earlier pages stay in the document, hidden.** With Cache Components, the router keeps recently visited pages mounted (`display: none`) so their state survives going back. Client state therefore outlives navigation: reset it deliberately where that matters. In browser tests use role locators, or `byLabel`, `byText` and `onScreen` from `e2e/helpers.ts`; a plain text or label locator also matches the hidden copies.
 - **One build folder, one process.** A dev server started on a build folder that another process is still writing to corrupts the cache, and every page then reloads in a loop (about 30 times a second, with nothing in the log but "Compiled"). It happened twice: with two sessions active, and when a server was started within a second of killing the previous one. Wait for the old process to exit before starting a new one. To recover, stop the servers and delete `web/.next/dev`. The browser tests avoid it by building into their own folder, `.next-e2e` (`NEXT_DIST_DIR`), which they delete at every start.
 - **More than one Claude Code session may be working in this checkout.** Before committing, run `git status` and `git log -5`, and commit only what you changed and verified.
+- **One stylesheet.** `src/app/globals.css` was carried over from the Flask prototype. Brand colours and fonts are CSS variables at its top.
 - Next.js telemetry was turned off on this machine with `npx next telemetry disable`.
-
-## Flask prototype (repository root, reference only)
-
-Flask website with public marketing pages, a multi-step booking wizard with Square payments, email confirmations and a login-protected admin dashboard. SQLite by default (`instance/studio.db`). It has no test suite or linter.
-
-### Commands
-
-```bash
-source venv/bin/activate
-python -m pip install -r requirements.txt
-cp .env.example .env                           # then fill in values (see README for the variable table)
-
-python -m flask --app run db upgrade           # apply migrations (migrations/ is Alembic via Flask-Migrate)
-python -m flask --app run db migrate -m "msg"  # generate a migration after changing app/models.py
-python seed.py                                 # creates the base tables, then seeds studios, hours, admin user
-
-python run.py                                  # dev server on :5000 (debug, stat reloader); USE_SSL=true for adhoc HTTPS
-```
-
-Use `python -m flask` and `python -m pip`, not the bare `flask` / `pip` commands: the launcher scripts in the local `venv/bin` point at a `venv3/` path that no longer exists and fail with "bad interpreter".
-
-Admin panel is at `/admin`. Use `SQUARE_ENVIRONMENT=sandbox` for development.
-
-### Architecture
-
-- **App factory** in [app/__init__.py](app/__init__.py): `create_app()` wires the extensions (`db`, `migrate`, `login_manager`, `mail`) and registers four blueprints: `main` (public pages), `booking` (`/book`, `/book/create`, `/booking/confirmation/<ref>`), `admin` (prefix `/admin`), `api` (prefix `/api`). All settings come from [config.py](config.py), which reads `.env`.
-- **Booking flow**: the wizard in `templates/book.html` (JS is inline, there is no `static/js`) calls `/api/availability` and `/api/price` for live data, then POSTs once to `/book/create`. That endpoint re-validates everything server-side, in this order: availability, then price, then the Square charge, then the `Booking` row, then emails. Emails are best-effort. Failures are logged and do not fail the booking.
-- **Business logic lives in [app/utils.py](app/utils.py)**, not in routes: `calculate_price` (bundle discount, deposit, per-service hourly rates), `get_available_slots` (combines per-studio `StudioHours`, existing bookings, `BlockedSlot`s and `SLOT_INCREMENT_MINUTES`), and `charge_square`.
-- **Models** ([app/models.py](app/models.py)): `Studio`, `StudioHours`, `Booking` (many-to-many with studios via `booking_studio`), `BlockedSlot`, `Announcement`, `AdminUser`. `Booking.service_type`, `payment_status`, and `status` are plain strings with the allowed values listed in comments, not enums.
-- **Admin** ([app/routes/admin.py](app/routes/admin.py), the largest file): bookings, calendar, customers (derived from bookings, not a separate table), reports, availability blocking, studio/hours editing, announcements, settings. It also serves an iCal feed at `/admin/ical/<ICAL_TOKEN>.ics`, which is token-authenticated rather than login-protected.
-- **Templates**: Jinja2, all public pages extend `base.html` and admin pages extend `admin/base_admin.html`. Brand styling is CSS variables at the top of `static/css/style.css`. The new site reuses this stylesheet as `web/src/app/globals.css`.
-
-### Gotchas
-
-- `.env` is gitignored and contains real secrets. Edit `.env.example` for documentation of new variables.
-- `Config` falls back to insecure defaults (`SECRET_KEY`, `ADMIN_PASSWORD`, `ICAL_TOKEN`) when env vars are missing, so a missing `.env` will not fail loudly.
-- The README's migration steps start with `db init`, but `migrations/` already exists, so only run `db upgrade`.
-- The migration history is incomplete: its single migration creates only the `announcement` table. Every other table is created by `db.create_all()` inside `seed.py`. On a fresh database run `db upgrade` first and `seed.py` second. The reverse order fails because `announcement` already exists.
 
 ## Rebuild decisions
 
@@ -132,10 +95,11 @@ Live reference: the public site is Squarespace, with Acuity Scheduling for booki
 ### Stack
 
 - **Language and framework** — **Decided (2026-11-14):** TypeScript, Next.js (React), PostgreSQL. Alternative considered and rejected: Python with Django.
-- **Where the new code lives** — **Decided (2026-11-14):** `web/` in this repository, on the `rebuild` branch. The Flask code stays untouched as a reference.
+- **Where the new code lives** — **Decided (2026-11-14):** `web/` in this repository, on the `rebuild` branch.
+- **What happens to the Flask prototype** — **Superseded (2026-11-15).** Decided 2026-11-14: it stays untouched as a reference. Replaced 2026-11-15: the owner had it deleted from the repository and from the development machine. It remains in git history; its last version is commit `f1420bc`.
 - **Node.js** — **Decided (2026-11-14):** installed with nvm (current LTS).
 - **Database access** — **Decided (2026-11-14, by Claude):** Drizzle ORM with SQL migrations in `web/drizzle/`. PGlite for local development and tests so nothing has to be installed; PostgreSQL through `DATABASE_URL` in production. No production database has been chosen or created yet.
-- **Payments** — **Open.** Built as proposed: Square behind a provider interface, called over HTTPS, with a mock for development. The owner has not confirmed Square, and no real Square credentials have been tried.
+- **Payments** — **Open.** Built as proposed: Square behind a provider interface, called over HTTPS, with a mock for development. The owner has not confirmed Square, and no real Square credentials have been tried. Square sandbox keys from the prototype's settings file are kept on the development machine in `web/.env.square-sandbox`. Git ignores that file and the site does not read it, so the keys stay untested and unused until someone copies them into `web/.env.local`.
 - **Hosting** — **Open.** Not discussed yet.
 
 ### Requirements from the owner (received 2026-11-14)
@@ -169,7 +133,7 @@ All of these are data or settings, not code, unless noted.
 
 ### Policies and facts to confirm with the owner
 
-- **Cancellation window** — **Open.** The prototype's policy pages say 24 hours. The live terms say 7 days for rentals and 14 days for photography.
+- **Cancellation window** — **Open.** The deleted prototype's policy pages said 24 hours. The live terms say 7 days for rentals and 14 days for photography.
 - **Refund amount** — **Open.** The live guest information says "100% refund", but the live terms keep a 5% processing fee.
 - **Pets** — **Open.** Dayglow allows up to 2 pets, up to 70 lb each, for a $40 fee. The live guest-information page also says it does not allow pets in the studio. Confirm which applies.
 - **Membership prices** — **Open.** The memberships page shows Dayglow at $280 and $520 a month, but its buy buttons charge $330 and $600. Paris shows $270 and $500 as "Coming soon", while its Acuity products are $300 and $550.
@@ -180,7 +144,7 @@ All of these are data or settings, not code, unless noted.
 
 Not connected to the outside world yet:
 
-- **Square has never been called.** Charging and refunding are written against Square's HTTPS API but were only ever run with the mock. The card form has not been rendered in a test. Needs sandbox credentials and a test pass before real use.
+- **Square has never been called.** Charging and refunding are written against Square's HTTPS API but were only ever run with the mock. The card form has not been rendered in a test. Needs a test pass with sandbox credentials before real use. Sandbox keys exist on the development machine (see Payments under Stack) but have not been tried.
 - **No email has ever been sent.** The Resend transport is written but untried. In production, without `RESEND_API_KEY` and `EMAIL_FROM`, nothing goes out, including sign-in codes, so nobody could sign in.
 - **Nothing calls the scheduled tasks.** `GET /api/cron/tick` must be called every few minutes by a scheduler (with `CRON_SECRET`). Until then visits are not marked completed, no loyalty codes go out, and failed refunds are not retried.
 - **No production database, hosting or domain** has been chosen.
@@ -191,7 +155,7 @@ Known weaknesses:
 - A customer whose connection drops after paying sees a network error; retrying is safe (the slot is theirs, so the retry is refused and the card is not charged again) but the message is confusing. A client request id would fix it.
 - If the server stops between a successful charge and confirming the booking, the booking stays `pending_payment` and its slot is released when the hold expires. Nothing reconciles that case yet.
 - A loyalty code can reach a customer whom staff mark as a no-show later than `loyaltyDelayHours` after the visit. The owner can cancel the code in `/admin/codes`.
-- The owner cannot yet edit studio texts, photos, add-ons, included guests or clean-up time from the admin; those are database rows. The Flask admin's calendar, reports, customer list, announcements and iCal feed were not carried over.
+- The owner cannot yet edit studio texts, photos, add-ons, included guests or clean-up time from the admin; those are database rows. The Flask prototype's admin had a calendar, reports, a customer list, announcements and an iCal feed; none of them were carried over.
 - Studio photos are placeholders (tinted boxes).
 - The browser tests run against the development server with the mock processor, not a production build.
 
@@ -203,3 +167,4 @@ Known weaknesses:
 - 2026-11-14: First milestone built: data model, prices by weekday and weekend, availability, booking any set of studios, both booking flows, payment through a provider interface. Requirements 1, 4 and 6 are built with placeholder numbers.
 - 2026-11-14: All eight requirements built with placeholder settings. Passwordless sign-in, customer accounts, staff day sheet, loyalty codes, reschedule codes, automatic refunds and retry, email delivery via Resend, owner admin dashboard (bookings, prices, hours, staff, codes, settings). Rate limiting on the booking endpoint. Playwright e2e test suite. 210 unit/integration tests passing.
 - 2026-11-15: Verified in a real browser: all 13 browser tests pass from a cold start, with any browser console error failing the test. Found and fixed on the way: the booking screen kept its finished selection after paying (it now loads the booking page as a new document); two processes sharing one build folder corrupted it and made every page reload in a loop (the browser tests now build into `.next-e2e`). Two Claude Code sessions worked in this checkout at the same time that night; the three commits `8a1ab9e`, `54035c1` and `b1de4cd` came from the other one.
+- 2026-11-15: The owner asked to delete everything old and keep only what the new site needs. Removed from the repository: the Flask prototype (`app/`, `migrations/`, `run.py`, `config.py`, `seed.py`, `requirements.txt`, the root `.env.example`) and its README, which a short one replaces. Removed from the development machine: the Python environment, the seed database (it held no bookings) and the old settings file. Kept from that settings file: its four Square sandbox lines, now in `web/.env.square-sandbox`. Git history was not rewritten, so the prototype can still be read at commit `f1420bc`.
