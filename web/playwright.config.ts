@@ -25,7 +25,10 @@ export default defineConfig({
     screenshot: "only-on-failure",
   },
   webServer: {
-    command: `rm -rf .data/e2e && npx next dev -p ${PORT}`,
+    // Start from an empty database and an empty build folder every time. A
+    // build cache left by a server that was killed mid-write makes every
+    // page reload in a loop.
+    command: `rm -rf .data/e2e .next-e2e && npx next dev -p ${PORT}`,
     url: `http://localhost:${PORT}/api/booking-config`,
     // Set E2E_REUSE_SERVER=1 to run against a server you started yourself
     // (same port and environment). Its database must be fresh.

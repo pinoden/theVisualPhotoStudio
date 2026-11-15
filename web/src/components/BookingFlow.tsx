@@ -830,7 +830,7 @@ export function BookingFlow({ catalog, navigate = loadPage }: { catalog: Catalog
                 </button>
               </div>
             ) : (
-              <div style={{ display: "flex", gap: ".5rem" }}>
+              <div className="code-row">
                 <input
                   id="promo-code"
                   className="form-control"
