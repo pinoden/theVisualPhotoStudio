@@ -9,6 +9,7 @@ import {
   studiosFreeAt,
   type SlotOptions,
 } from "@/lib/domain/availability";
+import { multiStudioOffer } from "@/lib/catalog-view";
 import { bookableDurations, findPrice, formatCents, quote, type Quote } from "@/lib/domain/pricing";
 import {
   addDays,
@@ -18,6 +19,7 @@ import {
   minutesToLabel,
   type DayType,
 } from "@/lib/domain/time";
+import { count } from "@/lib/words";
 import type { DayAvailability } from "@/server/availability";
 import type { Catalog } from "@/server/catalog";
 import type { PaymentClientConfig } from "@/server/payments";
@@ -179,6 +181,7 @@ export function BookingFlow({ catalog, navigate = loadPage }: { catalog: Catalog
   );
 
   const availableAddons = catalog.addons.filter((a) => a.studioId === null || studioIds.includes(a.studioId));
+  const studioOffer = multiStudioOffer(catalog);
 
   // A code is tied to an email address, so it stops applying if the address changes.
   const normalizedEmail = email.trim().toLowerCase();
@@ -426,14 +429,20 @@ export function BookingFlow({ catalog, navigate = loadPage }: { catalog: Catalog
         setStart(null);
         go(steps.indexOf("time"), { refetch: true });
       }
-      // Prices on screen came with the page; reload them so the customer
-      // reviews the current total before confirming again.
-      if (data.code === "price_changed") router.refresh();
+      // Prices and add-ons on screen came with the page. When they have
+      // changed since (a new price, an add-on withdrawn, a duration no longer
+      // sold), reload them so the customer reviews what is offered now.
+      const offerChanged = data.code === "price_changed" || data.code === "invalid_price";
+      if (offerChanged) router.refresh();
       if (data.code === "invalid_code") {
         setApplied(null);
         go(steps.indexOf("details"));
       }
-      setError(data.message || "Something went wrong. Please try again.");
+      setError(
+        data.code === "invalid_price"
+          ? `${data.message || "Part of your selection is no longer offered."} This page now shows what is offered: please review your booking and confirm again.`
+          : data.message || "Something went wrong. Please try again.",
+      );
     } catch {
       setError("Network error. Please check your connection and try again. If you are unsure whether the booking went through, check your email before retrying.");
     } finally {
@@ -597,16 +606,7 @@ export function BookingFlow({ catalog, navigate = loadPage }: { catalog: Catalog
               );
             })}
           </div>
-          {Object.keys(settings.multiStudioPercent).length > 0 && (
-            <p style={{ fontSize: ".85rem" }}>
-              Booking several studios together:{" "}
-              {Object.entries(settings.multiStudioPercent)
-                .sort(([a], [b]) => Number(a) - Number(b))
-                .map(([count, percent]) => `${percent}% off for ${count}`)
-                .join(", ")}
-              .
-            </p>
-          )}
+          {studioOffer && <p style={{ fontSize: ".85rem" }}>Booking several studios together: {studioOffer}.</p>}
           {actions(nextLabelFor("studios"))}
         </div>
       )}
@@ -616,8 +616,10 @@ export function BookingFlow({ catalog, navigate = loadPage }: { catalog: Catalog
         <div className="wizard-panel active">
           <h3 style={{ fontSize: "1.6rem", marginBottom: ".5rem" }}>Select date &amp; duration</h3>
           <p className="text-muted mb-3">
-            {mode === "studio" && chosenNames ? `${chosenNames}. ` : ""}Bookings open {settings.minLeadHours} hours
-            to {settings.maxAdvanceDays} days ahead.
+            {mode === "studio" && chosenNames ? `${chosenNames}. ` : ""}
+            {settings.minLeadHours > 0
+              ? `Bookings open ${count(settings.minLeadHours, "hour")} to ${count(settings.maxAdvanceDays, "day")} ahead.`
+              : `Bookings open up to ${count(settings.maxAdvanceDays, "day")} ahead.`}
           </p>
           <div className="form-grid">
             <div className="form-group">
@@ -645,7 +647,7 @@ export function BookingFlow({ catalog, navigate = loadPage }: { catalog: Catalog
                     aria-pressed={duration === minutes}
                     onClick={() => chooseDuration(minutes)}
                   >
-                    {durationLabel(minutes).replace(" hours", " hr").replace(" hour", " hr")}
+                    {durationLabel(minutes).replace(" hours", " hr").replace(" hour", " hr").replace(/ minutes?/, " min")}
                   </button>
                 ))}
                 {durations.length === 0 && <p style={{ fontSize: ".85rem" }}>No durations are offered for this selection.</p>}
@@ -721,7 +723,7 @@ export function BookingFlow({ catalog, navigate = loadPage }: { catalog: Catalog
                   {availability.problem === "past"
                     ? "That date has already passed."
                     : availability.problem === "too_far"
-                      ? `Bookings open ${settings.maxAdvanceDays} days ahead.`
+                      ? `Bookings open ${count(settings.maxAdvanceDays, "day")} ahead.`
                       : mode === "studio" && studioIds.length > 1
                         ? "These studios are not free together on this date. Try another day, or fewer studios."
                         : "No times are available on this date. Please try another day."}

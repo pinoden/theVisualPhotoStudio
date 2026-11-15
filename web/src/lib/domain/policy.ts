@@ -20,6 +20,8 @@ export interface BookingFacts {
   cardPaidCents: number;
   /** Paid with a reschedule credit (money from an earlier booking). */
   creditAppliedCents: number;
+  /** Taken off the price by a percent code (a loyalty code, for example). That code is used up. */
+  discountCents: number;
 }
 
 export type CancelBlock = "not_confirmed" | "already_started";
@@ -53,19 +55,42 @@ export function cancellationOutcome(booking: BookingFacts, now: Date, settings: 
   return { allowed: true, refundCents: booking.cardPaidCents - feeCents, feeCents, why: "refund" };
 }
 
-export type RescheduleBlock = "not_confirmed" | "already_started" | "too_late" | "limit_reached" | "nothing_paid";
+export type RescheduleBlock =
+  | "not_confirmed"
+  | "already_started"
+  /** The owner has switched moving off (`maxReschedules` is 0). */
+  | "not_offered"
+  | "too_late"
+  | "limit_reached"
+  | "nothing_paid";
 
 export type RescheduleOutcome =
   | { allowed: false; reason: RescheduleBlock }
-  | { allowed: true; creditCents: number };
+  | {
+      allowed: true;
+      /** What the new code is worth. */
+      creditCents: number;
+      /** The part of it that is the discount a percent code gave on this booking, not money paid. */
+      discountCents: number;
+    };
 
-/** Whether the customer can turn this booking into a credit code for a new one. */
+/**
+ * Whether the customer can turn this booking into a credit code for a new one.
+ *
+ * The code is worth what was paid plus what a percent code took off. That
+ * code was spent on this booking and does not come back, and checkout takes
+ * one code, so without its value the same booking at a new time would cost
+ * the discount a second time.
+ */
 export function rescheduleOutcome(booking: BookingFacts, now: Date, settings: PolicySettings): RescheduleOutcome {
   if (booking.status !== "confirmed") return { allowed: false, reason: "not_confirmed" };
   if (now.getTime() >= booking.startAt.getTime()) return { allowed: false, reason: "already_started" };
+  if (settings.maxReschedules <= 0) return { allowed: false, reason: "not_offered" };
   if (booking.rescheduledCount >= settings.maxReschedules) return { allowed: false, reason: "limit_reached" };
   if (hoursUntil(booking.startAt, now) < settings.rescheduleCutoffHours) return { allowed: false, reason: "too_late" };
-  const creditCents = booking.cardPaidCents + booking.creditAppliedCents;
-  if (creditCents <= 0) return { allowed: false, reason: "nothing_paid" };
-  return { allowed: true, creditCents };
+  const paidCents = booking.cardPaidCents + booking.creditAppliedCents;
+  // A booking that cost nothing is cancelled instead: that gives its code back.
+  if (paidCents <= 0) return { allowed: false, reason: "nothing_paid" };
+  const discountCents = Math.max(0, booking.discountCents);
+  return { allowed: true, creditCents: paidCents + discountCents, discountCents };
 }

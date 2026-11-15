@@ -13,15 +13,20 @@ import {
 } from "@/db/client";
 import { isStartFree } from "@/lib/domain/availability";
 import { formatCents, PricingError, quote, type Quote } from "@/lib/domain/pricing";
+import { formText } from "@/lib/parse";
+import { count } from "@/lib/words";
 import { durationLabel, isIsoDate } from "@/lib/domain/time";
 import { loadDayAvailability, releaseExpiredHolds } from "./availability";
 import { dayTypeFor, loadCatalog } from "./catalog";
-import { bookingConfirmationEmail, queueEmail } from "./email";
+import { bookingConfirmationEmail, ownerPaymentUnknownNotice, queueEmail } from "./email";
 import type { PaymentProvider } from "./payments";
 import { findUsablePromo, PROMO_PROBLEM_TEXT, redeemPromo, restorePromo, toPromoDef, type UsablePromo } from "./promos";
+import { loadAccessInstructions } from "./settings";
 import { formatInstant, localToUtc } from "./tz";
 
 const emailField = z.string().trim().toLowerCase().max(200).pipe(z.email());
+/** Text a person typed: trimmed, line breaks made single, and without the NUL character the database refuses. */
+const textField = (min: number, max: number) => z.string().transform(formText).pipe(z.string().min(min).max(max));
 const addonsField = z
   .array(z.object({ addonId: z.uuid(), quantity: z.number().int().min(1).max(20) }))
   .max(20)
@@ -33,14 +38,14 @@ export const bookingInput = z.object({
   startMinute: z.number().int().min(0).max(1439),
   durationMinutes: z.number().int().positive().max(1440),
   customer: z.object({
-    name: z.string().trim().min(2).max(120),
+    name: textField(2, 120),
     email: emailField,
-    phone: z.string().trim().min(7).max(40),
+    phone: textField(7, 40),
   }),
-  notes: z.string().trim().max(2000).default(""),
+  notes: textField(0, 2000).default(""),
   addons: addonsField,
   /** A loyalty or reschedule code. */
-  promoCode: z.string().trim().max(40).optional(),
+  promoCode: textField(0, 40).optional(),
   acceptTerms: z.literal(true),
   paymentToken: z.string().min(1).max(1000).optional(),
   /** The total the customer was shown. A mismatch stops the booking before any charge. */
@@ -71,6 +76,8 @@ export interface BookingDeps {
   payments: PaymentProvider | null;
   /** Site origin, used for links in emails. */
   baseUrl: string;
+  /** Who is told when a charge got no answer and a person has to check the processor. */
+  ownerEmail?: string | null;
 }
 
 const REF_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
@@ -105,7 +112,7 @@ export const quoteInput = z.object({
   date: z.string().max(10),
   durationMinutes: z.number().int().positive().max(1440),
   addons: addonsField,
-  promoCode: z.string().trim().max(40).optional(),
+  promoCode: textField(0, 40).optional(),
   email: emailField.optional(),
 });
 
@@ -183,7 +190,7 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
     const text = {
       invalid_date: "That date is not valid.",
       past: "That date has already passed.",
-      too_far: `Bookings open ${catalog.settings.maxAdvanceDays} days ahead.`,
+      too_far: `Bookings open ${count(catalog.settings.maxAdvanceDays, "day")} ahead.`,
     }[day.problem];
     return fail(400, "not_bookable_date", text);
   }
@@ -335,12 +342,33 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
 
     if (!charge.ok) {
       await db.transaction(async (tx) => {
-        await tx.update(payments).set({ status: "failed", error: charge.message }).where(eq(payments.id, payment.id));
+        await tx
+          .update(payments)
+          .set({ status: "failed", error: charge.detail ?? charge.message })
+          .where(eq(payments.id, payment.id));
         await tx.update(bookings).set({ status: "expired" }).where(eq(bookings.id, bookingId));
         await tx.update(studioHolds).set({ active: false }).where(eq(studioHolds.bookingId, bookingId));
         if (spendsCode) await restorePromo(tx, promo!.id, promo!.kind, price.promoDiscountCents);
+        // No answer from the processor: the card may have been charged, and only a person can check.
+        if (charge.unknown && deps.ownerEmail) {
+          await queueEmail(
+            tx,
+            ownerPaymentUnknownNotice({
+              to: deps.ownerEmail,
+              ref,
+              customer: input.customer.name,
+              amountCents: price.totalCents,
+            }),
+          );
+        }
       });
-      return fail(402, "payment_failed", `Payment failed: ${charge.message} Your card was not charged.`);
+      return fail(
+        402,
+        "payment_failed",
+        charge.unknown
+          ? `${charge.message} Your booking was not made. We cannot tell whether your card was charged: if a charge appears, contact us and we will refund it.`
+          : `Payment failed: ${charge.message} Your card was not charged.`,
+      );
     }
 
     await db.transaction(async (tx) => {
@@ -369,6 +397,7 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
         creditCents: spendsCode && promo!.kind === "amount" ? price.promoDiscountCents : 0,
         cardCents: price.totalCents,
         manageUrl: manageUrl(deps.baseUrl, ref, manageToken),
+        access: await loadAccessInstructions(db),
       }),
     );
   } catch (error) {
@@ -444,6 +473,17 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[]): Promise<Bo
     totalCents: booking.totalCents,
     rescheduledCount: booking.rescheduledCount,
   }));
+}
+
+/**
+ * True for a confirmed booking whose time has not ended. Only then is its
+ * holder told how to get into the building. The end time is part of the test
+ * because a booking stays "confirmed" after the visit until the scheduled task
+ * marks it completed: without it, an earlier visitor's link would go on
+ * showing the text, including a door code set after their visit.
+ */
+export function isUpcomingVisit(booking: Pick<BookingView, "status" | "endAt">, now: Date): boolean {
+  return booking.status === "confirmed" && now.getTime() < new Date(booking.endAt).getTime();
 }
 
 /** True when `token` is the secret from this booking's manage link. */

@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { getDb } from "@/db/client";
 import { requestLoginCode, verifyLoginCode } from "@/server/auth";
 import { flushEmailsSoon } from "@/server/runtime";
-import { closeSession, openSession, ownerEmails, safeNextPath } from "@/server/session";
+import { openSession, ownerEmails, safeNextPath } from "@/server/session";
 
 export interface SignInState {
   step: "email" | "code";
@@ -56,9 +56,4 @@ export async function signInAction(previous: SignInState, formData: FormData): P
   }
 
   return previous;
-}
-
-export async function signOutAction(): Promise<void> {
-  await closeSession();
-  redirect("/");
 }

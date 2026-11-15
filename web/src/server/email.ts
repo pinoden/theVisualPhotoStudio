@@ -13,11 +13,14 @@ export interface QueuedEmail {
   body: string;
   /** What the message is, e.g. "booking_confirmation". For filtering and tests. */
   kind: string;
+  /** Who a reply should reach, when that is not the site's own address. */
+  replyTo?: string;
 }
 
 export async function queueEmail(db: DbLike, message: QueuedEmail): Promise<void> {
   await db.insert(emailOutbox).values({
     toEmail: message.to.trim().toLowerCase(),
+    replyTo: message.replyTo?.trim().toLowerCase() || null,
     subject: message.subject,
     body: message.body,
     kind: message.kind,
@@ -28,14 +31,15 @@ export type SendResult = { ok: true } | { ok: false; error: string };
 
 export interface EmailTransport {
   name: string;
-  send(message: { to: string; subject: string; text: string }): Promise<SendResult>;
+  send(message: { to: string; subject: string; text: string; replyTo?: string }): Promise<SendResult>;
 }
 
 /** Development transport: prints the message to the server log. */
 export const logTransport: EmailTransport = {
   name: "log",
   async send(message) {
-    console.log(`\n── email to ${message.to} ──\n${message.subject}\n\n${message.text}\n──────────────\n`);
+    const replyTo = message.replyTo ? ` (reply to ${message.replyTo})` : "";
+    console.log(`\n── email to ${message.to}${replyTo} ──\n${message.subject}\n\n${message.text}\n──────────────\n`);
     return { ok: true };
   },
 };
@@ -49,7 +53,13 @@ export function resendTransport(config: { apiKey: string; from: string }): Email
         const response = await fetch("https://api.resend.com/emails", {
           method: "POST",
           headers: { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ from: config.from, to: [message.to], subject: message.subject, text: message.text }),
+          body: JSON.stringify({
+            from: config.from,
+            to: [message.to],
+            subject: message.subject,
+            text: message.text,
+            ...(message.replyTo ? { reply_to: message.replyTo } : {}),
+          }),
         });
         if (response.ok) return { ok: true };
         const detail = await response.text().catch(() => "");
@@ -103,7 +113,12 @@ export async function deliverPendingEmails(
       .returning({ id: emailOutbox.id });
     if (claimed.length === 0) continue;
 
-    const result = await transport.send({ to: row.toEmail, subject: row.subject, text: row.body });
+    const result = await transport.send({
+      to: row.toEmail,
+      subject: row.subject,
+      text: row.body,
+      ...(row.replyTo ? { replyTo: row.replyTo } : {}),
+    });
     if (result.ok) {
       await db.update(emailOutbox).set({ sentAt: now, error: null }).where(eq(emailOutbox.id, row.id));
       sent++;
@@ -154,6 +169,8 @@ export function bookingConfirmationEmail(input: {
   /** Part of the total charged to the card. */
   cardCents: number;
   manageUrl: string;
+  /** How to get into the building, when the owner has set it. */
+  access?: string;
 }): QueuedEmail {
   return {
     to: input.to,
@@ -174,6 +191,7 @@ export function bookingConfirmationEmail(input: {
       "",
       `View, cancel or move your booking: ${input.manageUrl}`,
       "",
+      ...(input.access ? ["Getting in:", input.access, ""] : []),
       "Your booking begins at the scheduled start time. Please arrive no more than five minutes early.",
       "",
       SIGN_OFF,
@@ -213,9 +231,15 @@ export function rescheduleCodeEmail(input: {
   ref: string;
   code: string;
   valueCents: number;
+  /** The part of the value that is a discount the customer's code gave, not money paid. */
+  discountCents?: number;
   expires: string;
   bookUrl: string;
 }): QueuedEmail {
+  const credit =
+    (input.discountCents ?? 0) > 0
+      ? `Your booking ${input.ref} has been released. What you paid, plus the ${money(input.discountCents!)} your discount code took off, is now a credit of ${money(input.valueCents)}.`
+      : `Your booking ${input.ref} has been released, and what you paid is now a credit of ${money(input.valueCents)}.`;
   return {
     to: input.to,
     kind: "reschedule_code",
@@ -223,7 +247,7 @@ export function rescheduleCodeEmail(input: {
     body: [
       `Hi ${input.name},`,
       "",
-      `Your booking ${input.ref} has been released, and what you paid is now a credit of ${money(input.valueCents)}.`,
+      credit,
       "",
       `Reschedule code: ${input.code}`,
       `Valid until: ${input.expires}`,
@@ -290,5 +314,57 @@ export function ownerRefundNotice(input: {
       : [
           `${input.automatic ? "An automatic refund" : "A refund"} of ${money(input.amountCents)} was sent for booking ${input.ref} (${input.customer}).`,
         ].join("\n"),
+  };
+}
+
+/**
+ * A charge whose outcome nobody knows: the processor never answered, or the
+ * server stopped before the answer was recorded. The booking was not made,
+ * but the card may have been charged.
+ */
+export function ownerPaymentUnknownNotice(input: {
+  to: string;
+  ref: string;
+  customer: string;
+  amountCents: number;
+  /** True when the server stopped mid-charge; otherwise the processor gave no answer. */
+  interrupted?: boolean;
+}): QueuedEmail {
+  return {
+    to: input.to,
+    kind: "owner_payment_unknown",
+    subject: `ACTION NEEDED: check a payment for ${input.ref}`,
+    body: [
+      `A card payment of ${money(input.amountCents)} for booking ${input.ref} (${input.customer}) ${
+        input.interrupted ? "was interrupted before its result was recorded." : "got no answer from Square."
+      }`,
+      "",
+      "The booking was not made and its time was released. Square may still have charged the card.",
+      `Look in Square for a payment with the reference ${input.ref}. If it is there, refund it.`,
+    ].join("\n"),
+  };
+}
+
+/** A visitor's message from the contact page, sent to the owner. Replying reaches the visitor. */
+export function contactMessageEmail(input: {
+  to: string;
+  name: string;
+  email: string;
+  topic: string;
+  message: string;
+}): QueuedEmail {
+  return {
+    to: input.to,
+    replyTo: input.email,
+    kind: "contact_message",
+    subject: `Website message from ${input.name}: ${input.topic}`,
+    body: [
+      `${input.name} <${input.email}> wrote through the contact page.`,
+      `Topic: ${input.topic}`,
+      "",
+      input.message,
+      "",
+      `Reply to this email to answer ${input.name}.`,
+    ].join("\n"),
   };
 }

@@ -50,6 +50,12 @@ describe("labels", () => {
     expect(durationLabel(60)).toBe("1 hour");
     expect(durationLabel(90)).toBe("1.5 hours");
     expect(durationLabel(480)).toBe("8 hours");
+    // Prices can be set in steps of 15 minutes: a quarter of an hour is not "0.3 hours".
+    expect(durationLabel(15)).toBe("15 minutes");
+    expect(durationLabel(30)).toBe("30 minutes");
+    expect(durationLabel(45)).toBe("45 minutes");
+    expect(durationLabel(75)).toBe("1 hour 15 minutes");
+    expect(durationLabel(165)).toBe("2 hours 45 minutes");
     expect(longDateLabel("2026-11-21")).toBe("Saturday, November 21, 2026");
   });
 });

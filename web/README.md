@@ -19,7 +19,7 @@ Locally nothing leaves your machine:
 - **Emails** are not sent. Every message the site would send, including sign-in codes, is listed at http://localhost:3000/dev/outbox.
 - **Scheduled work** (marking visits completed, sending loyalty codes) does not run by itself. The "Run scheduled tasks now" button on `/dev/outbox` runs it.
 
-To see the owner's admin at `/admin`, create `.env.local` containing `OWNER_EMAILS=you@example.com`, restart, and sign in with that address at `/account`.
+To see the owner's admin at `/admin`, create `.env.local` containing `OWNER_EMAILS=you@example.com`, restart, and sign in with that address at `/account`. The same address receives the messages sent from the contact page; without it the form refuses messages.
 
 To start over with a clean database, stop the server and delete `.data/`.
 
@@ -33,7 +33,9 @@ npm run lint
 npm run build
 ```
 
-The browser tests need Playwright's browser once: `npx playwright install chromium`. They start their own server with their own database and build folder, so they can run while `npm run dev` is running.
+`npm run check:square` runs the site's own payment code against Square's sandbox: a charge, refused cards and refunds. No money moves. It needs sandbox keys in `.env.square-sandbox` (four `SQUARE_` lines, as in `.env.example`) and refuses any other kind of key. It is not part of `npm test`.
+
+The browser tests need Playwright's browser once: `npx playwright install chromium`. They start their own server with their own database and build folder, so they can run while `npm run dev` is running. A second run can go on at the same time: `E2E_NAME=tester E2E_PORT=3213 npm run test:e2e` uses its own port, database, build and results folders.
 
 Run only one dev server per folder. If every page starts reloading in a loop, stop the servers and delete `.next/dev`.
 
@@ -44,7 +46,7 @@ Copy `.env.example` to `.env.local` and fill it in. Each variable is explained t
 - `DATABASE_URL`: a PostgreSQL connection string. Run `npm run db:migrate` and then `npm run db:seed` once against a new database.
 - `SQUARE_APPLICATION_ID`, `SQUARE_ACCESS_TOKEN`, `SQUARE_LOCATION_ID`, `SQUARE_ENVIRONMENT`: without all of them a production server refuses paid bookings.
 - `RESEND_API_KEY`, `EMAIL_FROM`: without them no email is sent, so nobody can sign in.
-- `OWNER_EMAILS`: who can open `/admin`.
+- `OWNER_EMAILS`: who can open `/admin`. The first address also receives refund notices and messages from the contact page, unless `OWNER_NOTIFY_EMAIL` names another.
 - `CRON_SECRET`: for the scheduler that must call `GET /api/cron/tick` every few minutes.
 - `SITE_URL`: the public address, used in email links.
 

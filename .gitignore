@@ -1,7 +1,8 @@
 # Settings files with keys never go into git. The site's own are covered by web/.gitignore.
 .env
 
-# Editor, tool and system files
+# Editor, tool and system files. Agent definitions in .claude/agents are shared; the rest of .claude is personal.
 .idea/
-.claude/
+.claude/*
+!.claude/agents/
 .DS_Store

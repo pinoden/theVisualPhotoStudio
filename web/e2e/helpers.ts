@@ -1,6 +1,8 @@
 import { expect, type Locator, type Page } from "@playwright/test";
 
 const STUDIO_TZ = "America/New_York";
+// The same folder name as outputDir in playwright.config.ts, so a second run keeps its own pictures.
+const SHOTS_DIR = `test-results${/^[a-z0-9]{1,20}$/.test(process.env.E2E_NAME ?? "") ? `-${process.env.E2E_NAME}` : ""}/shots`;
 
 function isoInStudio(date: Date): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: STUDIO_TZ, year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
@@ -36,20 +38,28 @@ export async function shot(page: Page, name: string): Promise<void> {
   try {
     // caret "initial": the default hides the text cursor by editing the page's
     // inputs, which the framework then reports as a mismatch with the server's HTML.
-    await page.screenshot({ path: `test-results/shots/${name}.png`, fullPage: true, timeout: 15_000, caret: "initial" });
+    await page.screenshot({ path: `${SHOTS_DIR}/${name}.png`, fullPage: true, timeout: 15_000, caret: "initial" });
   } catch (error) {
     console.warn(`screenshot ${name} skipped:`, error instanceof Error ? error.message.split("\n")[0] : error);
   }
 }
 
 /** Read the newest email of one kind sent to an address, from the development outbox. */
-export async function latestEmail(page: Page, kind: string, to: string): Promise<{ subject: string; body: string }> {
+export async function latestEmail(
+  page: Page,
+  kind: string,
+  to: string,
+): Promise<{ subject: string; body: string; replyTo: string | null }> {
   const outbox = await page.context().newPage();
   try {
     await outbox.goto("/dev/outbox");
     const card = outbox.locator(".admin-card", { hasText: `To ${to} · ${kind}` }).first();
     await expect(card).toBeVisible();
-    return { subject: (await card.locator("h3").innerText()).trim(), body: await card.locator("pre").innerText() };
+    return {
+      subject: (await card.locator("h3").innerText()).trim(),
+      body: await card.locator("pre").innerText(),
+      replyTo: /Replies go to (\S+)/.exec(await card.innerText())?.[1] ?? null,
+    };
   } finally {
     await outbox.close();
   }

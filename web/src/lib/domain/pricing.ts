@@ -148,7 +148,7 @@ export function quote(input: QuoteInput): Quote {
     .filter((sel) => sel.quantity !== 0)
     .map((sel) => {
       const def = catalog.find((a) => a.id === sel.addonId);
-      if (!def) throw new PricingError("UNKNOWN_ADDON", "Unknown add-on.");
+      if (!def) throw new PricingError("UNKNOWN_ADDON", "An add-on you chose is no longer offered.");
       if (seen.has(def.id)) throw new PricingError("BAD_QUANTITY", "An add-on was listed twice.");
       seen.add(def.id);
       if (def.studioId !== null && !studioIds.includes(def.studioId)) {

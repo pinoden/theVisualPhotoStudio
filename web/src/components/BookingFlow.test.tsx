@@ -54,11 +54,12 @@ const catalog: Catalog = {
     ...rulesFor(P, { 60: 68, 120: 136 }),
   ],
   addons: [
-    { id: "addon-people", slug: "extra-people", name: "Extra people", description: "Bigger groups.", priceCents: 3000, studioId: null, maxQuantity: 1 },
-    { id: "addon-pet", slug: "pet-fee", name: "Pet fee", description: "Dayglow only.", priceCents: 4000, studioId: D, maxQuantity: 1 },
+    { id: "addon-people", slug: "extra-people", name: "Extra people", description: "Bigger groups.", priceCents: 3000, studioId: null, maxQuantity: 1, kind: "people" },
+    { id: "addon-pet", slug: "pet-fee", name: "Pet fee", description: "Dayglow only.", priceCents: 4000, studioId: D, maxQuantity: 1, kind: "pet" },
   ],
   settings: { ...DEFAULT_SETTINGS, slotIncrementMinutes: 60, multiStudioPercent: { 2: 20, 3: 22 } },
   specialDates: {},
+  accessInfoSent: false,
 };
 
 /** Taken time per studio that the fake server reports. */
@@ -320,6 +321,34 @@ describe("studio-first flow", () => {
     expect((await screen.findByRole("alert")).textContent).toContain("The price is now $75");
     expect(nav.refresh).toHaveBeenCalledTimes(1);
     expect(nav.push).not.toHaveBeenCalled();
+  });
+
+  it("reloads what is offered when an add-on was withdrawn while the customer was checking out", async () => {
+    bookingReply = { status: 422, body: { ok: false, code: "invalid_price", message: "An add-on you chose is no longer offered." } };
+    render(<BookingFlow catalog={catalog} navigate={nav.push} />);
+    await user.click(studioBox("Studio Paris"));
+    await next();
+    pickDate(WED);
+    await pickDuration("1 hr");
+    await next();
+    await pickTime("9:00 AM");
+    await next();
+    await fillDetails();
+    await next();
+    await user.click(await screen.findByRole("button", { name: "Confirm & pay $68" }));
+    const alert = (await screen.findByRole("alert")).textContent;
+    expect(alert).toContain("An add-on you chose is no longer offered.");
+    expect(alert).toContain("please review your booking and confirm again");
+    expect(nav.refresh).toHaveBeenCalledTimes(1); // the page is given the current add-ons and prices
+    expect(nav.push).not.toHaveBeenCalled();
+  });
+
+  it("states the discount for several studios as it is charged, not more", () => {
+    const settings = { ...catalog.settings, multiStudioPercent: { 2: 15, 3: 0 } };
+    render(<BookingFlow catalog={{ ...catalog, settings }} navigate={nav.push} />);
+    expect(screen.getByText(/Booking several studios together/).textContent).toBe(
+      "Booking several studios together: 15% off when you book exactly 2.",
+    );
   });
 
   it("shows the server's message when payment fails and stays on the payment step", async () => {

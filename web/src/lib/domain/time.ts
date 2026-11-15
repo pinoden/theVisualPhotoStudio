@@ -72,11 +72,19 @@ export function minutesToLabel(minutes: number): string {
   return `${h12}:${String(m).padStart(2, "0")} ${suffix}`;
 }
 
-/** 90 -> "1.5 hours", 60 -> "1 hour" */
+/**
+ * 60 -> "1 hour", 90 -> "1.5 hours", 45 -> "45 minutes", 75 -> "1 hour 15 minutes".
+ * Hours get a decimal only for a half: a quarter of an hour would read "0.3 hours".
+ */
 export function durationLabel(minutes: number): string {
-  const hours = minutes / 60;
-  const text = Number.isInteger(hours) ? String(hours) : hours.toFixed(1);
-  return `${text} ${hours === 1 ? "hour" : "hours"}`;
+  if (minutes < 60) return `${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
+  if (minutes % 30 === 0) {
+    const hours = minutes / 60;
+    return `${hours} ${hours === 1 ? "hour" : "hours"}`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return `${hours} ${hours === 1 ? "hour" : "hours"} ${rest} ${rest === 1 ? "minute" : "minutes"}`;
 }
 
 const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];

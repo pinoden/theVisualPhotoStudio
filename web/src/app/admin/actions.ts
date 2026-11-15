@@ -3,7 +3,8 @@
 import { updateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import { getDb } from "@/db/client";
-import { dollarsToCents, hhmmToMinutes, intInRange } from "@/lib/parse";
+import { isAddonKind } from "@/lib/addon-kinds";
+import { dollarsToCents, formText, hhmmToMinutes, intInRange } from "@/lib/parse";
 import { formatCents } from "@/lib/domain/pricing";
 import {
   addStaff,
@@ -11,8 +12,11 @@ import {
   createManualCode,
   removeBlock,
   removeStaff,
+  saveAddon,
   savePrice,
+  saveStudioDetails,
   saveStudioHours,
+  setAddonActive,
   setShift,
   setSpecialDate,
   voidCode,
@@ -21,7 +25,7 @@ import { CATALOG_TAG } from "@/server/cached";
 import { ownerCancelBooking, ownerRefund } from "@/server/manage";
 import { flushEmailsSoon, manageDeps } from "@/server/runtime";
 import { requireOwner } from "@/server/session";
-import { saveSetting } from "@/server/settings";
+import { ACCESS_INSTRUCTIONS_MAX, saveAccessInstructions, saveSetting } from "@/server/settings";
 
 /**
  * Everything the owner can change. Every action starts with `requireOwner`:
@@ -36,10 +40,7 @@ function failed(path: string, error: string): never {
   redirect(`${path}${path.includes("?") ? "&" : "?"}error=${encodeURIComponent(error)}`);
 }
 
-const text = (formData: FormData, name: string) => {
-  const value = formData.get(name);
-  return typeof value === "string" ? value.trim() : "";
-};
+const text = (formData: FormData, name: string) => formText(formData.get(name));
 
 /** Where to return after a bookings action. Only the bookings list itself is accepted. */
 function bookingsBack(formData: FormData): string {
@@ -278,4 +279,79 @@ export async function saveSettingsAction(formData: FormData): Promise<void> {
     failed("/admin/settings", `Not saved, value out of range: ${rejected.join(", ")}. Everything else was saved.`);
   }
   done("/admin/settings", "Settings saved.");
+}
+
+export async function saveAccessInstructionsAction(formData: FormData): Promise<void> {
+  await requireOwner("/admin/settings");
+  const instructions = text(formData, "accessInstructions");
+  if (!(await saveAccessInstructions(await getDb(), instructions))) {
+    failed("/admin/settings", `Not saved: the text is longer than ${ACCESS_INSTRUCTIONS_MAX} characters.`);
+  }
+  updateTag(CATALOG_TAG); // the guest information page says whether this is sent
+  done(
+    "/admin/settings",
+    instructions === ""
+      ? "Saved. No getting-in text is sent or shown any more."
+      : "Saved. New confirmation emails and the page of every confirmed booking that has not ended now show it.",
+  );
+}
+
+// ── Studios and add-ons ──────────────────────────────────────────────────────
+
+export async function saveStudioDetailsAction(formData: FormData): Promise<void> {
+  await requireOwner("/admin/studios");
+  const includedGuests = intInRange(text(formData, "includedGuests"), 1, 100);
+  const bufferMinutes = intInRange(text(formData, "bufferMinutes"), 0, 240);
+  if (includedGuests === null || bufferMinutes === null) {
+    failed("/admin/studios", "Not saved: guests must be 1 to 100, and clean-up time 0 to 240 minutes.");
+  }
+  const saved = await saveStudioDetails(await getDb(), text(formData, "studioId"), {
+    tagline: text(formData, "tagline"),
+    description: text(formData, "description"),
+    includedGuests,
+    bufferMinutes,
+  });
+  if (!saved) failed("/admin/studios", "Not saved: the tagline or the description is too long.");
+  updateTag(CATALOG_TAG);
+  done("/admin/studios", "Studio saved.");
+}
+
+export async function saveAddonAction(formData: FormData): Promise<void> {
+  await requireOwner("/admin/studios");
+  const priceCents = dollarsToCents(text(formData, "price"));
+  const kind = text(formData, "kind");
+  if (priceCents === null) failed("/admin/studios", "Enter the price as an amount, for example 40 or 40.50.");
+  if (!isAddonKind(kind)) failed("/admin/studios", "Choose what the add-on is for.");
+  const addonId = text(formData, "addonId") || null;
+  const result = await saveAddon(await getDb(), addonId, {
+    name: text(formData, "name"),
+    description: text(formData, "description"),
+    priceCents,
+    kind,
+    studioId: text(formData, "studioId") || null,
+  });
+  if (!result.ok) failed("/admin/studios", result.message);
+  updateTag(CATALOG_TAG);
+  done("/admin/studios", addonId ? "Add-on saved." : "Add-on added.");
+}
+
+async function offerAddon(formData: FormData, active: boolean): Promise<void> {
+  await requireOwner("/admin/studios");
+  if (!(await setAddonActive(await getDb(), text(formData, "addonId"), active))) {
+    failed("/admin/studios", "Unknown add-on.");
+  }
+  updateTag(CATALOG_TAG);
+  done(
+    "/admin/studios",
+    active ? "The add-on is offered again." : "The add-on is no longer offered. Bookings that already have it keep it.",
+  );
+}
+
+// Two actions rather than one with a named button: a button whose formAction is a function cannot carry a name.
+export async function stopOfferingAddonAction(formData: FormData): Promise<void> {
+  await offerAddon(formData, false);
+}
+
+export async function offerAddonAgainAction(formData: FormData): Promise<void> {
+  await offerAddon(formData, true);
 }

@@ -5,7 +5,7 @@ import { statusLabel } from "@/components/BookingSummary";
 import { getDb } from "@/db/client";
 import { formatCents } from "@/lib/domain/pricing";
 import { addDays, isIsoDate } from "@/lib/domain/time";
-import { centsToInput } from "@/lib/parse";
+import { centsToInput, MONEY_FIELD } from "@/lib/parse";
 import { listBookings } from "@/server/admin";
 import { requireOwner } from "@/server/session";
 import { formatRange, localDateOf } from "@/server/tz";
@@ -85,8 +85,8 @@ async function Bookings({ searchParams }: Pick<PageProps<"/admin/bookings">, "se
                     </td>
                     <td>
                       {b.studios.map((s) => s.name).join(" + ")}
-                      {b.addons.map((a) => (
-                        <div key={a.name} style={{ fontSize: ".8rem" }}>
+                      {b.addons.map((a, index) => (
+                        <div key={index} style={{ fontSize: ".8rem" }}>
                           + {a.name}
                         </div>
                       ))}
@@ -124,7 +124,7 @@ async function Bookings({ searchParams }: Pick<PageProps<"/admin/bookings">, "se
                             <label style={{ fontSize: ".8rem" }}>
                               Refund to card ($)
                               <br />
-                              <input name="refund" className="price-input" defaultValue={centsToInput(b.cardHeldCents)} inputMode="decimal" />
+                              <input name="refund" className="price-input" defaultValue={centsToInput(b.cardHeldCents)} {...MONEY_FIELD} />
                             </label>
                             <br />
                             <button type="submit" className="btn btn-dark btn-small" style={{ marginTop: ".4rem" }}>
@@ -142,7 +142,7 @@ async function Bookings({ searchParams }: Pick<PageProps<"/admin/bookings">, "se
                             <label style={{ fontSize: ".8rem" }}>
                               Amount ($)
                               <br />
-                              <input name="amount" className="price-input" inputMode="decimal" required />
+                              <input name="amount" className="price-input" {...MONEY_FIELD} required />
                             </label>
                             <br />
                             <label style={{ fontSize: ".8rem" }}>

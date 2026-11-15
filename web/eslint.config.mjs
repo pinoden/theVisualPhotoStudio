@@ -14,7 +14,9 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Output of the browser tests:
     ".next-e2e/**",
+    ".next-e2e-*/**",
     "test-results/**",
+    "test-results-*/**",
     "playwright-report/**",
   ]),
 ]);

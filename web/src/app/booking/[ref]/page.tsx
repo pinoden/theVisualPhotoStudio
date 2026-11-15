@@ -6,8 +6,9 @@ import { BookingSummary } from "@/components/BookingSummary";
 import { ManageBooking } from "@/components/ManageBooking";
 import { getDb } from "@/db/client";
 import { SITE } from "@/lib/site";
-import { getBookingByToken } from "@/server/bookings";
+import { getBookingByToken, isUpcomingVisit } from "@/server/bookings";
 import { getManageChoices } from "@/server/manage";
+import { loadAccessInstructions } from "@/server/settings";
 
 export const metadata: Metadata = {
   title: "Your Booking",
@@ -69,8 +70,11 @@ async function BookingDetails({ params, searchParams }: Pick<PageProps<"/booking
     booking.status === "cancelled" && booking.cancelReason === "rescheduled"
       ? { heading: "Released for Rescheduling", icon: "↻" }
       : (HEADING[booking.status] ?? HEADING.confirmed);
+  const now = new Date();
   const choices =
-    booking.status === "confirmed" ? await getManageChoices(db, booking.ref, { kind: "token", token }, new Date()) : null;
+    booking.status === "confirmed" ? await getManageChoices(db, booking.ref, { kind: "token", token }, now) : null;
+  // Only someone holding the private link of a confirmed booking that has not ended is told how to get in.
+  const access = isUpcomingVisit(booking, now) ? await loadAccessInstructions(db) : "";
 
   return (
     <div className="confirmation-card" style={{ textAlign: "left" }}>
@@ -92,6 +96,13 @@ async function BookingDetails({ params, searchParams }: Pick<PageProps<"/booking
             {SITE.addressLine1}, {SITE.addressLine2}. Your booking begins at the scheduled start time; please
             arrive no more than five minutes early.
           </p>
+          {access && (
+            <div className="notice" style={{ whiteSpace: "pre-line" }}>
+              <strong>Getting in</strong>
+              <br />
+              {access}
+            </div>
+          )}
         </>
       )}
 

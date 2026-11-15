@@ -249,6 +249,62 @@ describe("payment", () => {
     expect((await book()).ok).toBe(true); // the slot is bookable again
   });
 
+  it("does not claim the card was spared when the processor gave no answer, and asks the owner to check", async () => {
+    const silent: PaymentProvider = {
+      name: "square",
+      charge: async () => ({
+        ok: false,
+        unknown: true,
+        message: "We could not reach the card processor.",
+        detail: "No answer from Square",
+      }),
+      refund: mockProvider.refund,
+    };
+    const result = await book({}, { payments: silent, ownerEmail: "owner@studio.test" });
+    expect(result).toEqual({
+      ok: false,
+      status: 402,
+      code: "payment_failed",
+      message:
+        "We could not reach the card processor. Your booking was not made. We cannot tell whether your card was charged: if a charge appears, contact us and we will refund it.",
+    });
+
+    const [row] = await db.select().from(bookings);
+    expect(row.status).toBe("expired");
+    expect((await db.select().from(payments))[0]).toMatchObject({ status: "failed", error: "No answer from Square" });
+    const mail = await db.select().from(emailOutbox);
+    expect(mail).toHaveLength(1);
+    expect(mail[0]).toMatchObject({
+      toEmail: "owner@studio.test",
+      kind: "owner_payment_unknown",
+      subject: `ACTION NEEDED: check a payment for ${row.ref}`,
+    });
+    expect(mail[0].body).toContain(`A card payment of $176 for booking ${row.ref} (Test Person) got no answer from Square.`);
+    expect((await book()).ok).toBe(true); // the time is free again
+  });
+
+  it("records the processor's own words for a refused card, and shows the customer a sentence", async () => {
+    const refusing: PaymentProvider = {
+      name: "square",
+      charge: async () => ({
+        ok: false,
+        message: "The card's security code is not right.",
+        detail: "CVV_FAILURE: Authorization error: 'CVV_FAILURE'",
+      }),
+      refund: mockProvider.refund,
+    };
+    const result = await book({}, { payments: refusing, ownerEmail: "owner@studio.test" });
+    expect(result).toMatchObject({
+      ok: false,
+      message: "Payment failed: The card's security code is not right. Your card was not charged.",
+    });
+    expect((await db.select().from(payments))[0]).toMatchObject({
+      status: "failed",
+      error: "CVV_FAILURE: Authorization error: 'CVV_FAILURE'",
+    });
+    expect(await db.select().from(emailOutbox)).toHaveLength(0);
+  });
+
   it("cannot be skipped by the browser", async () => {
     expect(await book({ paymentToken: undefined })).toMatchObject({ ok: false, status: 400, code: "payment_required" });
     expect(await book({ paymentToken: "anything-else" })).toMatchObject({ ok: false, code: "payment_failed" });
@@ -352,6 +408,14 @@ describe("bad input is refused", () => {
       expect(await db.select().from(bookings).where(eq(bookings.status, "confirmed"))).toHaveLength(0);
     });
   }
+
+  it("a character the database cannot store, which is dropped instead of failing the request", async () => {
+    const result = await book({ customer: { name: "Jane\u0000 Smith", email: "jane@example.com", phone: "407-555-0100" }, notes: "Bring\u0000 props\r\nand lights" });
+    expect(result).toMatchObject({ ok: true });
+    expect((await db.select().from(bookings))[0]).toMatchObject({ customerName: "Jane Smith", notes: "Bring props\nand lights" });
+    // A code is looked up in the database too.
+    expect(await book({ startMinute: h(14), promoCode: "MOVE\u0000-1234" })).toMatchObject({ ok: false, code: "invalid_code" });
+  });
 
   it("the same studio listed twice", async () => {
     expect(await book({ studioIds: [ids.blanche, ids.blanche] })).toMatchObject({ ok: false, code: "invalid_input" });

@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { settings as settingsTable } from "@/db/schema";
 import type { DbLike } from "@/db/client";
 
@@ -133,6 +134,36 @@ export async function saveSetting(db: DbLike, key: string, value: unknown): Prom
   await db
     .insert(settingsTable)
     .values({ key, value })
+    .onConflictDoUpdate({ target: settingsTable.key, set: { value } });
+  return true;
+}
+
+// ── Kept out of `Settings` on purpose ───────────────────────────────────────
+// `Settings` travels to every browser inside the catalog. The text below must
+// not: it can hold the code for the building door. It lives in the same table
+// under a key that `mergeSettings` ignores and `saveSetting` refuses, and is
+// only ever read and written through these two functions.
+
+const ACCESS_KEY = "accessInstructions";
+export const ACCESS_INSTRUCTIONS_MAX = 1000;
+
+/**
+ * How to get into the building, for example the door code and the floor.
+ * Given to customers with a confirmed booking only: in the confirmation email
+ * and on their booking page. Empty when the owner has not set it.
+ */
+export async function loadAccessInstructions(db: DbLike): Promise<string> {
+  const [row] = await db.select().from(settingsTable).where(eq(settingsTable.key, ACCESS_KEY)).limit(1);
+  return typeof row?.value === "string" ? row.value : "";
+}
+
+/** Store the text; empty switches it off. Returns false, changing nothing, when it is too long. */
+export async function saveAccessInstructions(db: DbLike, text: string): Promise<boolean> {
+  const value = text.replace(/\r\n?/g, "\n").trim();
+  if (value.length > ACCESS_INSTRUCTIONS_MAX) return false;
+  await db
+    .insert(settingsTable)
+    .values({ key: ACCESS_KEY, value })
     .onConflictDoUpdate({ target: settingsTable.key, set: { value } });
   return true;
 }

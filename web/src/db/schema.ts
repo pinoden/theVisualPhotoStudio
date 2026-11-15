@@ -153,6 +153,12 @@ export const addons = pgTable("addons", {
   /** null = any booking; otherwise only bookings that include this studio. */
   studioId: uuid("studio_id").references(() => studios.id, { onDelete: "cascade" }),
   maxQuantity: integer("max_quantity").notNull().default(1),
+  /**
+   * What the add-on is for. The guest information page reads it to say whether
+   * larger groups and pets can be booked, so those answers follow what is
+   * offered and not what an add-on happens to be called.
+   */
+  kind: text("kind", { enum: ["people", "pet", "other"] }).notNull().default("other"),
   sortOrder: integer("sort_order").notNull().default(0),
   active: boolean("active").notNull().default(true),
 });
@@ -315,6 +321,8 @@ export const refunds = pgTable("refunds", {
 export const emailOutbox = pgTable("email_outbox", {
   id: id(),
   toEmail: text("to_email").notNull(),
+  /** Where a reply should go when that is not the site's own address (messages from the contact form). */
+  replyTo: text("reply_to"),
   subject: text("subject").notNull(),
   body: text("body").notNull(),
   kind: text("kind").notNull(),

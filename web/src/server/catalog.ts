@@ -1,9 +1,10 @@
 import { asc, eq } from "drizzle-orm";
 import { addons, priceRules, specialDates, studioHours, studios } from "@/db/schema";
 import type { DbLike } from "@/db/client";
+import type { AddonKind } from "@/lib/addon-kinds";
 import type { AddonDef, PriceRule } from "@/lib/domain/pricing";
 import { defaultDayType, type DayType, type IsoDate } from "@/lib/domain/time";
-import { loadSettings, type Settings } from "./settings";
+import { loadAccessInstructions, loadSettings, type Settings } from "./settings";
 
 export interface CatalogStudio {
   id: string;
@@ -20,6 +21,8 @@ export interface CatalogStudio {
 export interface CatalogAddon extends AddonDef {
   slug: string;
   description: string;
+  /** What it is for: see ADDON_KINDS. */
+  kind: AddonKind;
 }
 
 /** Everything public about what can be booked. Safe to send to the browser. */
@@ -30,16 +33,22 @@ export interface Catalog {
   settings: Settings;
   /** date -> day type, for dates priced differently from their weekday. */
   specialDates: Record<IsoDate, DayType>;
+  /**
+   * True when the owner has set how to get into the building. Only this fact
+   * is public: the text itself (it can hold the door code) never enters the catalog.
+   */
+  accessInfoSent: boolean;
 }
 
 export async function loadCatalog(db: DbLike): Promise<Catalog> {
-  const [studioRows, hourRows, ruleRows, addonRows, specialRows, settings] = await Promise.all([
+  const [studioRows, hourRows, ruleRows, addonRows, specialRows, settings, access] = await Promise.all([
     db.select().from(studios).where(eq(studios.active, true)).orderBy(asc(studios.sortOrder), asc(studios.name)),
     db.select().from(studioHours),
     db.select().from(priceRules),
     db.select().from(addons).where(eq(addons.active, true)).orderBy(asc(addons.sortOrder), asc(addons.name)),
     db.select().from(specialDates),
     loadSettings(db),
+    loadAccessInstructions(db),
   ]);
 
   const activeIds = new Set(studioRows.map((s) => s.id));
@@ -76,9 +85,11 @@ export async function loadCatalog(db: DbLike): Promise<Catalog> {
         priceCents: a.priceCents,
         studioId: a.studioId,
         maxQuantity: a.maxQuantity,
+        kind: a.kind,
       })),
     settings,
     specialDates: Object.fromEntries(specialRows.map((r) => [r.day, r.dayType])),
+    accessInfoSent: access !== "",
   };
 }
 

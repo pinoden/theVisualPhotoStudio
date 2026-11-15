@@ -45,8 +45,9 @@ export function BookingSummary({ booking }: { booking: BookingView }) {
           <span>{formatCents(-booking.multiStudioDiscountCents)}</span>
         </div>
       )}
-      {booking.addons.map((addon) => (
-        <div className="price-row" key={addon.name}>
+      {/* By position: two add-ons can share a name (a pet fee for each of two studios). */}
+      {booking.addons.map((addon, index) => (
+        <div className="price-row" key={index}>
           <span>
             {addon.name}
             {addon.quantity > 1 ? ` × ${addon.quantity}` : ""}

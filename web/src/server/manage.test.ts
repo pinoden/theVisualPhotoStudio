@@ -3,6 +3,8 @@ import { eq } from "drizzle-orm";
 import { bookings, payments, promoCodes, refunds, settings, studioHolds } from "@/db/schema";
 import {
   cancelBooking,
+  cancelOutcomeText,
+  getManageChoices,
   getManageOptions,
   netCardPaidCents,
   ownerCancelBooking,
@@ -12,6 +14,7 @@ import {
   type Actor,
 } from "./manage";
 import { issuePromo } from "./promos";
+import { DEFAULT_SETTINGS } from "./settings";
 import { createTestWorld, daysAfter, expectOk, FAR, h, hoursAfter, NEAR, NOW, OWNER_EMAIL, type TestWorld } from "./testing";
 
 let world: TestWorld;
@@ -125,11 +128,32 @@ describe("cancelling", () => {
     expect((await world.db.select().from(promoCodes))[0].usedCount).toBe(0);
   });
 
+  it("gives back an amount code the studio handed out, as it gives back a discount code", async () => {
+    const gift = (await issuePromo(world.db, { kind: "amount", value: 5000, source: "manual", email: null, expiresAt: daysAfter(NOW, 60) }))!;
+    const booked = expectOk(await world.book({ date: FAR, promoCode: gift.code, expectedTotalCents: 12600 }));
+    const left = async () => (await world.db.select().from(promoCodes).where(eq(promoCodes.id, gift.id)))[0].value;
+    expect(await left()).toBe(0);
+
+    const result = expectOk(await cancelBooking(world.db, booked.ref, byToken(booked.manageToken), world.manageDeps()));
+    expect(result.refundCents).toBe(12600 - 630); // the card payment less the 5% fee
+    expect(result.message).toContain("The code you used for this booking can be used again.");
+    expect(await left()).toBe(5000);
+  });
+
+  it("names the refund window as the owner set it, in days only when it is whole days", () => {
+    const late = { allowed: true, refundCents: 0, feeCents: 0, why: "inside_window" } as const;
+    const text = (refundWindowHours: number) => cancelOutcomeText(late, { ...DEFAULT_SETTINGS, refundWindowHours });
+    expect(text(168)).toBe("No refund is due, because the booking starts in less than 7 days.");
+    expect(text(100)).toBe("No refund is due, because the booking starts in less than 100 hours.");
+    expect(text(36)).toBe("No refund is due, because the booking starts in less than 36 hours.");
+    expect(text(1)).toBe("No refund is due, because the booking starts in less than 1 hour.");
+  });
+
   it("tells the customer in advance what cancelling or moving would do", async () => {
     const early = expectOk(await world.book({ date: FAR }));
     expect(await getManageOptions(world.db, early.ref, byToken(early.manageToken), NOW)).toEqual({
       cancel: { allowed: true, refundCents: 16720, feeCents: 880, why: "refund" },
-      reschedule: { allowed: true, creditCents: 17600 },
+      reschedule: { allowed: true, creditCents: 17600, discountCents: 0 },
     });
     const late = expectOk(await world.book({ date: NEAR }));
     expect(await getManageOptions(world.db, late.ref, byToken(late.manageToken), NOW)).toMatchObject({
@@ -215,6 +239,44 @@ describe("the reschedule code", () => {
     expect(mail.body).toContain(`Reschedule code: ${result.code}`);
     expect(mail.body).toContain("credit of $176");
     expect(mail.body).toContain("https://studio.test/book");
+  });
+
+  it("carries what a discount code took off, so the same booking at a new time costs nothing more", async () => {
+    const promo = (await issuePromo(world.db, { kind: "percent", value: 10, source: "loyalty", email: "jane@example.com", expiresAt: daysAfter(NOW, 60) }))!;
+    const first = expectOk(await world.book({ date: NEAR, promoCode: promo.code }));
+    expect(first.totalCents).toBe(15840); // $176 less 10%
+
+    const choices = await getManageChoices(world.db, first.ref, byToken(first.manageToken), NOW);
+    expect(choices?.reschedule).toEqual({
+      allowed: true,
+      offered: true,
+      text: "This booking will be released and you will get a code worth $176, valid for 90 days, to book a new time. That is what you paid plus the $17.60 your discount code took off. A booking made with the code cannot be refunded.",
+    });
+    const moved = expectOk(await requestRescheduleCode(world.db, first.ref, byToken(first.manageToken), world.manageDeps()));
+    expect(moved.valueCents).toBe(17600);
+    const [mail] = await world.emails("reschedule_code");
+    expect(mail.body).toContain("What you paid, plus the $17.60 your discount code took off, is now a credit of $176.");
+
+    // The discount code stays spent. The credit alone pays for the same booking at the new time.
+    expect((await world.db.select().from(promoCodes).where(eq(promoCodes.id, promo.id)))[0].usedCount).toBe(1);
+    const second = expectOk(await world.book({ date: FAR, promoCode: moved.code, paymentToken: undefined }));
+    expect(second.totalCents).toBe(0);
+    expect(world.charges).toHaveLength(1); // only the first payment: nothing more was charged
+  });
+
+  it("says that bookings cannot be moved, and offers no button, when the owner switched moving off", async () => {
+    await world.db.insert(settings).values({ key: "maxReschedules", value: 0 });
+    const booked = expectOk(await world.book({ date: FAR }));
+    const choices = await getManageChoices(world.db, booked.ref, byToken(booked.manageToken), NOW);
+    expect(choices?.reschedule).toEqual({
+      allowed: false,
+      offered: false,
+      text: "Bookings cannot be moved online. Please call the studio.",
+    });
+    expect(await requestRescheduleCode(world.db, booked.ref, byToken(booked.manageToken), world.manageDeps())).toMatchObject({
+      ok: false,
+      code: "not_offered",
+    });
   });
 
   it("books the new time for free, and that booking can no longer be refunded or moved", async () => {
@@ -321,6 +383,28 @@ describe("the reschedule code", () => {
 });
 
 describe("the owner", () => {
+  it("gives the customer's code back when the studio cancels a visit that has not started", async () => {
+    // A booking paid with a reschedule credit: the customer could not get that credit back by cancelling.
+    const first = expectOk(await world.book({ date: NEAR }));
+    const moved = expectOk(await requestRescheduleCode(world.db, first.ref, byToken(first.manageToken), world.manageDeps()));
+    const second = expectOk(await world.book({ date: FAR, promoCode: moved.code, paymentToken: undefined }));
+    const credit = async () => (await world.db.select().from(promoCodes).where(eq(promoCodes.code, moved.code)))[0].value;
+    expect(await credit()).toBe(0);
+
+    expectOk(await ownerCancelBooking(world.db, second.ref, { refundCents: 0 }, world.manageDeps()));
+    expect(await credit()).toBe(17600);
+    expect((await world.emails("booking_cancelled")).at(-1)?.body).toContain("The code you used for this booking can be used again.");
+  });
+
+  it("keeps a code spent when the cancellation comes after the visit started", async () => {
+    const promo = (await issuePromo(world.db, { kind: "percent", value: 10, source: "loyalty", email: "jane@example.com", expiresAt: daysAfter(NOW, 60) }))!;
+    const booked = expectOk(await world.book({ date: NEAR, promoCode: promo.code }));
+    const afterStart = world.manageDeps({ now: hoursAfter(NEAR_START, 1) });
+    expectOk(await ownerCancelBooking(world.db, booked.ref, { refundCents: 5000 }, afterStart));
+    expect((await world.db.select().from(promoCodes).where(eq(promoCodes.id, promo.id)))[0].usedCount).toBe(1);
+    expect((await world.emails("booking_cancelled")).at(-1)?.body).not.toContain("can be used again");
+  });
+
   it("can cancel any booking with a refund of their choosing", async () => {
     const booked = expectOk(await world.book({ date: NEAR })); // the customer would get nothing here
     const result = expectOk(await ownerCancelBooking(world.db, booked.ref, { refundCents: 17600 }, world.manageDeps()));

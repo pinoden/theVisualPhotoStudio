@@ -35,7 +35,16 @@ export function SiteFooter() {
               <Link href="/rates">Rates</Link>
             </li>
             <li>
+              <Link href="/services">Photography</Link>
+            </li>
+            <li>
+              <Link href="/faq">Guest Information</Link>
+            </li>
+            <li>
               <Link href="/policies">Policies</Link>
+            </li>
+            <li>
+              <Link href="/contact">Contact</Link>
             </li>
             <li>
               <Link href="/book">Book a studio</Link>

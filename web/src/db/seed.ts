@@ -90,6 +90,7 @@ export async function seed(db: Db): Promise<boolean> {
         description: "For groups larger than the number of guests included with the studio.",
         priceCents: 3000,
         studioId: null,
+        kind: "people",
         sortOrder: 0,
       },
       {
@@ -98,6 +99,7 @@ export async function seed(db: Db): Promise<boolean> {
         description: "For groups larger than the number of guests included with the studio.",
         priceCents: 5000,
         studioId: null,
+        kind: "people",
         sortOrder: 1,
       },
       {
@@ -106,6 +108,7 @@ export async function seed(db: Db): Promise<boolean> {
         description: "Required when bringing a pet. Pets are welcome in Studio Dayglow only.",
         priceCents: 4000,
         studioId: ids.dayglow,
+        kind: "pet",
         sortOrder: 2,
       },
     ]);

@@ -34,7 +34,8 @@ export default async function StudiosPage() {
                   <p className="section-eyebrow">{studio.tagline}</p>
                   <h2>{studio.name}</h2>
                   <div className="divider" style={{ margin: "1rem 0" }} />
-                  <p>{studio.description}</p>
+                  {/* pre-line: the owner's line breaks and paragraphs are kept. */}
+                  <p style={{ whiteSpace: "pre-line" }}>{studio.description}</p>
                   <ul className="rate-details" style={{ listStyle: "none", padding: 0, margin: "1rem 0" }}>
                     <li>Up to {studio.includedGuests} guests included</li>
                     {hoursLines(studio).map((line) => (

@@ -66,6 +66,11 @@ export function SiteNav() {
             </a>
           </li>
           <li>
+            <Link href="/contact" onClick={close}>
+              Contact
+            </Link>
+          </li>
+          <li>
             <Link href="/account" onClick={close}>
               My Bookings
             </Link>
@@ -81,6 +86,16 @@ export function SiteNav() {
       {infoOpen && (
         <div className="nav-dropdown" ref={dropdownRef}>
           <ul>
+            <li>
+              <Link href="/faq" onClick={close}>
+                Guest Information
+              </Link>
+            </li>
+            <li>
+              <Link href="/services" onClick={close}>
+                Photography
+              </Link>
+            </li>
             <li>
               <Link href="/policies" onClick={close}>
                 Policies
