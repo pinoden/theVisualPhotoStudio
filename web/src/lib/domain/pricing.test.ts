@@ -178,3 +178,50 @@ describe("helpers", () => {
     expect(formatCents(-780)).toBe("-$7.80");
   });
 });
+
+describe("a free hour", () => {
+  const freeHour = { kind: "free_hour", value: 60 } as const;
+  const one = { ...base, studioIds: [B], dayType: "weekday" as const, promo: freeHour };
+
+  it("makes a one-hour booking of one studio free", () => {
+    expect(quote({ ...one, durationMinutes: 60 })).toMatchObject({ promoDiscountCents: 8800, totalCents: 0, promoMisfit: null });
+  });
+
+  it("takes the one-hour price off a longer booking, so the customer pays for the rest", () => {
+    expect(quote({ ...one, durationMinutes: 120 }).totalCents).toBe(17600 - 8800);
+    // Four hours cost $320, less than four times the hourly price. One hour is still worth $88.
+    expect(quote({ ...one, durationMinutes: 240 }).totalCents).toBe(32000 - 8800);
+  });
+
+  it("is worth the price of that kind of day", () => {
+    expect(quote({ ...one, dayType: "weekend", durationMinutes: 120 }).totalCents).toBe(20000 - 10000);
+  });
+
+  it("is worth the same share of the booking when the studio is not sold by the hour", () => {
+    const byTwoHours = tiers("loft", "weekday", { 120: 200, 180: 270 });
+    const q = quote({ ...base, rules: byTwoHours, studioIds: ["loft"], dayType: "weekday", durationMinutes: 180, promo: freeHour });
+    expect(q.promoDiscountCents).toBe(9000); // a third of three hours
+  });
+
+  it("never takes off more than the studio costs", () => {
+    const withHalfHour = [...rules, ...tiers(B, "weekday", { 30: 50 })];
+    const q = quote({ ...one, rules: withHalfHour, durationMinutes: 30 });
+    expect(q).toMatchObject({ promoDiscountCents: 5000, totalCents: 0 });
+  });
+
+  it("pays for the studio, not for add-ons", () => {
+    const q = quote({ ...base, studioIds: [D], dayType: "weekday", durationMinutes: 60, addons: [{ addonId: "pet", quantity: 1 }], promo: freeHour });
+    expect(q).toMatchObject({ promoDiscountCents: 7800, addonsCents: 4000, totalCents: 4000 });
+  });
+
+  it("cannot be used when several studios are booked together: the price stays whole, with the reason", () => {
+    const bundle = { ...base, studioIds: [B, P], dayType: "weekday" as const, durationMinutes: 60 };
+    const q = quote({ ...bundle, promo: freeHour });
+    expect(q).toMatchObject({ promoDiscountCents: 0, promoMisfit: "several_studios" });
+    expect(q.totalCents).toBe(quote(bundle).totalCents);
+  });
+
+  it("is refused when it carries no time", () => {
+    expect(code(() => quote({ ...one, durationMinutes: 60, promo: { kind: "free_hour", value: 0 } }))).toBe("BAD_PROMO");
+  });
+});

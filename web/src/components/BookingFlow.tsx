@@ -10,7 +10,15 @@ import {
   type SlotOptions,
 } from "@/lib/domain/availability";
 import { multiStudioOffer } from "@/lib/catalog-view";
-import { bookableDurations, findPrice, formatCents, quote, type Quote } from "@/lib/domain/pricing";
+import {
+  bookableDurations,
+  findPrice,
+  formatCents,
+  PROMO_MISFIT_TEXT,
+  quote,
+  type PromoKind,
+  type Quote,
+} from "@/lib/domain/pricing";
 import {
   addDays,
   defaultDayType,
@@ -45,7 +53,7 @@ const MOCK_TOKEN = "mock-card-ok";
 /** A code the server accepted for one email address. */
 interface AppliedCode {
   code: string;
-  kind: "percent" | "amount";
+  kind: PromoKind;
   value: number;
   email: string;
 }
@@ -282,7 +290,7 @@ export function BookingFlow({ catalog, navigate = loadPage }: { catalog: Catalog
       const data = (await response.json().catch(() => ({}))) as {
         ok?: boolean;
         message?: string;
-        promo?: { code: string; kind: "percent" | "amount"; value: number } | null;
+        promo?: { code: string; kind: PromoKind; value: number } | null;
       };
       if (response.ok && data.ok && data.promo) {
         setApplied({ ...data.promo, email: normalizedEmail });
@@ -406,7 +414,8 @@ export function BookingFlow({ catalog, navigate = loadPage }: { catalog: Catalog
           customer: { name: name.trim(), email: email.trim(), phone: phone.trim() },
           notes: notes.trim(),
           addons: price.addonLines.map((line) => ({ addonId: line.addonId, quantity: line.quantity })),
-          promoCode: promo?.code,
+          // A code that does not fit this selection is not used, which the summary says.
+          promoCode: promo && !price.promoMisfit ? promo.code : undefined,
           acceptTerms: true,
           paymentToken,
           expectedTotalCents: price.totalCents,
@@ -485,7 +494,11 @@ export function BookingFlow({ catalog, navigate = loadPage }: { catalog: Catalog
       {promo && price.promoDiscountCents > 0 && (
         <div className="price-row price-discount">
           <span>
-            {promo.kind === "percent" ? `Code ${promo.code} (${promo.value}% off rental)` : `Reschedule code ${promo.code}`}
+            {promo.kind === "percent"
+              ? `Code ${promo.code} (${promo.value}% off rental)`
+              : promo.kind === "free_hour"
+                ? `Free hour, code ${promo.code}`
+                : `Reschedule code ${promo.code}`}
           </span>
           <span>{formatCents(-price.promoDiscountCents)}</span>
         </div>
@@ -494,6 +507,11 @@ export function BookingFlow({ catalog, navigate = loadPage }: { catalog: Catalog
         <span>{promo ? "To pay" : "Total"}</span>
         <span>{formatCents(price.totalCents)}</span>
       </div>
+      {promo && price.promoMisfit && (
+        <p className="field-error" role="status" style={{ margin: ".75rem 0 0" }}>
+          {PROMO_MISFIT_TEXT[price.promoMisfit]} Code {promo.code} is not used on this booking and stays yours.
+        </p>
+      )}
     </div>
   );
 

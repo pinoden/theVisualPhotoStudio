@@ -31,6 +31,7 @@ const DOOR_DAY = dateAhead(24); // a day no other test books
 const WITHDRAWN_DAY = dateAhead(31); // likewise, for the add-on withdrawn during checkout
 const MOVE_FROM = dateAhead(38); // and for the discounted booking that is moved
 const MOVE_TO = dateAhead(45);
+const FREE_HOUR_DAY = dateAhead(52); // and for the bookings made with a free hour
 
 const jane = { name: "Jane Smith", email: "jane.e2e@example.com", phone: "407-555-0100" };
 const bob = { name: "Bob Brown", email: "bob.e2e@example.com", phone: "407-555-0111" };
@@ -40,6 +41,7 @@ const SECOND_OWNER = "owner2@studio.test";
 const STAFF = "sam.e2e@studio.test";
 
 let rescheduleCode = "";
+let freeHourCode = "";
 
 // Any error the browser reports (a script error, a mismatch between the
 // server's HTML and the page) fails the test that caused it.
@@ -100,6 +102,13 @@ test("guest information answers with the current rules and prices", async ({ pag
   const moving = page.locator("details.faq-item", { hasText: "Can I move my booking to another time?" });
   await moving.locator("summary").click();
   await expect(moving.locator(".faq-answer")).toContainText("Yes, once, until 24 hours before it starts.");
+
+  const loyalty = page.locator("details.faq-item", { hasText: "Do returning guests get anything?" });
+  await loyalty.locator("summary").click();
+  await expect(loyalty.locator(".faq-answer")).toContainText(
+    "When you have visited us 5 times, on separate days, we email you a code for one free hour in any studio.",
+  );
+  await expect(loyalty.locator(".faq-answer")).toContainText("It is valid for 60 days.");
 
   const pets = page.locator("details.faq-item", { hasText: "Can I bring my pet?" });
   await pets.locator("summary").click();
@@ -245,6 +254,7 @@ test("starting from the time shows which studios are free, and books one", async
 test("a customer signs in, sees their booking, and turns it into a reschedule code", async ({ page }) => {
   await signIn(page, jane.email);
   await expect(byText(page, `Signed in as ${jane.email}`)).toBeVisible();
+  await expect(byText(page, /0 of 5 visits towards your next free hour/)).toBeVisible();
   const card = onScreen(page.locator(".admin-card", { hasText: "Studio Blanche + Studio Dayglow" }));
   await expect(card).toBeVisible();
   // Bob's booking is not shown to Jane.
@@ -587,6 +597,16 @@ test("a booking made with a discount code is moved without paying the discount a
   await expect(created).toBeVisible();
   const discountCode = /VS-[0-9A-Z]{4}-[0-9A-Z]{4}/.exec(await created.innerText())![0];
 
+  // While signed in: a free hour for Jane, usable twice, for the next test. The site sends one by itself
+  // after five visits; the owner can also hand one out.
+  await onScreen(page.locator("#code-kind")).selectOption({ label: "One free hour (one studio)" });
+  await onScreen(page.locator("#code-email")).fill(jane.email);
+  await onScreen(page.locator("#code-uses")).fill("2");
+  await page.getByRole("button", { name: "Create", exact: true }).click();
+  await expect(page.getByRole("row", { name: /1 hour free/ })).toContainText(jane.email);
+  freeHourCode = /VS-[0-9A-Z]{4}-[0-9A-Z]{4}/.exec(await page.getByRole("row", { name: /1 hour free/ }).innerText())![0];
+  expect(freeHourCode).not.toBe(discountCode);
+
   // Studio Paris for an hour is $68. The code takes 10% off: $61.20 is paid.
   await bookStudioFirstToPayment(page, {
     studios: ["Studio Paris"],
@@ -617,6 +637,53 @@ test("a booking made with a discount code is moved without paying the discount a
     time: "3:00 PM",
     customer: bob,
     code: moveCode,
+  });
+  await expect(byText(page, "Nothing to pay: your code covers this booking. No card is needed.")).toBeVisible();
+  await expect(totalRow(page)).toContainText("$0");
+  await confirmAndGetRef(page, "Confirm booking");
+});
+
+test("a free hour takes one hour off a booking of one studio, and is not for several studios", async ({ page }) => {
+  // Two studios together: the code is refused, with the reason.
+  await page.goto("/book");
+  await pickStudio(page, "Studio Blanche");
+  await pickStudio(page, "Studio Dayglow");
+  await next(page);
+  await byLabel(page, "Date").fill(FREE_HOUR_DAY);
+  await page.getByRole("button", { name: "1 hr", exact: true }).click();
+  await next(page);
+  await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
+  await next(page);
+  await fillDetails(page, jane);
+  await byLabel(page, "Have a code?").fill(freeHourCode);
+  await page.getByRole("button", { name: "Apply" }).click();
+  await expect(
+    byText(page, "A free hour is for one studio. It cannot be used when several studios are booked together."),
+  ).toBeVisible();
+
+  // One studio for an hour and a half: the hour is free ($88) and the other half hour is paid ($132 less $88).
+  await bookStudioFirstToPayment(page, {
+    studios: ["Studio Blanche"],
+    date: FREE_HOUR_DAY,
+    duration: "1.5 hr",
+    time: "10:00 AM",
+    customer: jane,
+    code: freeHourCode,
+  });
+  await expect(byText(page, `Free hour, code ${freeHourCode}`)).toBeVisible();
+  await expect(totalRow(page)).toContainText("$44");
+  await confirmAndGetRef(page, "Confirm & pay $44");
+  await expect(page.locator(".price-row", { hasText: "Free hour" })).toContainText("-$88");
+  await shot(page, "20-free-hour");
+
+  // One studio for one hour: nothing to pay, and no card is asked for.
+  await bookStudioFirstToPayment(page, {
+    studios: ["Studio Paris"],
+    date: FREE_HOUR_DAY,
+    duration: "1 hr",
+    time: "2:00 PM",
+    customer: jane,
+    code: freeHourCode,
   });
   await expect(byText(page, "Nothing to pay: your code covers this booking. No card is needed.")).toBeVisible();
   await expect(totalRow(page)).toContainText("$0");

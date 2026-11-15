@@ -295,7 +295,7 @@ describe("settings", () => {
       ["refundFeePercent", 101],
       ["refundFeePercent", -1],
       ["refundFeePercent", "5"],
-      ["loyaltyPercent", 0],
+      ["loyaltyVisits", 0],
       ["slotIncrementMinutes", 1],
       ["loyaltyEnabled", "yes"],
       ["multiStudioPercent", { 1: 50 }],
@@ -305,6 +305,6 @@ describe("settings", () => {
     ] as const) {
       expect(await saveSetting(world.db, key, value)).toBe(false);
     }
-    expect(await loadSettings(world.db)).toMatchObject({ refundFeePercent: 5, loyaltyPercent: 10, slotIncrementMinutes: 30, multiStudioPercent: { 2: 20, 3: 22 } });
+    expect(await loadSettings(world.db)).toMatchObject({ refundFeePercent: 5, loyaltyVisits: 5, slotIncrementMinutes: 30, multiStudioPercent: { 2: 20, 3: 22 } });
   });
 });

@@ -33,13 +33,13 @@ export interface Settings {
   creditValidDays: number;
 
   // ── Loyalty ──
-  /** Send a discount code after each completed visit. */
+  /** Give one free hour for every `loyaltyVisits` visits. */
   loyaltyEnabled: boolean;
-  /** Percent off the next booking. */
-  loyaltyPercent: number;
-  /** Days the loyalty code stays valid. */
+  /** Visits, on separate days, that earn one free hour. */
+  loyaltyVisits: number;
+  /** Days a free hour stays valid after it is earned. */
   loyaltyValidDays: number;
-  /** Hours after a visit ends before it counts as completed and the code is sent. */
+  /** Hours after a visit ends before it counts as completed. */
   loyaltyDelayHours: number;
 
   // ── Staff ──
@@ -61,7 +61,7 @@ export const DEFAULT_SETTINGS: Settings = {
   creditValidDays: 90,
 
   loyaltyEnabled: true,
-  loyaltyPercent: 10,
+  loyaltyVisits: 5,
   loyaltyValidDays: 60,
   loyaltyDelayHours: 2,
 
@@ -96,7 +96,7 @@ const VALIDATORS: { [K in Exclude<keyof Settings, "multiStudioPercent">]: (v: un
   maxReschedules: int(0, 20),
   creditValidDays: int(1, 730),
   loyaltyEnabled: bool,
-  loyaltyPercent: int(1, 100),
+  loyaltyVisits: int(1, 100),
   loyaltyValidDays: int(1, 730),
   loyaltyDelayHours: int(0, 24 * 14),
   staffSeesContact: bool,

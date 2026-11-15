@@ -38,7 +38,7 @@ export const bookingStatus = pgEnum("booking_status", [
 ]);
 export const paymentStatus = pgEnum("payment_status", ["pending", "succeeded", "failed"]);
 export const refundStatus = pgEnum("refund_status", ["pending", "succeeded", "failed"]);
-export const promoKind = pgEnum("promo_kind", ["percent", "amount"]);
+export const promoKind = pgEnum("promo_kind", ["percent", "amount", "free_hour"]);
 export const promoSource = pgEnum("promo_source", ["loyalty", "reschedule", "manual"]);
 export const cancelReason = pgEnum("cancel_reason", ["customer", "rescheduled", "owner"]);
 
@@ -175,7 +175,7 @@ export const promoCodes = pgTable("promo_codes", {
   id: id(),
   code: text("code").notNull().unique(),
   kind: promoKind("kind").notNull(),
-  /** percent: 1-100. amount: cents still available. */
+  /** percent: 1-100. amount: cents still available. free_hour: the minutes that are free (60). */
   value: integer("value").notNull(),
   /** When set, only this customer email may use the code. */
   email: text("email"),
@@ -233,6 +233,7 @@ export const bookings = pgTable(
     /** Hash of the secret in the customer's manage link. */
     manageTokenHash: text("manage_token_hash").notNull(),
     termsAcceptedAt: ts("terms_accepted_at"),
+    /** When this completed visit was counted for loyalty (a free hour may or may not have followed). */
     loyaltyIssuedAt: ts("loyalty_issued_at"),
     cancelledAt: ts("cancelled_at"),
     createdAt: createdAt(),

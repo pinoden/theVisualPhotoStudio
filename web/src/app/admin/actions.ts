@@ -22,6 +22,7 @@ import {
   voidCode,
 } from "@/server/admin";
 import { CATALOG_TAG } from "@/server/cached";
+import { FREE_HOUR_MINUTES } from "@/server/loyalty";
 import { ownerCancelBooking, ownerRefund } from "@/server/manage";
 import { flushEmailsSoon, manageDeps } from "@/server/runtime";
 import { requireOwner } from "@/server/session";
@@ -223,8 +224,15 @@ export async function ownerRefundAction(formData: FormData): Promise<void> {
 
 export async function createCodeAction(formData: FormData): Promise<void> {
   await requireOwner("/admin/codes");
-  const kind = text(formData, "kind") === "amount" ? "amount" : "percent";
-  const value = kind === "amount" ? dollarsToCents(text(formData, "value")) : intInRange(text(formData, "value"), 1, 100);
+  const chosen = text(formData, "kind");
+  const kind = chosen === "amount" || chosen === "free_hour" ? chosen : "percent";
+  // A free hour needs no value: it is always the price of one hour.
+  const value =
+    kind === "free_hour"
+      ? FREE_HOUR_MINUTES
+      : kind === "amount"
+        ? dollarsToCents(text(formData, "value"))
+        : intInRange(text(formData, "value"), 1, 100);
   const validDays = intInRange(text(formData, "validDays"), 1, 730);
   const maxUses = kind === "amount" ? 1 : intInRange(text(formData, "maxUses") || "1", 1, 100000);
   if (value === null || validDays === null || maxUses === null) {
@@ -257,7 +265,7 @@ const NUMBER_SETTINGS = [
   "rescheduleCutoffHours",
   "maxReschedules",
   "creditValidDays",
-  "loyaltyPercent",
+  "loyaltyVisits",
   "loyaltyValidDays",
   "loyaltyDelayHours",
 ] as const;

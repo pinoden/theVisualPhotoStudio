@@ -43,6 +43,13 @@
       "when": 1794756765979,
       "tag": "0005_addon_kind",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1794759458032,
+      "tag": "0006_loyalty_free_hour",
+      "breakpoints": true
     }
   ]
 }

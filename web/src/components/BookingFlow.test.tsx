@@ -102,6 +102,8 @@ beforeEach(() => {
         });
       }
       if (input === "/api/booking-config") return reply({ mode: "mock" });
+      // The server accepts any code as a free hour for the address that asks.
+      if (input === "/api/quote") return reply({ ok: true, promo: { code: "THANKS-FREE-HOUR", kind: "free_hour", value: 60 } });
       if (input === "/api/bookings") {
         posted.push(JSON.parse(init!.body!));
         return reply(bookingReply.body, bookingReply.status);
@@ -349,6 +351,46 @@ describe("studio-first flow", () => {
     expect(screen.getByText(/Booking several studios together/).textContent).toBe(
       "Booking several studios together: 15% off when you book exactly 2.",
     );
+  });
+
+  it("takes a free hour off one studio, and sets it aside with the reason when a second studio is added", async () => {
+    const back = () => user.click(screen.getByRole("button", { name: /Back/ }));
+    render(<BookingFlow catalog={catalog} navigate={nav.push} />);
+    await user.click(studioBox("Studio Paris"));
+    await next();
+    pickDate(WED);
+    await pickDuration("1 hr");
+    await next();
+    await pickTime("9:00 AM");
+    await next();
+    await fillDetails();
+    await user.type(screen.getByLabelText("Have a code?"), "thanks-free-hour");
+    await user.click(screen.getByRole("button", { name: "Apply" }));
+
+    // Studio Paris for an hour is $68, and the hour is free.
+    expect(await screen.findByText("Free hour, code THANKS-FREE-HOUR")).toBeTruthy();
+    expect(screen.getByText("To pay").nextElementSibling?.textContent).toBe("$0");
+
+    // Back to the studios, to add a second one: the free hour is for one studio only.
+    await back();
+    await back();
+    await back();
+    await user.click(studioBox("Studio Blanche"));
+    await next();
+    await next();
+    await pickTime("9:00 AM");
+    await next();
+    expect(screen.getByRole("status").textContent).toBe(
+      "A free hour is for one studio. It cannot be used when several studios are booked together. Code THANKS-FREE-HOUR is not used on this booking and stays yours.",
+    );
+    expect(screen.queryByText("Free hour, code THANKS-FREE-HOUR")).toBeNull();
+    // ($88 + $68) less the 20% two-studio discount, with nothing taken off for the code.
+    expect(screen.getByText("To pay").nextElementSibling?.textContent).toBe("$124.80");
+
+    await next();
+    await user.click(await screen.findByRole("button", { name: "Confirm & pay $124.80" }));
+    expect(posted[0]).toMatchObject({ expectedTotalCents: 12480 });
+    expect(posted[0].promoCode).toBeUndefined(); // the code is not sent, so it is not spent
   });
 
   it("shows the server's message when payment fails and stays on the payment step", async () => {

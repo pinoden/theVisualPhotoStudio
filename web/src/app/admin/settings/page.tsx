@@ -34,11 +34,11 @@ const GROUPS: { title: string; fields: { key: NumberKey; label: string; help: st
     ],
   },
   {
-    title: "Loyalty code after a visit",
+    title: "Loyalty: a free hour for regular visitors",
     fields: [
-      { key: "loyaltyPercent", label: "Discount (%)", help: "Off the studio rental of the next booking." },
-      { key: "loyaltyValidDays", label: "Valid for (days)", help: "" },
-      { key: "loyaltyDelayHours", label: "Send after (hours)", help: "Time after the visit ends, so staff can mark a no-show first." },
+      { key: "loyaltyVisits", label: "Visits that earn a free hour", help: "Counted on separate days. A visit made with a free hour does not count." },
+      { key: "loyaltyValidDays", label: "Free hour valid for (days)", help: "" },
+      { key: "loyaltyDelayHours", label: "A visit counts after (hours)", help: "Time after the visit ends, so staff can mark a no-show first." },
     ],
   },
 ];
@@ -88,8 +88,8 @@ async function SettingsForm({ searchParams }: Pick<PageProps<"/admin/settings">,
             <h3>{group.title}</h3>
             {group.title.startsWith("Loyalty") && (
               <label style={{ display: "block", marginBottom: "1rem", fontSize: ".9rem" }}>
-                <input type="checkbox" name="loyaltyEnabled" defaultChecked={settings.loyaltyEnabled} /> Send a loyalty code
-                after each completed visit
+                <input type="checkbox" name="loyaltyEnabled" defaultChecked={settings.loyaltyEnabled} /> Email a free
+                hour to customers when their visits have earned one
               </label>
             )}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "1rem" }}>

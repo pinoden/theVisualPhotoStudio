@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto
 import { desc, eq, inArray } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
-import { bookingAddons, bookings, payments, studioHolds, studios } from "@/db/schema";
+import { bookingAddons, bookings, payments, promoCodes, studioHolds, studios } from "@/db/schema";
 import {
   PG_DEADLOCK_DETECTED,
   PG_EXCLUSION_VIOLATION,
@@ -12,7 +12,7 @@ import {
   type DbLike,
 } from "@/db/client";
 import { isStartFree } from "@/lib/domain/availability";
-import { formatCents, PricingError, quote, type Quote } from "@/lib/domain/pricing";
+import { formatCents, PricingError, PROMO_MISFIT_TEXT, quote, type PromoKind, type Quote } from "@/lib/domain/pricing";
 import { formText } from "@/lib/parse";
 import { count } from "@/lib/words";
 import { durationLabel, isIsoDate } from "@/lib/domain/time";
@@ -117,7 +117,7 @@ export const quoteInput = z.object({
 });
 
 export type QuoteResult =
-  | { ok: true; quote: Quote; promo: { code: string; kind: "percent" | "amount"; value: number } | null }
+  | { ok: true; quote: Quote; promo: { code: string; kind: PromoKind; value: number } | null }
   | { ok: false; status: number; code: "invalid_input" | "invalid_price" | "invalid_code"; message: string };
 
 /**
@@ -149,6 +149,8 @@ export async function quoteSelection(db: DbLike, rawInput: unknown, now: Date): 
       addonCatalog: catalog.addons,
       promo: promo ? toPromoDef(promo) : null,
     });
+    // A code that exists but cannot be used on this selection is refused with the reason.
+    if (price.promoMisfit) return fail(422, "invalid_code", PROMO_MISFIT_TEXT[price.promoMisfit]);
     return { ok: true, quote: price, promo: promo ? { code: promo.code, kind: promo.kind, value: promo.value } : null };
   } catch (error) {
     if (error instanceof PricingError) return fail(422, "invalid_price", error.message);
@@ -218,6 +220,9 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
     if (error instanceof PricingError) return fail(422, "invalid_price", error.message);
     throw error;
   }
+  // The booking screen leaves out a code that does not fit the selection. Anything else that
+  // sends one is told why, instead of being charged the full price without a word.
+  if (price.promoMisfit) return fail(422, "invalid_code", PROMO_MISFIT_TEXT[price.promoMisfit]);
   if (input.expectedTotalCents !== undefined && input.expectedTotalCents !== price.totalCents) {
     return fail(409, "price_changed", `The price is now ${formatCents(price.totalCents)}. Please review and confirm again.`);
   }
@@ -430,6 +435,8 @@ export interface BookingView {
   addonsCents: number;
   promoDiscountCents: number;
   creditAppliedCents: number;
+  /** The kind of code used on the booking, if any. */
+  promoKind: PromoKind | null;
   totalCents: number;
   rescheduledCount: number;
 }
@@ -440,13 +447,17 @@ type BookingRow = typeof bookings.$inferSelect;
 export async function toBookingViews(db: DbLike, rows: BookingRow[]): Promise<BookingView[]> {
   if (rows.length === 0) return [];
   const ids = rows.map((r) => r.id);
-  const [holdRows, addonRows] = await Promise.all([
+  const codeIds = rows.map((r) => r.promoCodeId).filter((id): id is string => id !== null);
+  const [holdRows, addonRows, codeRows] = await Promise.all([
     db
       .select({ bookingId: studioHolds.bookingId, name: studios.name, priceCents: studioHolds.priceCents, sort: studios.sortOrder })
       .from(studioHolds)
       .innerJoin(studios, eq(studios.id, studioHolds.studioId))
       .where(inArray(studioHolds.bookingId, ids)),
     db.select().from(bookingAddons).where(inArray(bookingAddons.bookingId, ids)),
+    codeIds.length > 0
+      ? db.select({ id: promoCodes.id, kind: promoCodes.kind }).from(promoCodes).where(inArray(promoCodes.id, codeIds))
+      : [],
   ]);
   return rows.map((booking) => ({
     id: booking.id,
@@ -470,6 +481,7 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[]): Promise<Bo
     addonsCents: booking.addonsCents,
     promoDiscountCents: booking.promoDiscountCents,
     creditAppliedCents: booking.creditAppliedCents,
+    promoKind: codeRows.find((code) => code.id === booking.promoCodeId)?.kind ?? null,
     totalCents: booking.totalCents,
     rescheduledCount: booking.rescheduledCount,
   }));

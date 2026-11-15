@@ -57,7 +57,13 @@ export function BookingSummary({ booking }: { booking: BookingView }) {
       ))}
       {booking.promoDiscountCents > 0 && (
         <div className="price-row price-discount">
-          <span>{booking.creditAppliedCents > 0 ? "Paid with reschedule code" : "Discount code"}</span>
+          <span>
+            {booking.creditAppliedCents > 0
+              ? "Paid with reschedule code"
+              : booking.promoKind === "free_hour"
+                ? "Free hour"
+                : "Discount code"}
+          </span>
           <span>{formatCents(-booking.promoDiscountCents)}</span>
         </div>
       )}
