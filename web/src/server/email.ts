@@ -168,6 +168,8 @@ export function bookingConfirmationEmail(input: {
   creditCents: number;
   /** Part of the total charged to the card. */
   cardCents: number;
+  /** The studio made the booking for the client: nothing was charged, the total is paid at the studio. */
+  payAtStudio?: boolean;
   manageUrl: string;
   /** How to get into the building, when the owner has set it. */
   access?: string;
@@ -184,7 +186,7 @@ export function bookingConfirmationEmail(input: {
       `Reference: ${input.ref}`,
       `Studio: ${input.studios}`,
       `When: ${input.when} (${input.duration})`,
-      `Total: ${money(input.totalCents)}`,
+      input.payAtStudio ? `To pay at the studio: ${money(input.totalCents)}` : `Total: ${money(input.totalCents)}`,
       ...(input.creditCents > 0
         ? [`Paid with your reschedule code: ${money(input.creditCents)}`, `Charged to your card: ${money(input.cardCents)}`]
         : []),
@@ -193,6 +195,38 @@ export function bookingConfirmationEmail(input: {
       "",
       ...(input.access ? ["Getting in:", input.access, ""] : []),
       "Your booking begins at the scheduled start time. Please arrive no more than five minutes early.",
+      "",
+      SIGN_OFF,
+    ].join("\n"),
+  };
+}
+
+/** An administrator moved the booking to a new time. The customer's link stays the same. */
+export function bookingMovedEmail(input: {
+  to: string;
+  name: string;
+  ref: string;
+  studios: string;
+  /** The old and the new time, as the studio's clock shows them. */
+  was: string;
+  now: string;
+  duration: string;
+}): QueuedEmail {
+  return {
+    to: input.to,
+    kind: "booking_moved",
+    subject: `Your booking ${input.ref} has a new time`,
+    body: [
+      `Hi ${input.name},`,
+      "",
+      `Your booking at The Visuals Photo Studio has been moved.`,
+      "",
+      `Reference: ${input.ref}`,
+      `Studio: ${input.studios}`,
+      `New time: ${input.now} (${input.duration})`,
+      `It was: ${input.was}`,
+      "",
+      "The link in your confirmation email still opens this booking. If the new time does not suit you, please reply to this email or call us.",
       "",
       SIGN_OFF,
     ].join("\n"),

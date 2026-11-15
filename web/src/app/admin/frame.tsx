@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 
 const LINKS = [
   { href: "/admin", label: "Overview" },
+  { href: "/admin/calendar", label: "Calendar" },
   { href: "/admin/bookings", label: "Bookings" },
   { href: "/staff", label: "Day sheet" },
   { href: "/admin/staff", label: "Staff" },
@@ -14,7 +15,10 @@ const LINKS = [
 ] as const;
 
 /** The second level of the admin: what a member of staff can open. Everything else answers "not found" for them. */
-const STAFF_LINKS = [{ href: "/staff", label: "Day sheet" }] as const;
+const STAFF_LINKS = [
+  { href: "/admin/calendar", label: "Calendar" },
+  { href: "/staff", label: "Day sheet" },
+] as const;
 
 export type AdminQuery = Record<string, string | string[] | undefined>;
 

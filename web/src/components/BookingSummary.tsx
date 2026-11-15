@@ -68,7 +68,7 @@ export function BookingSummary({ booking }: { booking: BookingView }) {
         </div>
       )}
       <div className="price-row total">
-        <span>{paidStatus ? "Charged to card" : "Total"}</span>
+        <span>{!paidStatus ? "Total" : booking.madeByAdmin ? "To pay at the studio" : "Charged to card"}</span>
         <span>{formatCents(booking.totalCents)}</span>
       </div>
     </div>

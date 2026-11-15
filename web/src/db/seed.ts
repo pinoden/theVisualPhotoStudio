@@ -11,6 +11,7 @@ const h = (hours: number) => Math.round(hours * 60);
 const STUDIOS = [
   {
     slug: "blanche",
+    color: "#4f7cac",
     name: "Studio Blanche",
     tagline: "A modern, all-white space with sleek design.",
     description:
@@ -21,6 +22,7 @@ const STUDIOS = [
   },
   {
     slug: "dayglow",
+    color: "#c9851a",
     name: "Studio Dayglow",
     tagline: "A natural, boho-style studio with warm vibes.",
     description:
@@ -30,6 +32,7 @@ const STUDIOS = [
   },
   {
     slug: "paris",
+    color: "#b4517b",
     name: "Studio Paris",
     tagline: "A romantic space with vintage charm.",
     description:
@@ -56,6 +59,7 @@ export async function seed(db: Db): Promise<boolean> {
           description: s.description,
           includedGuests: s.includedGuests,
           bufferMinutes: 15,
+          color: s.color,
           sortOrder: index,
         })
         .returning({ id: studios.id });

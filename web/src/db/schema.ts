@@ -103,12 +103,13 @@ export const studios = pgTable("studios", {
   description: text("description").notNull().default(""),
   /** Guests included in the price. */
   includedGuests: integer("included_guests").notNull().default(6),
-  /** Clean-up minutes kept free after each booking. */
   /**
    * Minutes kept free after every booking, so that appointments are at least this far apart.
    * 15 is the owner's rule: 7 minutes before and 7 after each appointment, drawn so in the calendar.
    */
   bufferMinutes: integer("buffer_minutes").notNull().default(15),
+  /** The studio's colour in the admin calendar, the same in every view. A hex colour. */
+  color: text("color").notNull().default("#8a7f72"),
   sortOrder: integer("sort_order").notNull().default(0),
   active: boolean("active").notNull().default(true),
 });
@@ -237,6 +238,11 @@ export const bookings = pgTable(
 
     /** A booking that has been moved can no longer be refunded. */
     rescheduledCount: integer("rescheduled_count").notNull().default(0),
+    /**
+     * The administrator's address when the booking was made in the admin for a client. Null for a
+     * booking the customer made online. Nothing is charged online for an administrator's booking.
+     */
+    madeBy: text("made_by"),
     cancelReason: cancelReason("cancel_reason"),
     /** Hash of the secret in the customer's manage link. */
     manageTokenHash: text("manage_token_hash").notNull(),

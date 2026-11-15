@@ -64,6 +64,13 @@
       "when": 1794761814712,
       "tag": "0008_booking_labels",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1794762146914,
+      "tag": "0009_calendar",
+      "breakpoints": true
     }
   ]
 }

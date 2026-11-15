@@ -1,6 +1,7 @@
-import { eq } from "drizzle-orm";
-import { bookings } from "@/db/schema";
-import type { Db, DbLike } from "@/db/client";
+import { eq, sql } from "drizzle-orm";
+import { bookings, studioHolds } from "@/db/schema";
+import { PG_EXCLUSION_VIOLATION, pgErrorCode, type Db, type DbLike } from "@/db/client";
+import { combinedStarts, isStartFree } from "@/lib/domain/availability";
 import {
   LABEL_BLOCK_TEXT,
   labelChange,
@@ -10,13 +11,25 @@ import {
   type LabelKey,
   type SettableLabel,
 } from "@/lib/domain/labels";
+import { durationLabel, isIsoDate, type IsoDate } from "@/lib/domain/time";
 import { can, type StaffAbility } from "@/lib/staff-abilities";
 import type { AuthUser } from "./auth";
-import { isBookingRef, toBookingViews, type BookingView } from "./bookings";
+import { loadDayAvailability } from "./availability";
+import {
+  createBooking,
+  isBookingRef,
+  toBookingViews,
+  type BookingDeps,
+  type BookingInput,
+  type BookingView,
+  type CreateBookingResult,
+} from "./bookings";
+import { loadCatalog } from "./catalog";
+import { bookingMovedEmail, queueEmail } from "./email";
 import { listEvents, recordEvent, type BookingEvent } from "./history";
 import { loadSettings } from "./settings";
 import { canViewDay } from "./staff";
-import { localDateOf } from "./tz";
+import { formatInstant, localDateOf, localToUtc } from "./tz";
 
 /**
  * One appointment as the admin sees it, for both of its levels: the owners,
@@ -116,4 +129,202 @@ export async function setLabel(db: Db, viewer: AuthUser, ref: string, target: Se
     await recordEvent(tx, { bookingId: booking.id, from: labelOf(booking), to: target, actor: viewer.email, at: now });
     return { ok: true, label: target };
   });
+}
+
+// ── Moving a booking to a new time ───────────────────────────────────────────
+
+const WINDOW_PROBLEM = {
+  invalid_date: "Choose a valid date.",
+  past: "That date has already passed.",
+  too_far: "That date is further ahead than bookings are open.",
+} as const;
+
+/**
+ * The start times, on one date, at which every one of these studios is free
+ * for this long. For an administrator: the customers' notice period does not
+ * apply, everything else does. `excludeBookingId` leaves a booking's own time
+ * out, so that it can be moved within its own day.
+ */
+export async function freeStartsFor(
+  db: DbLike,
+  selection: { studioIds: string[]; date: string; durationMinutes: number; excludeBookingId?: string },
+  now: Date,
+): Promise<{ ok: true; starts: number[] } | { ok: false; message: string }> {
+  const catalog = await loadCatalog(db);
+  const day = await loadDayAvailability(db, catalog, selection.date, now, {
+    asAdmin: true,
+    excludeBookingId: selection.excludeBookingId,
+  });
+  if (day.problem) return { ok: false, message: WINDOW_PROBLEM[day.problem] };
+  const days = selection.studioIds.map((id) => day.days.find((studio) => studio.studioId === id));
+  if (days.length === 0 || days.some((studio) => !studio)) return { ok: false, message: "Unknown studio." };
+  return {
+    ok: true,
+    starts: combinedStarts(days as NonNullable<(typeof days)[number]>[], {
+      durationMinutes: selection.durationMinutes,
+      incrementMinutes: catalog.settings.slotIncrementMinutes,
+      earliestStartMinute: day.earliestStartMinute,
+    }),
+  };
+}
+
+/** The studios a booking holds. */
+async function studioIdsOf(db: DbLike, bookingId: string): Promise<string[]> {
+  const rows = await db.select({ studioId: studioHolds.studioId }).from(studioHolds).where(eq(studioHolds.bookingId, bookingId));
+  return rows.map((row) => row.studioId);
+}
+
+/** For the "move" form: the free start times on `date` for this booking, in its own studios and for its own length. */
+export async function moveOptions(
+  db: DbLike,
+  viewer: AuthUser,
+  ref: string,
+  date: string,
+  now: Date,
+): Promise<{ ok: true; starts: number[] } | { ok: false; message: string }> {
+  const settings = await loadSettings(db);
+  if (!isBookingRef(ref) || !can(viewer, "staffMovesBookings", settings)) return { ok: false, message: "Booking not found." };
+  const [booking] = await db.select().from(bookings).where(eq(bookings.ref, ref)).limit(1);
+  if (!booking || !(await maySee(db, viewer, booking.startAt))) return { ok: false, message: "Booking not found." };
+  return freeStartsFor(
+    db,
+    { studioIds: await studioIdsOf(db, booking.id), date, durationMinutes: booking.durationMinutes, excludeBookingId: booking.id },
+    now,
+  );
+}
+
+export type MoveResult =
+  | { ok: true; startAt: Date; endAt: Date }
+  | { ok: false; reason: "forbidden" | "not_found" | "not_movable" | "invalid_time" | "slot_taken"; message: string };
+
+/**
+ * Move a booking to a new date or time, in the same studios and for the same
+ * length. What was paid stays as it is. The availability rules are the ones
+ * every booking obeys: opening hours, no overlap, and the gap between
+ * appointments; and the database refuses an overlap whatever happens here.
+ *
+ * `countsAsClientMove` says the client asked for the move. It then counts as
+ * their one reschedule: the booking is no longer refunded automatically and
+ * the client cannot move it again themselves, as the rental terms say. Leave
+ * it off when the studio is the one that needs the change.
+ */
+export async function moveBooking(
+  db: Db,
+  viewer: AuthUser,
+  ref: string,
+  input: { date: string; startMinute: number; countsAsClientMove: boolean },
+  now: Date,
+): Promise<MoveResult> {
+  const refuse = (reason: Extract<MoveResult, { ok: false }>["reason"], message: string): MoveResult => ({ ok: false, reason, message });
+  const settings = await loadSettings(db);
+  if (!isBookingRef(ref)) return refuse("not_found", "Booking not found.");
+  if (!can(viewer, "staffMovesBookings", settings)) return refuse("forbidden", "You cannot move bookings.");
+
+  const [found] = await db.select().from(bookings).where(eq(bookings.ref, ref)).limit(1);
+  if (!found) return viewer.role === "owner" ? refuse("not_found", "Booking not found.") : refuse("forbidden", "You cannot move that booking.");
+  if (!(await maySee(db, viewer, found.startAt))) return refuse("forbidden", "You cannot move that booking.");
+  if (found.status !== "confirmed" || now.getTime() >= found.endAt.getTime()) {
+    return refuse("not_movable", "Only a booking that is still to come can be moved.");
+  }
+  if (!isIsoDate(input.date) || !Number.isInteger(input.startMinute)) return refuse("invalid_time", "Choose a date and a time.");
+
+  const startAt = localToUtc(input.date, input.startMinute);
+  const endAt = localToUtc(input.date, input.startMinute + found.durationMinutes);
+  if (startAt.getTime() === found.startAt.getTime()) return refuse("invalid_time", "That is the time the booking already has.");
+
+  const catalog = await loadCatalog(db);
+  const day = await loadDayAvailability(db, catalog, input.date, now, { asAdmin: true, excludeBookingId: found.id });
+  if (day.problem) return refuse("invalid_time", WINDOW_PROBLEM[day.problem]);
+  const studioIds = await studioIdsOf(db, found.id);
+  const slot = {
+    durationMinutes: found.durationMinutes,
+    incrementMinutes: catalog.settings.slotIncrementMinutes,
+    earliestStartMinute: day.earliestStartMinute,
+  };
+  const free = studioIds.every((id) => {
+    const studioDay = day.days.find((studio) => studio.studioId === id);
+    return studioDay !== undefined && isStartFree(studioDay, input.startMinute, slot);
+  });
+  if (!free) return refuse("slot_taken", "That time is not free in the studio. Choose another.");
+
+  const studioNames = catalog.studios.filter((studio) => studioIds.includes(studio.id)).map((studio) => studio.name).join(" + ");
+  try {
+    return await db.transaction(async (tx): Promise<MoveResult> => {
+      const [booking] = await tx.select().from(bookings).where(eq(bookings.id, found.id)).for("update").limit(1);
+      if (!booking || booking.status !== "confirmed") return refuse("not_movable", "Only a booking that is still to come can be moved.");
+
+      await tx
+        .update(bookings)
+        .set({
+          startAt,
+          endAt,
+          label: "rescheduled",
+          rescheduledCount: booking.rescheduledCount + (input.countsAsClientMove ? 1 : 0),
+        })
+        .where(eq(bookings.id, booking.id));
+      // Each studio keeps its own gap after the booking, as when the booking was made.
+      for (const studioId of [...studioIds].sort()) {
+        const buffer = catalog.studios.find((studio) => studio.id === studioId)?.bufferMinutes ?? 0;
+        const occupiedEnd = new Date(endAt.getTime() + buffer * 60_000);
+        await tx
+          .update(studioHolds)
+          .set({ occupied: sql`tstzrange(${startAt.toISOString()}::timestamptz, ${occupiedEnd.toISOString()}::timestamptz, '[)')` })
+          .where(sql`${studioHolds.bookingId} = ${booking.id} and ${studioHolds.studioId} = ${studioId}`);
+      }
+
+      const was = formatInstant(booking.startAt);
+      const is = formatInstant(startAt);
+      await recordEvent(tx, {
+        bookingId: booking.id,
+        from: labelOf(booking),
+        to: "rescheduled",
+        actor: viewer.email,
+        at: now,
+        note: `Moved from ${was} to ${is}${input.countsAsClientMove ? ", at the client's request" : ""}`,
+      });
+      await queueEmail(
+        tx,
+        bookingMovedEmail({
+          to: booking.customerEmail,
+          name: booking.customerName,
+          ref: booking.ref,
+          studios: studioNames,
+          was,
+          now: is,
+          duration: durationLabel(booking.durationMinutes),
+        }),
+      );
+      return { ok: true, startAt, endAt };
+    });
+  } catch (error) {
+    // Someone took the time between the check above and the move.
+    if (pgErrorCode(error) === PG_EXCLUSION_VIOLATION) return refuse("slot_taken", "That time was just taken. Choose another.");
+    throw error;
+  }
+}
+
+// ── A booking made in the admin for a client ─────────────────────────────────
+
+/**
+ * Make a booking for a client, from the admin. The same rules as a booking
+ * made online, except that customers' notice period does not apply and
+ * nothing is charged: the price is paid at the studio. The client gets the
+ * confirmation email with their own link.
+ */
+export async function createAdminBooking(
+  db: Db,
+  viewer: AuthUser,
+  input: Omit<BookingInput, "acceptTerms" | "paymentToken" | "expectedTotalCents">,
+  deps: Pick<BookingDeps, "now" | "baseUrl">,
+): Promise<CreateBookingResult | { ok: false; status: 403; code: "forbidden"; message: string }> {
+  const settings = await loadSettings(db);
+  if (!can(viewer, "staffCreatesBookings", settings)) {
+    return { ok: false, status: 403, code: "forbidden", message: "You cannot make bookings for clients." };
+  }
+  return createBooking(db, { ...input, acceptTerms: true }, { ...deps, payments: null, madeBy: viewer.email });
+}
+
+/** The date of a booking, for links back to its day. */
+export function dayOf(startAt: Date): IsoDate {
+  return localDateOf(startAt);
 }

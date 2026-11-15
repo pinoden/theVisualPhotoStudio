@@ -1,9 +1,11 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { bookings, settings, staffShifts, studioHolds } from "@/db/schema";
-import { getAppointment, setLabel } from "./appointments";
+import { createAdminBooking, getAppointment, moveBooking, moveOptions, setLabel } from "./appointments";
 import type { AuthUser } from "./auth";
-import { cancelBooking } from "./manage";
+import { loadCalendar } from "./calendar";
+import { loadCatalog } from "./catalog";
+import { cancelBooking, getManageOptions } from "./manage";
 import { getDaySheet } from "./staff";
 import { completeVisits } from "./tasks";
 import { BASE_URL, createTestWorld, expectOk, h, hoursAfter, NEAR, NOW, type TestWorld } from "./testing";
@@ -222,5 +224,181 @@ describe("the two levels of the admin", () => {
 
     await world.db.update(bookings).set({ status: "expired" }).where(eq(bookings.ref, nextDayRef));
     expect(await getAppointment(world.db, owner, nextDayRef, NOW)).toBeNull(); // an abandoned checkout
+  });
+});
+
+describe("moving a booking to a new time", () => {
+  const to = (startMinute: number, date = NEAR, countsAsClientMove = false) => ({ date, startMinute, countsAsClientMove });
+  const holdOf = async (ref: string) => {
+    const booking = await row(ref);
+    const [hold] = await world.db
+      .select({ from: sql<Date>`lower(${studioHolds.occupied})`, to: sql<Date>`upper(${studioHolds.occupied})`, active: studioHolds.active })
+      .from(studioHolds)
+      .where(eq(studioHolds.bookingId, booking.id));
+    return { from: new Date(hold.from).toISOString(), to: new Date(hold.to).toISOString(), active: hold.active };
+  };
+
+  it("is the owners' to do, and staff's only once the owners switch it on", async () => {
+    expect(await moveBooking(world.db, sam, morningRef, to(h(11)), NOW)).toMatchObject({ ok: false, reason: "forbidden" });
+    expect(await moveOptions(world.db, sam, morningRef, NEAR, NOW)).toMatchObject({ ok: false });
+    await allow("staffMovesBookings");
+    expect(await moveBooking(world.db, sam, morningRef, to(h(11)), NOW)).toMatchObject({ ok: true });
+    // Still only on the days they may see.
+    expect(await moveBooking(world.db, sam, nextDayRef, to(h(15), NEXT_DAY), NOW)).toMatchObject({ ok: false, reason: "forbidden" });
+    expect(await moveBooking(world.db, jane, nextDayRef, to(h(15), NEXT_DAY), NOW)).toMatchObject({ ok: false, reason: "forbidden" });
+  });
+
+  it("changes the time, keeps the studio held for the new time and the gap after it, and tells the customer", async () => {
+    const before = await row(morningRef);
+    const moved = await moveBooking(world.db, owner, morningRef, to(h(13) + 15, NEXT_DAY), NOW);
+    expect(moved).toMatchObject({ ok: true });
+
+    const after = await row(morningRef);
+    expect(after.startAt.toISOString()).toBe("2026-11-19T18:15:00.000Z"); // 1:15 PM studio time
+    expect(after.endAt.toISOString()).toBe("2026-11-19T19:15:00.000Z");
+    expect(after).toMatchObject({ status: "confirmed", label: "rescheduled", totalCents: before.totalCents, rescheduledCount: 0 });
+    expect(await holdOf(morningRef)).toEqual({ from: "2026-11-19T18:15:00.000Z", to: "2026-11-19T19:30:00.000Z", active: true });
+
+    // The old time is free again, and the new one is taken.
+    expect((await world.book({ studioIds: [world.ids.dayglow], startMinute: h(9), durationMinutes: 60 })).ok).toBe(true);
+    expect(await world.book({ studioIds: [world.ids.dayglow], date: NEXT_DAY, startMinute: h(13), durationMinutes: 60 })).toMatchObject({ code: "slot_taken" });
+
+    const history = (await getAppointment(world.db, owner, morningRef, NOW))!.history;
+    expect(history.at(-1)).toMatchObject({ from: "confirmed", to: "rescheduled", actor: "owner@studio.test" });
+    expect(history.at(-1)!.note).toMatch(/^Moved from .*Nov 18.* to .*Nov 19/);
+    const [mail] = await world.emails("booking_moved");
+    expect(mail).toMatchObject({ toEmail: "bob@example.com", subject: `Your booking ${morningRef} has a new time` });
+    expect(mail.body).toContain("New time: ");
+  });
+
+  it("obeys the rules every booking obeys: opening hours, no overlap, and 15 minutes between appointments", async () => {
+    const other = expectOk(await world.book({ studioIds: [world.ids.dayglow], startMinute: h(14), durationMinutes: 60 })); // 2:00 to 3:00
+    expect(other.ok).toBe(true);
+
+    expect(await moveBooking(world.db, owner, morningRef, to(h(14) + 30), NOW)).toMatchObject({ ok: false, reason: "slot_taken" }); // overlaps
+    expect(await moveBooking(world.db, owner, morningRef, to(h(13)), NOW)).toMatchObject({ ok: false, reason: "slot_taken" }); // ends as the next begins
+    expect(await moveBooking(world.db, owner, morningRef, to(h(15)), NOW)).toMatchObject({ ok: false, reason: "slot_taken" }); // begins as the last ends
+    expect(await moveBooking(world.db, owner, morningRef, to(h(8)), NOW)).toMatchObject({ ok: false, reason: "slot_taken" }); // before opening
+    expect(await moveBooking(world.db, owner, morningRef, to(h(9) + 10), NOW)).toMatchObject({ ok: false, reason: "slot_taken" }); // not a start time
+    expect(await moveBooking(world.db, owner, morningRef, to(h(9)), NOW)).toMatchObject({ ok: false, reason: "invalid_time" }); // where it already is
+    expect(await moveBooking(world.db, owner, morningRef, to(h(9), "2026-11-10"), NOW)).toMatchObject({ ok: false, reason: "invalid_time" }); // the past
+
+    // Its own present time does not stand in its way: a quarter of an hour later is fine.
+    expect(await moveBooking(world.db, owner, morningRef, to(h(9) + 15), NOW)).toMatchObject({ ok: true });
+    expect(await moveBooking(world.db, owner, morningRef, to(h(12) + 45), NOW)).toMatchObject({ ok: true }); // exactly 15 minutes before the next
+    // Other studios have calendars of their own: Paris at the time Dayglow is taken.
+    expect((await world.book({ studioIds: [world.ids.paris], startMinute: h(14), durationMinutes: 60 })).ok).toBe(true);
+  });
+
+  it("offers only the start times that are free for this booking", async () => {
+    expectOk(await world.book({ studioIds: [world.ids.dayglow], startMinute: h(14), durationMinutes: 60 }));
+    const options = await moveOptions(world.db, owner, morningRef, NEAR, NOW);
+    const starts = options.ok ? options.starts : [];
+    expect(starts.slice(0, 3)).toEqual([h(9), h(9) + 15, h(9) + 30]); // its own time is offered: it could stay close by
+    expect(starts).toContain(h(12) + 45);
+    expect(starts).not.toContain(h(13)); // would touch the 2:00 booking
+    expect(starts).not.toContain(h(15)); // inside the gap after it
+    expect(starts).toContain(h(15) + 15);
+  });
+
+  it("counts as the client's one reschedule when the client asked for it: no automatic refund afterwards", async () => {
+    await moveBooking(world.db, owner, nextDayRef, to(h(14), "2026-12-09", true), NOW);
+    expect(await row(nextDayRef)).toMatchObject({ rescheduledCount: 1 });
+    const options = await getManageOptions(world.db, nextDayRef, { kind: "owner" }, NOW);
+    expect(options?.cancel).toMatchObject({ allowed: true, refundCents: 0, why: "rescheduled" });
+    expect(options?.reschedule).toEqual({ allowed: false, reason: "limit_reached" });
+  });
+
+  it("is only for a booking that is still to come", async () => {
+    await cancelBooking(world.db, morningRef, { kind: "owner" }, world.manageDeps());
+    expect(await moveBooking(world.db, owner, morningRef, to(h(11)), NOW)).toMatchObject({ ok: false, reason: "not_movable" });
+    expect(await moveBooking(world.db, owner, nextDayRef, to(h(11), "2026-12-09"), hoursAfter(NOW, 24 * 20))).toMatchObject({ ok: false, reason: "not_movable" });
+    expect(await moveBooking(world.db, owner, "VS-AAAAAA", to(h(11)), NOW)).toMatchObject({ ok: false, reason: "not_found" });
+  });
+});
+
+describe("a booking made in the admin for a client", () => {
+  const client = { name: "Dana Diaz", email: "dana@example.com", phone: "407-555-0142" };
+  const TODAY = "2026-11-14"; // NOW is 10:00 on this Saturday, studio time
+  const request = { studioIds: [] as string[], date: TODAY, startMinute: h(14), durationMinutes: 120, customer: client };
+  const deps = { now: NOW, baseUrl: BASE_URL };
+
+  it("can be for today, charges nothing online, and sends the client their confirmation", async () => {
+    const chargedBefore = world.charges.length;
+    const made = expectOk(await createAdminBooking(world.db, owner, { ...request, studioIds: [world.ids.blanche] }, deps));
+    expect(world.charges).toHaveLength(chargedBefore); // no card was charged for it
+    const booking = await row(made.ref);
+    expect(booking).toMatchObject({ status: "confirmed", madeBy: "owner@studio.test", totalCents: 17600, customerEmail: "dana@example.com", termsAcceptedAt: null });
+
+    const mail = (await world.emails("booking_confirmation")).at(-1)!;
+    expect(mail.toEmail).toBe("dana@example.com");
+    expect(mail.body).toContain("To pay at the studio: $176");
+    const appointment = (await getAppointment(world.db, owner, made.ref, NOW))!;
+    expect(appointment.history).toEqual([
+      { at: NOW.toISOString(), from: "new", to: "confirmed", actor: "owner@studio.test", note: "Booked in the admin for the client" },
+    ]);
+    expect(appointment.money).toMatchObject({ madeByAdmin: true });
+
+    // A customer cannot book the same afternoon online: they have to give a day's notice.
+    expect(await world.book({ studioIds: [world.ids.paris], date: TODAY, startMinute: h(14) })).toMatchObject({ ok: false });
+  });
+
+  it("obeys the same availability rules as a booking made online", async () => {
+    expectOk(await createAdminBooking(world.db, owner, { ...request, studioIds: [world.ids.blanche] }, deps)); // 2:00 to 4:00
+    const again = (startMinute: number, studio = world.ids.blanche) =>
+      createAdminBooking(world.db, owner, { ...request, studioIds: [studio], startMinute, durationMinutes: 60 }, deps);
+    expect(await again(h(15))).toMatchObject({ ok: false, code: "slot_taken" }); // overlaps
+    expect(await again(h(16))).toMatchObject({ ok: false, code: "slot_taken" }); // no gap after the last
+    expect(await again(h(21))).toMatchObject({ ok: false, code: "slot_taken" }); // after closing
+    expect(await again(h(9))).toMatchObject({ ok: false, code: "slot_taken" }); // earlier today: already past
+    expect(await again(h(16) + 15)).toMatchObject({ ok: true }); // 15 minutes after
+    expect(await again(h(15), world.ids.paris)).toMatchObject({ ok: true }); // another studio's calendar
+  });
+
+  it("is the owners' to do, and staff's only once the owners switch it on", async () => {
+    const asked = { ...request, studioIds: [world.ids.blanche] };
+    expect(await createAdminBooking(world.db, sam, asked, deps)).toMatchObject({ ok: false, code: "forbidden" });
+    expect(await createAdminBooking(world.db, jane, asked, deps)).toMatchObject({ ok: false, code: "forbidden" });
+    await allow("staffCreatesBookings");
+    expect(await createAdminBooking(world.db, sam, asked, deps)).toMatchObject({ ok: true });
+    expect(await createAdminBooking(world.db, jane, { ...asked, startMinute: h(17) }, deps)).toMatchObject({ ok: false, code: "forbidden" });
+  });
+});
+
+describe("the calendar's appointments", () => {
+  const WEEK = { from: "2026-11-15", to: "2026-11-22" };
+
+  it("shows the owners every appointment of the span, once for each studio it holds", async () => {
+    const bundle = expectOk(await world.book({ studioIds: [world.ids.blanche, world.ids.paris], startMinute: h(15), durationMinutes: 60 }));
+    const catalog = await loadCatalog(world.db);
+    const calendar = await loadCalendar(world.db, owner, catalog, WEEK);
+
+    expect(calendar.days).toHaveLength(7);
+    expect(calendar.appointments.map((entry) => [entry.ref, entry.date, entry.startMinute, entry.endMinute, entry.label])).toEqual([
+      [morningRef, NEAR, h(9), h(10), "confirmed"],
+      [bundle.ref, NEAR, h(15), h(16), "confirmed"],
+      [nextDayRef, NEXT_DAY, h(10), h(12), "confirmed"],
+    ]);
+    expect(calendar.appointments[1].studioIds.sort()).toEqual([world.ids.blanche, world.ids.paris].sort());
+    expect(calendar.appointments[0]).toMatchObject({ customerName: "Bob Brown", studioIds: [world.ids.dayglow] });
+  });
+
+  it("leaves out cancelled bookings and follows a label as it changes", async () => {
+    await cancelBooking(world.db, nextDayRef, { kind: "owner" }, world.manageDeps());
+    await setLabel(world.db, owner, morningRef, "reschedule_pending", NOW);
+    const calendar = await loadCalendar(world.db, owner, await loadCatalog(world.db), WEEK);
+    expect(calendar.appointments.map((entry) => [entry.ref, entry.label])).toEqual([[morningRef, "reschedule_pending"]]);
+  });
+
+  it("shows staff the days they may see, and nothing of the others", async () => {
+    const catalog = await loadCatalog(world.db);
+    const forSam = await loadCalendar(world.db, sam, catalog, WEEK);
+    expect(forSam.days).toEqual([NEAR]);
+    expect(forSam.appointments.map((entry) => entry.ref)).toEqual([morningRef]);
+    expect(await loadCalendar(world.db, riley, catalog, WEEK)).toEqual({ appointments: [], blocks: [], days: [] });
+    expect(await loadCalendar(world.db, jane, catalog, WEEK)).toEqual({ appointments: [], blocks: [], days: [] });
+
+    await allow("staffSeesAllDays");
+    expect((await loadCalendar(world.db, riley, catalog, WEEK)).appointments).toHaveLength(2);
   });
 });

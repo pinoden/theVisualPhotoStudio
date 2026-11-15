@@ -55,14 +55,27 @@ export function bookingWindow(
   return { problem: null, earliestStartMinute: localMinuteOn(earliest, date) };
 }
 
+export interface AvailabilityOptions {
+  /** Leave this booking's own holds out. For moving it: its present time does not stand in its own way. */
+  excludeBookingId?: string;
+  /**
+   * An administrator is booking or moving. The notice period that customers
+   * have to give does not apply: any time from now on can be chosen. Opening
+   * hours, existing bookings and the gap between them apply as for anyone.
+   */
+  asAdmin?: boolean;
+}
+
 /** Opening hours and taken time for every active studio on one date. */
 export async function loadDayAvailability(
   db: DbLike,
   catalog: Catalog,
   date: string,
   now: Date,
+  options: AvailabilityOptions = {},
 ): Promise<DayAvailability> {
-  const window = bookingWindow(date, now, catalog.settings);
+  const window = bookingWindow(date, now, options.asAdmin ? { ...catalog.settings, minLeadHours: 0 } : catalog.settings);
+  const exclude = options.excludeBookingId ?? null;
   if (window.problem === "invalid_date") {
     return { date, dayType: "weekday", problem: window.problem, earliestStartMinute: 1440, days: [] };
   }
@@ -75,6 +88,7 @@ export async function loadDayAvailability(
       from studio_holds
       where active
         and occupied && tstzrange(${start.toISOString()}::timestamptz, ${end.toISOString()}::timestamptz, '[)')
+        and (${exclude}::uuid is null or booking_id is distinct from ${exclude}::uuid)
     `,
   );
 

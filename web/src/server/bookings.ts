@@ -80,6 +80,12 @@ export interface BookingDeps {
   baseUrl: string;
   /** Who is told when a charge got no answer and a person has to check the processor. */
   ownerEmail?: string | null;
+  /**
+   * The address of the administrator who is making this booking for a client
+   * (see `createAdminBooking`). Nothing is charged online: the client pays at
+   * the studio. The notice period does not apply; every other rule does.
+   */
+  madeBy?: string;
 }
 
 const REF_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
@@ -189,7 +195,7 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
   if (chosen.some((s) => !s)) return fail(400, "unknown_studio", "One of the selected studios is not available.");
   const studioNames = chosen.map((s) => s!.name).join(" + ");
 
-  const day = await loadDayAvailability(db, catalog, input.date, now);
+  const day = await loadDayAvailability(db, catalog, input.date, now, { asAdmin: Boolean(deps.madeBy) });
   if (day.problem) {
     const text = {
       invalid_date: "That date is not valid.",
@@ -240,12 +246,16 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
   });
   if (!allFree) return fail(409, "slot_taken", "That time is no longer available. Please choose another.");
 
-  if (price.totalCents > 0) {
+  const chargesCard = price.totalCents > 0 && !deps.madeBy;
+  if (chargesCard) {
     if (!deps.payments) {
       return fail(503, "payments_unavailable", "Online payment is not available right now. Please contact the studio.");
     }
     if (!input.paymentToken) return fail(400, "payment_required", "Card details are required.");
   }
+  const booked = deps.madeBy
+    ? { actor: deps.madeBy, note: "Booked in the admin for the client" }
+    : { actor: BY_CUSTOMER, note: "Booked online" };
 
   const startAt = localToUtc(input.date, input.startMinute);
   const endAt = localToUtc(input.date, input.startMinute + input.durationMinutes);
@@ -285,7 +295,9 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
             // Money that was already moved once stays "moved" on the new booking.
             rescheduledCount: spendsCode && promo!.source === "reschedule" ? promo!.rescheduleGeneration : 0,
             manageTokenHash: hashToken(manageToken),
-            termsAcceptedAt: now,
+            madeBy: deps.madeBy ?? null,
+            // The client has not ticked the box themselves when an administrator books for them.
+            termsAcceptedAt: deps.madeBy ? null : now,
             createdAt: now,
           })
           .returning({ id: bookings.id });
@@ -331,7 +343,7 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
   }
 
   // ── Charge the card ────────────────────────────────────────────────────────
-  if (price.totalCents > 0) {
+  if (chargesCard) {
     const provider = deps.payments!;
     const [payment] = await db
       .insert(payments)
@@ -384,12 +396,12 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
         .set({ status: "succeeded", providerPaymentId: charge.paymentId })
         .where(eq(payments.id, payment.id));
       await tx.update(bookings).set({ status: "confirmed", holdExpiresAt: null }).where(eq(bookings.id, bookingId));
-      await recordEvent(tx, { bookingId, from: "new", to: "confirmed", actor: BY_CUSTOMER, at: now, note: "Booked online" });
+      await recordEvent(tx, { bookingId, from: "new", to: "confirmed", at: now, ...booked });
     });
   } else {
     await db.transaction(async (tx) => {
       await tx.update(bookings).set({ status: "confirmed", holdExpiresAt: null }).where(eq(bookings.id, bookingId));
-      await recordEvent(tx, { bookingId, from: "new", to: "confirmed", actor: BY_CUSTOMER, at: now, note: "Booked online" });
+      await recordEvent(tx, { bookingId, from: "new", to: "confirmed", at: now, ...booked });
     });
   }
 
@@ -407,6 +419,7 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
         totalCents: price.totalCents + (spendsCode && promo!.kind === "amount" ? price.promoDiscountCents : 0),
         creditCents: spendsCode && promo!.kind === "amount" ? price.promoDiscountCents : 0,
         cardCents: price.totalCents,
+        payAtStudio: Boolean(deps.madeBy) && price.totalCents > 0,
         manageUrl: manageUrl(deps.baseUrl, ref, manageToken),
         access: await loadAccessInstructions(db),
       }),
@@ -445,6 +458,8 @@ export interface BookingView {
   promoKind: PromoKind | null;
   /** The status label an administrator sees. */
   label: LabelKey;
+  /** Made in the admin for the client: nothing was charged online, the total is paid at the studio. */
+  madeByAdmin: boolean;
   totalCents: number;
   rescheduledCount: number;
 }
@@ -491,6 +506,7 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[]): Promise<Bo
     creditAppliedCents: booking.creditAppliedCents,
     promoKind: codeRows.find((code) => code.id === booking.promoCodeId)?.kind ?? null,
     label: labelOf(booking),
+    madeByAdmin: booking.madeBy !== null,
     totalCents: booking.totalCents,
     rescheduledCount: booking.rescheduledCount,
   }));

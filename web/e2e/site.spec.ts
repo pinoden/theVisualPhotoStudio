@@ -13,6 +13,7 @@ import {
   pickStudio,
   shot,
   signIn,
+  todayInStudio,
   totalRow,
 } from "./helpers";
 
@@ -416,7 +417,7 @@ test("staff see the day sheet of their assigned day and nothing else", async ({ 
   expect(appointment).not.toContain("$");
   expect(appointment).not.toContain(bob.email);
   // The second level of the admin has its own short menu.
-  await expect(onScreen(page.locator(".admin-nav"))).toHaveText("Day sheet");
+  await expect(onScreen(page.locator(".admin-nav"))).toHaveText("CalendarDay sheet");
   await shot(page, "16b-staff-appointment");
   await page.getByRole("button", { name: "Confirmed", exact: true }).click();
   await expect(byText(page, "Marked Confirmed.")).toBeVisible();
@@ -479,6 +480,94 @@ test("the owners switch on what staff can do, and it applies at once", async ({ 
   await expect(page.getByRole("heading", { name: "Bob Brown" })).toBeVisible();
   await expect(onScreen(page.locator(".admin-main"))).toContainText("$68");
   await expect(onScreen(page.locator(".admin-main"))).toContainText(bob.email);
+
+  // Their calendar shows the days they may see, and says so for the others.
+  await page.goto(`/admin/calendar?view=day&date=${NEAR}`);
+  await expect(page.getByRole("link", { name: /Bob Brown/ })).toBeVisible();
+  await page.goto(`/admin/calendar?view=day&date=${FAR}`);
+  await expect(byText(page, /None of these days is assigned to you/)).toBeVisible();
+  await expect(page.getByRole("link", { name: "New booking" })).toHaveCount(0); // not switched on for staff
+});
+
+test("the calendar shows a day, a week and a month, one studio or all, and a booking is moved and made from it", async ({ page }) => {
+  await signIn(page, THIRD_OWNER, `/admin/calendar?view=day&date=${NEAR}`);
+  await expect(page.getByRole("heading", { name: "Calendar", exact: true })).toBeVisible();
+
+  // The day: a column for each studio, and Bob's hour in Studio Paris with its time and its status.
+  const bobs = page.getByRole("link", { name: /Bob Brown/ });
+  await expect(bobs).toContainText("10:00 AM – 11:00 AM");
+  await expect(bobs).toContainText("Confirmed");
+  for (const studio of ["Studio Blanche", "Studio Dayglow", "Studio Paris"]) {
+    await expect(onScreen(page.locator(".cal-head")).getByText(studio)).toBeVisible();
+  }
+  await shot(page, "17c-calendar-day");
+
+  // One studio at a time, or all of them.
+  const filter = page.getByRole("navigation", { name: "Studio" });
+  await filter.getByRole("link", { name: "Studio Blanche" }).click();
+  await expect(page).toHaveURL(/studio=blanche/);
+  await expect(page.getByRole("link", { name: /Bob Brown/ })).toHaveCount(0);
+  await filter.getByRole("link", { name: "Studio Paris" }).click();
+  await expect(page.getByRole("link", { name: /Bob Brown/ })).toBeVisible();
+  await filter.getByRole("link", { name: "All studios" }).click();
+  await expect(page).not.toHaveURL(/studio=/);
+
+  // The week and the month show the same appointment.
+  const views = page.getByRole("navigation", { name: "Calendar view" });
+  await views.getByRole("link", { name: "Week" }).click();
+  await expect(page).toHaveURL(/view=week/);
+  await expect(page.getByRole("link", { name: /Bob Brown/ })).toBeVisible();
+  await shot(page, "17d-calendar-week");
+  await views.getByRole("link", { name: "Month" }).click();
+  await expect(page).toHaveURL(/view=month/);
+  await expect(page.getByRole("link", { name: /Bob Brown/ }).first()).toBeVisible();
+  await shot(page, "17e-calendar-month");
+
+  // Forward a month, and back to today.
+  const [year, month] = NEAR.split("-").map(Number);
+  const nextMonth = new Date(Date.UTC(year, month, 1)).toISOString().slice(0, 10);
+  await page.getByRole("link", { name: "Next month" }).click();
+  await expect(page).toHaveURL(new RegExp(`date=${nextMonth}`));
+  await page.getByRole("link", { name: "Today", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`date=${todayInStudio()}`));
+
+  // Open Bob's appointment from the calendar and move it to the afternoon. The studio needs the change,
+  // so it does not count as Bob's own reschedule.
+  await page.goto(`/admin/calendar?view=day&date=${NEAR}`);
+  await page.getByRole("link", { name: /Bob Brown/ }).click();
+  await expect(page.getByRole("heading", { name: "Bob Brown" })).toBeVisible();
+  await byLabel(page, "New date").fill(NEAR);
+  await page.getByRole("button", { name: "Show free times" }).click();
+  await page.getByLabel(/Free start times on/).selectOption({ label: "2:00 PM – 3:00 PM" });
+  await page.getByRole("checkbox", { name: /The client asked for this move/ }).uncheck();
+  await page.getByRole("button", { name: "Move booking" }).click();
+  await expect(byText(page, /Moved to .* The client has been emailed\./)).toBeVisible();
+  await expect(onScreen(page.locator(".admin-card h3 .status-badge"))).toHaveText("Rescheduled");
+  await expect(page.getByRole("row", { name: /Confirmed → Rescheduled/ })).toContainText("Moved from");
+  expect((await latestEmail(page, "booking_moved", bob.email)).body).toContain("New time: ");
+  await shot(page, "17f-appointment-moved");
+
+  // A booking made for a client, from the calendar: no card, and the price is paid at the studio.
+  await page.goto(`/admin/calendar?view=day&date=${NEAR}`);
+  await expect(page.getByRole("link", { name: /Bob Brown/ })).toContainText("2:00 PM – 3:00 PM");
+  await page.getByRole("link", { name: "New booking" }).click();
+  await page.getByRole("checkbox", { name: "Studio Dayglow" }).check();
+  await byLabel(page, "Length").selectOption({ label: "1 hour" });
+  await page.getByRole("button", { name: "Show free times" }).click();
+  await page.getByLabel("Free start times").selectOption({ label: "4:00 PM – 5:00 PM" });
+  await page.getByLabel("Client’s name").fill("Dana Diaz");
+  await page.getByLabel("Client’s email").fill("dana.e2e@example.com");
+  await page.getByLabel("Client’s phone").fill("407-555-0142");
+  await page.getByRole("button", { name: "Book for the client" }).click();
+  await expect(page.getByRole("heading", { name: "Dana Diaz" })).toBeVisible();
+  await expect(byText(page, /Nothing was charged: the price is paid at the studio\./)).toBeVisible();
+  await expect(onScreen(page.locator(".price-row.total"))).toContainText("To pay at the studio");
+  expect((await latestEmail(page, "booking_confirmation", "dana.e2e@example.com")).body).toContain("To pay at the studio: $78");
+
+  // It is on the calendar, in Studio Dayglow's column, like any other booking.
+  await page.goto(`/admin/calendar?view=day&date=${NEAR}&studio=dayglow`);
+  await expect(page.getByRole("link", { name: /Dana Diaz/ })).toContainText("4:00 PM – 5:00 PM");
+  await expect(page.getByRole("link", { name: /Bob Brown/ })).toHaveCount(0);
 });
 
 test("the owner sets a weekend price and the booking screen charges it on Saturday only", async ({ page }) => {

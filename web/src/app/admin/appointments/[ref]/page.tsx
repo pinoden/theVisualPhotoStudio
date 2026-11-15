@@ -7,13 +7,13 @@ import { BookingSummary } from "@/components/BookingSummary";
 import { StatusBadge } from "@/components/StatusBadge";
 import { getDb } from "@/db/client";
 import { LABEL_MEANING, LABEL_TEXT } from "@/lib/domain/labels";
-import { durationLabel } from "@/lib/domain/time";
-import { getAppointment } from "@/server/appointments";
+import { durationLabel, isIsoDate, longDateLabel, minutesToLabel } from "@/lib/domain/time";
+import { getAppointment, moveOptions } from "@/server/appointments";
 import { BY_CUSTOMER, BY_SYSTEM } from "@/server/history";
 import { requireStaff } from "@/server/session";
 import { formatInstant, formatRange, localDateOf } from "@/server/tz";
 import { AdminFrame, AdminLoading } from "../../frame";
-import { setLabelAction } from "../actions";
+import { moveBookingAction, setLabelAction } from "../actions";
 
 export const metadata: Metadata = { title: "Appointment", robots: { index: false } };
 
@@ -39,8 +39,14 @@ async function AppointmentDetails({
   await connection();
   const { ref } = await params;
   const viewer = await requireStaff(`/admin/appointments/${encodeURIComponent(ref)}`);
-  const appointment = await getAppointment(await getDb(), viewer, ref, new Date());
+  const db = await getDb();
+  const now = new Date();
+  const appointment = await getAppointment(db, viewer, ref, now);
   if (!appointment) notFound();
+  const query = await searchParams;
+  // "Move to a new time" works in two steps: choose the date, then one of the times that are free on it.
+  const moveDate = appointment.may.move && typeof query.move === "string" && isIsoDate(query.move) ? query.move : null;
+  const moveTimes = moveDate ? await moveOptions(db, viewer, ref, moveDate, now) : null;
 
   const when = formatRange(new Date(appointment.startAt), new Date(appointment.endAt));
   const day = localDateOf(new Date(appointment.startAt));
@@ -49,7 +55,7 @@ async function AppointmentDetails({
     <AdminFrame
       active={viewer.role === "owner" ? "/admin/bookings" : "/staff"}
       title={appointment.customerName}
-      query={await searchParams}
+      query={query}
       viewer={viewer}
     >
       <div className="admin-card">
@@ -99,7 +105,9 @@ async function AppointmentDetails({
           <dd>{appointment.ref}</dd>
         </dl>
         <p style={{ marginBottom: 0 }}>
-          <Link href={`/staff?date=${day}`}>Day sheet for this day</Link>
+          <Link href={`/admin/calendar?view=day&date=${day}`}>This day in the calendar</Link>
+          {" · "}
+          <Link href={`/staff?date=${day}`}>Day sheet</Link>
           {viewer.role === "owner" && (
             <>
               {" · "}
@@ -136,6 +144,71 @@ async function AppointmentDetails({
               </li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {appointment.may.move && (
+        <div className="admin-card" id="move">
+          <h3>Move to a new time</h3>
+          <form method="get" action={`/admin/appointments/${appointment.ref}#move`} className="admin-form-row">
+            <div className="form-group">
+              <label className="form-label" htmlFor="move-date">
+                New date
+              </label>
+              <input
+                id="move-date"
+                type="date"
+                name="move"
+                className="form-control"
+                defaultValue={moveDate ?? day}
+                min={localDateOf(now)}
+                required
+              />
+            </div>
+            <button type="submit" className="btn btn-outline btn-small">
+              Show free times
+            </button>
+          </form>
+          {moveDate && moveTimes && !moveTimes.ok && <p className="field-error">{moveTimes.message}</p>}
+          {moveDate && moveTimes?.ok && moveTimes.starts.length === 0 && (
+            <p className="field-error">
+              No time is free on {longDateLabel(moveDate)} for {durationLabel(appointment.durationMinutes)} in{" "}
+              {appointment.studios.join(" + ")}.
+            </p>
+          )}
+          {moveDate && moveTimes?.ok && moveTimes.starts.length > 0 && (
+            <form action={moveBookingAction}>
+              <input type="hidden" name="ref" value={appointment.ref} />
+              <input type="hidden" name="date" value={moveDate} />
+              <div className="admin-form-row">
+                <div className="form-group">
+                  <label className="form-label" htmlFor="move-time">
+                    Free start times on {longDateLabel(moveDate)}
+                  </label>
+                  <select id="move-time" name="startMinute" className="form-control" required>
+                    {moveTimes.starts.map((minute) => (
+                      <option key={minute} value={minute}>
+                        {minutesToLabel(minute)} – {minutesToLabel(minute + appointment.durationMinutes)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <button type="submit" className="btn btn-dark btn-small">
+                  Move booking
+                </button>
+              </div>
+              <label style={{ display: "block", fontSize: ".85rem" }}>
+                <input type="checkbox" name="countsAsClientMove" defaultChecked /> The client asked for this move. It
+                counts as their one reschedule: the booking is then no longer refunded automatically, as the rental
+                terms say. Untick it when the studio needs the change.
+              </label>
+            </form>
+          )}
+          <p style={{ fontSize: ".78rem", margin: ".75rem 0 0" }}>
+            The studio and the length stay the same, and what was paid stays as it is. Only times that are free are
+            offered: inside opening hours, and at least 15 minutes from any other appointment in the studio. The client
+            is emailed the new time.
+          </p>
         </div>
       )}
 

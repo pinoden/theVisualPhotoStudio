@@ -14,6 +14,8 @@ export interface CatalogStudio {
   description: string;
   includedGuests: number;
   bufferMinutes: number;
+  /** Its colour in the admin calendar. */
+  color: string;
   /** weekday (1-7) -> opening hours; a missing weekday means closed. */
   hours: Record<number, { openMinute: number; closeMinute: number }>;
 }
@@ -61,6 +63,7 @@ export async function loadCatalog(db: DbLike): Promise<Catalog> {
       description: s.description,
       includedGuests: s.includedGuests,
       bufferMinutes: s.bufferMinutes,
+      color: s.color,
       hours: Object.fromEntries(
         hourRows
           .filter((h) => h.studioId === s.id)
