@@ -100,6 +100,8 @@ export async function createAdminBookingAction(formData: FormData): Promise<void
         phone: formText(formData.get("phone")),
       },
       notes: formText(formData.get("notes")),
+      // A reward or credit of the client's, used on their behalf: it is checked and spent as at checkout.
+      promoCode: formText(formData.get("code")) || undefined,
     },
     { now: new Date(), baseUrl: await siteUrl() },
   );

@@ -42,6 +42,8 @@ const OWNER = "owner@studio.test";
 const SECOND_OWNER = "owner2@studio.test";
 // And so has the second, by the end of the run.
 const THIRD_OWNER = "owner3@studio.test";
+// And the third. This one looks customers up.
+const FIFTH_OWNER = "owner5@studio.test";
 const STAFF = "sam.e2e@studio.test";
 
 let rescheduleCode = "";
@@ -540,11 +542,14 @@ test("staff see the day sheet of their assigned day and nothing else", async ({ 
   await page.goto(`/staff?date=${FAR}`);
   await expect(onScreen(page.locator(".flash-error"))).toContainText("is not assigned to you");
   await expect(byText(page, "Bob Brown")).toHaveCount(0);
-  for (const path of ["/admin", "/admin/bookings", "/admin/prices", "/admin/staff"]) {
+  const bobsPage = `/admin/customers/${encodeURIComponent(bob.email)}`;
+  for (const path of ["/admin", "/admin/bookings", "/admin/prices", "/admin/staff", "/admin/customers", bobsPage]) {
     await page.goto(path);
     await expect(byText(page, /could not be found/i)).toBeVisible();
     await expect(byText(page, "Studio Admin")).toHaveCount(0);
   }
+  // A customer's payments are not for staff to see, as a page or as a file.
+  expect((await page.request.get(`${bobsPage}/receipts/year/${todayInStudio().slice(0, 4)}/pdf`)).status()).toBe(404);
 });
 
 test("a customer cannot open the staff or owner areas", async ({ page }) => {
@@ -1034,6 +1039,77 @@ test("the account lists every reward with its status, and a code is copied with 
   await expect(usable).toContainText(freeHourCodes[2]);
   await expect(usable).not.toContainText(freeHourCodes[0]);
   await expect(onScreen(page.locator(".account-card", { hasText: "Your next appointment" }))).toContainText("upcoming appointments in all");
+});
+
+test("the owners look a customer up, see what they paid, and correct their stamps and rewards", async ({ page }) => {
+  await signIn(page, FIFTH_OWNER, "/admin/customers");
+  await expect(page.getByRole("heading", { name: "Customers", exact: true })).toBeVisible();
+  await expect(page.getByRole("row", { name: /Bob Brown/ })).toBeVisible();
+
+  // Found by a part of the name, and opened.
+  await byLabel(page, "Name or email").fill("jane");
+  await page.getByRole("button", { name: "Search", exact: true }).click();
+  await expect(byText(page, /1 customer for "jane"/)).toBeVisible();
+  await expect(page.getByRole("row", { name: /Bob Brown/ })).toHaveCount(0);
+  await page.getByRole("link", { name: "Jane Smith" }).click();
+  await expect(page.getByRole("heading", { name: "Jane Smith", level: 1 })).toBeVisible();
+  await expect(onScreen(page.locator(".admin-card", { hasText: "Contact" }))).toContainText(jane.email);
+
+  // Everything she paid this year, added up, with a receipt for each booking; and the file of the year.
+  const year = todayInStudio().slice(0, 4);
+  const payments = onScreen(page.locator("#payments"));
+  await expect(payments).toContainText(`${year}: $362.80 paid, $64.60 refunded`);
+  await expect(payments.locator(".receipt-list li")).toHaveCount(4);
+  const janesPage = `/admin/customers/${encodeURIComponent(jane.email)}`;
+  const file = await page.request.get(`${janesPage}/receipts/year/${year}/pdf`);
+  expect(file.status()).toBe(200);
+  expect((await file.body()).subarray(0, 5).toString("latin1")).toBe("%PDF-");
+  // Her appointments, each a link to its own page, and whether each reward was used.
+  await expect(onScreen(page.locator("#appointments"))).toContainText("Released for rescheduling");
+  const rewards = onScreen(page.locator("#rewards"));
+  await expect(rewards.locator("li.reward")).toHaveCount(3);
+  await expect(rewards.locator("li.reward", { hasText: freeHourCodes[0] })).toContainText(/Redeemed on .+ for the appointment on/);
+  // The pet fee the owners returned to her is listed as credit, not as a reward.
+  await expect(onScreen(page.locator(".admin-card", { hasText: "Credit and discount codes" }))).toContainText("A pet fee returned");
+  await shot(page, "20b-admin-customer");
+
+  // Five visits she made before the site counted them: five stamps, which complete a free hour at once.
+  await byLabel(page, "What to do").selectOption({ label: "Add stamps" });
+  await byLabel(page, "How many").fill("5");
+  await byLabel(page, "Why").fill("Five visits on the old booking system");
+  await page.getByRole("button", { name: "Change stamps" }).click();
+  await expect(
+    byText(page, "5 stamps added. The customer now has 5 stamps. That completed 1 free hour, emailed to the customer just now."),
+  ).toBeVisible();
+  await expect(rewards.locator("li.reward")).toHaveCount(4);
+  await expect(rewards.locator("li.reward", { hasText: /THANKS-/ })).toContainText("Available");
+  await expect(onScreen(page.locator("#loyalty"))).toContainText(`5 stamps added by ${FIFTH_OWNER}. Five visits on the old booking system`);
+  const earned = await latestEmail(page, "loyalty_code", jane.email);
+  expect(earned.subject).toBe("You have earned a free hour in the studio");
+
+  // A stamp cannot be changed without saying why: the browser asks for the reason before anything is sent.
+  await byLabel(page, "How many").fill("1");
+  await page.getByRole("button", { name: "Change stamps" }).click();
+  await expect(onScreen(page.locator("#stamp-reason:invalid"))).toHaveCount(1);
+
+  // The free hour that was handed out once too often is cancelled, with a reason, and then given back.
+  const spare = rewards.locator("li.reward", { hasText: freeHourCodes[2] });
+  await byLabel(spare, "Why it is cancelled").fill("Handed out once too often");
+  await spare.getByRole("button", { name: "Cancel this reward" }).click();
+  await expect(byText(page, `Reward ${freeHourCodes[2]} cancelled. It can no longer be used, and the customer sees it as Canceled.`)).toBeVisible();
+  await expect(spare).toContainText("Canceled");
+  await byLabel(spare, "Why it is given back").fill("It was the right number after all");
+  await spare.getByRole("button", { name: "Give this reward back" }).click();
+  await expect(byText(page, `Reward ${freeHourCodes[2]} given back.`)).toBeVisible();
+  await expect(spare).toContainText("Available");
+  await expect(rewards).toContainText(`${freeHourCodes[2]} cancelled by ${FIFTH_OWNER}. Handed out once too often`);
+  await expect(rewards).toContainText(`${freeHourCodes[2]} given back by ${FIFTH_OWNER}. It was the right number after all`);
+
+  // From an appointment, the client's name leads to this page.
+  await onScreen(page.locator("#appointments")).getByRole("link").first().click();
+  await expect(page.getByRole("heading", { name: "Jane Smith", level: 1 })).toBeVisible();
+  await onScreen(page.locator(".detail-list")).getByRole("link", { name: "Jane Smith" }).click();
+  await expect(page).toHaveURL(new RegExp(`/admin/customers/${encodeURIComponent(jane.email).replace(/[.]/g, "\\.")}`));
 });
 
 test("a client without a photographer books a session, and the photographer cannot be booked twice", async ({ page }) => {

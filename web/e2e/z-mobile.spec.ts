@@ -402,6 +402,8 @@ test("the admin fits a phone: the calendar in its three views, an appointment, a
     "/admin",
     "/admin/calendar/new",
     "/admin/bookings",
+    "/admin/customers",
+    `/admin/customers/${encodeURIComponent(mia.email)}`,
     "/staff",
     "/admin/staff",
     "/admin/prices",

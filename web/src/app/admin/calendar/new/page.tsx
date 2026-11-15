@@ -178,6 +178,16 @@ async function NewBooking({ searchParams }: Pick<PageProps<"/admin/calendar/new"
                 </label>
                 <textarea id="new-notes" name="notes" className="form-control" rows={2} maxLength={2000} />
               </div>
+              <div className="form-group" style={{ maxWidth: "20rem" }}>
+                <label className="form-label" htmlFor="new-code">
+                  Client&rsquo;s reward or credit code (optional)
+                </label>
+                <input id="new-code" name="code" className="form-control" maxLength={40} autoComplete="off" autoCapitalize="characters" />
+                <div style={{ fontSize: ".78rem", marginTop: ".25rem" }}>
+                  A free hour or credit that belongs to this client&rsquo;s email address. It comes off what is paid at the
+                  studio, and is used up.
+                </div>
+              </div>
               <button type="submit" className="btn btn-dark">
                 Book for the client
               </button>

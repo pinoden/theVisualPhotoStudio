@@ -96,7 +96,11 @@ async function AppointmentDetails({
           )}
           <dt>Client</dt>
           <dd>
-            {appointment.customerName}
+            {viewer.role === "owner" && appointment.customerEmail ? (
+              <Link href={`/admin/customers/${encodeURIComponent(appointment.customerEmail)}`}>{appointment.customerName}</Link>
+            ) : (
+              appointment.customerName
+            )}
             {appointment.customerPhone && (
               <>
                 {" · "}

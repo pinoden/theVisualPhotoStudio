@@ -1193,6 +1193,11 @@ button { font-family: inherit; }
 .receipt h3 { font-size: 1.2rem; margin: 1.25rem 0 .5rem; }
 .receipt-foot { font-size: .78rem; margin: 1rem 0 0; }
 
+/* A customer's page in the admin. */
+.reward-fix { display: grid; gap: .4rem; margin-top: .75rem; max-width: 26rem; }
+.customer-year { border-top: 1px solid var(--color-border); padding-top: .75rem; margin-top: .75rem; }
+.customer-year:first-of-type { border-top: 0; padding-top: 0; margin-top: 0; }
+
 /* A receipt on paper, or saved as a PDF from the browser's print window: the receipt and nothing else. */
 @media print {
   .site-nav, .site-footer, .nav-dropdown, .page-banner, .account-who, .account-tabs, .no-print, nextjs-portal { display: none !important; }
