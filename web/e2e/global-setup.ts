@@ -12,6 +12,7 @@ const PATHS = [
   "/policies",
   "/faq",
   "/contact",
+  "/services",
   "/book",
   "/account/sign-in",
   "/account",

@@ -1042,6 +1042,11 @@ button { font-family: inherit; }
 .price-table td { padding: .35rem 0; border-bottom: 1px solid var(--color-border); }
 .price-table td:last-child { text-align: right; color: var(--color-dark); }
 .price-table tr:last-child td { border-bottom: none; }
+.price-table th {
+  padding: .35rem 0; border-bottom: 1px solid var(--color-border); text-align: left;
+  font-size: .75rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--color-dark);
+}
+.price-table th:last-child { text-align: right; }
 .policy h2 { font-size: 1.6rem; margin: 2.5rem 0 1rem; }
 .policy li { margin-bottom: .6rem; }
 

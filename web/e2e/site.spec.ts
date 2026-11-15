@@ -70,6 +70,14 @@ test("public pages show the studios and the live price list", async ({ page }) =
   await expect(byText(page, /7 or more days \(168 hours\)/)).toBeVisible();
   await page.goto("/studios");
   await expect(page.getByRole("heading", { name: "Studio Paris" })).toBeVisible();
+
+  // Photography sessions are described, and asked for by message.
+  await page.goto("/services");
+  await expect(page.getByRole("heading", { name: "Professional Photography" })).toBeVisible();
+  await expect(page.getByRole("row", { name: /2 hours/ })).toContainText("30");
+  await shot(page, "02a-photography");
+  await page.getByRole("link", { name: "Ask About a Session" }).click();
+  await expect(page.getByRole("heading", { name: "Contact Us" })).toBeVisible();
 });
 
 test("guest information answers with the current rules and prices", async ({ page }) => {

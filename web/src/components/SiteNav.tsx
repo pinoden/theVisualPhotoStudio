@@ -92,6 +92,11 @@ export function SiteNav() {
               </Link>
             </li>
             <li>
+              <Link href="/services" onClick={close}>
+                Photography
+              </Link>
+            </li>
+            <li>
               <Link href="/policies" onClick={close}>
                 Policies
               </Link>
