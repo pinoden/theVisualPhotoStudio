@@ -29,7 +29,7 @@ const byToken = (token: string): Actor => ({ kind: "token", token });
 const NEAR_START = new Date("2026-11-18T15:00:00Z"); // NEAR at 10:00 local
 
 describe("cancelling", () => {
-  it("7 or more days ahead: refunds the card automatically, less the 5% fee, and frees the slot", async () => {
+  it("14 or more days ahead: refunds the card automatically, less the 5% fee, and frees the slot", async () => {
     const booked = expectOk(await world.book({ date: FAR })); // $176
     const row = await bookingRow(booked.ref);
 
@@ -57,16 +57,32 @@ describe("cancelling", () => {
     expect(toOwner.body).toContain(`An automatic refund of $167.20 was sent for booking ${booked.ref}`);
   });
 
-  it("inside 7 days: cancels without a refund and says why", async () => {
+  it("inside 14 days: cancels without a refund and says why", async () => {
     const booked = expectOk(await world.book({ date: NEAR }));
     const result = expectOk(await cancelBooking(world.db, booked.ref, byToken(booked.manageToken), world.manageDeps()));
     expect(result).toMatchObject({ refundCents: 0, refund: "none" });
-    expect(result.message).toBe("No refund is due, because the booking starts in less than 7 days.");
+    expect(result.message).toBe("No refund is due, because the booking starts in less than 14 days.");
     expect(world.refundCalls).toHaveLength(0);
     expect(await world.db.select().from(refunds)).toHaveLength(0);
     expect((await bookingRow(booked.ref)).status).toBe("cancelled");
     expect((await world.emails("booking_cancelled"))[0].body).toContain("No refund is due");
     expect(await world.emails("owner_refund_notice")).toHaveLength(0);
+  });
+
+  it("draws the line at 14 days, not at 7 (the owner's answer of 2026-11-15)", async () => {
+    // Ten days ahead was refunded while the window was 7 days. It no longer is.
+    const tenDays = expectOk(await world.book({ date: "2026-11-24" }));
+    expect(expectOk(await cancelBooking(world.db, tenDays.ref, byToken(tenDays.manageToken), world.manageDeps()))).toMatchObject({
+      refundCents: 0,
+      refund: "none",
+    });
+    // Exactly 14 days before the start is still in time: Saturday 10:00 for a booking on Saturday the 28th at 10:00.
+    const onTheLine = expectOk(await world.book({ date: "2026-11-28" }));
+    expect(expectOk(await cancelBooking(world.db, onTheLine.ref, byToken(onTheLine.manageToken), world.manageDeps()))).toMatchObject({
+      refundCents: 17600 - 880,
+      feeCents: 880,
+      refund: "sent",
+    });
   });
 
   it("uses the owner's refund window and fee", async () => {
@@ -141,8 +157,9 @@ describe("cancelling", () => {
   });
 
   it("names the refund window as the owner set it, in days only when it is whole days", () => {
-    const late = { allowed: true, refundCents: 0, feeCents: 0, why: "inside_window" } as const;
+    const late = { allowed: true, refundCents: 0, feeCents: 0, creditCents: 0, byHandCents: 0, why: "inside_window" } as const;
     const text = (refundWindowHours: number) => cancelOutcomeText(late, { ...DEFAULT_SETTINGS, refundWindowHours });
+    expect(text(336)).toBe("No refund is due, because the booking starts in less than 14 days.");
     expect(text(168)).toBe("No refund is due, because the booking starts in less than 7 days.");
     expect(text(100)).toBe("No refund is due, because the booking starts in less than 100 hours.");
     expect(text(36)).toBe("No refund is due, because the booking starts in less than 36 hours.");
@@ -152,7 +169,7 @@ describe("cancelling", () => {
   it("tells the customer in advance what cancelling or moving would do", async () => {
     const early = expectOk(await world.book({ date: FAR }));
     expect(await getManageOptions(world.db, early.ref, byToken(early.manageToken), NOW)).toEqual({
-      cancel: { allowed: true, refundCents: 16720, feeCents: 880, why: "refund" },
+      cancel: { allowed: true, refundCents: 16720, feeCents: 880, creditCents: 0, byHandCents: 0, why: "refund" },
       reschedule: { allowed: true, creditCents: 17600, discountCents: 0 },
     });
     const late = expectOk(await world.book({ date: NEAR }));
@@ -291,7 +308,7 @@ describe("the reschedule code", () => {
 
     // 25 days ahead would normally be refundable. A moved booking is not.
     expect(await getManageOptions(world.db, second.ref, byToken(second.manageToken), NOW)).toEqual({
-      cancel: { allowed: true, refundCents: 0, feeCents: 0, why: "rescheduled" },
+      cancel: { allowed: true, refundCents: 0, feeCents: 0, creditCents: 0, byHandCents: 0, why: "rescheduled" },
       reschedule: { allowed: false, reason: "limit_reached" },
     });
     expect(await requestRescheduleCode(world.db, second.ref, byToken(second.manageToken), world.manageDeps())).toMatchObject({

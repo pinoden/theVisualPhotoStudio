@@ -1,12 +1,26 @@
 import type { Metadata } from "next";
+import { noticeHours } from "@/lib/domain/availability";
+import { petPolicy } from "@/lib/catalog-view";
+import { formatCents } from "@/lib/domain/pricing";
+import { hoursInWords, hoursWithDays, listInWords as list } from "@/lib/words";
+import { getCatalog } from "@/server/cached";
 
 export const metadata: Metadata = { title: "Studio Policies" };
 
 /**
- * Wording follows the studio's current terms for studio rentals.
- * The refund fee and windows are still open decisions; see CLAUDE.md.
+ * The rental terms. The wording follows the studio's current terms; every
+ * number that is a setting or a price (the refund windows and fee, how late
+ * and how often a booking can move, the notice for a photography session, the
+ * pet fee, where pets may come) is read from the catalog, so this page cannot
+ * disagree with what the site does. The house rules are written by hand here
+ * and on the guest information page: change both together.
  */
-export default function PoliciesPage() {
+export default async function PoliciesPage() {
+  const catalog = await getCatalog();
+  const s = catalog.settings;
+  const pets = petPolicy(catalog);
+  const fee = s.refundFeePercent > 0 ? `, excluding the non-refundable payment processing fee (${s.refundFeePercent}%)` : "";
+  const sessionNotice = noticeHours(s, true);
   return (
     <>
       <div className="page-banner">
@@ -19,19 +33,37 @@ export default function PoliciesPage() {
         <div className="container-sm policy">
           <h2 style={{ marginTop: 0 }}>Cancellations &amp; Rescheduling</h2>
           <ul>
-            <li>
-              Cancellations made 7 or more days (168 hours) before the appointment are eligible for a full refund,
-              excluding the non-refundable payment processing fee (5%).
-            </li>
-            <li>
-              Cancellations made less than 7 days before the appointment are non-refundable, but may be rescheduled
-              at no additional charge.
-            </li>
-            <li>Once an appointment has been rescheduled, it is no longer eligible for a refund.</li>
-            <li>
-              Photography sessions with our in-house photographer: the same terms, with 14 days in place of 7. A
-              session cancelled less than 14 days before the appointment is non-refundable.
-            </li>
+            {s.refundWindowHours > 0 ? (
+              <>
+                <li>
+                  Cancellations made {hoursWithDays(s.refundWindowHours)} or more before the appointment are eligible
+                  for a full refund{fee}.
+                </li>
+                <li>
+                  Cancellations made less than {hoursInWords(s.refundWindowHours)} before the appointment are
+                  non-refundable
+                  {s.maxReschedules > 0 &&
+                    `, but may be rescheduled at no additional charge${
+                      s.rescheduleCutoffHours > 0 ? ` until ${hoursInWords(s.rescheduleCutoffHours)} before the appointment` : ""
+                    }`}
+                  .
+                </li>
+              </>
+            ) : (
+              <li>Cancellations made before the appointment starts are eligible for a full refund{fee}.</li>
+            )}
+            {s.maxReschedules > 0 && (
+              <li>Once an appointment has been rescheduled, it is no longer eligible for a refund.</li>
+            )}
+            {catalog.photoPackages.length > 0 && (
+              <li>
+                Photography sessions with our in-house photographer
+                {s.photoRefundWindowHours === s.refundWindowHours
+                  ? " follow the same terms."
+                  : `: the same terms, with ${hoursInWords(s.photoRefundWindowHours)} in place of ${hoursInWords(s.refundWindowHours)}. A session cancelled less than ${hoursInWords(s.photoRefundWindowHours)} before the appointment is non-refundable.`}
+                {sessionNotice > 0 && ` Sessions are booked at least ${hoursInWords(sessionNotice)} ahead.`}
+              </li>
+            )}
           </ul>
 
           <h2>Rental Time</h2>
@@ -62,7 +94,13 @@ export default function PoliciesPage() {
           <ul>
             <li>Maximum studio capacity applies to all reservations.</li>
             <li>Children must be supervised by an adult at all times.</li>
-            <li>Pets are permitted in Studio Dayglow only and must be added to the reservation in advance.</li>
+            <li>
+              {pets.studios.length === 0
+                ? "Pets are not permitted."
+                : pets.petFreeStudios.length === 0
+                  ? "Pets are permitted in every studio and must be added to the reservation in advance."
+                  : `Pets are permitted in ${list(pets.studios)} only and must be added to the reservation in advance.`}
+            </li>
             <li>No smoking or vaping. No confetti or popping champagne. No fog or haze machines.</li>
             <li>No live bands or performances. Full nudity is not permitted.</li>
             <li>Food and drinks are not permitted on furniture.</li>
@@ -85,16 +123,26 @@ export default function PoliciesPage() {
             your booking. Booking both studios together reserves the whole area for you.
           </p>
 
-          <h2>Pets (Studio Dayglow only)</h2>
-          <ul>
-            <li>A maximum of 2 pets per reservation, up to 70 lbs each.</li>
-            <li>A $40 non-refundable pet fee applies per reservation and must be added when booking.</li>
-            <li>Pets must be leashed or in a carrier when not being photographed, and supervised at all times.</li>
-            <li>
-              The pet fee is not a damage deposit. Clients are responsible for any damage or extra cleaning caused
-              by their pet.
-            </li>
-          </ul>
+          {pets.studios.length > 0 && (
+            <>
+              <h2>Pets{pets.petFreeStudios.length > 0 && ` (${list(pets.studios)} only)`}</h2>
+              <ul>
+                <li>A maximum of 2 pets per reservation, up to 70 lbs each.</li>
+                <li>
+                  {pets.oneFee
+                    ? `A ${formatCents(pets.fees[0].cents)} pet fee applies per reservation and must be added when booking.`
+                    : `A pet fee applies per reservation and must be added when booking: ${list(pets.fees.map((f) => `${formatCents(f.cents)} for ${f.studio}`))}.`}{" "}
+                  The pet fee is not refunded to your card. If your pet does not come, the fee is returned to you as
+                  studio credit for a future booking.
+                </li>
+                <li>Pets must be leashed or in a carrier when not being photographed, and supervised at all times.</li>
+                <li>
+                  The pet fee is not a damage deposit. Clients are responsible for any damage or extra cleaning caused
+                  by their pet.
+                </li>
+              </ul>
+            </>
+          )}
 
           <h2>Conduct &amp; Liability</h2>
           <p>

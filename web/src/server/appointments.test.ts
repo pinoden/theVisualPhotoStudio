@@ -179,21 +179,24 @@ describe("the two levels of the admin", () => {
     ]);
   });
 
-  it("gives staff the appointment without contact details or prices, and lets them change its label", async () => {
+  it("gives staff the appointment with contact details and without prices, and lets them change its label", async () => {
     const appointment = (await getAppointment(world.db, sam, morningRef, NOW))!;
     expect(appointment).toMatchObject({
       customerName: "Bob Brown",
-      customerPhone: null,
-      customerEmail: null,
+      customerPhone: "407-555-0111", // shown by default since the owner's answer of 2026-11-15
+      customerEmail: "bob@example.com",
       money: null,
       may: { setLabels: true, move: false },
     });
-    expect(JSON.stringify(appointment)).not.toContain("bob@example.com");
     expect(JSON.stringify(appointment)).not.toContain("7800");
+
+    await allow("staffSeesContact", false);
+    const hidden = (await getAppointment(world.db, sam, morningRef, NOW))!;
+    expect(hidden).toMatchObject({ customerPhone: null, customerEmail: null });
+    expect(JSON.stringify(hidden)).not.toContain("bob@example.com");
   });
 
   it("follows the owners' switches at once, with nothing redeployed", async () => {
-    await allow("staffSeesContact");
     await allow("staffSeesPrices");
     await allow("staffMovesBookings");
     expect(await getAppointment(world.db, sam, morningRef, NOW)).toMatchObject({

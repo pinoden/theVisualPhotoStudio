@@ -20,7 +20,7 @@ import {
   unblockPhotographer,
 } from "./photography";
 import { issuePromo } from "./promos";
-import { createTestWorld, daysAfter, expectOk, FAR, h, NEAR, NOW, type TestWorld } from "./testing";
+import { createTestWorld, daysAfter, expectOk, FAR, h, hoursAfter, NEAR, NOW, type TestWorld } from "./testing";
 
 let world: TestWorld;
 let owner: AuthUser;
@@ -39,8 +39,15 @@ beforeEach(async () => {
 });
 
 const byToken = (token: string) => ({ kind: "token", token }) as const;
-/** A photography session: Blanche, NEAR (a Wednesday), 10:00, one hour, unless said otherwise. */
-const session = (overrides: Parameters<TestWorld["book"]>[0] = {}) => world.book({ photography: true, durationMinutes: 60, ...overrides });
+/** A Wednesday 18 days ahead: outside the two weeks' notice a session needs. */
+const SESSION_DAY = "2026-12-02";
+/** The Thursday after it. */
+const NEXT_DAY = "2026-12-03";
+/** A photography session: Blanche, SESSION_DAY, 10:00, one hour, unless said otherwise. */
+const session = (overrides: Parameters<TestWorld["book"]>[0] = {}) =>
+  world.book({ photography: true, date: SESSION_DAY, durationMinutes: 60, ...overrides });
+/** A studio rental on the same day. */
+const rental = (overrides: Parameters<TestWorld["book"]>[0] = {}) => world.book({ date: SESSION_DAY, ...overrides });
 const range = (column: typeof studioHolds.occupied | typeof photographerHolds.occupied) => ({
   from: sql<Date>`lower(${column})`,
   to: sql<Date>`upper(${column})`,
@@ -86,8 +93,8 @@ describe("booking a photography session", () => {
       .select({ ...range(photographerHolds.occupied), photographerId: photographerHolds.photographerId })
       .from(photographerHolds)
       .where(eq(photographerHolds.bookingId, booking.id));
-    expect([iso(studio.from), iso(studio.to)]).toEqual(["2026-11-18T15:00:00.000Z", "2026-11-18T16:15:00.000Z"]);
-    expect([iso(person.from), iso(person.to)]).toEqual(["2026-11-18T15:00:00.000Z", "2026-11-18T16:15:00.000Z"]);
+    expect([iso(studio.from), iso(studio.to)]).toEqual(["2026-12-02T15:00:00.000Z", "2026-12-02T16:15:00.000Z"]);
+    expect([iso(person.from), iso(person.to)]).toEqual(["2026-12-02T15:00:00.000Z", "2026-12-02T16:15:00.000Z"]);
     expect(person.photographerId).toBe(photographer.id);
 
     const mail = (await world.emails("booking_confirmation")).at(-1)!;
@@ -106,7 +113,7 @@ describe("booking a photography session", () => {
     expect(await session({ studioIds: [world.ids.dayglow], startMinute: h(9) })).toMatchObject({ ok: false, code: "slot_taken" });
 
     // Renting Paris without a photographer at that time is fine: only the photographer is taken.
-    expect((await world.book({ studioIds: [world.ids.paris], startMinute: h(11), durationMinutes: 60 })).ok).toBe(true);
+    expect((await rental({ studioIds: [world.ids.paris], startMinute: h(11), durationMinutes: 60 })).ok).toBe(true);
     // And a session 15 minutes after the first one ends is fine.
     expect((await session({ studioIds: [world.ids.dayglow], startMinute: h(12) + 15 })).ok).toBe(true);
   });
@@ -125,7 +132,7 @@ describe("booking a photography session", () => {
   });
 
   it("needs a studio that is free too", async () => {
-    expectOk(await world.book({ startMinute: h(10), durationMinutes: 60 })); // Blanche is rented
+    expectOk(await rental({ startMinute: h(10), durationMinutes: 60 })); // Blanche is rented
     expect(await session()).toMatchObject({ ok: false, code: "slot_taken", message: "That time is no longer available. Please choose another." });
     expect((await session({ studioIds: [world.ids.paris] })).ok).toBe(true);
   });
@@ -150,12 +157,12 @@ describe("booking a photography session", () => {
     expect(await session({ promoCode: percent.code })).toEqual(refusal);
     expect(await session({ promoCode: freeHour.code })).toEqual(refusal);
     expect(
-      await quoteSelection(world.db, { studioIds: [world.ids.blanche], date: NEAR, durationMinutes: 60, photography: true, promoCode: freeHour.code, email: "jane@example.com" }, NOW),
+      await quoteSelection(world.db, { studioIds: [world.ids.blanche], date: SESSION_DAY, durationMinutes: 60, photography: true, promoCode: freeHour.code, email: "jane@example.com" }, NOW),
     ).toEqual(refusal);
 
     // A reschedule credit is the customer's own money: it pays for a session like for anything else.
-    const rental = expectOk(await world.book({ date: FAR }));
-    const credit = expectOk(await requestRescheduleCode(world.db, rental.ref, byToken(rental.manageToken), world.manageDeps()));
+    const paid = expectOk(await world.book({ date: FAR }));
+    const credit = expectOk(await requestRescheduleCode(world.db, paid.ref, byToken(paid.manageToken), world.manageDeps()));
     const booked = expectOk(await session({ promoCode: credit.code }));
     expect(booked.totalCents).toBe(37500 - 17600);
   });
@@ -168,11 +175,11 @@ describe("the photographer's availability", () => {
     expect(await session({ startMinute: h(10) })).toMatchObject({ ok: false, code: "slot_taken" });
     expect(await session({ startMinute: h(16) + 15 })).toMatchObject({ ok: false, code: "slot_taken" }); // would run past 5:00
     expect((await session({ startMinute: h(13) })).ok).toBe(true);
-    expect((await world.book({ studioIds: [world.ids.paris], startMinute: h(10), durationMinutes: 60 })).ok).toBe(true);
+    expect((await rental({ studioIds: [world.ids.paris], startMinute: h(10), durationMinutes: 60 })).ok).toBe(true);
 
     // A day off: no session at all that day.
     expect(await savePhotographerHours(world.db, owner, 4, null)).toBe(true);
-    expect(await session({ date: "2026-11-19" })).toMatchObject({ ok: false, code: "slot_taken" });
+    expect(await session({ date: NEXT_DAY })).toMatchObject({ ok: false, code: "slot_taken" });
     expect((await loadPhotographer(world.db))!.hours[4]).toBeUndefined();
   });
 
@@ -183,7 +190,7 @@ describe("the photographer's availability", () => {
   });
 
   it("can be blocked for part of a day, and opened again", async () => {
-    const blocked = await blockPhotographer(world.db, owner, { date: NEAR, startMinute: h(9), endMinute: h(12), note: "Wedding shoot" });
+    const blocked = await blockPhotographer(world.db, owner, { date: SESSION_DAY, startMinute: h(9), endMinute: h(12), note: "Wedding shoot" });
     expect(blocked.ok).toBe(true);
     expect(await session({ startMinute: h(11) })).toMatchObject({ ok: false, code: "slot_taken" });
     expect(await session({ startMinute: h(8) + 45 })).toMatchObject({ ok: false, code: "slot_taken" });
@@ -191,7 +198,7 @@ describe("the photographer's availability", () => {
 
     const blocks = await listPhotographerBlocks(world.db, NOW);
     expect(blocks).toHaveLength(1);
-    expect(blocks[0]).toMatchObject({ startAt: "2026-11-18T14:00:00.000Z", endAt: "2026-11-18T17:00:00.000Z", note: "Wedding shoot" });
+    expect(blocks[0]).toMatchObject({ startAt: "2026-12-02T14:00:00.000Z", endAt: "2026-12-02T17:00:00.000Z", note: "Wedding shoot" });
 
     expect(await unblockPhotographer(world.db, owner, blocks[0].id)).toBe(true);
     expect(await listPhotographerBlocks(world.db, NOW)).toHaveLength(0);
@@ -200,11 +207,11 @@ describe("the photographer's availability", () => {
 
   it("cannot be blocked over a session that is already booked, and a session's hold is never removed as a block", async () => {
     const booked = expectOk(await session());
-    expect(await blockPhotographer(world.db, owner, { date: NEAR, startMinute: h(9), endMinute: h(12), note: "" })).toEqual({
+    expect(await blockPhotographer(world.db, owner, { date: SESSION_DAY, startMinute: h(9), endMinute: h(12), note: "" })).toEqual({
       ok: false,
       message: "A photography session or another block already takes part of that time.",
     });
-    expect(await blockPhotographer(world.db, owner, { date: NEAR, startMinute: h(12), endMinute: h(11), note: "" })).toMatchObject({ ok: false });
+    expect(await blockPhotographer(world.db, owner, { date: SESSION_DAY, startMinute: h(12), endMinute: h(11), note: "" })).toMatchObject({ ok: false });
     expect(await blockPhotographer(world.db, owner, { date: "tomorrow", startMinute: h(9), endMinute: h(12), note: "" })).toMatchObject({ ok: false });
 
     const [hold] = await world.db.select().from(photographerHolds);
@@ -214,13 +221,13 @@ describe("the photographer's availability", () => {
   });
 
   it("is reported with the day's availability, for the booking screen", async () => {
-    await blockPhotographer(world.db, owner, { date: NEAR, startMinute: h(14), endMinute: h(15), note: "" });
+    await blockPhotographer(world.db, owner, { date: SESSION_DAY, startMinute: h(14), endMinute: h(15), note: "" });
     expectOk(await session());
     const catalog = await loadCatalog(world.db);
-    const day = await loadDayAvailability(world.db, catalog, NEAR, NOW, { withPhotographer: true });
+    const day = await loadDayAvailability(world.db, catalog, SESSION_DAY, NOW, { withPhotographer: true });
     expect(day.photographer).toMatchObject({
       openMinute: h(9),
-      closeMinute: h(19),
+      closeMinute: h(17), // 9 am to 5 pm, the owner's answer of 2026-11-15
       bufferMinutes: 15,
       anyStart: true,
       busy: [
@@ -229,7 +236,18 @@ describe("the photographer's availability", () => {
       ],
     });
     // It is not part of an ordinary request for a day.
-    expect((await loadDayAvailability(world.db, catalog, NEAR, NOW)).photographer).toBeUndefined();
+    expect((await loadDayAvailability(world.db, catalog, SESSION_DAY, NOW)).photographer).toBeUndefined();
+  });
+
+  it("starts at 9 am to 5 pm on every day, so the last one-hour session starts at 4 pm", async () => {
+    const hours = (await loadPhotographer(world.db))!.hours;
+    for (let weekday = 1; weekday <= 7; weekday++) expect(hours[weekday]).toEqual({ openMinute: h(9), closeMinute: h(17) });
+
+    expect((await session({ startMinute: h(16) })).ok).toBe(true); // 4:00 to 5:00 PM
+    expect(await session({ studioIds: [world.ids.paris], startMinute: h(16) + 15 })).toMatchObject({ ok: false, code: "slot_taken" });
+    // A two-hour session has to start by 3 pm. The studio itself is open until 7.
+    expect(await session({ studioIds: [world.ids.paris], startMinute: h(16), durationMinutes: 120 })).toMatchObject({ ok: false, code: "slot_taken" });
+    expect((await rental({ studioIds: [world.ids.paris], startMinute: h(17), durationMinutes: 120 })).ok).toBe(true);
   });
 
   it("is the owners' to set, and staff's only once the owners switch it on", async () => {
@@ -245,6 +263,43 @@ describe("the photographer's availability", () => {
     expect(await unblockPhotographer(world.db, jane, made.ok ? made.id : "")).toBe(false);
     expect(await savePhotographerHours(world.db, sam, 8, null)).toBe(false);
     expect(await savePhotographerHours(world.db, sam, 3, { openMinute: h(18), closeMinute: h(10) })).toBe(false);
+  });
+});
+
+describe("the notice a session needs", () => {
+  const TOO_SOON = "Photography sessions are made at least 14 days ahead. Please choose a later date.";
+
+  it("is two weeks: the photographer cannot be booked closer than that, while a studio can", async () => {
+    // Now is Saturday the 14th at 10:00. Four days ahead, and thirteen days ahead, are too soon.
+    expect(await session({ date: NEAR })).toEqual({ ok: false, status: 409, code: "slot_taken", message: TOO_SOON });
+    expect(await session({ date: "2026-11-27" })).toMatchObject({ ok: false, message: TOO_SOON });
+    expect(world.charges).toHaveLength(0);
+    // Exactly two weeks ahead to the minute is in time; a quarter of an hour sooner is not.
+    expect(await session({ date: "2026-11-28", startMinute: h(9) + 45 })).toMatchObject({ ok: false, message: TOO_SOON });
+    expect((await session({ date: "2026-11-28", startMinute: h(10) })).ok).toBe(true);
+    // Renting a studio keeps its own 24 hours.
+    expect((await world.book({ date: NEAR })).ok).toBe(true);
+  });
+
+  it("is what the booking screen is told, so it offers no time inside it", async () => {
+    const catalog = await loadCatalog(world.db);
+    expect((await loadDayAvailability(world.db, catalog, NEAR, NOW, { withPhotographer: true })).earliestStartMinute).toBe(1440);
+    expect((await loadDayAvailability(world.db, catalog, "2026-11-28", NOW, { withPhotographer: true })).earliestStartMinute).toBe(h(10));
+    expect((await loadDayAvailability(world.db, catalog, SESSION_DAY, NOW, { withPhotographer: true })).earliestStartMinute).toBe(0);
+    // The same day asked about for a rental: only the ordinary notice.
+    expect((await loadDayAvailability(world.db, catalog, NEAR, NOW)).earliestStartMinute).toBe(0);
+  });
+
+  it("follows the owner's setting, and is never shorter than the notice for a rental", async () => {
+    await world.db.insert(settings).values({ key: "photoMinLeadHours", value: 72 });
+    expect((await session({ date: NEAR })).ok).toBe(true); // four days ahead
+    await world.db.update(settings).set({ value: 0 }).where(eq(settings.key, "photoMinLeadHours"));
+    // With no notice of its own, a session still needs the 24 hours every booking needs.
+    expect(await session({ date: "2026-11-15", startMinute: h(9), studioIds: [world.ids.paris] })).toMatchObject({
+      ok: false,
+      message: "Photography sessions are made at least 24 hours ahead. Please choose a later date.",
+    });
+    expect((await session({ date: "2026-11-15", startMinute: h(10), studioIds: [world.ids.paris] })).ok).toBe(true);
   });
 });
 
@@ -271,21 +326,33 @@ describe("the packages", () => {
 });
 
 describe("after a session is booked", () => {
-  it("is refunded when cancelled 14 days or more ahead, not 7, and frees the studio and the photographer", async () => {
-    // Ten days ahead: a studio rental would be refunded, a session is not.
-    const soon = expectOk(await session({ date: "2026-11-24" }));
-    const choices = await getManageChoices(world.db, soon.ref, byToken(soon.manageToken), NOW);
+  it("is refunded when cancelled 14 days or more ahead, and frees the studio and the photographer", async () => {
+    // Booked 18 days ahead, and cancelled eight days later: ten days before the session.
+    const soon = expectOk(await session());
+    const tenDaysBefore = daysAfter(NOW, 8);
+    const choices = await getManageChoices(world.db, soon.ref, byToken(soon.manageToken), tenDaysBefore);
     expect(choices?.cancel.text).toBe("No refund is due, because the booking starts in less than 14 days.");
-    const cancelled = expectOk(await cancelBooking(world.db, soon.ref, byToken(soon.manageToken), world.manageDeps()));
+    const cancelled = expectOk(await cancelBooking(world.db, soon.ref, byToken(soon.manageToken), world.manageDeps({ now: tenDaysBefore })));
     expect(cancelled.refundCents).toBe(0);
     expect(await world.db.select().from(photographerHolds).where(eq(photographerHolds.active, true))).toHaveLength(0);
     // The time can be booked again, by someone else, in another studio.
-    expect((await session({ date: "2026-11-24", studioIds: [world.ids.paris] })).ok).toBe(true);
+    expect((await session({ studioIds: [world.ids.paris] })).ok).toBe(true);
 
     // Twenty-five days ahead: refunded, less the fee.
     const later = expectOk(await session({ date: FAR }));
     const refunded = expectOk(await cancelBooking(world.db, later.ref, byToken(later.manageToken), world.manageDeps()));
     expect(refunded.refundCents).toBe(37500 - 1875);
+  });
+
+  it("keeps its own refund window when the owners give rentals a different one", async () => {
+    await world.db.insert(settings).values({ key: "refundWindowHours", value: 168 }); // rentals: 7 days
+    const booked = expectOk(await session());
+    const paris = expectOk(await rental({ studioIds: [world.ids.paris], durationMinutes: 60 }));
+    const tenDaysBefore = hoursAfter(NOW, 8 * 24);
+    const deps = world.manageDeps({ now: tenDaysBefore });
+    // Ten days before: the rental is refunded, the session is not.
+    expect(expectOk(await cancelBooking(world.db, paris.ref, byToken(paris.manageToken), deps)).refundCents).toBe(6800 - 340);
+    expect(expectOk(await cancelBooking(world.db, booked.ref, byToken(booked.manageToken), deps)).refundCents).toBe(0);
   });
 
   it("frees the photographer when the customer takes a reschedule code", async () => {
@@ -298,7 +365,7 @@ describe("after a session is booked", () => {
     const first = expectOk(await session()); // Blanche, 10:00 to 11:00
     expectOk(await session({ studioIds: [world.ids.paris], startMinute: h(14) })); // Paris, 2:00 to 3:00
 
-    const to = (startMinute: number) => ({ date: NEAR, startMinute, countsAsClientMove: false });
+    const to = (startMinute: number) => ({ date: SESSION_DAY, startMinute, countsAsClientMove: false });
     // Blanche is free at 2:30, but the photographer is in Paris then.
     expect(await moveBooking(world.db, owner, first.ref, to(h(14) + 30), NOW)).toEqual({
       ok: false,
@@ -310,15 +377,15 @@ describe("after a session is booked", () => {
 
     const [booking] = await world.db.select().from(bookings).where(eq(bookings.ref, first.ref));
     const [person] = await world.db.select(range(photographerHolds.occupied)).from(photographerHolds).where(eq(photographerHolds.bookingId, booking.id));
-    expect([iso(person.from), iso(person.to)]).toEqual(["2026-11-18T20:15:00.000Z", "2026-11-18T21:30:00.000Z"]); // 3:15 to 4:30 PM
+    expect([iso(person.from), iso(person.to)]).toEqual(["2026-12-02T20:15:00.000Z", "2026-12-02T21:30:00.000Z"]); // 3:15 to 4:30 PM
     // The morning is the photographer's again.
     expect((await session({ studioIds: [world.ids.dayglow], startMinute: h(10) })).ok).toBe(true);
   });
 
   it("is marked as photography on the calendar", async () => {
     const booked = expectOk(await session());
-    expectOk(await world.book({ studioIds: [world.ids.paris], durationMinutes: 60 }));
-    const calendar = await loadCalendar(world.db, owner, await loadCatalog(world.db), { from: NEAR, to: "2026-11-19" });
+    expectOk(await rental({ studioIds: [world.ids.paris], durationMinutes: 60 }));
+    const calendar = await loadCalendar(world.db, owner, await loadCatalog(world.db), { from: SESSION_DAY, to: NEXT_DAY });
     expect(calendar.appointments.map((entry) => [entry.ref === booked.ref, entry.photography])).toEqual(
       expect.arrayContaining([
         [true, true],

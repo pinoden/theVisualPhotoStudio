@@ -7,12 +7,18 @@ import type { PromoDef, PromoKind } from "@/lib/domain/pricing";
 /**
  * Codes customers enter at checkout. Three kinds:
  *  - percent: a discount on the studio rental, usable `maxUses` times.
- *  - amount: money the customer already paid (a reschedule credit). `value`
- *    is what is left on it and goes down as it is spent.
+ *  - amount: money the customer already paid (a reschedule credit, or a pet
+ *    fee returned as studio credit), or credit the studio gave. `value` is
+ *    what is left on it and goes down as it is spent.
  *  - free_hour: the price of one hour of one studio, usable `maxUses` times
  *    (the loyalty reward: once). `value` is the free minutes, 60.
  */
-export type PromoSource = "loyalty" | "reschedule" | "manual";
+export type PromoSource = "loyalty" | "reschedule" | "manual" | "pet_fee";
+
+/** What an amount code is, in the customer's words: a moved booking's money, or credit from the studio. */
+export function creditName(source: PromoSource): string {
+  return source === "reschedule" ? "reschedule code" : "studio credit";
+}
 
 export interface UsablePromo {
   id: string;
@@ -162,7 +168,7 @@ export interface IssuePromoInput {
   note?: string;
 }
 
-const PREFIX: Record<PromoSource, string> = { loyalty: "THANKS", reschedule: "MOVE", manual: "VS" };
+const PREFIX: Record<PromoSource, string> = { loyalty: "THANKS", reschedule: "MOVE", manual: "VS", pet_fee: "PET" };
 
 /**
  * Create a new code. Returns null when a code for the same origin booking and

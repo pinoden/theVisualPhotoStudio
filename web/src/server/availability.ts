@@ -1,7 +1,7 @@
 import { and, asc, eq, lt, sql } from "drizzle-orm";
 import { bookings, photographerHours, photographers } from "@/db/schema";
 import { queryRows, type DbLike } from "@/db/client";
-import type { StudioDay } from "@/lib/domain/availability";
+import { noticeHours, type StudioDay } from "@/lib/domain/availability";
 import { daysBetween, isIsoDate, isoWeekday, type DayType, type IsoDate } from "@/lib/domain/time";
 import { dayTypeFor, type Catalog } from "./catalog";
 import { releaseHolds } from "./holds";
@@ -130,7 +130,9 @@ export async function loadDayAvailability(
   now: Date,
   options: AvailabilityOptions = {},
 ): Promise<DayAvailability> {
-  const window = bookingWindow(date, now, options.asAdmin ? { ...catalog.settings, minLeadHours: 0 } : catalog.settings);
+  // The notice customers give: none for an administrator, and longer for a session with the photographer.
+  const minLeadHours = options.asAdmin ? 0 : noticeHours(catalog.settings, Boolean(options.withPhotographer));
+  const window = bookingWindow(date, now, { ...catalog.settings, minLeadHours });
   const exclude = options.excludeBookingId ?? null;
   if (window.problem === "invalid_date") {
     return { date, dayType: "weekday", problem: window.problem, earliestStartMinute: 1440, days: [] };

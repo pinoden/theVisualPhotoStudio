@@ -7,13 +7,23 @@ import { BookingSummary } from "@/components/BookingSummary";
 import { StatusBadge } from "@/components/StatusBadge";
 import { getDb } from "@/db/client";
 import { LABEL_MEANING, LABEL_TEXT } from "@/lib/domain/labels";
+import { formatCents } from "@/lib/domain/pricing";
 import { durationLabel, isIsoDate, longDateLabel, minutesToLabel } from "@/lib/domain/time";
+import { centsToInput, MONEY_FIELD } from "@/lib/parse";
+import { PAYMENT_METHODS } from "@/lib/payment-methods";
 import { getAppointment, moveOptions } from "@/server/appointments";
 import { BY_CUSTOMER, BY_SYSTEM } from "@/server/history";
 import { requireStaff } from "@/server/session";
 import { formatInstant, formatRange, localDateOf } from "@/server/tz";
 import { AdminFrame, AdminLoading } from "../../frame";
-import { moveBookingAction, setLabelAction } from "../actions";
+import {
+  handRefundAction,
+  moveBookingAction,
+  petCreditAction,
+  recordPaymentAction,
+  setLabelAction,
+  voidPaymentAction,
+} from "../actions";
 
 export const metadata: Metadata = { title: "Appointment", robots: { index: false } };
 
@@ -228,6 +238,174 @@ async function AppointmentDetails({
         </div>
       )}
 
+      {appointment.payments && (appointment.payments.payments.length > 0 || appointment.payments.dueCents > 0) && (
+        <div className="admin-card" id="payment">
+          <h3>Payment</h3>
+          <p>
+            {appointment.payments.dueCents > 0 ? (
+              <>
+                <strong>{formatCents(appointment.payments.dueCents)} is still to pay.</strong> This booking was made in the admin,
+                so nothing was charged online.
+              </>
+            ) : appointment.payments.totalCents > 0 ? (
+              <strong>Paid in full.</strong>
+            ) : (
+              "Nothing was owed for this booking."
+            )}
+          </p>
+
+          {appointment.payments.payments.length > 0 && (
+            <div className="data-table-wrap">
+              <table className="data-table history-table">
+                <thead>
+                  <tr>
+                    <th>When</th>
+                    <th>Payment</th>
+                    <th>Recorded by</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {appointment.payments.payments.map((payment) => (
+                    <tr key={payment.id}>
+                      <td style={{ whiteSpace: "nowrap" }}>{formatInstant(new Date(payment.at))}</td>
+                      <td>
+                        <span style={payment.voided ? { textDecoration: "line-through" } : undefined}>
+                          {formatCents(payment.amountCents)} · {payment.how}
+                        </span>
+                        {payment.voided && <div style={{ fontSize: ".8rem" }}>Taken back: it does not count.</div>}
+                        {payment.refundedCents > 0 && (
+                          <div style={{ fontSize: ".8rem" }}>{formatCents(payment.refundedCents)} given back.</div>
+                        )}
+                        {payment.note && <div style={{ fontSize: ".8rem" }}>{payment.note}</div>}
+                        {appointment.may.changePayments && payment.byHand && !payment.voided && (
+                          <div className="payment-fixes">
+                            {payment.refundedCents === 0 && (
+                              <details>
+                                <summary>Recorded by mistake</summary>
+                                <form action={voidPaymentAction}>
+                                  <input type="hidden" name="ref" value={appointment.ref} />
+                                  <input type="hidden" name="paymentId" value={payment.id} />
+                                  <label className="form-label" htmlFor={`void-${payment.id}`}>
+                                    Why it is taken back
+                                  </label>
+                                  <input id={`void-${payment.id}`} name="reason" className="form-control" maxLength={200} />
+                                  <button type="submit" className="btn btn-outline btn-small">
+                                    Take this record back
+                                  </button>
+                                </form>
+                              </details>
+                            )}
+                            {payment.refundedCents < payment.amountCents && (
+                              <details>
+                                <summary>Record a refund given by hand</summary>
+                                <form action={handRefundAction}>
+                                  <input type="hidden" name="ref" value={appointment.ref} />
+                                  <input type="hidden" name="paymentId" value={payment.id} />
+                                  <label className="form-label" htmlFor={`refund-${payment.id}`}>
+                                    Amount given back ($)
+                                  </label>
+                                  <input id={`refund-${payment.id}`} name="amount" className="form-control" required {...MONEY_FIELD} />
+                                  <label className="form-label" htmlFor={`refund-note-${payment.id}`}>
+                                    Note
+                                  </label>
+                                  <input id={`refund-note-${payment.id}`} name="note" className="form-control" maxLength={180} />
+                                  <button type="submit" className="btn btn-outline btn-small">
+                                    Record the refund
+                                  </button>
+                                </form>
+                              </details>
+                            )}
+                          </div>
+                        )}
+                      </td>
+                      <td>{payment.byHand ? payment.recordedBy : "The site"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {appointment.may.recordPayment && (
+            <form action={recordPaymentAction} className="payment-form">
+              <input type="hidden" name="ref" value={appointment.ref} />
+              <h4>Mark as paid</h4>
+              <div className="admin-form-row">
+                <div className="form-group">
+                  <label className="form-label" htmlFor="payment-amount">
+                    Amount paid ($)
+                  </label>
+                  <input
+                    id="payment-amount"
+                    name="amount"
+                    className="form-control"
+                    defaultValue={centsToInput(appointment.payments.dueCents)}
+                    required
+                    {...MONEY_FIELD}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label" htmlFor="payment-method">
+                    How it was paid
+                  </label>
+                  <select id="payment-method" name="method" className="form-control" required defaultValue="cash">
+                    {Object.entries(PAYMENT_METHODS).map(([key, text]) => (
+                      <option key={key} value={key}>
+                        {text}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label className="form-label" htmlFor="payment-note">
+                    Note (optional)
+                  </label>
+                  <input id="payment-note" name="note" className="form-control" maxLength={200} />
+                </div>
+                <button type="submit" className="btn btn-dark btn-small">
+                  Record payment
+                </button>
+              </div>
+              <p style={{ fontSize: ".78rem", margin: ".5rem 0 0" }}>
+                This records money you took at the studio. Nothing is charged, and the client is emailed a confirmation.
+                The amount can be part of what is owed.
+              </p>
+            </form>
+          )}
+        </div>
+      )}
+
+      {appointment.petFee && (
+        <div className="admin-card" id="pet-fee">
+          <h3>Pet fee</h3>
+          {appointment.petFee.creditCode ? (
+            <p style={{ marginBottom: 0 }}>
+              The pet fee of {formatCents(appointment.petFee.cents)} was returned to the client as studio credit, code{" "}
+              <strong>{appointment.petFee.creditCode}</strong>.
+            </p>
+          ) : (
+            <>
+              <p>
+                This booking has a pet fee of {formatCents(appointment.petFee.cents)}. It is not refunded to a card. If the
+                pet did not come, return it to the client as studio credit: they are emailed a code for that amount.
+              </p>
+              {appointment.petFee.canReturn ? (
+                <form action={petCreditAction}>
+                  <input type="hidden" name="ref" value={appointment.ref} />
+                  <button type="submit" className="btn btn-outline btn-small">
+                    The pet did not come: return the fee as credit
+                  </button>
+                </form>
+              ) : (
+                <p className="field-error" style={{ marginBottom: 0 }}>
+                  {appointment.petFee.why}
+                </p>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
       <div className="admin-card">
         <h3>History</h3>
         {appointment.history.length === 0 ? (
@@ -247,8 +425,9 @@ async function AppointmentDetails({
                   <tr key={index}>
                     <td style={{ whiteSpace: "nowrap" }}>{formatInstant(new Date(event.at))}</td>
                     <td>
-                      {event.from === "new" ? "Booked" : `${LABEL_TEXT[event.from]} → ${LABEL_TEXT[event.to]}`}
-                      {event.note && <div style={{ fontSize: ".8rem" }}>{event.note}</div>}
+                      {/* A line with the same label on both sides records something else that happened: its note says what. */}
+                      {event.from === "new" ? "Booked" : event.from === event.to ? event.note : `${LABEL_TEXT[event.from]} → ${LABEL_TEXT[event.to]}`}
+                      {event.note && event.from !== event.to && <div style={{ fontSize: ".8rem" }}>{event.note}</div>}
                     </td>
                     <td>{WHO[event.actor] ?? event.actor}</td>
                   </tr>

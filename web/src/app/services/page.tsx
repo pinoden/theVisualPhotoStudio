@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { noticeHours } from "@/lib/domain/availability";
 import { formatCents } from "@/lib/domain/pricing";
+import { hoursInWords } from "@/lib/words";
 import { getCatalog } from "@/server/cached";
 
 export const metadata: Metadata = { title: "Professional Photography" };
@@ -22,6 +24,8 @@ const PACKAGES = [
 export default async function ServicesPage() {
   const catalog = await getCatalog();
   const from = catalog.photoPackages.length > 0 ? Math.min(...catalog.photoPackages.map((p) => p.priceCents)) : null;
+  /** How far ahead a session has to be booked: the owner's setting, so this page follows the admin. */
+  const notice = noticeHours(catalog.settings, true);
   return (
     <>
       <div className="page-banner">
@@ -79,7 +83,7 @@ export default async function ServicesPage() {
               <p>
                 Pick the studio you would like to be photographed in; its rental is included in the price. Then choose
                 the session length and one of the times our photographer is free, and pay online. Sessions start at{" "}
-                {formatCents(from)}.
+                {formatCents(from)}.{notice > 0 && ` Please book at least ${hoursInWords(notice)} ahead.`}
               </p>
               <div className="mt-3" style={{ display: "flex", gap: "1rem", justifyContent: "center", flexWrap: "wrap" }}>
                 <Link href="/studios" className="btn btn-outline">

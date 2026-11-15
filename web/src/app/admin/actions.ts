@@ -271,6 +271,7 @@ const NUMBER_SETTINGS = [
   "slotIncrementMinutes",
   "minLeadHours",
   "maxAdvanceDays",
+  "photoMinLeadHours",
   "holdMinutes",
   "refundWindowHours",
   "photoRefundWindowHours",

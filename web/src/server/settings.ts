@@ -15,6 +15,11 @@ export interface Settings {
   minLeadHours: number;
   /** Bookings can be made at most this many days ahead. */
   maxAdvanceDays: number;
+  /**
+   * A photography session must be booked at least this many hours ahead. The
+   * owner's rule (2026-11-15): the photographer is available from two weeks out.
+   */
+  photoMinLeadHours: number;
   /** Minutes an unpaid booking keeps its slot while the card is charged. */
   holdMinutes: number;
   /** Discount percent by number of studios booked together. */
@@ -57,6 +62,8 @@ export interface Settings {
   staffMovesBookings: boolean;
   /** Whether staff can make a booking for a client. */
   staffCreatesBookings: boolean;
+  /** Whether staff can record a payment taken at the studio ("mark as paid"). */
+  staffRecordsPayments: boolean;
   /** Whether staff can set the photographer's working hours and block their time. */
   staffSetsPhotographerTimes: boolean;
 }
@@ -65,10 +72,11 @@ export const DEFAULT_SETTINGS: Settings = {
   slotIncrementMinutes: 15,
   minLeadHours: 24,
   maxAdvanceDays: 180,
+  photoMinLeadHours: 336, // two weeks, the owner's rule of 2026-11-15
   holdMinutes: 10,
   multiStudioPercent: { 2: 20, 3: 22 },
 
-  refundWindowHours: 168,
+  refundWindowHours: 336, // 14 days: the owner's answer of 2026-11-15 (it was 7 days)
   photoRefundWindowHours: 336, // 14 days, as on the live site
   refundFeePercent: 5,
   rescheduleCutoffHours: 24,
@@ -77,15 +85,16 @@ export const DEFAULT_SETTINGS: Settings = {
 
   loyaltyEnabled: true,
   loyaltyVisits: 5,
-  loyaltyValidDays: 60,
+  loyaltyValidDays: 90, // the owner's answer of 2026-11-15 (it was 60)
   loyaltyDelayHours: 2,
 
-  staffSeesContact: false,
+  staffSeesContact: true, // the owner's answer of 2026-11-15: shown by default, the switch stays
   staffSetsLabels: true, // the owner, 2026-11-15: "Staff should be able to change all the labels"
   staffSeesAllDays: false,
   staffSeesPrices: false,
   staffMovesBookings: false,
   staffCreatesBookings: false,
+  staffRecordsPayments: false,
   staffSetsPhotographerTimes: false,
 };
 
@@ -110,6 +119,7 @@ const VALIDATORS: { [K in Exclude<keyof Settings, "multiStudioPercent">]: (v: un
   slotIncrementMinutes: int(5, 240),
   minLeadHours: int(0, 24 * 60),
   maxAdvanceDays: int(1, 730),
+  photoMinLeadHours: int(0, 24 * 365),
   holdMinutes: int(1, 60),
   refundWindowHours: int(0, 24 * 365),
   photoRefundWindowHours: int(0, 24 * 365),
@@ -127,6 +137,7 @@ const VALIDATORS: { [K in Exclude<keyof Settings, "multiStudioPercent">]: (v: un
   staffSeesPrices: bool,
   staffMovesBookings: bool,
   staffCreatesBookings: bool,
+  staffRecordsPayments: bool,
   staffSetsPhotographerTimes: bool,
 };
 

@@ -10,6 +10,11 @@ export function hoursInWords(hours: number): string {
   return hours >= 48 && hours % 24 === 0 ? count(hours / 24, "day") : count(hours, "hour");
 }
 
+/** For terms, where both units help: "14 days (336 hours)" for whole days from two up, otherwise "36 hours". */
+export function hoursWithDays(hours: number): string {
+  return hours >= 48 && hours % 24 === 0 ? `${hours / 24} days (${hours} hours)` : count(hours, "hour");
+}
+
 /** "A", "A and B", "A, B and C". */
 export function listInWords(items: string[]): string {
   return items.length <= 1 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;

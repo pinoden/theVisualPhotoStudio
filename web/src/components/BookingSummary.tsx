@@ -71,7 +71,9 @@ export function BookingSummary({ booking }: { booking: BookingView }) {
         <div className="price-row price-discount">
           <span>
             {booking.creditAppliedCents > 0
-              ? "Paid with reschedule code"
+              ? booking.promoSource === "reschedule"
+                ? "Paid with reschedule code"
+                : "Paid with studio credit"
               : booking.promoKind === "free_hour"
                 ? "Free hour"
                 : "Discount code"}
@@ -79,9 +81,24 @@ export function BookingSummary({ booking }: { booking: BookingView }) {
           <span>{formatCents(-booking.promoDiscountCents)}</span>
         </div>
       )}
+      {/* A booking made in the admin is paid at the studio, perhaps in parts: what was received, then what is owed. */}
+      {paidStatus && booking.madeByAdmin && booking.receivedCents > 0 && booking.dueCents > 0 && (
+        <div className="price-row">
+          <span>Paid at the studio so far</span>
+          <span>{formatCents(booking.receivedCents)}</span>
+        </div>
+      )}
       <div className="price-row total">
-        <span>{!paidStatus ? "Total" : booking.madeByAdmin ? "To pay at the studio" : "Charged to card"}</span>
-        <span>{formatCents(booking.totalCents)}</span>
+        <span>
+          {!paidStatus || booking.totalCents === 0
+            ? "Total"
+            : !booking.madeByAdmin
+              ? "Charged to card"
+              : booking.dueCents > 0
+                ? "To pay at the studio"
+                : "Paid at the studio"}
+        </span>
+        <span>{formatCents(paidStatus && booking.madeByAdmin && booking.dueCents > 0 ? booking.dueCents : booking.totalCents)}</span>
       </div>
     </div>
   );

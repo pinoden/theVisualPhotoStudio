@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { multiStudioOffer } from "@/lib/catalog-view";
+import { multiStudioOffer, petPolicy } from "@/lib/catalog-view";
 import { formatCents } from "@/lib/domain/pricing";
 import { SITE } from "@/lib/site";
-import { count, listInWords as list } from "@/lib/words";
+import { count, hoursWithDays as span, listInWords as list } from "@/lib/words";
 import { getCatalog } from "@/server/cached";
 
 export const metadata: Metadata = { title: "Guest Information" };
@@ -12,12 +12,6 @@ export const metadata: Metadata = { title: "Guest Information" };
 interface Question {
   q: string;
   a: ReactNode;
-}
-
-/** "7 days (168 hours)" for whole days from two up, otherwise "36 hours". */
-function span(hours: number): string {
-  if (hours >= 48 && hours % 24 === 0) return `${hours / 24} days (${hours} hours)`;
-  return count(hours, "hour");
 }
 
 /**
@@ -36,19 +30,7 @@ export default async function FaqPage() {
   const offer = multiStudioOffer(catalog);
 
   // Pets are welcome wherever a pet add-on can be booked: in one studio, in several, or in all of them.
-  const petAddons = catalog.addons.filter((addon) => addon.kind === "pet");
-  const petsAnywhere = petAddons.some((addon) => addon.studioId === null);
-  const petStudios = catalog.studios.filter(
-    (studio) => petsAnywhere || petAddons.some((addon) => addon.studioId === studio.id),
-  );
-  const petFreeStudios = catalog.studios.filter((studio) => !petStudios.includes(studio)).map((studio) => studio.name);
-  /** The fee for each studio that takes pets: its own add-on if it has one, else the one for any booking. */
-  const petFees = petStudios.map((studio) => ({
-    studio: studio.name,
-    cents: (petAddons.find((addon) => addon.studioId === studio.id) ?? petAddons.find((addon) => addon.studioId === null))!
-      .priceCents,
-  }));
-  const onePetFee = petFees.every((fee) => fee.cents === petFees[0].cents);
+  const { studios: petStudios, petFreeStudios, fees: petFees, oneFee: onePetFee } = petPolicy(catalog);
   const extraPeople = catalog.addons.some((addon) => addon.kind === "people");
 
   const visit: Question[] = [
@@ -105,7 +87,7 @@ export default async function FaqPage() {
                 <p>
                   {petFreeStudios.length === 0
                     ? "Pets are welcome in every studio. The common areas are pet-free."
-                    : `Pets are welcome in ${list(petStudios.map((studio) => studio.name))} only. ${list([...petFreeStudios, "all common areas"])} are pet-free.`}
+                    : `Pets are welcome in ${list(petStudios)} only. ${list([...petFreeStudios, "all common areas"])} are pet-free.`}
                 </p>
                 <ul>
                   <li>A maximum of 2 pets per reservation, up to 70 lbs each.</li>
@@ -257,8 +239,8 @@ export default async function FaqPage() {
                 </li>
                 <li>
                   It is valid for {count(s.loyaltyValidDays, "day")}. After that the count starts again: every{" "}
-                  {count(s.loyaltyVisits, "visit")} earn another hour, and a visit made with a free hour does not
-                  count.
+                  {count(s.loyaltyVisits, "visit")} earn another hour. A visit made with a free hour does not count,
+                  and neither does a photography session with our photographer.
                 </li>
               </ul>
             ),

@@ -3,11 +3,14 @@
 import { redirect } from "next/navigation";
 import { getDb } from "@/db/client";
 import { isSettableLabel, LABEL_BLOCK_TEXT, LABEL_TEXT } from "@/lib/domain/labels";
+import { formatCents } from "@/lib/domain/pricing";
 import { isIsoDate } from "@/lib/domain/time";
-import { formText, intInRange } from "@/lib/parse";
+import { dollarsToCents, formText, intInRange } from "@/lib/parse";
 import { createAdminBooking, moveBooking, setLabel } from "@/server/appointments";
+import { givePetFeeCredit } from "@/server/pet-fee";
 import { flushEmailsSoon, siteUrl } from "@/server/runtime";
-import { requireStaff } from "@/server/session";
+import { requireOwner, requireStaff } from "@/server/session";
+import { recordHandRefund, recordStudioPayment, voidStudioPayment } from "@/server/studio-payments";
 import { formatInstant } from "@/server/tz";
 
 /**
@@ -108,4 +111,76 @@ export async function createAdminBookingAction(formData: FormData): Promise<void
       "Booked. The client has been emailed their confirmation. Nothing was charged: the price is paid at the studio.",
     ),
   );
+}
+
+// ── Money taken at the studio ────────────────────────────────────────────────
+
+/** The appointment's own page, for the actions that only make sense there. */
+function appointmentPage(ref: string): string {
+  return /^VS-[0-9A-Z]{6}$/.test(ref) ? `/admin/appointments/${ref}` : "/admin/calendar";
+}
+
+/** "Mark as paid": record a payment taken at the studio. The service checks who may, and how much is owed. */
+export async function recordPaymentAction(formData: FormData): Promise<void> {
+  const ref = formText(formData.get("ref"));
+  const page = appointmentPage(ref);
+  const viewer = await requireStaff(page);
+  const amountCents = dollarsToCents(formText(formData.get("amount")));
+  if (amountCents === null) redirect(withMessage(page, "error", "Enter the amount that was paid, for example 88 or 88.50."));
+
+  const result = await recordStudioPayment(
+    await getDb(),
+    viewer,
+    ref,
+    { amountCents, method: formText(formData.get("method")), note: formText(formData.get("note")) },
+    new Date(),
+  );
+  if (!result.ok) redirect(withMessage(page, "error", result.message));
+  flushEmailsSoon();
+  redirect(
+    withMessage(
+      page,
+      "notice",
+      `${formatCents(result.amountCents)} recorded. ${
+        result.dueCents > 0 ? `${formatCents(result.dueCents)} is still to pay.` : "The booking is paid in full."
+      } The client has been emailed a confirmation.`,
+    ),
+  );
+}
+
+/** Take back a payment recorded by mistake. Owners only. */
+export async function voidPaymentAction(formData: FormData): Promise<void> {
+  const page = appointmentPage(formText(formData.get("ref")));
+  const viewer = await requireOwner(page);
+  const result = await voidStudioPayment(await getDb(), viewer, formText(formData.get("paymentId")), formText(formData.get("reason")), new Date());
+  if (!result.ok) redirect(withMessage(page, "error", result.message));
+  redirect(withMessage(page, "notice", "The payment record was taken back. The booking owes that amount again."));
+}
+
+/** Record a refund the studio gave by hand. Owners only. Nothing is sent anywhere. */
+export async function handRefundAction(formData: FormData): Promise<void> {
+  const page = appointmentPage(formText(formData.get("ref")));
+  const viewer = await requireOwner(page);
+  const amountCents = dollarsToCents(formText(formData.get("amount")));
+  if (amountCents === null) redirect(withMessage(page, "error", "Enter the amount that was given back, for example 25 or 25.50."));
+  const result = await recordHandRefund(
+    await getDb(),
+    viewer,
+    formText(formData.get("paymentId")),
+    { amountCents, note: formText(formData.get("note")) },
+    new Date(),
+  );
+  if (!result.ok) redirect(withMessage(page, "error", result.message));
+  redirect(withMessage(page, "notice", `Refund of ${formatCents(amountCents)} recorded. Nothing was sent: this records what you gave back by hand.`));
+}
+
+/** The pet did not come: return the pet fee as studio credit. Owners only. */
+export async function petCreditAction(formData: FormData): Promise<void> {
+  const ref = formText(formData.get("ref"));
+  const page = appointmentPage(ref);
+  const viewer = await requireOwner(page);
+  const result = await givePetFeeCredit(await getDb(), viewer, ref, { now: new Date(), baseUrl: await siteUrl() });
+  if (!result.ok) redirect(withMessage(page, "error", result.message));
+  flushEmailsSoon();
+  redirect(withMessage(page, "notice", `The pet fee of ${formatCents(result.cents)} is now studio credit. The client has been emailed the code ${result.code}.`));
 }

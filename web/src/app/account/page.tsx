@@ -103,7 +103,11 @@ async function Account() {
                       ? `${code.value}% off your next studio rental`
                       : code.kind === "free_hour"
                         ? `${durationLabel(code.value)} free in any one studio`
-                        : `${formatCents(code.value)} credit from a rescheduled booking`}
+                        : code.source === "reschedule"
+                          ? `${formatCents(code.value)} credit from a rescheduled booking`
+                          : code.source === "pet_fee"
+                            ? `${formatCents(code.value)} studio credit, from a pet fee`
+                            : `${formatCents(code.value)} studio credit`}
                     {code.expiresAt ? `, valid until ${formatInstant(new Date(code.expiresAt))}` : ""}
                   </td>
                   <td>

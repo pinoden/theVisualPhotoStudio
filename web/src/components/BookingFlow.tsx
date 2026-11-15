@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import {
   availabilityGrid,
   combinedStarts,
+  noticeHours,
   studiosFreeAt,
   type SlotOptions,
 } from "@/lib/domain/availability";
@@ -55,6 +56,8 @@ interface AppliedCode {
   code: string;
   kind: PromoKind;
   value: number;
+  /** Where the code came from: "reschedule" for a moved booking's money. */
+  source?: string;
   email: string;
 }
 
@@ -152,6 +155,10 @@ export function BookingFlow({
   const { settings, rules } = catalog;
 
   const dayType: DayType = date ? (catalog.specialDates[date] ?? defaultDayType(date)) : "weekday";
+  /** How far ahead this kind of booking has to be made. A session with the photographer needs more notice. */
+  const leadHours = noticeHours(settings, photography);
+  /** The first date that can have a free time at all: whole days of notice from today. */
+  const firstDate = today ? addDays(today, Math.floor(leadHours / 24)) : "";
 
   // ── What can be chosen ─────────────────────────────────────────────────────
   /** The session packages of the chosen studio, shortest first. Only in the photography flow. */
@@ -324,7 +331,7 @@ export function BookingFlow({
       const data = (await response.json().catch(() => ({}))) as {
         ok?: boolean;
         message?: string;
-        promo?: { code: string; kind: PromoKind; value: number } | null;
+        promo?: { code: string; kind: PromoKind; value: number; source?: string } | null;
       };
       if (response.ok && data.ok && data.promo) {
         setApplied({ ...data.promo, email: normalizedEmail });
@@ -546,7 +553,9 @@ export function BookingFlow({
               ? `Code ${promo.code} (${promo.value}% off rental)`
               : promo.kind === "free_hour"
                 ? `Free hour, code ${promo.code}`
-                : `Reschedule code ${promo.code}`}
+                : promo.source === "reschedule" || promo.source === undefined
+                  ? `Reschedule code ${promo.code}`
+                  : `Studio credit, code ${promo.code}`}
           </span>
           <span>{formatCents(-price.promoDiscountCents)}</span>
         </div>
@@ -702,8 +711,8 @@ export function BookingFlow({
           <h3 style={{ fontSize: "1.6rem", marginBottom: ".5rem" }}>{photography ? "Select date & session" : "Select date & duration"}</h3>
           <p className="text-muted mb-3">
             {mode === "studio" && chosenNames ? `${chosenNames}. ` : ""}
-            {settings.minLeadHours > 0
-              ? `Bookings open ${count(settings.minLeadHours, "hour")} to ${count(settings.maxAdvanceDays, "day")} ahead.`
+            {leadHours > 0
+              ? `${photography ? "Sessions" : "Bookings"} open ${hoursInWords(leadHours)} to ${count(settings.maxAdvanceDays, "day")} ahead.`
               : `Bookings open up to ${count(settings.maxAdvanceDays, "day")} ahead.`}
           </p>
           <div className="form-grid">
@@ -716,7 +725,7 @@ export function BookingFlow({
                 type="date"
                 className="form-control"
                 value={date}
-                min={today || undefined}
+                min={firstDate || undefined}
                 max={today ? addDays(today, settings.maxAdvanceDays) : undefined}
                 onChange={(event) => chooseDate(event.target.value)}
               />
@@ -838,9 +847,11 @@ export function BookingFlow({
                     ? "That date has already passed."
                     : availability.problem === "too_far"
                       ? `Bookings open ${count(settings.maxAdvanceDays, "day")} ahead.`
-                      : mode === "studio" && studioIds.length > 1
-                        ? "These studios are not free together on this date. Try another day, or fewer studios."
-                        : "No times are available on this date. Please try another day."}
+                      : firstDate && date < firstDate
+                        ? `${photography ? "Photography sessions" : "Bookings"} are made at least ${hoursInWords(leadHours)} ahead. Please choose a later date.`
+                        : mode === "studio" && studioIds.length > 1
+                          ? "These studios are not free together on this date. Try another day, or fewer studios."
+                          : "No times are available on this date. Please try another day."}
                 </div>
               )}
             </>

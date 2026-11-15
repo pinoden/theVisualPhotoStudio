@@ -20,7 +20,7 @@ import {
 
 /** Saturday 2026-11-14, 10:00 in Winter Park (EST, UTC-5). */
 export const NOW = new Date("2026-11-14T15:00:00Z");
-/** Wednesday, 4 days ahead: inside the 7-day refund window, outside the 24-hour notice. */
+/** Wednesday, 4 days ahead: inside the 14-day refund window, outside the 24-hour notice. */
 export const NEAR = "2026-11-18";
 /** Wednesday, 25 days ahead: refundable. */
 export const FAR = "2026-12-09";

@@ -67,7 +67,7 @@ describe("earning a free hour", () => {
       originBookingId: fifth.id, // the visit that completed the five
     });
     expect(code.code).toMatch(/^THANKS-[0-9A-Z]{4}-[0-9A-Z]{4}$/);
-    expect(code.expiresAt).toEqual(daysAfter(evening(DAYS[4]), 60));
+    expect(code.expiresAt).toEqual(daysAfter(evening(DAYS[4]), 90)); // the owner's answer of 2026-11-15: 90 days
 
     const [mail] = await world.emails("loyalty_code");
     expect(mail).toMatchObject({ toEmail: JANE, subject: "You have earned a free hour in the studio" });
@@ -119,9 +119,9 @@ describe("earning a free hour", () => {
     expect(await visitOn(DAYS.slice(0, 10))).toEqual([0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
     const [first, second] = await codes();
     expect([first.usedCount, second.usedCount]).toEqual([0, 0]);
-    // Each lasts 60 days from the day it was earned.
-    expect(first.expiresAt).toEqual(daysAfter(evening(DAYS[4]), 60));
-    expect(second.expiresAt).toEqual(daysAfter(evening(DAYS[9]), 60));
+    // Each lasts 90 days from the day it was earned.
+    expect(first.expiresAt).toEqual(daysAfter(evening(DAYS[4]), 90));
+    expect(second.expiresAt).toEqual(daysAfter(evening(DAYS[9]), 90));
     expect(first.code).not.toBe(second.code);
   });
 
@@ -137,6 +137,20 @@ describe("earning a free hour", () => {
     // Four more paid days are not enough. The fifth is.
     expect(await visitOn(DAYS.slice(6, 10))).toEqual([0, 0, 0, 0]);
     expect(await visitOn([DAYS[10]])).toEqual([1]);
+  });
+
+  it("does not count a photography session with the in-house photographer (the owner, 2026-11-15)", async () => {
+    // Five sessions on five days, each more than two weeks ahead, as a session has to be.
+    const sessions = ["2026-11-30", "2026-12-01", "2026-12-02", "2026-12-03", "2026-12-04"];
+    expect(await visitOn(sessions, { photography: true, durationMinutes: 60 })).toEqual([0, 0, 0, 0, 0]);
+    expect(await codes()).toHaveLength(0);
+    expect(await loyaltyStandingOf(world.db, JANE, DEFAULT_SETTINGS)).toMatchObject({ earned: 0, towardsNext: 0, days: [] });
+
+    // Renting a studio counts as before, also on a day that had a session.
+    expect(await visitOn(["2026-12-07"])).toEqual([0]);
+    expectOk(await world.book({ date: "2026-12-08", photography: true, durationMinutes: 60 }));
+    expect(await visitOn(["2026-12-08"], { studioIds: [world.ids.paris], startMinute: h(14) })).toEqual([0]);
+    expect((await loyaltyStandingOf(world.db, JANE, DEFAULT_SETTINGS)).days.map((entry) => entry.day)).toEqual(["2026-12-07", "2026-12-08"]);
   });
 
   it("does not send a second free hour for the same visits when one of them becomes a no-show afterwards", async () => {

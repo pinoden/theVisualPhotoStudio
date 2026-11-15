@@ -164,8 +164,10 @@ export function bookingConfirmationEmail(input: {
   duration: string;
   /** Price after discounts. */
   totalCents: number;
-  /** Part of the total covered by a reschedule credit. */
+  /** Part of the total covered by an amount code: a reschedule code, or studio credit. */
   creditCents: number;
+  /** What that code is called: "reschedule code" or "studio credit". */
+  creditName?: string;
   /** Part of the total charged to the card. */
   cardCents: number;
   /** The studio made the booking for the client: nothing was charged, the total is paid at the studio. */
@@ -196,7 +198,7 @@ export function bookingConfirmationEmail(input: {
         : []),
       input.payAtStudio ? `To pay at the studio: ${money(input.totalCents)}` : `Total: ${money(input.totalCents)}`,
       ...(input.creditCents > 0
-        ? [`Paid with your reschedule code: ${money(input.creditCents)}`, `Charged to your card: ${money(input.cardCents)}`]
+        ? [`Paid with your ${input.creditName ?? "reschedule code"}: ${money(input.creditCents)}`, `Charged to your card: ${money(input.cardCents)}`]
         : []),
       "",
       `View, cancel or move your booking: ${input.manageUrl}`,
@@ -250,6 +252,8 @@ export function cancellationEmail(input: {
   feeCents: number;
   /** Why no refund is due, when refundCents is 0. */
   note: string;
+  /** The pet fee, returned as a code for studio credit and not to the card. */
+  petCredit?: { code: string; cents: number; expires: string; bookUrl: string };
 }): QueuedEmail {
   const refundLines =
     input.refundCents > 0
@@ -259,11 +263,109 @@ export function cancellationEmail(input: {
           }. Banks usually show it within 5 to 10 business days.`,
         ]
       : [input.note];
+  const creditLines = input.petCredit
+    ? [
+        "",
+        `The pet fee of ${money(input.petCredit.cents)} is not refunded to a card. It is returned to you as studio credit:`,
+        "",
+        `Code: ${input.petCredit.code}`,
+        `Valid until: ${input.petCredit.expires}`,
+        "",
+        `Book at ${input.petCredit.bookUrl} and enter the code at checkout, with this email address. What you do not spend stays on the code.`,
+      ]
+    : [];
   return {
     to: input.to,
     kind: "booking_cancelled",
     subject: `Booking cancelled: ${input.ref}`,
-    body: [`Hi ${input.name},`, "", `Your booking ${input.ref} on ${input.when} has been cancelled.`, "", ...refundLines, "", SIGN_OFF].join("\n"),
+    body: [
+      `Hi ${input.name},`,
+      "",
+      `Your booking ${input.ref} on ${input.when} has been cancelled.`,
+      "",
+      ...refundLines,
+      ...creditLines,
+      "",
+      SIGN_OFF,
+    ].join("\n"),
+  };
+}
+
+/** The pet did not come: the pet fee of a booking is returned as studio credit. */
+export function petCreditEmail(input: {
+  to: string;
+  name: string;
+  ref: string;
+  code: string;
+  cents: number;
+  expires: string;
+  bookUrl: string;
+}): QueuedEmail {
+  return {
+    to: input.to,
+    kind: "pet_credit",
+    subject: `Your pet fee for booking ${input.ref} is now studio credit`,
+    body: [
+      `Hi ${input.name},`,
+      "",
+      `Your pet did not come to booking ${input.ref}, so the pet fee of ${money(input.cents)} is returned to you as studio credit.`,
+      "",
+      `Code: ${input.code}`,
+      `Valid until: ${input.expires}`,
+      "",
+      `Book at ${input.bookUrl} and enter the code at checkout, with this email address. What you do not spend stays on the code.`,
+      "",
+      SIGN_OFF,
+    ].join("\n"),
+  };
+}
+
+/** A payment taken at the studio was recorded for a booking: the customer's confirmation of it. */
+export function paymentReceivedEmail(input: {
+  to: string;
+  name: string;
+  ref: string;
+  when: string;
+  amountCents: number;
+  /** How it was paid, in words: "Cash". */
+  method: string;
+  /** What is still to pay after this payment. */
+  dueCents: number;
+}): QueuedEmail {
+  return {
+    to: input.to,
+    kind: "payment_received",
+    subject: `Payment received for booking ${input.ref}`,
+    body: [
+      `Hi ${input.name},`,
+      "",
+      `We received your payment of ${money(input.amountCents)} for booking ${input.ref} on ${input.when}.`,
+      "",
+      `Paid at the studio: ${input.method}`,
+      input.dueCents > 0 ? `Still to pay: ${money(input.dueCents)}` : "Your booking is paid in full.",
+      "",
+      SIGN_OFF,
+    ].join("\n"),
+  };
+}
+
+/**
+ * A booking paid at the studio was cancelled early enough to be refunded. The
+ * site cannot send that money back, so the owner is asked to.
+ */
+export function ownerHandRefundNotice(input: { to: string; ref: string; customer: string; paidCents: number; feePercent: number }): QueuedEmail {
+  return {
+    to: input.to,
+    kind: "owner_hand_refund",
+    subject: `ACTION NEEDED: refund by hand for ${input.ref}`,
+    body: [
+      `${input.customer} cancelled booking ${input.ref} early enough to be refunded.`,
+      "",
+      `${money(input.paidCents)} of it was paid at the studio, so the site could not send that back.`,
+      input.feePercent > 0
+        ? `By the rental terms it is refunded less the ${input.feePercent}% fee. Refund the customer by hand, then record the refund on the appointment's page.`
+        : "By the rental terms it is refunded in full. Refund the customer by hand, then record the refund on the appointment's page.",
+    ].join("\n"),
   };
 }
 
@@ -329,7 +431,7 @@ export function freeHourEmail(input: {
       "",
       "The price of one hour comes off your booking: a one-hour booking is free, and a longer one costs the rest. The free hour is for one studio, so it cannot be used when several studios are booked together, and it does not pay for add-ons.",
       "",
-      `Every ${input.visits} visits, on separate days, earn another free hour. A visit made with a free hour does not count.`,
+      `Every ${input.visits} visits, on separate days, earn another free hour. A visit made with a free hour does not count, and neither does a photography session with our photographer.`,
       "",
       SIGN_OFF,
     ].join("\n"),

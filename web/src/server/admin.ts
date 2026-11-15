@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, inArray, isNotNull, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, lt, ne, sql } from "drizzle-orm";
 import {
   addons,
   blocks,
@@ -18,6 +18,7 @@ import { PG_EXCLUSION_VIOLATION, pgErrorCode, queryRows, type Db, type DbLike } 
 import { isAddonKind, type AddonKind } from "@/lib/addon-kinds";
 import type { PromoKind } from "@/lib/domain/pricing";
 import { isIsoDate, type DayType, type IsoDate } from "@/lib/domain/time";
+import { MANUAL_PROVIDER } from "@/lib/payment-methods";
 import { deleteAllSessions, normalizeEmail } from "./auth";
 import { toBookingViews, type BookingView } from "./bookings";
 import { issuePromo } from "./promos";
@@ -298,7 +299,8 @@ export async function listBookings(
       paidCents: sql<number>`coalesce(sum(${payments.amountCents}), 0)::int`,
     })
     .from(payments)
-    .where(and(inArray(payments.bookingId, ids), eq(payments.status, "succeeded")))
+    // Card money charged through the site only: what was taken at the studio cannot be refunded from here.
+    .where(and(inArray(payments.bookingId, ids), eq(payments.status, "succeeded"), ne(payments.provider, MANUAL_PROVIDER)))
     .groupBy(payments.bookingId);
   const back = await db
     .select({
@@ -308,7 +310,7 @@ export async function listBookings(
     })
     .from(refunds)
     .innerJoin(payments, eq(payments.id, refunds.paymentId))
-    .where(inArray(payments.bookingId, ids))
+    .where(and(inArray(payments.bookingId, ids), ne(payments.provider, MANUAL_PROVIDER)))
     .groupBy(payments.bookingId, refunds.status);
 
   const views = await toBookingViews(db, rows);

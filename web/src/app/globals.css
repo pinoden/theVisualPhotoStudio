@@ -1112,6 +1112,13 @@ button { font-family: inherit; }
 .label-meanings { margin: 0; padding-left: 1.1rem; font-size: .82rem; }
 .label-meanings em { color: var(--color-muted, #7a7168); }
 
+/* The payment section of an appointment: what was received, "mark as paid", and the owners' corrections. */
+.payment-form { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--color-border); }
+.payment-form h4 { margin: 0 0 .75rem; }
+.payment-fixes { display: flex; flex-wrap: wrap; gap: .25rem 1.25rem; margin-top: .35rem; font-size: .82rem; }
+.payment-fixes summary { cursor: pointer; text-decoration: underline; }
+.payment-fixes form { display: grid; gap: .4rem; margin: .5rem 0 .75rem; max-width: 22rem; }
+
 .detail-list { display: grid; grid-template-columns: max-content 1fr; gap: .4rem 1.25rem; margin: 0 0 1rem; }
 .detail-list dt { font-size: .72rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; padding-top: .2rem; }
 .detail-list dd { margin: 0; overflow-wrap: anywhere; }
@@ -1429,6 +1436,7 @@ button { font-family: inherit; }
   .admin-header { margin-bottom: 1.25rem; }
   .admin-card { padding: 1rem; }
   .admin-form-row > .btn { width: 100%; }
+  .payment-fixes summary { padding: .75rem 0; }
   .wizard-actions .btn { padding-left: 1.1rem; padding-right: 1.1rem; }
   .label-select { flex-wrap: wrap; }
 }

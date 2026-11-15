@@ -36,10 +36,12 @@ export const bookingStatus = pgEnum("booking_status", [
   "no_show",
   "expired", // payment never completed, slot released
 ]);
-export const paymentStatus = pgEnum("payment_status", ["pending", "succeeded", "failed"]);
+/** `voided`: a payment recorded by hand in error, and taken back by an owner. */
+export const paymentStatus = pgEnum("payment_status", ["pending", "succeeded", "failed", "voided"]);
 export const refundStatus = pgEnum("refund_status", ["pending", "succeeded", "failed"]);
 export const promoKind = pgEnum("promo_kind", ["percent", "amount", "free_hour"]);
-export const promoSource = pgEnum("promo_source", ["loyalty", "reschedule", "manual"]);
+/** `pet_fee`: the pet fee of a booking, given back as studio credit because the pet did not come. */
+export const promoSource = pgEnum("promo_source", ["loyalty", "reschedule", "manual", "pet_fee"]);
 export const cancelReason = pgEnum("cancel_reason", ["customer", "rescheduled", "owner"]);
 /** A label an administrator puts on a confirmed booking. See src/lib/domain/labels.ts. */
 export const bookingLabel = pgEnum("booking_label", ["checked_in", "reschedule_pending", "rescheduled"]);
@@ -403,6 +405,11 @@ export const bookingAddons = pgTable(
     name: text("name").notNull(),
     quantity: integer("quantity").notNull(),
     unitCents: integer("unit_cents").notNull(),
+    /**
+     * What the add-on was for when it was booked (see `addons.kind`). Kept with the booking like its name
+     * and price: the pet fee is refunded by its own rule, whatever the add-on is called or becomes later.
+     */
+    kind: text("kind", { enum: ["people", "pet", "other"] }).notNull().default("other"),
   },
   (t) => [primaryKey({ columns: [t.bookingId, t.addonId] })],
 );
@@ -412,12 +419,19 @@ export const payments = pgTable("payments", {
   bookingId: uuid("booking_id")
     .notNull()
     .references(() => bookings.id, { onDelete: "restrict" }),
-  provider: text("provider").notNull(), // 'square' | 'mock'
+  /** 'square' | 'mock' for a card charged through the site, 'manual' for money taken at the studio and recorded by hand. */
+  provider: text("provider").notNull(),
   providerPaymentId: text("provider_payment_id"),
   amountCents: integer("amount_cents").notNull(),
   refundedCents: integer("refunded_cents").notNull().default(0),
   status: paymentStatus("status").notNull().default("pending"),
   error: text("error"),
+  /** For a payment recorded by hand: how the money was taken. See src/lib/payment-methods.ts. Null for a card charged through the site. */
+  method: text("method"),
+  /** For a payment recorded by hand: the administrator who recorded it. */
+  recordedBy: text("recorded_by"),
+  /** What the administrator wrote beside it. */
+  note: text("note").notNull().default(""),
   createdAt: createdAt(),
 });
 

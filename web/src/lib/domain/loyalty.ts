@@ -6,6 +6,8 @@
  *  - A day counts once, however many bookings or studios it had.
  *  - A visit made as a bundle of studios counts like any other.
  *  - A visit on which a free hour was used does not count towards the next one.
+ *  - A photography session with the in-house photographer does not count
+ *    (the owner, 2026-11-15): the reward is for renting the studios.
  *  - The count starts again after each free hour, so every fifth day earns one.
  */
 import type { IsoDate } from "./time";
@@ -19,6 +21,8 @@ export interface LoyaltyVisit {
   startAt: number;
   /** A free hour was used on this booking. */
   usedFreeHour: boolean;
+  /** A photography session, not a studio rental. */
+  photography: boolean;
 }
 
 export interface LoyaltyStanding {
@@ -37,7 +41,7 @@ export function loyaltyStanding(visits: LoyaltyVisit[], visitsPerReward: number)
     return { days: [], earned: 0, towardsNext: 0, milestones: [] };
   }
   const ordered = visits
-    .filter((visit) => !visit.usedFreeHour)
+    .filter((visit) => !visit.usedFreeHour && !visit.photography)
     .sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : a.startAt - b.startAt || (a.bookingId < b.bookingId ? -1 : 1)));
 
   const days: LoyaltyStanding["days"] = [];

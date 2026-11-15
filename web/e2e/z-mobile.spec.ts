@@ -303,6 +303,27 @@ test("the admin fits a phone: the calendar in its three views, an appointment, a
   await page.getByRole("button", { name: "Reschedule Pending", exact: true }).click();
   await expect(byText(page, "Marked Reschedule Pending.")).toBeVisible();
 
+  // A booking made for a client on the phone, and the cash they pay at the studio marked as paid.
+  await page.goto("/admin/calendar/new");
+  await page.getByRole("checkbox", { name: "Studio Paris" }).check();
+  await byLabel(page, "Date").fill(dateAhead(115));
+  await byLabel(page, "Length").selectOption({ label: "1 hour" });
+  await page.getByRole("button", { name: "Show free times" }).click();
+  await page.getByLabel("Free start times").selectOption({ label: "11:00 AM – 12:00 PM" });
+  await page.getByLabel("Client’s name").fill("Pat Phone");
+  await page.getByLabel("Client’s email").fill("pat.phone@example.com");
+  await page.getByLabel("Client’s phone").fill("407-555-0188");
+  await page.getByRole("button", { name: "Book for the client" }).click();
+  await expect(page.getByRole("heading", { name: "Pat Phone" })).toBeVisible();
+  await expect(byText(page, "$68 is still to pay.")).toBeVisible();
+  await expectFits(page, "an appointment that is still to pay");
+  expect(await hardToTouch(page), "the form that marks a booking as paid: hard to use by touch").toEqual([]);
+  await shot(page, "m-390-mark-as-paid");
+  await page.getByRole("button", { name: "Record payment" }).click();
+  await expect(onScreen(page.locator("#payment"))).toContainText("Paid in full.");
+  await expectFits(page, "an appointment paid at the studio");
+  expect(await hardToTouch(page), "an appointment paid at the studio: hard to use by touch").toEqual([]);
+
   for (const path of [
     "/admin",
     "/admin/calendar/new",

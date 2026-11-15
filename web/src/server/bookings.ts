@@ -11,19 +11,29 @@ import {
   type Db,
   type DbLike,
 } from "@/db/client";
-import { isStartFree } from "@/lib/domain/availability";
+import { isStartFree, noticeHours } from "@/lib/domain/availability";
 import { labelOf, type LabelKey } from "@/lib/domain/labels";
 import { formatCents, PricingError, PROMO_MISFIT_TEXT, quote, type PromoKind, type Quote } from "@/lib/domain/pricing";
 import { formText } from "@/lib/parse";
-import { count } from "@/lib/words";
+import { count, hoursInWords } from "@/lib/words";
 import { durationLabel, isIsoDate } from "@/lib/domain/time";
 import { loadDayAvailability, releaseExpiredHolds } from "./availability";
 import { dayTypeFor, loadCatalog, type Catalog, type CatalogPhotoPackage } from "./catalog";
 import { bookingConfirmationEmail, ownerPaymentUnknownNotice, queueEmail } from "./email";
 import { BY_CUSTOMER, recordEvent } from "./history";
 import { releaseHolds } from "./holds";
+import { receivedCentsByBooking } from "./money";
 import type { PaymentProvider } from "./payments";
-import { findUsablePromo, PROMO_PROBLEM_TEXT, redeemPromo, restorePromo, toPromoDef, type UsablePromo } from "./promos";
+import {
+  creditName,
+  findUsablePromo,
+  PROMO_PROBLEM_TEXT,
+  redeemPromo,
+  restorePromo,
+  toPromoDef,
+  type PromoSource,
+  type UsablePromo,
+} from "./promos";
 import { loadAccessInstructions } from "./settings";
 import { formatInstant, localToUtc } from "./tz";
 
@@ -141,7 +151,7 @@ export const quoteInput = z.object({
 });
 
 export type QuoteResult =
-  | { ok: true; quote: Quote; promo: { code: string; kind: PromoKind; value: number } | null }
+  | { ok: true; quote: Quote; promo: { code: string; kind: PromoKind; value: number; source: PromoSource } | null }
   | { ok: false; status: number; code: "invalid_input" | "invalid_price" | "invalid_code"; message: string };
 
 /**
@@ -178,7 +188,11 @@ export async function quoteSelection(db: DbLike, rawInput: unknown, now: Date): 
     });
     // A code that exists but cannot be used on this selection is refused with the reason.
     if (price.promoMisfit) return fail(422, "invalid_code", PROMO_MISFIT_TEXT[price.promoMisfit]);
-    return { ok: true, quote: price, promo: promo ? { code: promo.code, kind: promo.kind, value: promo.value } : null };
+    return {
+      ok: true,
+      quote: price,
+      promo: promo ? { code: promo.code, kind: promo.kind, value: promo.value, source: promo.source } : null,
+    };
   } catch (error) {
     if (error instanceof PricingError) return fail(422, "invalid_price", error.message);
     throw error;
@@ -260,6 +274,17 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
   if (price.promoMisfit) return fail(422, "invalid_code", PROMO_MISFIT_TEXT[price.promoMisfit]);
   if (input.expectedTotalCents !== undefined && input.expectedTotalCents !== price.totalCents) {
     return fail(409, "price_changed", `The price is now ${formatCents(price.totalCents)}. Please review and confirm again.`);
+  }
+
+  // Too close to now: said in so many words, because "no longer available" would send the customer
+  // looking for another time on a day that has none. An administrator gives no notice.
+  if (input.startMinute < day.earliestStartMinute) {
+    const notice = hoursInWords(noticeHours(catalog.settings, Boolean(session)));
+    return fail(
+      409,
+      "slot_taken",
+      `${session ? "Photography sessions" : "Bookings"} are made at least ${notice} ahead. Please choose a later ${session ? "date" : "time"}.`,
+    );
   }
 
   const slot = {
@@ -370,6 +395,8 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
               name: line.name,
               quantity: line.quantity,
               unitCents: line.unitCents,
+              // What the add-on is for today stays with the booking: the pet fee has a refund rule of its own.
+              kind: catalog.addons.find((addon) => addon.id === line.addonId)?.kind ?? "other",
             })),
           );
         }
@@ -465,6 +492,7 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
         duration: durationLabel(input.durationMinutes),
         totalCents: price.totalCents + (spendsCode && promo!.kind === "amount" ? price.promoDiscountCents : 0),
         creditCents: spendsCode && promo!.kind === "amount" ? price.promoDiscountCents : 0,
+        creditName: promo ? creditName(promo.source) : undefined,
         cardCents: price.totalCents,
         payAtStudio: Boolean(deps.madeBy) && price.totalCents > 0,
         photoIncludes: session ? session.includes : undefined,
@@ -504,6 +532,8 @@ export interface BookingView {
   creditAppliedCents: number;
   /** The kind of code used on the booking, if any. */
   promoKind: PromoKind | null;
+  /** Where that code came from: a moved booking, the loyalty reward, the studio, or a pet fee returned. */
+  promoSource: PromoSource | null;
   /** The status label an administrator sees. */
   label: LabelKey;
   /** Made in the admin for the client: nothing was charged online, the total is paid at the studio. */
@@ -511,6 +541,13 @@ export interface BookingView {
   /** Set on a photography session: what it includes, as it was sold. */
   photography: { includes: string } | null;
   totalCents: number;
+  /** Money received for the booking so far, by card through the site or at the studio, before any refund. */
+  receivedCents: number;
+  /**
+   * What is still to pay. Only a booking made in the admin can owe anything:
+   * a booking made online is paid in full when it is made.
+   */
+  dueCents: number;
   rescheduledCount: number;
 }
 
@@ -521,7 +558,7 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[]): Promise<Bo
   if (rows.length === 0) return [];
   const ids = rows.map((r) => r.id);
   const codeIds = rows.map((r) => r.promoCodeId).filter((id): id is string => id !== null);
-  const [holdRows, addonRows, codeRows] = await Promise.all([
+  const [holdRows, addonRows, codeRows, received] = await Promise.all([
     db
       .select({ bookingId: studioHolds.bookingId, name: studios.name, priceCents: studioHolds.priceCents, sort: studios.sortOrder })
       .from(studioHolds)
@@ -529,8 +566,12 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[]): Promise<Bo
       .where(inArray(studioHolds.bookingId, ids)),
     db.select().from(bookingAddons).where(inArray(bookingAddons.bookingId, ids)),
     codeIds.length > 0
-      ? db.select({ id: promoCodes.id, kind: promoCodes.kind }).from(promoCodes).where(inArray(promoCodes.id, codeIds))
+      ? db
+          .select({ id: promoCodes.id, kind: promoCodes.kind, source: promoCodes.source })
+          .from(promoCodes)
+          .where(inArray(promoCodes.id, codeIds))
       : [],
+    receivedCentsByBooking(db, ids),
   ]);
   return rows.map((booking) => ({
     id: booking.id,
@@ -555,10 +596,13 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[]): Promise<Bo
     promoDiscountCents: booking.promoDiscountCents,
     creditAppliedCents: booking.creditAppliedCents,
     promoKind: codeRows.find((code) => code.id === booking.promoCodeId)?.kind ?? null,
+    promoSource: codeRows.find((code) => code.id === booking.promoCodeId)?.source ?? null,
     label: labelOf(booking),
     madeByAdmin: booking.madeBy !== null,
     photography: booking.photographerId !== null ? { includes: booking.photoIncludes ?? "" } : null,
     totalCents: booking.totalCents,
+    receivedCents: received.get(booking.id) ?? 0,
+    dueCents: booking.madeBy !== null ? Math.max(0, booking.totalCents - (received.get(booking.id) ?? 0)) : 0,
     rescheduledCount: booking.rescheduledCount,
   }));
 }

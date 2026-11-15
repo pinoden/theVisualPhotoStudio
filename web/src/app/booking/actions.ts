@@ -35,12 +35,17 @@ export async function cancelBookingAction(_previous: ManageState, formData: Form
   if (!result.ok) return { status: "error", message: result.message };
   flushEmailsSoon();
   if (!formData.get("keepInPlace")) refresh();
+  // The pet fee is never sent back to the card: when a refund is due it comes back as a code for studio credit.
+  const credit =
+    result.creditCents > 0
+      ? ` The pet fee of ${formatCents(result.creditCents)} is returned as studio credit: we have emailed you the code.`
+      : "";
   return {
     status: "cancelled",
     message:
       result.refund === "none"
         ? `Your booking is cancelled. ${result.message}`
-        : `Your booking is cancelled. A refund of ${formatCents(result.refundCents)} is on its way to your card.`,
+        : `Your booking is cancelled. A refund of ${formatCents(result.refundCents)} is on its way to your card.${credit}`,
   };
 }
 

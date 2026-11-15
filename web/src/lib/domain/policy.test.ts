@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { cancellationOutcome, rescheduleOutcome, type BookingFacts, type PolicySettings } from "./policy";
 
+/** The owner's terms since 2026-11-15: 14 days, 5% kept. */
 const settings: PolicySettings = {
-  refundWindowHours: 168,
+  refundWindowHours: 336,
   refundFeePercent: 5,
   rescheduleCutoffHours: 24,
   maxReschedules: 1,
@@ -24,23 +25,76 @@ function booking(overrides: Partial<BookingFacts> = {}): BookingFacts {
 }
 
 describe("cancelling", () => {
-  it("refunds the card payment less the fee when cancelled 7 or more days ahead", () => {
-    expect(cancellationOutcome(booking(), hoursBefore(200), settings)).toEqual({
+  it("refunds the card payment less the fee when cancelled 14 or more days ahead", () => {
+    expect(cancellationOutcome(booking(), hoursBefore(400), settings)).toEqual({
       allowed: true,
       refundCents: 16720,
       feeCents: 880,
+      creditCents: 0,
+      byHandCents: 0,
       why: "refund",
     });
-    // Exactly 168 hours ahead still counts.
-    expect(cancellationOutcome(booking(), hoursBefore(168), settings)).toMatchObject({ refundCents: 16720 });
+    // Exactly 336 hours ahead still counts.
+    expect(cancellationOutcome(booking(), hoursBefore(336), settings)).toMatchObject({ refundCents: 16720 });
   });
 
   it("refunds nothing inside the window", () => {
-    expect(cancellationOutcome(booking(), hoursBefore(167.99), settings)).toEqual({
+    expect(cancellationOutcome(booking(), hoursBefore(335.99), settings)).toEqual({
       allowed: true,
       refundCents: 0,
       feeCents: 0,
+      creditCents: 0,
+      byHandCents: 0,
       why: "inside_window",
+    });
+    // Ten days ahead was refunded while the window was 7 days.
+    expect(cancellationOutcome(booking(), hoursBefore(240), settings)).toMatchObject({ refundCents: 0, why: "inside_window" });
+  });
+
+  it("keeps the pet fee out of the card refund and returns it as studio credit", () => {
+    // $176 for the studio and $40 for the pet. The fee is taken on the $176 only; the $40 comes back whole, as credit.
+    const withPet = booking({ cardPaidCents: 21600, petFeeCents: 4000 });
+    expect(cancellationOutcome(withPet, hoursBefore(400), settings)).toEqual({
+      allowed: true,
+      refundCents: 16720,
+      feeCents: 880,
+      creditCents: 4000,
+      byHandCents: 0,
+      why: "refund",
+    });
+    // Inside the window nothing comes back by itself, the pet fee included.
+    expect(cancellationOutcome(withPet, hoursBefore(100), settings)).toMatchObject({ refundCents: 0, creditCents: 0, why: "inside_window" });
+    // When an administrator has already returned it, it is not returned a second time, and it still stays off the card.
+    expect(cancellationOutcome({ ...withPet, petCreditGiven: true }, hoursBefore(400), settings)).toMatchObject({
+      refundCents: 16720,
+      creditCents: 0,
+    });
+    // A booking of which a credit paid most: the card holds less than the pet fee, and all of it becomes credit.
+    expect(cancellationOutcome(booking({ cardPaidCents: 1000, creditAppliedCents: 20600, petFeeCents: 4000 }), hoursBefore(400), settings)).toMatchObject({
+      refundCents: 0,
+      feeCents: 0,
+      creditCents: 1000,
+    });
+  });
+
+  it("leaves money taken at the studio to the studio: nothing is sent back online", () => {
+    const paidInCash = booking({ cardPaidCents: 0, paidAtStudioCents: 17600 });
+    expect(cancellationOutcome(paidInCash, hoursBefore(400), settings)).toEqual({
+      allowed: true,
+      refundCents: 0,
+      feeCents: 0,
+      creditCents: 0,
+      byHandCents: 17600,
+      why: "paid_at_studio",
+    });
+    // Inside the window no refund is due at all, so there is nothing for the studio to do either.
+    expect(cancellationOutcome(paidInCash, hoursBefore(100), settings)).toMatchObject({ byHandCents: 0, why: "inside_window" });
+    // Part by card, part at the studio: the card part goes back by itself, the rest by hand.
+    expect(cancellationOutcome(booking({ cardPaidCents: 10000, paidAtStudioCents: 7600 }), hoursBefore(400), settings)).toMatchObject({
+      refundCents: 9500,
+      feeCents: 500,
+      byHandCents: 7600,
+      why: "refund",
     });
   });
 
@@ -53,18 +107,18 @@ describe("cancelling", () => {
   });
 
   it("refunds in full when the owner sets no fee, and rounds the fee to the cent", () => {
-    expect(cancellationOutcome(booking(), hoursBefore(200), { ...settings, refundFeePercent: 0 })).toMatchObject({
+    expect(cancellationOutcome(booking(), hoursBefore(400), { ...settings, refundFeePercent: 0 })).toMatchObject({
       refundCents: 17600,
       feeCents: 0,
     });
-    expect(cancellationOutcome(booking({ cardPaidCents: 13290 }), hoursBefore(200), settings)).toMatchObject({
+    expect(cancellationOutcome(booking({ cardPaidCents: 13290 }), hoursBefore(400), settings)).toMatchObject({
       feeCents: 665, // 664.5 rounds up
       refundCents: 12625,
     });
   });
 
   it("has nothing to refund when nothing was paid by card", () => {
-    expect(cancellationOutcome(booking({ cardPaidCents: 0 }), hoursBefore(200), settings)).toMatchObject({
+    expect(cancellationOutcome(booking({ cardPaidCents: 0 }), hoursBefore(400), settings)).toMatchObject({
       allowed: true,
       refundCents: 0,
       why: "nothing_paid",
@@ -75,7 +129,7 @@ describe("cancelling", () => {
     expect(cancellationOutcome(booking(), START, settings)).toEqual({ allowed: false, reason: "already_started" });
     expect(cancellationOutcome(booking(), hoursBefore(-1), settings)).toEqual({ allowed: false, reason: "already_started" });
     for (const status of ["cancelled", "completed", "no_show", "pending_payment", "expired"]) {
-      expect(cancellationOutcome(booking({ status }), hoursBefore(200), settings)).toEqual({
+      expect(cancellationOutcome(booking({ status }), hoursBefore(400), settings)).toEqual({
         allowed: false,
         reason: "not_confirmed",
       });
@@ -145,6 +199,14 @@ describe("moving a booking", () => {
     expect(rescheduleOutcome(booking({ cardPaidCents: 0 }), hoursBefore(48), settings)).toEqual({
       allowed: false,
       reason: "nothing_paid",
+    });
+  });
+
+  it("moves money taken at the studio like any other", () => {
+    expect(rescheduleOutcome(booking({ cardPaidCents: 0, paidAtStudioCents: 17600 }), hoursBefore(48), settings)).toEqual({
+      allowed: true,
+      creditCents: 17600,
+      discountCents: 0,
     });
   });
 });

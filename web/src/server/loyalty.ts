@@ -26,7 +26,8 @@ const DAY = 86_400_000;
 /**
  * Where a customer stands: the days that count, and the free hours earned.
  * Customers are told apart by email address. Only completed visits count, so
- * a cancelled booking or a no-show adds nothing.
+ * a cancelled booking or a no-show adds nothing, and photography sessions do
+ * not count (the rule is in the domain function).
  */
 export async function loyaltyStandingOf(
   db: DbLike,
@@ -34,7 +35,7 @@ export async function loyaltyStandingOf(
   settings: Pick<Settings, "loyaltyVisits">,
 ): Promise<LoyaltyStanding> {
   const rows = await db
-    .select({ id: bookings.id, startAt: bookings.startAt, codeKind: promoCodes.kind })
+    .select({ id: bookings.id, startAt: bookings.startAt, codeKind: promoCodes.kind, photographerId: bookings.photographerId })
     .from(bookings)
     .leftJoin(promoCodes, eq(promoCodes.id, bookings.promoCodeId))
     .where(and(eq(bookings.customerEmail, email.trim().toLowerCase()), eq(bookings.status, "completed")));
@@ -44,6 +45,7 @@ export async function loyaltyStandingOf(
       day: localDateOf(row.startAt),
       startAt: row.startAt.getTime(),
       usedFreeHour: row.codeKind === "free_hour",
+      photography: row.photographerId !== null,
     })),
     settings.loyaltyVisits,
   );

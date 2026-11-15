@@ -10,6 +10,7 @@ export const STAFF_ABILITIES = {
   staffSeesPrices: "See what a booking cost",
   staffMovesBookings: "Move a booking to a new time",
   staffCreatesBookings: "Make a booking for a client",
+  staffRecordsPayments: "Record a payment taken at the studio (this shows them what the booking still owes)",
   staffSetsPhotographerTimes: "Set the hours the photographer works, and block their time",
 } as const;
 

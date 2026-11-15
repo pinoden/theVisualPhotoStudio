@@ -24,9 +24,9 @@ import {
  */
 test.describe.configure({ mode: "serial" });
 
-const NEAR = dateAhead(3); // inside the 7-day refund window
-const FAR = dateAhead(10); // refundable
-const LATER = dateAhead(17);
+const NEAR = dateAhead(3); // inside the 14-day refund window
+const FAR = dateAhead(15); // refundable: more than 14 days ahead
+const LATER = dateAhead(21);
 const SATURDAY = dateAhead(3, "saturday");
 const DOOR_DAY = dateAhead(24); // a day no other test books
 const WITHDRAWN_DAY = dateAhead(31); // likewise, for the add-on withdrawn during checkout
@@ -79,7 +79,11 @@ test("public pages show the studios and the live price list", async ({ page }) =
   await shot(page, "02-rates");
 
   await page.goto("/policies");
-  await expect(byText(page, /7 or more days \(168 hours\)/)).toBeVisible();
+  // The terms follow the settings: 14 days and a 5% fee since the owner's answers of 2026-11-15.
+  await expect(byText(page, /Cancellations made 14 days \(336 hours\) or more before the appointment/)).toBeVisible();
+  await expect(byText(page, /excluding the non-refundable payment processing fee \(5%\)/)).toBeVisible();
+  await expect(byText(page, /Sessions are booked at least 14 days ahead\./)).toBeVisible();
+  await expect(byText(page, /A \$40 pet fee applies per reservation.* If your pet does not come, the fee is returned to you as\s+studio credit/)).toBeVisible();
   await page.goto("/studios");
   await expect(page.getByRole("heading", { name: "Studio Paris" })).toBeVisible();
 
@@ -87,6 +91,7 @@ test("public pages show the studios and the live price list", async ({ page }) =
   await page.goto("/services");
   await expect(page.getByRole("heading", { name: "Professional Photography" })).toBeVisible();
   await expect(page.getByRole("row", { name: /2 hours/ })).toContainText("30");
+  await expect(byText(page, /Please book at least 14 days ahead\./)).toBeVisible();
   await shot(page, "02a-photography");
   await page.getByRole("link", { name: "Book a Photographer" }).click();
   await expect(page.getByRole("heading", { name: "Book a Photographer" })).toBeVisible();
@@ -100,7 +105,7 @@ test("guest information answers with the current rules and prices", async ({ pag
   const refunds = page.locator("details.faq-item", { hasText: "Can I cancel, and do I get a refund?" });
   await expect(refunds.locator(".faq-answer")).toBeHidden();
   await refunds.locator("summary").click();
-  await expect(refunds.locator(".faq-answer")).toContainText("Cancel 7 days (168 hours) or more before your start time");
+  await expect(refunds.locator(".faq-answer")).toContainText("Cancel 14 days (336 hours) or more before your start time");
   await expect(refunds.locator(".faq-answer")).toContainText("less the 5% payment processing fee");
 
   const moving = page.locator("details.faq-item", { hasText: "Can I move my booking to another time?" });
@@ -112,7 +117,8 @@ test("guest information answers with the current rules and prices", async ({ pag
   await expect(loyalty.locator(".faq-answer")).toContainText(
     "When you have visited us 5 times, on separate days, we email you a code for one free hour in any studio.",
   );
-  await expect(loyalty.locator(".faq-answer")).toContainText("It is valid for 60 days.");
+  await expect(loyalty.locator(".faq-answer")).toContainText("It is valid for 90 days.");
+  await expect(loyalty.locator(".faq-answer")).toContainText("and neither does a photography session with our photographer");
 
   const pets = page.locator("details.faq-item", { hasText: "Can I bring my pet?" });
   await pets.locator("summary").click();
@@ -302,7 +308,7 @@ test("the released time is bookable again, and the code pays for a new booking w
   await confirmAndGetRef(page, "Confirm booking");
   await expect(byText(page, "Paid with reschedule code")).toBeVisible();
 
-  // Seventeen days ahead would normally be refundable. A moved booking is not.
+  // Three weeks ahead would normally be refundable. A moved booking is not.
   await page.getByRole("button", { name: "Cancel booking" }).click();
   await expect(byText(page, "No refund is due, because this booking was made with a reschedule code.")).toBeVisible();
   await page.getByRole("button", { name: "Keep my booking" }).click();
@@ -339,7 +345,7 @@ test("a code only works for the person it was sent to", async ({ page }) => {
   await expect(byText(page, /belongs to a different email address/)).toBeVisible();
 });
 
-test("cancelling a week or more ahead refunds the card automatically", async ({ page }) => {
+test("cancelling two weeks or more ahead refunds the card automatically", async ({ page }) => {
   await bookStudioFirstToPayment(page, { studios: ["Studio Paris"], date: FAR, duration: "1 hr", time: "10:00 AM", customer: bob });
   await confirmAndGetRef(page, "Confirm & pay $68");
 
@@ -354,6 +360,55 @@ test("cancelling a week or more ahead refunds the card automatically", async ({ 
 
   const toOwner = await latestEmail(page, "owner_refund_notice", OWNER);
   expect(toOwner.body).toContain("An automatic refund of $64.60 was sent");
+});
+
+test("a pet fee is not refunded to the card: it comes back as studio credit", async ({ page }) => {
+  // Bob books Studio Dayglow with his dog, more than two weeks ahead: $78 for the hour and $40 for the pet.
+  await bookStudioFirstToPayment(page, {
+    studios: ["Studio Dayglow"],
+    date: FAR,
+    duration: "1 hr",
+    time: "3:00 PM",
+    customer: bob,
+    addons: ["Pet fee"],
+  });
+  await confirmAndGetRef(page, "Confirm & pay $118");
+
+  // Cancelled in time: the studio's $78 goes back to the card less the fee, and the $40 comes back as credit.
+  await page.getByRole("button", { name: "Cancel booking" }).click();
+  await expect(
+    byText(
+      page,
+      "You will be refunded $74.10 to your card. The 5% processing fee ($3.90) is not refundable. The pet fee ($40) is not refunded to your card: it is returned as studio credit, and we email you the code.",
+    ),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Yes, cancel it" }).click();
+  await expect(
+    byText(
+      page,
+      "Your booking is cancelled. A refund of $74.10 is on its way to your card. The pet fee of $40 is returned as studio credit: we have emailed you the code.",
+    ),
+  ).toBeVisible();
+  const mail = await latestEmail(page, "booking_cancelled", bob.email);
+  expect(mail.body).toContain("The pet fee of $40 is not refunded to a card. It is returned to you as studio credit:");
+  const petCode = /Code: (PET-[0-9A-Z]{4}-[0-9A-Z]{4})/.exec(mail.body)?.[1];
+  expect(petCode).toBeTruthy();
+
+  // The credit pays for part of his next booking: Studio Paris for an hour is $68, so $28 is left to pay.
+  await bookStudioFirstToPayment(page, { studios: ["Studio Paris"], date: FAR, duration: "1 hr", time: "3:00 PM", customer: bob, code: petCode });
+  await expect(byText(page, `Studio credit, code ${petCode}`)).toBeVisible();
+  await expect(totalRow(page)).toContainText("$28");
+
+  // Jane books the near date with her dog. The owner will find that the dog did not come (see the calendar test).
+  await bookStudioFirstToPayment(page, {
+    studios: ["Studio Dayglow"],
+    date: NEAR,
+    duration: "1 hr",
+    time: "12:15 PM",
+    customer: jane,
+    addons: ["Pet fee"],
+  });
+  await confirmAndGetRef(page, "Confirm & pay $118");
 });
 
 test("the owner adds a staff member and assigns one day", async ({ page }) => {
@@ -393,11 +448,10 @@ test("staff see the day sheet of their assigned day and nothing else", async ({ 
   await expect(row).toContainText("Studio Paris");
   await shot(page, "16-staff-day-sheet");
 
-  // No prices, no contact details.
+  // No prices. Phone numbers and emails are shown to staff unless the owners switch that off.
   const table = await onScreen(page.locator("table.data-table")).innerText();
   expect(table).not.toContain("$");
-  expect(table).not.toContain(bob.email);
-  expect(table).not.toContain(bob.phone);
+  expect(table).toContain(bob.phone);
 
   // Staff can change the status label, from the day sheet. Bob has asked to move his booking.
   await row.getByRole("combobox", { name: "Status label for Bob Brown" }).selectOption({ label: "Reschedule Pending" });
@@ -409,14 +463,14 @@ test("staff see the day sheet of their assigned day and nothing else", async ({ 
   await page.getByRole("row", { name: /Bob Brown/ }).getByRole("button", { name: "Set" }).click();
   await expect(onScreen(page.locator(".flash-error"))).toContainText("can be set once the appointment has started");
 
-  // The appointment page: details, the label, and the history of its changes. Still no price and no contact details.
+  // The appointment page: details, the label, and the history of its changes. Still no price.
   await page.getByRole("link", { name: "Bob Brown" }).click();
   await expect(page.getByRole("heading", { name: "Bob Brown" })).toBeVisible();
   await expect(page.getByRole("row", { name: /Booked/ })).toContainText("The customer");
   await expect(page.getByRole("row", { name: /Confirmed → Reschedule Pending/ })).toContainText(STAFF);
   const appointment = await onScreen(page.locator(".admin-main")).innerText();
   expect(appointment).not.toContain("$");
-  expect(appointment).not.toContain(bob.email);
+  expect(appointment).toContain(bob.email);
   // The second level of the admin has its own short menu.
   await expect(onScreen(page.locator(".admin-nav"))).toHaveText("CalendarDay sheet");
   await shot(page, "16b-staff-appointment");
@@ -463,9 +517,10 @@ test("the owners switch on what staff can do, and it applies at once", async ({ 
   await expect(onScreen(page.locator(".admin-main"))).toContainText("$68");
   await expect(onScreen(page.locator(".admin-main"))).toContainText(bob.email);
 
-  // Two switches: contact details and prices.
+  // Two switches: contact details off (they are on by default), and prices on.
   await page.getByRole("link", { name: "Staff", exact: true }).click();
-  await page.getByRole("checkbox", { name: "See customers' phone numbers and email addresses" }).check();
+  await expect(page.getByRole("checkbox", { name: "See customers' phone numbers and email addresses" })).toBeChecked();
+  await page.getByRole("checkbox", { name: "See customers' phone numbers and email addresses" }).uncheck();
   await page.getByRole("checkbox", { name: "See what a booking cost" }).check();
   await page.getByRole("button", { name: "Save what staff can do" }).click();
   await expect(byText(page, "Saved. It applies to every member of staff from now on.")).toBeVisible();
@@ -476,11 +531,12 @@ test("the owners switch on what staff can do, and it applies at once", async ({ 
   await page.getByRole("button", { name: "Sign out" }).click();
   await page.waitForURL((url) => url.pathname === "/");
   await signIn(page, STAFF, `/staff?date=${NEAR}`);
-  await expect(page.getByRole("row", { name: /Bob Brown/ })).toContainText(bob.phone);
+  await expect(page.getByRole("row", { name: /Bob Brown/ })).toBeVisible();
+  expect(await onScreen(page.locator("table.data-table")).innerText()).not.toContain(bob.phone);
   await page.getByRole("link", { name: "Bob Brown" }).click();
   await expect(page.getByRole("heading", { name: "Bob Brown" })).toBeVisible();
   await expect(onScreen(page.locator(".admin-main"))).toContainText("$68");
-  await expect(onScreen(page.locator(".admin-main"))).toContainText(bob.email);
+  expect(await onScreen(page.locator(".admin-main")).innerText()).not.toContain(bob.email);
 
   // Their calendar shows the days they may see, and says so for the others.
   await page.goto(`/admin/calendar?view=day&date=${NEAR}`);
@@ -565,10 +621,36 @@ test("the calendar shows a day, a week and a month, one studio or all, and a boo
   await expect(onScreen(page.locator(".price-row.total"))).toContainText("To pay at the studio");
   expect((await latestEmail(page, "booking_confirmation", "dana.e2e@example.com")).body).toContain("To pay at the studio: $78");
 
+  // Dana pays in cash at the studio, and the owner marks the booking as paid.
+  await expect(byText(page, "$78 is still to pay.")).toBeVisible();
+  await expect(byLabel(page, "Amount paid ($)")).toHaveValue("78");
+  await byLabel(page, "How it was paid").selectOption({ label: "Cash" });
+  await byLabel(page, "Note (optional)").fill("Paid at the desk");
+  await page.getByRole("button", { name: "Record payment" }).click();
+  await expect(byText(page, /\$78 recorded\. The booking is paid in full\. The client has been emailed a confirmation\./)).toBeVisible();
+  await expect(onScreen(page.locator("#payment"))).toContainText("Paid in full.");
+  await expect(onScreen(page.locator(".price-row.total"))).toContainText("Paid at the studio");
+  await expect(page.getByRole("row", { name: /\$78 · Cash/ })).toContainText(THIRD_OWNER);
+  await expect(page.getByRole("button", { name: "Record payment" })).toHaveCount(0); // nothing is owed any more
+  const receipt = await latestEmail(page, "payment_received", "dana.e2e@example.com");
+  expect(receipt.body).toContain("We received your payment of $78");
+  expect(receipt.body).toContain("Your booking is paid in full.");
+  await shot(page, "17g-marked-as-paid");
+
   // It is on the calendar, in Studio Dayglow's column, like any other booking.
   await page.goto(`/admin/calendar?view=day&date=${NEAR}&studio=dayglow`);
   await expect(page.getByRole("link", { name: /Dana Diaz/ })).toContainText("4:00 PM – 5:00 PM");
   await expect(page.getByRole("link", { name: /Bob Brown/ })).toHaveCount(0);
+
+  // Jane booked this day with her dog, and the dog is not coming: the owner returns the pet fee as studio credit.
+  await page.getByRole("link", { name: /Jane Smith/ }).click();
+  await expect(page.getByRole("heading", { name: "Jane Smith" })).toBeVisible();
+  await expect(byText(page, /This booking has a pet fee of \$40\. It is not refunded to a card\./)).toBeVisible();
+  await page.getByRole("button", { name: "The pet did not come: return the fee as credit" }).click();
+  await expect(byText(page, /The pet fee of \$40 is now studio credit\. The client has been emailed the code PET-/)).toBeVisible();
+  await expect(byText(page, /was returned to the client as studio credit, code/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "The pet did not come: return the fee as credit" })).toHaveCount(0);
+  expect((await latestEmail(page, "pet_credit", jane.email)).body).toContain("the pet fee of $40 is returned to you as studio credit");
 });
 
 test("the owner sets a weekend price and the booking screen charges it on Saturday only", async ({ page }) => {

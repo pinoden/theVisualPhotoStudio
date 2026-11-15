@@ -3,7 +3,7 @@ import { loyaltyStanding, type LoyaltyVisit } from "./loyalty";
 
 /** A visit at 10:00 on a day, or later that day with `hour`. */
 function visit(day: string, id = day, extra: Partial<LoyaltyVisit> = {}, hour = 10): LoyaltyVisit {
-  return { bookingId: id, day, startAt: Date.parse(`${day}T${String(hour).padStart(2, "0")}:00:00Z`), usedFreeHour: false, ...extra };
+  return { bookingId: id, day, startAt: Date.parse(`${day}T${String(hour).padStart(2, "0")}:00:00Z`), usedFreeHour: false, photography: false, ...extra };
 }
 
 const FIVE = ["2026-11-02", "2026-11-05", "2026-11-09", "2026-11-12", "2026-11-16"];
@@ -39,6 +39,15 @@ describe("one free hour for five visits", () => {
     expect(loyaltyStanding(visits, 5)).toMatchObject({ earned: 1, towardsNext: 0 });
     // A paid booking on the same day still counts that day.
     expect(loyaltyStanding([...visits, visit("2026-11-20", "paid", {}, 15)], 5)).toMatchObject({ earned: 1, towardsNext: 1 });
+  });
+
+  it("does not count a photography session (the owner, 2026-11-15)", () => {
+    const sessions = FIVE.map((day) => visit(day, day, { photography: true }));
+    expect(loyaltyStanding(sessions, 5)).toEqual({ days: [], earned: 0, towardsNext: 0, milestones: [] });
+    // Four rentals and a session are four visits. A rental on the day of a session counts that day.
+    const mixed = [...FIVE.slice(0, 4).map((day) => visit(day)), visit(FIVE[4], "session", { photography: true })];
+    expect(loyaltyStanding(mixed, 5)).toMatchObject({ earned: 0, towardsNext: 4 });
+    expect(loyaltyStanding([...mixed, visit(FIVE[4], "rental", {}, 15)], 5)).toMatchObject({ earned: 1, milestones: ["rental"] });
   });
 
   it("starts the count again after each free hour: every fifth day earns one", () => {

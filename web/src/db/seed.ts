@@ -113,7 +113,8 @@ export async function seed(db: Db): Promise<boolean> {
     );
 
     // The in-house photographer. The migration that added photography creates one; this is for a
-    // database that has none. Their hours start as the studios' opening hours, until the owner sets them.
+    // database that has none. They work 9 am to 5 pm (the owner, 2026-11-15), so the last one-hour
+    // session starts at 4 pm. The owner changes the hours, and switches days off, under Admin, Photography.
     const [someone] = await tx.select({ id: photographers.id }).from(photographers).limit(1);
     if (!someone) {
       const [photographer] = await tx.insert(photographers).values({ name: "In-house photographer" }).returning({ id: photographers.id });
@@ -121,8 +122,8 @@ export async function seed(db: Db): Promise<boolean> {
         [1, 2, 3, 4, 5, 6, 7].map((weekday) => ({
           photographerId: photographer.id,
           weekday,
-          openMinute: weekday <= 5 ? h(9) : h(8),
-          closeMinute: weekday <= 5 ? h(19) : h(20),
+          openMinute: h(9),
+          closeMinute: h(17),
         })),
       );
     }

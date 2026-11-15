@@ -113,6 +113,8 @@ export async function bookStudioFirstToPayment(
     time: string;
     customer: { name: string; email: string; phone: string };
     code?: string;
+    /** Add-ons to tick, by name: "Pet fee". */
+    addons?: string[];
   },
 ): Promise<void> {
   await page.goto("/book");
@@ -124,6 +126,7 @@ export async function bookStudioFirstToPayment(
   await page.getByRole("button", { name: options.time, exact: true }).click();
   await next(page);
   await fillDetails(page, options.customer);
+  for (const addon of options.addons ?? []) await page.getByRole("checkbox", { name: new RegExp(addon) }).check();
   if (options.code) {
     await byLabel(page, "Have a code?").fill(options.code);
     await page.getByRole("button", { name: "Apply" }).click();

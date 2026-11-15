@@ -27,8 +27,10 @@ import {
 import { loadCatalog } from "./catalog";
 import { bookingMovedEmail, queueEmail } from "./email";
 import { listEvents, recordEvent, type BookingEvent } from "./history";
+import { PET_CREDIT_BLOCK_TEXT, petCreditStanding } from "./pet-fee";
 import { loadSettings } from "./settings";
 import { canViewDay } from "./staff";
+import { moneyOf, type BookingMoney } from "./studio-payments";
 import { formatInstant, localDateOf, localToUtc } from "./tz";
 
 /**
@@ -55,11 +57,22 @@ export interface Appointment {
   addons: { name: string; quantity: number }[];
   /** The booking with its amounts. Null unless the viewer may see prices. */
   money: BookingView | null;
+  /**
+   * What the booking has received and still owes, with each payment. Null
+   * unless the viewer may see prices or may record payments.
+   */
+  payments: BookingMoney | null;
+  /**
+   * The pet fee on the booking, and whether it can be returned as studio
+   * credit now. Null when there is none, and for staff: returning it is the
+   * owners' decision.
+   */
+  petFee: { cents: number; creditCode: string | null; canReturn: boolean; why: string } | null;
   history: BookingEvent[];
   /** Each label that can be set by hand, and whether it can be set right now. */
   labelChoices: { key: SettableLabel; allowed: boolean; why: string }[];
   /** What this viewer may do with the appointment. */
-  may: Record<"setLabels" | "move", boolean>;
+  may: Record<"setLabels" | "move" | "recordPayment" | "changePayments", boolean>;
 }
 
 /** The viewer may see this booking: owners always, staff on the days they may see. */
@@ -78,6 +91,8 @@ export async function getAppointment(db: DbLike, viewer: AuthUser, ref: string, 
   const may = (ability: StaffAbility) => can(viewer, ability, settings);
   const [view] = await toBookingViews(db, [booking]);
   const active = ["confirmed", "completed", "no_show"].includes(booking.status);
+  const money = await moneyOf(db, booking);
+  const pet = viewer.role === "owner" ? await petCreditStanding(db, booking) : null;
 
   return {
     ref: booking.ref,
@@ -93,6 +108,16 @@ export async function getAppointment(db: DbLike, viewer: AuthUser, ref: string, 
     notes: booking.notes,
     addons: view.addons.map((addon) => ({ name: addon.name, quantity: addon.quantity })),
     money: may("staffSeesPrices") ? view : null,
+    payments: may("staffSeesPrices") || may("staffRecordsPayments") ? money : null,
+    petFee:
+      pet && pet.feeCents > 0
+        ? {
+            cents: pet.feeCents,
+            creditCode: pet.given?.code ?? null,
+            canReturn: pet.block === null,
+            why: pet.block ? PET_CREDIT_BLOCK_TEXT[pet.block] : "",
+          }
+        : null,
     history: await listEvents(db, booking.id),
     labelChoices: SETTABLE_LABELS.map((key) => {
       const change = labelChange(booking, key, now);
@@ -109,6 +134,8 @@ export async function getAppointment(db: DbLike, viewer: AuthUser, ref: string, 
     may: {
       setLabels: active && may("staffSetsLabels"),
       move: booking.status === "confirmed" && now.getTime() < booking.endAt.getTime() && may("staffMovesBookings"),
+      recordPayment: active && money.dueCents > 0 && may("staffRecordsPayments"),
+      changePayments: viewer.role === "owner",
     },
   };
 }
