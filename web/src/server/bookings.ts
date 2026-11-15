@@ -16,7 +16,7 @@ import { formatCents, PricingError, quote, type Quote } from "@/lib/domain/prici
 import { durationLabel, isIsoDate } from "@/lib/domain/time";
 import { loadDayAvailability, releaseExpiredHolds } from "./availability";
 import { dayTypeFor, loadCatalog } from "./catalog";
-import { bookingConfirmationEmail, queueEmail } from "./email";
+import { bookingConfirmationEmail, ownerPaymentUnknownNotice, queueEmail } from "./email";
 import type { PaymentProvider } from "./payments";
 import { findUsablePromo, PROMO_PROBLEM_TEXT, redeemPromo, restorePromo, toPromoDef, type UsablePromo } from "./promos";
 import { formatInstant, localToUtc } from "./tz";
@@ -71,6 +71,8 @@ export interface BookingDeps {
   payments: PaymentProvider | null;
   /** Site origin, used for links in emails. */
   baseUrl: string;
+  /** Who is told when a charge got no answer and a person has to check the processor. */
+  ownerEmail?: string | null;
 }
 
 const REF_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
@@ -335,12 +337,33 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
 
     if (!charge.ok) {
       await db.transaction(async (tx) => {
-        await tx.update(payments).set({ status: "failed", error: charge.message }).where(eq(payments.id, payment.id));
+        await tx
+          .update(payments)
+          .set({ status: "failed", error: charge.detail ?? charge.message })
+          .where(eq(payments.id, payment.id));
         await tx.update(bookings).set({ status: "expired" }).where(eq(bookings.id, bookingId));
         await tx.update(studioHolds).set({ active: false }).where(eq(studioHolds.bookingId, bookingId));
         if (spendsCode) await restorePromo(tx, promo!.id, promo!.kind, price.promoDiscountCents);
+        // No answer from the processor: the card may have been charged, and only a person can check.
+        if (charge.unknown && deps.ownerEmail) {
+          await queueEmail(
+            tx,
+            ownerPaymentUnknownNotice({
+              to: deps.ownerEmail,
+              ref,
+              customer: input.customer.name,
+              amountCents: price.totalCents,
+            }),
+          );
+        }
       });
-      return fail(402, "payment_failed", `Payment failed: ${charge.message} Your card was not charged.`);
+      return fail(
+        402,
+        "payment_failed",
+        charge.unknown
+          ? `${charge.message} Your booking was not made. We cannot tell whether your card was charged: if a charge appears, contact us and we will refund it.`
+          : `Payment failed: ${charge.message} Your card was not charged.`,
+      );
     }
 
     await db.transaction(async (tx) => {

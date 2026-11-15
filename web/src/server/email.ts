@@ -308,6 +308,26 @@ export function ownerRefundNotice(input: {
   };
 }
 
+/** A charge that got no answer: the booking was not made, but the card may have been charged. */
+export function ownerPaymentUnknownNotice(input: {
+  to: string;
+  ref: string;
+  customer: string;
+  amountCents: number;
+}): QueuedEmail {
+  return {
+    to: input.to,
+    kind: "owner_payment_unknown",
+    subject: `ACTION NEEDED: check a payment for ${input.ref}`,
+    body: [
+      `A card payment of ${money(input.amountCents)} for booking ${input.ref} (${input.customer}) got no answer from Square.`,
+      "",
+      "The booking was not made and its time was released. Square may still have charged the card.",
+      `Look in Square for a payment with the reference ${input.ref}. If it is there, refund it.`,
+    ].join("\n"),
+  };
+}
+
 /** A visitor's message from the contact page, sent to the owner. Replying reaches the visitor. */
 export function contactMessageEmail(input: {
   to: string;

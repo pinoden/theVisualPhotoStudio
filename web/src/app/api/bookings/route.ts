@@ -3,7 +3,7 @@ import { getDb } from "@/db/client";
 import { createBooking } from "@/server/bookings";
 import { resolvePayments } from "@/server/payments";
 import { RateLimiter } from "@/server/rate-limit";
-import { flushEmailsSoon } from "@/server/runtime";
+import { flushEmailsSoon, ownerNotifyEmail } from "@/server/runtime";
 
 const limiter = new RateLimiter({ windowMs: 60_000, maxRequests: 10 });
 
@@ -33,6 +33,7 @@ export async function POST(request: NextRequest) {
     now: new Date(),
     payments: resolvePayments().provider,
     baseUrl: process.env.SITE_URL || request.nextUrl.origin,
+    ownerEmail: ownerNotifyEmail(),
   });
 
   if (result.ok) {

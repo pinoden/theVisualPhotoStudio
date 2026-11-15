@@ -33,6 +33,8 @@ npm run lint
 npm run build
 ```
 
+`npm run check:square` runs the site's own payment code against Square's sandbox: a charge, refused cards and refunds. No money moves. It needs sandbox keys in `.env.square-sandbox` (four `SQUARE_` lines, as in `.env.example`) and refuses any other kind of key. It is not part of `npm test`.
+
 The browser tests need Playwright's browser once: `npx playwright install chromium`. They start their own server with their own database and build folder, so they can run while `npm run dev` is running.
 
 Run only one dev server per folder. If every page starts reloading in a loop, stop the servers and delete `.next/dev`.

@@ -16,7 +16,8 @@
     "typecheck": "next typegen && tsc --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/migrate.ts",
-    "db:seed": "tsx scripts/seed.ts"
+    "db:seed": "tsx scripts/seed.ts",
+    "check:square": "tsx scripts/square-sandbox-check.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.16",
