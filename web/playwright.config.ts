@@ -1,6 +1,15 @@
 import { defineConfig } from "@playwright/test";
 
-const PORT = 3211;
+/**
+ * A second run in the same checkout must not share a port, a database, a
+ * build folder or a results folder with the first: two processes writing one
+ * build folder corrupt it. `E2E_NAME=tester E2E_PORT=3213 npm run test:e2e`
+ * gives a run its own of each. The name can only ever extend "e2e", so the
+ * clean-up below cannot reach local development data.
+ */
+const SUFFIX = /^[a-z0-9]{1,20}$/.test(process.env.E2E_NAME ?? "") ? `-${process.env.E2E_NAME}` : "";
+const NAME = `e2e${SUFFIX}`;
+const PORT = Number(process.env.E2E_PORT) || 3211;
 
 /**
  * Browser tests. They start their own dev server with a throwaway database
@@ -17,7 +26,7 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   reporter: [["list"]],
-  outputDir: "test-results",
+  outputDir: `test-results${SUFFIX}`,
   use: {
     baseURL: `http://localhost:${PORT}`,
     viewport: { width: 1280, height: 900 },
@@ -28,15 +37,15 @@ export default defineConfig({
     // Start from an empty database and an empty build folder every time. A
     // build cache left by a server that was killed mid-write makes every
     // page reload in a loop.
-    command: `rm -rf .data/e2e .next-e2e && npx next dev -p ${PORT}`,
+    command: `rm -rf .data/${NAME} .next-${NAME} && npx next dev -p ${PORT}`,
     url: `http://localhost:${PORT}/api/booking-config`,
     // Set E2E_REUSE_SERVER=1 to run against a server you started yourself
     // (same port and environment). Its database must be fresh.
     reuseExistingServer: Boolean(process.env.E2E_REUSE_SERVER),
     timeout: 180_000,
     env: {
-      PGLITE_DATA_NAME: "e2e",
-      NEXT_DIST_DIR: ".next-e2e",
+      PGLITE_DATA_NAME: NAME,
+      NEXT_DIST_DIR: `.next-${NAME}`,
       // Two owners: sign-in codes are limited to three per address in 15 minutes.
       OWNER_EMAILS: "owner@studio.test,owner2@studio.test",
       NEXT_TELEMETRY_DISABLED: "1",

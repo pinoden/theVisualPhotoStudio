@@ -26,6 +26,7 @@ npx vitest run src/server/bookings.test.ts            # one file
 npx vitest run -t "refuses a second booking"          # tests whose name matches
 npm run test:e2e     # browser tests (Playwright); starts its own server on port 3211
 E2E_SHOTS=1 npm run test:e2e                          # also saves full-page pictures to test-results/shots
+E2E_NAME=tester E2E_PORT=3213 npm run test:e2e        # a second run at the same time: its own port, database, build and results folders
 npx playwright test -g "staff see the day sheet"      # one browser test by name (they build on each other; see below)
 npm run typecheck    # generates Next.js route types, then runs tsc
 npm run lint
@@ -79,13 +80,22 @@ Local development needs no database install and no credentials. Without `DATABAS
 - **Constraints written by hand are not in `schema.ts`.** Add new ones with `npx drizzle-kit generate --custom --name <name>`.
 - **PGlite's data folder can be opened by one process at a time.** Stop `npm run dev` before running anything else against `web/.data`. `next build` without `DATABASE_URL` prerenders from an in-memory copy of the starting catalog.
 - **Tests** come in four kinds: domain unit tests; server tests against an in-memory PGlite, set up by `src/server/testing.ts` (the real constraints are exercised); component tests of the booking screen in jsdom; and browser tests in `web/e2e/`. Resend has never been called. Square has been called in its sandbox only, by `npm run check:square`, which is not part of `npm test`.
-- **Browser tests** start their own dev server on port 3211 with a throwaway database (`.data/e2e`), their own build folder (`.next-e2e`), the mock processor and two owners (`owner@studio.test`, `owner2@studio.test`). Sign-in codes are limited to three per address in 15 minutes, so a fourth owner sign-in in one run has to use the second address. They read sign-in codes from `/dev/outbox`. They share one database and run in order, so a single test run with `-g` only works if it does not depend on an earlier one. Any error in the browser console fails the test.
+- **Browser tests** start their own dev server on port 3211 with a throwaway database (`.data/e2e`), their own build folder (`.next-e2e`), the mock processor and two owners (`owner@studio.test`, `owner2@studio.test`). Sign-in codes are limited to three per address in 15 minutes, so a fourth owner sign-in in one run has to use the second address. They read sign-in codes from `/dev/outbox`. They share one database and run in order, so a single test run with `-g` only works if it does not depend on an earlier one. Any error in the browser console fails the test. A second run can go on at the same time under its own name: `E2E_NAME=tester E2E_PORT=3213` gives it `.data/e2e-tester`, `.next-e2e-tester` and `test-results-tester`. `tsconfig.json` already lists the `tester` build folder; with another name Next.js would add lines there on its first start.
 - **Earlier pages stay in the document, hidden.** With Cache Components, the router keeps recently visited pages mounted (`display: none`) so their state survives going back. Client state therefore outlives navigation: reset it deliberately where that matters. In browser tests use role locators, or `byLabel`, `byText` and `onScreen` from `e2e/helpers.ts`; a plain text or label locator also matches the hidden copies.
 - **One build folder, one process.** A dev server started on a build folder that another process is still writing to corrupts the cache, and every page then reloads in a loop (about 30 times a second, with nothing in the log but "Compiled"). It happened twice: with two sessions active, and when a server was started within a second of killing the previous one. Wait for the old process to exit before starting a new one. To recover, stop the servers and delete `web/.next/dev`. The browser tests avoid it by building into their own folder, `.next-e2e` (`NEXT_DIST_DIR`), which they delete at every start.
 - **More than one Claude Code session may be working in this checkout.** Before committing, run `git status` and `git log -5`, and commit only what you changed and verified.
 - **A button whose `formAction` is a server action cannot have a `name`.** React overrides it and logs an error, which fails the browser tests. Give each button its own action (see the two add-on actions in `src/app/admin/actions.ts`).
 - **One stylesheet.** `src/app/globals.css` was carried over from the Flask prototype. Brand colours and fonts are CSS variables at its top.
 - Next.js telemetry was turned off on this machine with `npx next telemetry disable`.
+
+## Agents
+
+`.claude/agents/tester.md` defines a second agent, the **tester**. It runs the test suites, uses the site in a real browser as a customer, a staff member and the owner, and reports defects with steps to reproduce. It does not change application code, commit or push: fixing what it finds is the builder's job.
+
+- Ask for it by name ("use the tester agent to test the contact form") or with `@agent-tester`. `claude --agent tester` runs a whole session as the tester.
+- It works on port 3213 with its own database, build and results folders (see "Browser tests" above), so it can run while a dev server or the usual browser tests are running.
+- Claude Code picks up a changed agent file within seconds. A session that started before `.claude/agents/` existed has to be restarted once to see it.
+- Agent definitions are in git. The rest of `.claude/` is personal and ignored.
 
 ## Rebuild decisions
 
@@ -188,3 +198,4 @@ Known weaknesses:
 - 2026-11-15: Added the getting-in text: the owner sets it in Settings, and customers with a confirmed booking get it by email and on their booking page. It is kept out of the public catalog because it can hold the door code. 245 unit and integration tests and 16 browser tests pass.
 - 2026-11-15: The scheduled task now notices a payment whose result was never recorded, which is what a server stopping in the middle of a charge leaves behind, and emails the owner to check it in Square.
 - 2026-11-15: Added "Studios & add-ons" to the admin: the owner can change each studio's tagline, description, guest number and clean-up time, and add, change or stop offering add-ons. Bookings already made keep the add-on name and price they were made with. 254 unit and integration tests and 17 browser tests pass.
+- 2026-11-15: Added a tester agent (`.claude/agents/tester.md`) at the owner's request. So that it can work beside other sessions in this checkout, a second browser-test run can now use its own port and folders. Two runs side by side both passed all 17 tests.

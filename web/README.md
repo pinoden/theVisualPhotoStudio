@@ -35,7 +35,7 @@ npm run build
 
 `npm run check:square` runs the site's own payment code against Square's sandbox: a charge, refused cards and refunds. No money moves. It needs sandbox keys in `.env.square-sandbox` (four `SQUARE_` lines, as in `.env.example`) and refuses any other kind of key. It is not part of `npm test`.
 
-The browser tests need Playwright's browser once: `npx playwright install chromium`. They start their own server with their own database and build folder, so they can run while `npm run dev` is running.
+The browser tests need Playwright's browser once: `npx playwright install chromium`. They start their own server with their own database and build folder, so they can run while `npm run dev` is running. A second run can go on at the same time: `E2E_NAME=tester E2E_PORT=3213 npm run test:e2e` uses its own port, database, build and results folders.
 
 Run only one dev server per folder. If every page starts reloading in a loop, stop the servers and delete `.next/dev`.
 
