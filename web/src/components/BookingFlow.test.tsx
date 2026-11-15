@@ -59,6 +59,7 @@ const catalog: Catalog = {
   ],
   settings: { ...DEFAULT_SETTINGS, slotIncrementMinutes: 60, multiStudioPercent: { 2: 20, 3: 22 } },
   specialDates: {},
+  accessInfoSent: false,
 };
 
 /** Taken time per studio that the fake server reports. */

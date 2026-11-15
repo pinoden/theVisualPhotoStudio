@@ -19,6 +19,7 @@ import { dayTypeFor, loadCatalog } from "./catalog";
 import { bookingConfirmationEmail, ownerPaymentUnknownNotice, queueEmail } from "./email";
 import type { PaymentProvider } from "./payments";
 import { findUsablePromo, PROMO_PROBLEM_TEXT, redeemPromo, restorePromo, toPromoDef, type UsablePromo } from "./promos";
+import { loadAccessInstructions } from "./settings";
 import { formatInstant, localToUtc } from "./tz";
 
 const emailField = z.string().trim().toLowerCase().max(200).pipe(z.email());
@@ -392,6 +393,7 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
         creditCents: spendsCode && promo!.kind === "amount" ? price.promoDiscountCents : 0,
         cardCents: price.totalCents,
         manageUrl: manageUrl(deps.baseUrl, ref, manageToken),
+        access: await loadAccessInstructions(db),
       }),
     );
   } catch (error) {

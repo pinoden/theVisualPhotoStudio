@@ -169,6 +169,8 @@ export function bookingConfirmationEmail(input: {
   /** Part of the total charged to the card. */
   cardCents: number;
   manageUrl: string;
+  /** How to get into the building, when the owner has set it. */
+  access?: string;
 }): QueuedEmail {
   return {
     to: input.to,
@@ -189,6 +191,7 @@ export function bookingConfirmationEmail(input: {
       "",
       `View, cancel or move your booking: ${input.manageUrl}`,
       "",
+      ...(input.access ? ["Getting in:", input.access, ""] : []),
       "Your booking begins at the scheduled start time. Please arrive no more than five minutes early.",
       "",
       SIGN_OFF,

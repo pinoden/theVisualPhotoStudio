@@ -8,6 +8,7 @@ import { getDb } from "@/db/client";
 import { SITE } from "@/lib/site";
 import { getBookingByToken } from "@/server/bookings";
 import { getManageChoices } from "@/server/manage";
+import { loadAccessInstructions } from "@/server/settings";
 
 export const metadata: Metadata = {
   title: "Your Booking",
@@ -71,6 +72,8 @@ async function BookingDetails({ params, searchParams }: Pick<PageProps<"/booking
       : (HEADING[booking.status] ?? HEADING.confirmed);
   const choices =
     booking.status === "confirmed" ? await getManageChoices(db, booking.ref, { kind: "token", token }, new Date()) : null;
+  // Only someone holding a confirmed booking's private link is told how to get in.
+  const access = booking.status === "confirmed" ? await loadAccessInstructions(db) : "";
 
   return (
     <div className="confirmation-card" style={{ textAlign: "left" }}>
@@ -92,6 +95,13 @@ async function BookingDetails({ params, searchParams }: Pick<PageProps<"/booking
             {SITE.addressLine1}, {SITE.addressLine2}. Your booking begins at the scheduled start time; please
             arrive no more than five minutes early.
           </p>
+          {access && (
+            <div className="notice" style={{ whiteSpace: "pre-line" }}>
+              <strong>Getting in</strong>
+              <br />
+              {access}
+            </div>
+          )}
         </>
       )}
 

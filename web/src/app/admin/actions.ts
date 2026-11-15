@@ -21,7 +21,7 @@ import { CATALOG_TAG } from "@/server/cached";
 import { ownerCancelBooking, ownerRefund } from "@/server/manage";
 import { flushEmailsSoon, manageDeps } from "@/server/runtime";
 import { requireOwner } from "@/server/session";
-import { saveSetting } from "@/server/settings";
+import { ACCESS_INSTRUCTIONS_MAX, saveAccessInstructions, saveSetting } from "@/server/settings";
 
 /**
  * Everything the owner can change. Every action starts with `requireOwner`:
@@ -278,4 +278,13 @@ export async function saveSettingsAction(formData: FormData): Promise<void> {
     failed("/admin/settings", `Not saved, value out of range: ${rejected.join(", ")}. Everything else was saved.`);
   }
   done("/admin/settings", "Settings saved.");
+}
+
+export async function saveAccessInstructionsAction(formData: FormData): Promise<void> {
+  await requireOwner("/admin/settings");
+  if (!(await saveAccessInstructions(await getDb(), text(formData, "accessInstructions")))) {
+    failed("/admin/settings", `Not saved: the text is longer than ${ACCESS_INSTRUCTIONS_MAX} characters.`);
+  }
+  updateTag(CATALOG_TAG); // the guest information page says whether this is sent
+  done("/admin/settings", "Saved. New confirmation emails and every confirmed booking's page now show it.");
 }

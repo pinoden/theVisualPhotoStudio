@@ -27,10 +27,13 @@ const NEAR = dateAhead(3); // inside the 7-day refund window
 const FAR = dateAhead(10); // refundable
 const LATER = dateAhead(17);
 const SATURDAY = dateAhead(3, "saturday");
+const DOOR_DAY = dateAhead(24); // a day no other test books
 
 const jane = { name: "Jane Smith", email: "jane.e2e@example.com", phone: "407-555-0100" };
 const bob = { name: "Bob Brown", email: "bob.e2e@example.com", phone: "407-555-0111" };
 const OWNER = "owner@studio.test";
+// The first owner has used up the three sign-in codes an address may ask for in 15 minutes.
+const SECOND_OWNER = "owner2@studio.test";
 const STAFF = "sam.e2e@studio.test";
 
 let rescheduleCode = "";
@@ -437,4 +440,34 @@ test("the owner cancels a booking with a full refund and blocks a morning", asyn
   await expect(page.getByRole("button", { name: "12:00 PM", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "10:00 AM", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "11:30 AM", exact: true })).toHaveCount(0);
+});
+
+test("the owner sets how to get in, and only a customer with a confirmed booking is told", async ({ page }) => {
+  const GETTING_IN = "Door code 4821#. Third floor, suite 301.";
+  await signIn(page, SECOND_OWNER, "/admin/settings");
+  await byLabel(page, "How customers get into the building").fill(GETTING_IN);
+  await page.getByRole("button", { name: "Save getting-in text" }).click();
+  await expect(byText(page, /Saved\. New confirmation emails/)).toBeVisible();
+
+  // Public pages say that the email explains it, and never contain the text itself.
+  await page.goto("/faq");
+  await expect(byText(page, "How do I get into the building?")).toBeVisible();
+  expect(await page.content()).not.toContain("4821");
+  await page.goto("/book");
+  await expect(page.getByRole("heading", { name: "Reserve Your Studio" })).toBeVisible();
+  expect(await page.content()).not.toContain("4821");
+
+  // A new booking's page and its confirmation email carry it.
+  await bookStudioFirstToPayment(page, { studios: ["Studio Paris"], date: DOOR_DAY, duration: "1 hr", time: "3:00 PM", customer: jane });
+  await confirmAndGetRef(page, "Confirm & pay $68");
+  await expect(byText(page, GETTING_IN)).toBeVisible();
+  await shot(page, "18-getting-in");
+  const mail = await latestEmail(page, "booking_confirmation", jane.email);
+  expect(mail.body).toContain(`Getting in:\n${GETTING_IN}`);
+
+  // Once the booking is cancelled, its page no longer shows it.
+  await page.getByRole("button", { name: "Cancel booking" }).click();
+  await page.getByRole("button", { name: "Yes, cancel it" }).click();
+  await expect(page.getByRole("heading", { name: "Booking Cancelled" })).toBeVisible();
+  await expect(byText(page, GETTING_IN)).toHaveCount(0);
 });

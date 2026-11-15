@@ -53,6 +53,19 @@ export default async function FaqPage() {
         </p>
       ),
     },
+    ...(catalog.accessInfoSent
+      ? [
+          {
+            q: "How do I get into the building?",
+            a: (
+              <p>
+                Your confirmation email tells you how to get in. Please read it before you set off. The same
+                instructions are on your booking page.
+              </p>
+            ),
+          },
+        ]
+      : []),
     { q: "Is there parking?", a: <p>Yes. There is free parking around the building.</p> },
     {
       q: "Will someone be at the studio?",

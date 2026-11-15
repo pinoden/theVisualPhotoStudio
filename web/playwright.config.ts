@@ -37,7 +37,8 @@ export default defineConfig({
     env: {
       PGLITE_DATA_NAME: "e2e",
       NEXT_DIST_DIR: ".next-e2e",
-      OWNER_EMAILS: "owner@studio.test",
+      // Two owners: sign-in codes are limited to three per address in 15 minutes.
+      OWNER_EMAILS: "owner@studio.test,owner2@studio.test",
       NEXT_TELEMETRY_DISABLED: "1",
     },
   },
