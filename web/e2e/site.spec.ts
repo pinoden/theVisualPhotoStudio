@@ -72,6 +72,66 @@ test("public pages show the studios and the live price list", async ({ page }) =
   await expect(page.getByRole("heading", { name: "Studio Paris" })).toBeVisible();
 });
 
+test("guest information answers with the current rules and prices", async ({ page }) => {
+  await page.goto("/faq");
+  await expect(page.getByRole("heading", { name: "Guest Information" })).toBeVisible();
+
+  // Answers are closed until asked for.
+  const refunds = page.locator("details.faq-item", { hasText: "Can I cancel, and do I get a refund?" });
+  await expect(refunds.locator(".faq-answer")).toBeHidden();
+  await refunds.locator("summary").click();
+  await expect(refunds.locator(".faq-answer")).toContainText("Cancel 7 days (168 hours) or more before your start time");
+  await expect(refunds.locator(".faq-answer")).toContainText("less the 5% payment processing fee");
+
+  const moving = page.locator("details.faq-item", { hasText: "Can I move my booking to another time?" });
+  await moving.locator("summary").click();
+  await expect(moving.locator(".faq-answer")).toContainText("Yes, once, until 24 hours before it starts.");
+
+  const pets = page.locator("details.faq-item", { hasText: "Can I bring my pet?" });
+  await pets.locator("summary").click();
+  await expect(pets.locator(".faq-answer")).toContainText("Pets are welcome in Studio Dayglow only.");
+  await expect(pets.locator(".faq-answer")).toContainText("A $40 pet fee applies");
+  await shot(page, "02b-guest-information");
+
+  // The menu leads here.
+  await page.goto("/");
+  await page.getByRole("link", { name: "Info ▾" }).click();
+  await page.getByRole("link", { name: "Guest Information" }).first().click();
+  await expect(page).toHaveURL(/\/faq$/);
+});
+
+test("a visitor's message reaches the owner, who can reply straight to the visitor", async ({ page }) => {
+  await page.goto("/contact");
+  await expect(page.getByRole("heading", { name: "Contact Us" })).toBeVisible();
+  await expect(byText(page, "Mon–Fri: 9:00 AM – 7:00 PM")).toBeVisible();
+
+  // An address the browser accepts and the server does not: nothing typed is lost.
+  await byLabel(page, "Your name").fill("Vera Visitor");
+  await byLabel(page, "Email address").fill("vera@nowhere");
+  await byLabel(page, "Topic").selectOption({ label: "Photography session" });
+  await byLabel(page, "Message").fill("Do you photograph newborns?");
+  await page.getByRole("button", { name: "Send Message" }).click();
+  await expect(onScreen(page.locator(".field-error"))).toHaveText("Please enter a valid email address.");
+  await expect(byLabel(page, "Your name")).toHaveValue("Vera Visitor");
+  await expect(byLabel(page, "Topic")).toHaveValue("photography");
+  await expect(byLabel(page, "Message")).toHaveValue("Do you photograph newborns?");
+  await shot(page, "02c-contact");
+
+  await byLabel(page, "Email address").fill("vera.e2e@example.com");
+  await page.getByRole("button", { name: "Send Message" }).click();
+  await expect(page.getByRole("heading", { name: "Message Sent" })).toBeVisible();
+
+  const mail = await latestEmail(page, "contact_message", OWNER);
+  expect(mail.subject).toBe("Website message from Vera Visitor: Photography session");
+  expect(mail.body).toContain("Vera Visitor <vera.e2e@example.com> wrote through the contact page.");
+  expect(mail.body).toContain("Do you photograph newborns?");
+  expect(mail.replyTo).toBe("vera.e2e@example.com");
+
+  // The form can be used again.
+  await page.getByRole("button", { name: "Send another message" }).click();
+  await expect(byLabel(page, "Your name")).toHaveValue("");
+});
+
 test("books two studios together, starting from the studios", async ({ page }) => {
   await page.goto("/book");
   await shot(page, "03-book-start");

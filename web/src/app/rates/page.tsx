@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { hasWeekendPricing, hourlyFromCents, priceTable } from "@/lib/catalog-view";
+import { hasWeekendPricing, hourlyFromCents, multiStudioOffer, priceTable } from "@/lib/catalog-view";
 import { formatCents } from "@/lib/domain/pricing";
 import { durationLabel } from "@/lib/domain/time";
 import { getCatalog } from "@/server/cached";
@@ -10,10 +10,7 @@ export const metadata: Metadata = { title: "Rates" };
 export default async function RatesPage() {
   const catalog = await getCatalog();
   const weekend = hasWeekendPricing(catalog);
-  const discounts = Object.entries(catalog.settings.multiStudioPercent)
-    .map(([count, percent]) => ({ count: Number(count), percent }))
-    .filter((d) => d.percent > 0)
-    .sort((a, b) => a.count - b.count);
+  const offer = multiStudioOffer(catalog);
 
   return (
     <>
@@ -77,7 +74,7 @@ export default async function RatesPage() {
         </div>
       </section>
 
-      {discounts.length > 0 && (
+      {offer && (
         <section className="section section-ivory">
           <div className="container-sm" style={{ textAlign: "center" }}>
             <p className="section-eyebrow">Several Studios</p>
@@ -85,10 +82,7 @@ export default async function RatesPage() {
             <div className="divider" />
             <p>
               Select any combination of studios in one booking. Each is reserved for you for the whole session.{" "}
-              {discounts
-                .map((d) => `${d.percent}% off when you book ${d.count}${d === discounts.at(-1) ? " or more" : ""}`)
-                .join(", ")}
-              .
+              {offer}.
             </p>
             <Link href="/book" className="btn btn-dark mt-3">
               Choose Studios →

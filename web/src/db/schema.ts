@@ -315,6 +315,8 @@ export const refunds = pgTable("refunds", {
 export const emailOutbox = pgTable("email_outbox", {
   id: id(),
   toEmail: text("to_email").notNull(),
+  /** Where a reply should go when that is not the site's own address (messages from the contact form). */
+  replyTo: text("reply_to"),
   subject: text("subject").notNull(),
   body: text("body").notNull(),
   kind: text("kind").notNull(),

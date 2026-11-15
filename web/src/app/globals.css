@@ -115,7 +115,8 @@ a:hover { color: var(--color-rose-dark); }
   transition: .3s;
 }
 
-@media (max-width: 768px) {
+/* The full row of links needs about 960px; below that it would wrap under the logo. */
+@media (max-width: 1000px) {
   .nav-toggle { display: block; }
   .nav-links {
     display: none;
@@ -361,6 +362,27 @@ a:hover { color: var(--color-rose-dark); }
 }
 .faq-item.open .faq-answer { display: block; }
 
+/* The guest information page builds each question from <details>, which opens and closes without script. */
+details.faq-item > summary { list-style: none; }
+details.faq-item > summary::-webkit-details-marker { display: none; }
+details.faq-item > .faq-answer { display: block; }
+details.faq-item[open] .faq-icon { transform: rotate(45deg); }
+.faq-answer p { margin: 0 0 .6rem; }
+.faq-answer p:last-child { margin-bottom: 0; }
+.faq-answer ul { margin: 0; padding-left: 1.2rem; }
+.faq-answer li { margin-bottom: .4rem; }
+.faq-section h2 { font-size: 1.6rem; margin: 2.5rem 0 .5rem; }
+.faq-section:first-child h2 { margin-top: 0; }
+.faq-more {
+  text-align: center;
+  margin-top: 3rem;
+  padding: 2rem;
+  background: var(--color-ivory);
+  border: 1px solid var(--color-border);
+}
+.faq-more h3 { margin: 0 0 .5rem; }
+.faq-more p { margin-bottom: 1.5rem; }
+
 /* ── Contact ── */
 .contact-grid {
   display: grid;
@@ -381,6 +403,24 @@ a:hover { color: var(--color-rose-dark); }
   flex-shrink: 0;
   color: var(--color-rose-dark);
   font-size: .9rem;
+}
+.contact-detail strong { color: var(--color-dark); }
+.contact-card {
+  background: var(--color-ivory);
+  border: 1px solid var(--color-border);
+  padding: 2.5rem;
+}
+.contact-card h3 { margin: 0 0 1.5rem; font-size: 1.5rem; }
+@media (max-width: 560px) { .contact-card { padding: 1.5rem; } }
+
+/* For a field that people must neither see nor reach: the contact form's trap for programs. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 /* ── Form fields ── */

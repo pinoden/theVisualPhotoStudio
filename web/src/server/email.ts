@@ -13,11 +13,14 @@ export interface QueuedEmail {
   body: string;
   /** What the message is, e.g. "booking_confirmation". For filtering and tests. */
   kind: string;
+  /** Who a reply should reach, when that is not the site's own address. */
+  replyTo?: string;
 }
 
 export async function queueEmail(db: DbLike, message: QueuedEmail): Promise<void> {
   await db.insert(emailOutbox).values({
     toEmail: message.to.trim().toLowerCase(),
+    replyTo: message.replyTo?.trim().toLowerCase() || null,
     subject: message.subject,
     body: message.body,
     kind: message.kind,
@@ -28,14 +31,15 @@ export type SendResult = { ok: true } | { ok: false; error: string };
 
 export interface EmailTransport {
   name: string;
-  send(message: { to: string; subject: string; text: string }): Promise<SendResult>;
+  send(message: { to: string; subject: string; text: string; replyTo?: string }): Promise<SendResult>;
 }
 
 /** Development transport: prints the message to the server log. */
 export const logTransport: EmailTransport = {
   name: "log",
   async send(message) {
-    console.log(`\n── email to ${message.to} ──\n${message.subject}\n\n${message.text}\n──────────────\n`);
+    const replyTo = message.replyTo ? ` (reply to ${message.replyTo})` : "";
+    console.log(`\n── email to ${message.to}${replyTo} ──\n${message.subject}\n\n${message.text}\n──────────────\n`);
     return { ok: true };
   },
 };
@@ -49,7 +53,13 @@ export function resendTransport(config: { apiKey: string; from: string }): Email
         const response = await fetch("https://api.resend.com/emails", {
           method: "POST",
           headers: { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ from: config.from, to: [message.to], subject: message.subject, text: message.text }),
+          body: JSON.stringify({
+            from: config.from,
+            to: [message.to],
+            subject: message.subject,
+            text: message.text,
+            ...(message.replyTo ? { reply_to: message.replyTo } : {}),
+          }),
         });
         if (response.ok) return { ok: true };
         const detail = await response.text().catch(() => "");
@@ -103,7 +113,12 @@ export async function deliverPendingEmails(
       .returning({ id: emailOutbox.id });
     if (claimed.length === 0) continue;
 
-    const result = await transport.send({ to: row.toEmail, subject: row.subject, text: row.body });
+    const result = await transport.send({
+      to: row.toEmail,
+      subject: row.subject,
+      text: row.body,
+      ...(row.replyTo ? { replyTo: row.replyTo } : {}),
+    });
     if (result.ok) {
       await db.update(emailOutbox).set({ sentAt: now, error: null }).where(eq(emailOutbox.id, row.id));
       sent++;
@@ -290,5 +305,29 @@ export function ownerRefundNotice(input: {
       : [
           `${input.automatic ? "An automatic refund" : "A refund"} of ${money(input.amountCents)} was sent for booking ${input.ref} (${input.customer}).`,
         ].join("\n"),
+  };
+}
+
+/** A visitor's message from the contact page, sent to the owner. Replying reaches the visitor. */
+export function contactMessageEmail(input: {
+  to: string;
+  name: string;
+  email: string;
+  topic: string;
+  message: string;
+}): QueuedEmail {
+  return {
+    to: input.to,
+    replyTo: input.email,
+    kind: "contact_message",
+    subject: `Website message from ${input.name}: ${input.topic}`,
+    body: [
+      `${input.name} <${input.email}> wrote through the contact page.`,
+      `Topic: ${input.topic}`,
+      "",
+      input.message,
+      "",
+      `Reply to this email to answer ${input.name}.`,
+    ].join("\n"),
   };
 }

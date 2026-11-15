@@ -10,6 +10,8 @@ const PATHS = [
   "/studios",
   "/rates",
   "/policies",
+  "/faq",
+  "/contact",
   "/book",
   "/account/sign-in",
   "/account",

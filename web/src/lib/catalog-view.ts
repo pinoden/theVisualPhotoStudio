@@ -30,6 +30,17 @@ export function hasWeekendPricing(catalog: Catalog): boolean {
   );
 }
 
+/** "20% off when you book 2, 22% off when you book 3 or more"; empty when no discount is set. */
+export function multiStudioOffer(catalog: Catalog): string {
+  const discounts = Object.entries(catalog.settings.multiStudioPercent)
+    .map(([count, percent]) => ({ count: Number(count), percent }))
+    .filter((d) => d.percent > 0)
+    .sort((a, b) => a.count - b.count);
+  return discounts
+    .map((d, index) => `${d.percent}% off when you book ${d.count}${index === discounts.length - 1 ? " or more" : ""}`)
+    .join(", ");
+}
+
 /** "Mon-Fri 9:00 AM - 7:00 PM" style lines, grouping consecutive days with equal hours. */
 export function hoursLines(studio: CatalogStudio): string[] {
   const lines: string[] = [];

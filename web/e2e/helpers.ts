@@ -43,13 +43,21 @@ export async function shot(page: Page, name: string): Promise<void> {
 }
 
 /** Read the newest email of one kind sent to an address, from the development outbox. */
-export async function latestEmail(page: Page, kind: string, to: string): Promise<{ subject: string; body: string }> {
+export async function latestEmail(
+  page: Page,
+  kind: string,
+  to: string,
+): Promise<{ subject: string; body: string; replyTo: string | null }> {
   const outbox = await page.context().newPage();
   try {
     await outbox.goto("/dev/outbox");
     const card = outbox.locator(".admin-card", { hasText: `To ${to} · ${kind}` }).first();
     await expect(card).toBeVisible();
-    return { subject: (await card.locator("h3").innerText()).trim(), body: await card.locator("pre").innerText() };
+    return {
+      subject: (await card.locator("h3").innerText()).trim(),
+      body: await card.locator("pre").innerText(),
+      replyTo: /Replies go to (\S+)/.exec(await card.innerText())?.[1] ?? null,
+    };
   } finally {
     await outbox.close();
   }

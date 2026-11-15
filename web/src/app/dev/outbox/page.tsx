@@ -55,6 +55,7 @@ async function Outbox({ searchParams }: Pick<PageProps<"/dev/outbox">, "searchPa
         <div className="admin-card" key={row.id} style={{ border: "1px solid var(--color-border)" }}>
           <div style={{ fontSize: ".8rem" }}>
             To {row.toEmail} · {row.kind} · {formatInstant(row.createdAt)}
+            {row.replyTo && <div>Replies go to {row.replyTo}</div>}
           </div>
           <h3 style={{ margin: ".5rem 0" }}>{row.subject}</h3>
           <pre style={{ whiteSpace: "pre-wrap", fontFamily: "inherit", fontSize: ".875rem", margin: 0 }}>{row.body}</pre>
