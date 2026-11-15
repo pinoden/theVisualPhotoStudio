@@ -260,8 +260,8 @@ export async function createCodeAction(formData: FormData): Promise<void> {
 }
 
 export async function voidCodeAction(formData: FormData): Promise<void> {
-  await requireOwner("/admin/codes");
-  await voidCode(await getDb(), text(formData, "codeId"), new Date());
+  const owner = await requireOwner("/admin/codes");
+  await voidCode(await getDb(), text(formData, "codeId"), new Date(), owner.email);
   done("/admin/codes", "Code cancelled. It can no longer be used.");
 }
 

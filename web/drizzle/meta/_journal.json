@@ -99,6 +99,13 @@
       "when": 1794776339388,
       "tag": "0013_payment_links",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1794777110867,
+      "tag": "0014_loyalty_ledger",
+      "breakpoints": true
     }
   ]
 }

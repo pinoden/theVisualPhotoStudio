@@ -252,11 +252,43 @@ export const promoCodes = pgTable("promo_codes", {
   rescheduleGeneration: integer("reschedule_generation").notNull().default(0),
   /** The booking this code was issued for (the visit rewarded, or the booking moved). */
   originBookingId: uuid("origin_booking_id"),
+  /**
+   * For a free hour earned by visits: which one of this customer's it is (1 for their first, 2 for their
+   * second). The database allows each number once per customer, so the same reward cannot be sent twice,
+   * also when it was earned through a correction and no single visit stands for it.
+   */
+  loyaltySeq: integer("loyalty_seq"),
   /** Set when the owner cancels a code. */
   voidedAt: ts("voided_at"),
   note: text("note").notNull().default(""),
   createdAt: createdAt(),
 });
+
+/**
+ * What an administrator changed by hand in a customer's loyalty: stamps added
+ * or taken away, a reward cancelled or given back. One row per change, with
+ * who made it, when and why; nothing here is ever edited or removed. Stamps
+ * earned by visits are not stored: they are counted from the completed visits
+ * themselves, so one visit can never give two. See src/server/loyalty.ts.
+ */
+export const loyaltyLedger = pgTable(
+  "loyalty_ledger",
+  {
+    id: id(),
+    /** The customer, by the email address their visits are counted under. Lowercase. */
+    email: text("email").notNull(),
+    kind: text("kind", { enum: ["stamps", "reward_cancelled", "reward_restored"] }).notNull(),
+    /** For `stamps`: how many were added (positive) or taken away (negative). 0 for the other kinds. */
+    stamps: integer("stamps").notNull().default(0),
+    /** For the reward kinds: the code that was cancelled or given back. */
+    codeId: uuid("code_id").references(() => promoCodes.id, { onDelete: "set null" }),
+    reason: text("reason").notNull(),
+    /** The administrator who made the change. */
+    actor: text("actor").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("loyalty_ledger_email_idx").on(t.email)],
+);
 
 export const bookings = pgTable(
   "bookings",

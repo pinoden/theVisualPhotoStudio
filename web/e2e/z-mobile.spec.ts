@@ -240,6 +240,50 @@ test("a photographer can be booked on a phone", async ({ page }) => {
   await expectFits(page, "the booking page of a session");
 });
 
+test("a customer's account fits a phone: overview, appointments, rewards and receipts", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 667 });
+  // Mia has made every phone booking above, each paid by card.
+  await signIn(page, mia.email);
+  const fits = async (where: string) => {
+    await expectFits(page, where);
+    expect(await hardToTouch(page), `${where}: hard to use by touch`).toEqual([]);
+    expect(await tooSmallToRead(page), `${where}: text too small`).toEqual([]);
+  };
+  await expect(onScreen(page.locator(".account-card", { hasText: "Your next appointment" }))).toContainText("Studio Paris");
+  await expect(onScreen(page.locator(".stamp-row"))).toBeVisible();
+  await fits("the account's overview");
+  await shot(page, "m-375-account");
+
+  await page.getByRole("link", { name: "My Appointments", exact: true }).click();
+  await expect(onScreen(page.locator(".appointment-card")).first()).toBeVisible();
+  await fits("my appointments");
+  await shot(page, "m-375-appointments");
+  await page.getByRole("link", { name: /^Past/ }).click();
+  await expect(byLabel(page, "Status")).toBeVisible();
+  await fits("my past appointments, with their filter");
+
+  await page.getByRole("link", { name: "My Rewards", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "My Loyalty Rewards" })).toBeVisible();
+  await fits("my rewards");
+
+  await page.getByRole("link", { name: "Receipts & Payments", exact: true }).click();
+  await expect(onScreen(page.locator(".receipt-list li")).first()).toBeVisible();
+  await fits("receipts and payments");
+  await shot(page, "m-375-receipts");
+  await page.getByRole("link", { name: "View", exact: true }).first().click();
+  await expect(onScreen(page.locator("article.receipt"))).toContainText("Card, online");
+  await fits("a receipt");
+  await shot(page, "m-375-receipt");
+
+  // The narrowest phone as well.
+  await page.setViewportSize({ width: 320, height: 568 });
+  for (const path of ["/account", "/account/appointments", "/account/rewards", "/account/receipts"]) {
+    await page.goto(path);
+    await expect(page.locator("main h1").first()).toBeVisible();
+    await expectFits(page, `${path} at 320px`);
+  }
+});
+
 test("starting from the time works on a phone", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const date = dateAhead(108);

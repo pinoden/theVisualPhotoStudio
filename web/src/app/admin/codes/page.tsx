@@ -68,7 +68,7 @@ async function Codes({ searchParams }: Pick<PageProps<"/admin/codes">, "searchPa
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="code-uses">
-              Uses (not for credit)
+              Uses (discount codes only)
             </label>
             <input id="code-uses" name="maxUses" className="form-control" inputMode="numeric" defaultValue="1" />
           </div>

@@ -63,6 +63,11 @@ export function formatInstant(instant: Date): string {
   return DateTime.fromJSDate(instant, { zone: STUDIO_TZ }).toFormat("ccc, LLL d, yyyy, h:mm a");
 }
 
+/** "Nov 21, 2026" in studio time: a day, for a list of dates. */
+export function formatDay(instant: Date): string {
+  return DateTime.fromJSDate(instant, { zone: STUDIO_TZ }).toFormat("LLL d, yyyy");
+}
+
 /** "Saturday, November 21, 2026" and "10:00 AM – 12:00 PM" in studio time. */
 export function formatRange(start: Date, end: Date): { day: string; time: string } {
   const a = DateTime.fromJSDate(start, { zone: STUDIO_TZ });

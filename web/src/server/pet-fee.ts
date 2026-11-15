@@ -68,6 +68,7 @@ export async function issuePetCredit(
     maxUses: 1_000_000, // limited by the money left on it, not by a count
     originBookingId: booking.id,
     note: `Pet fee of ${booking.ref}, returned as credit`,
+    issuedAt: deps.now,
   });
   return issued ? { code: issued.code, expiresAt } : null;
 }

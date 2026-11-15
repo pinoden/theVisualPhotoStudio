@@ -20,6 +20,7 @@
     "check:square": "tsx scripts/square-sandbox-check.ts"
   },
   "dependencies": {
+    "@cantoo/pdf-lib": "^2.11.1",
     "@electric-sql/pglite": "^0.5.16",
     "drizzle-orm": "^0.45.4",
     "luxon": "^3.7.2",

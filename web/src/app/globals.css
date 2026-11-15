@@ -1112,6 +1112,95 @@ button { font-family: inherit; }
 .label-meanings { margin: 0; padding-left: 1.1rem; font-size: .82rem; }
 .label-meanings em { color: var(--color-muted, #7a7168); }
 
+/* ── A customer's account ── */
+.account-who { display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; align-items: center; }
+.account-tabs, .tab-row { display: flex; flex-wrap: wrap; gap: .5rem; margin: 0 0 1.75rem; }
+.account-tabs a, .tab-row a {
+  display: inline-flex; align-items: center; min-height: 40px; padding: .35rem 1rem;
+  border: 1px solid var(--color-border); border-radius: 999px; background: var(--color-ivory);
+  color: var(--color-dark); font-size: .85rem; text-decoration: none;
+}
+.account-tabs a[aria-current="page"], .tab-row a[aria-current="page"] { background: var(--color-dark); border-color: var(--color-dark); color: #fff; }
+.account-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 1rem; }
+.account-grid .admin-card, .appointment-card, .container-sm > .admin-card { border: 1px solid var(--color-border); }
+.account-card { margin-bottom: 0; display: flex; flex-direction: column; }
+.account-card h3 { margin-top: 0; }
+.account-next strong { color: var(--color-dark); font-size: 1.05rem; }
+.account-actions { margin: .5rem 0 0; }
+.account-card .account-actions:last-child { margin-top: auto; padding-top: .75rem; }
+.account-small { font-size: .82rem; margin: .35rem 0 0; }
+.account-code { display: grid; gap: .35rem; padding: .75rem 0; border-top: 1px solid var(--color-border); }
+.account-code:first-of-type { border-top: 0; padding-top: 0; }
+.account-code strong { color: var(--color-dark); }
+.account-book { display: flex; gap: 1rem; flex-wrap: wrap; justify-content: center; margin-top: 2rem; }
+.copy-code { display: inline-flex; flex-wrap: wrap; align-items: center; gap: .6rem; }
+.copy-code-text { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1rem; letter-spacing: .06em; color: var(--color-dark); overflow-wrap: anywhere; }
+
+/* The stamps towards a free hour: a row of circles in the brand's colours. */
+.stamp-card { text-align: center; margin-bottom: 1rem; }
+.stamp-row { display: flex; justify-content: center; flex-wrap: wrap; gap: .6rem; margin-bottom: .6rem; }
+.stamp {
+  width: 2.6rem; height: 2.6rem; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+  border: 2px solid var(--color-rose); color: #fff; font-size: 1.1rem; background: transparent;
+}
+.stamp-filled { background: var(--color-rose); }
+.stamp-count { font-family: var(--font-serif); font-size: 2rem; color: var(--color-dark); line-height: 1.1; }
+.stamp-needed { margin: .25rem 0 0; font-size: .9rem; }
+.stamp-days { margin: 0 0 1rem; padding-left: 1.1rem; font-size: .9rem; }
+.stamp-facts { margin: 1rem 0; }
+
+/* A reward, with its code, its dates and its status. */
+.reward-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .75rem; }
+.reward { border: 1px solid var(--color-border); border-radius: 6px; padding: 1rem; background: #fff; }
+.reward-head { display: flex; justify-content: space-between; gap: .75rem; flex-wrap: wrap; align-items: center; margin-bottom: .5rem; }
+.reward-head strong { color: var(--color-dark); }
+.reward-status { font-size: .75rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; padding: .15rem .6rem; border-radius: 999px; border: 1px solid; }
+.reward-status-available { background: #e4f3e4; color: #24602a; border-color: #a9d3ab; }
+.reward-status-redeemed  { background: #e3eefb; color: #17477e; border-color: #a9c8ee; }
+.reward-status-expired   { background: #f3efe9; color: #4a443d; border-color: #d8cfc3; }
+.reward-status-cancelled { background: #ececec; color: #5c5c5c; border-color: #cfcfcf; }
+.reward-code-spent { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .06em; text-decoration: line-through; overflow-wrap: anywhere; }
+.reward-facts { display: flex; flex-wrap: wrap; gap: .5rem 2rem; margin: .6rem 0 0; }
+.reward-facts dt { font-size: .7rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.reward-facts dd { margin: 0; color: var(--color-dark); }
+.reward-note { font-size: .82rem; margin: .5rem 0 0; }
+
+/* Appointments in the account. */
+.appointment-card h3 { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+.appointment-ref { font-family: var(--font-sans); font-size: .8rem; color: var(--color-muted); }
+.appointment-moves { margin: .5rem 0; padding-left: 1.1rem; font-size: .85rem; }
+.past-filter { align-items: flex-end; }
+.past-item { border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-ivory); margin-bottom: .6rem; }
+.past-item summary { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem 1rem; padding: .75rem 1rem; cursor: pointer; min-height: 44px; }
+.past-when { color: var(--color-dark); font-weight: 700; }
+.past-what { flex: 1 1 10rem; }
+.past-details { padding: 0 1rem 1rem; }
+
+/* Receipts. */
+.plain-list { margin: 0; padding-left: 1.1rem; }
+.receipt-list { list-style: none; margin: 0; padding: 0; }
+.receipt-list li { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1rem; padding: .85rem 0; border-top: 1px solid var(--color-border); }
+.receipt-list li:first-child { border-top: 0; padding-top: 0; }
+.receipt-row-main { flex: 1 1 14rem; display: grid; gap: .1rem; }
+.receipt-row-main strong, .receipt-row-amount { color: var(--color-dark); }
+.receipt-row-amount { font-weight: 700; }
+.receipt-row-links { display: flex; gap: .5rem; }
+.receipt-actions { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: .75rem; margin-bottom: 1rem; }
+.receipt { background: #fff; border: 1px solid var(--color-border); border-radius: 6px; padding: 1.5rem; }
+.receipt-head { display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; border-bottom: 1px solid var(--color-border); padding-bottom: 1rem; margin-bottom: 1rem; font-size: .85rem; }
+.receipt-studio { display: block; font-family: var(--font-serif); font-size: 1.4rem; color: var(--color-dark); }
+.receipt-title { font-size: .8rem; font-weight: 700; letter-spacing: .2em; text-transform: uppercase; color: var(--color-dark); }
+.receipt h3 { font-size: 1.2rem; margin: 1.25rem 0 .5rem; }
+.receipt-foot { font-size: .78rem; margin: 1rem 0 0; }
+
+/* A receipt on paper, or saved as a PDF from the browser's print window: the receipt and nothing else. */
+@media print {
+  .site-nav, .site-footer, .nav-dropdown, .page-banner, .account-who, .account-tabs, .no-print, nextjs-portal { display: none !important; }
+  body { background: #fff; }
+  .section { padding: 0; }
+  .receipt { border: 0; padding: 0; }
+}
+
 /* The payment section of an appointment: what was received, "mark as paid", and the owners' corrections. */
 .payment-form { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--color-border); }
 .payment-form h4 { margin: 0 0 .75rem; }

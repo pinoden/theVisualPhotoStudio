@@ -45,7 +45,8 @@ const THIRD_OWNER = "owner3@studio.test";
 const STAFF = "sam.e2e@studio.test";
 
 let rescheduleCode = "";
-let freeHourCode = "";
+// Three free hours the owner hands Jane: two are used in a later test, the third stays available.
+let freeHourCodes: string[] = [];
 
 // Any error the browser reports (a script error, a mismatch between the
 // server's HTML and the page) fails the test that caused it.
@@ -267,14 +268,29 @@ test("starting from the time shows which studios are free, and books one", async
 });
 
 test("a customer signs in, sees their booking, and turns it into a reschedule code", async ({ page }) => {
+  // The account opens on an overview: the next appointment, the stamps towards a free hour, and the ways on.
   await signIn(page, jane.email);
   await expect(byText(page, `Signed in as ${jane.email}`)).toBeVisible();
-  await expect(byText(page, /0 of 5 visits towards your next free hour/)).toBeVisible();
+  const nextUp = onScreen(page.locator(".account-card", { hasText: "Your next appointment" }));
+  await expect(nextUp).toContainText("Studio Blanche + Studio Dayglow");
+  await expect(nextUp).toContainText("10:00 AM – 11:00 AM (1 hour)");
+  const loyalty = onScreen(page.locator(".account-card", { hasText: "My Loyalty Rewards" }));
+  await expect(loyalty).toContainText("0 / 5");
+  await expect(loyalty).toContainText("five more stamps until your free studio hour");
+  const book = onScreen(page.locator(".account-book"));
+  await expect(book.getByRole("link", { name: "Book a studio", exact: true })).toBeVisible();
+  await expect(book.getByRole("link", { name: "Book a photographer", exact: true })).toBeVisible();
+  await shot(page, "09-account");
+
+  // My Appointments: everything still to come, with its details and the ways to change it.
+  await page.getByRole("link", { name: "View all appointments" }).click();
+  await expect(page.getByRole("heading", { name: "My Appointments" })).toBeVisible();
   const card = onScreen(page.locator(".admin-card", { hasText: "Studio Blanche + Studio Dayglow" }));
   await expect(card).toBeVisible();
+  await expect(card).toContainText("Confirmed");
   // Bob's booking is not shown to Jane.
   await expect(byText(page.locator("main .container-sm"), "Studio Paris")).toHaveCount(0);
-  await shot(page, "09-account");
+  await shot(page, "09a-account-appointments");
 
   await card.getByRole("button", { name: "Reschedule" }).click();
   await expect(byText(card, /you will get a code worth \$132\.80, valid for 90 days/)).toBeVisible();
@@ -287,10 +303,52 @@ test("a customer signs in, sees their booking, and turns it into a reschedule co
   const mail = await latestEmail(page, "reschedule_code", jane.email);
   expect(mail.body).toContain(`Reschedule code: ${rescheduleCode}`);
 
-  // The code is listed in the account from now on.
-  await page.reload();
+  // The booking that was released keeps its record, under Past, and can be found by its status.
+  await page.getByRole("link", { name: /^Past/ }).click();
+  await expect(page.getByRole("link", { name: "Past (1)" })).toBeVisible();
+  const released = onScreen(page.locator("details.past-item", { hasText: "Studio Blanche + Studio Dayglow" }));
+  await expect(released).toContainText("Released for rescheduling");
+  await byLabel(page, "Status").selectOption({ label: "Completed" });
+  await page.getByRole("button", { name: "Show", exact: true }).click();
+  await expect(byText(page, "No past appointment matches. Change the dates, the studio or the status.")).toBeVisible();
+  await byLabel(page, "Status").selectOption({ label: "Rescheduled" });
+  await byLabel(page, "Studio").selectOption({ label: "Studio Dayglow" });
+  await page.getByRole("button", { name: "Show", exact: true }).click();
+  await expect(byText(page, "1 appointment of 1 shown.")).toBeVisible();
+  await expect(onScreen(page.locator("details.past-item"))).toHaveCount(1);
+
+  // The code is listed in the account from now on: it is credit, not a reward.
+  await page.getByRole("link", { name: "My Rewards", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "My Rewards", level: 1 })).toBeVisible();
   await expect(byText(page, rescheduleCode)).toBeVisible();
   await expect(byText(page, "$132.80 credit from a rescheduled booking")).toBeVisible();
+  await expect(byText(page, /You have not earned a reward yet\. Your first free studio hour comes with your 5th stamp\./)).toBeVisible();
+
+  // What she paid has a receipt, on the screen and as a PDF file, and the year's payments are added up.
+  await page.getByRole("link", { name: "Receipts & Payments", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Receipts & Payments", level: 1 })).toBeVisible();
+  const year = todayInStudio().slice(0, 4);
+  const summary = onScreen(page.locator(".admin-card", { hasText: `Your payments in ${year}` }));
+  await expect(summary).toContainText("$132.80");
+  await shot(page, "10a-account-receipts");
+  await page.getByRole("link", { name: "View", exact: true }).click();
+  const receipt = onScreen(page.locator("article.receipt"));
+  await expect(receipt).toContainText("Studio Blanche");
+  await expect(receipt).toContainText("Discount for booking several studios");
+  await expect(receipt).toContainText("-$33.20");
+  await expect(receipt).toContainText("Card, online");
+  await expect(receipt).toContainText("Released for rescheduling");
+  await shot(page, "10b-account-receipt");
+  const ref = /VS-[0-9A-Z]{6}/.exec(page.url())![0];
+  for (const path of [`/account/receipts/${ref}/pdf`, `/account/receipts/year/${year}/pdf`]) {
+    const file = await page.request.get(path);
+    expect(file.status(), path).toBe(200);
+    expect(file.headers()["content-type"], path).toBe("application/pdf");
+    expect((await file.body()).subarray(0, 5).toString("latin1"), path).toBe("%PDF-");
+  }
+  // Nobody else's receipt can be opened, and a year with no payments has no file.
+  expect((await page.request.get("/account/receipts/VS-NOPE22/pdf")).status()).toBe(404);
+  expect((await page.request.get("/account/receipts/year/1999/pdf")).status()).toBe(404);
 });
 
 test("the released time is bookable again, and the code pays for a new booking with no card", async ({ page }) => {
@@ -830,15 +888,21 @@ test("a booking made with a discount code is moved without paying the discount a
   await expect(created).toBeVisible();
   const discountCode = /VS-[0-9A-Z]{4}-[0-9A-Z]{4}/.exec(await created.innerText())![0];
 
-  // While signed in: a free hour for Jane, usable twice, for the next test. The site sends one by itself
-  // after five visits; the owner can also hand one out.
-  await onScreen(page.locator("#code-kind")).selectOption({ label: "One free hour (one studio)" });
-  await onScreen(page.locator("#code-email")).fill(jane.email);
-  await onScreen(page.locator("#code-uses")).fill("2");
-  await page.getByRole("button", { name: "Create", exact: true }).click();
-  await expect(page.getByRole("row", { name: /1 hour free/ })).toContainText(jane.email);
-  freeHourCode = /VS-[0-9A-Z]{4}-[0-9A-Z]{4}/.exec(await page.getByRole("row", { name: /1 hour free/ }).innerText())![0];
-  expect(freeHourCode).not.toBe(discountCode);
+  // While signed in: three free hours for Jane, for the next tests. The site sends one by itself after
+  // five visits; the owner can also hand one out. A free hour is a reward, and a reward is used once.
+  for (let made = 1; made <= 3; made++) {
+    await onScreen(page.locator("#code-kind")).selectOption({ label: "One free hour (one studio)" });
+    await onScreen(page.locator("#code-email")).fill(jane.email);
+    await page.getByRole("button", { name: "Create", exact: true }).click();
+    await expect(page.getByRole("row", { name: /1 hour free/ })).toHaveCount(made);
+  }
+  const rows = await page.getByRole("row", { name: /1 hour free/ }).allInnerTexts();
+  freeHourCodes = rows.map((row) => /VS-[0-9A-Z]{4}-[0-9A-Z]{4}/.exec(row)![0]);
+  expect(new Set([...freeHourCodes, discountCode]).size).toBe(4);
+  for (const row of rows) {
+    expect(row).toContain(jane.email);
+    expect(row).toContain("0 of 1");
+  }
 
   // Studio Paris for an hour is $68. The code takes 10% off: $61.20 is paid.
   await bookStudioFirstToPayment(page, {
@@ -888,7 +952,7 @@ test("a free hour takes one hour off a booking of one studio, and is not for sev
   await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
   await next(page);
   await fillDetails(page, jane);
-  await byLabel(page, "Have a code?").fill(freeHourCode);
+  await byLabel(page, "Have a code?").fill(freeHourCodes[0]);
   await page.getByRole("button", { name: "Apply" }).click();
   await expect(
     byText(page, "A free hour is for one studio. It cannot be used when several studios are booked together."),
@@ -901,26 +965,75 @@ test("a free hour takes one hour off a booking of one studio, and is not for sev
     duration: "1.5 hr",
     time: "10:00 AM",
     customer: jane,
-    code: freeHourCode,
+    code: freeHourCodes[0],
   });
-  await expect(byText(page, `Free hour, code ${freeHourCode}`)).toBeVisible();
+  await expect(byText(page, `Free hour, code ${freeHourCodes[0]}`)).toBeVisible();
   await expect(totalRow(page)).toContainText("$44");
   await confirmAndGetRef(page, "Confirm & pay $44");
   await expect(page.locator(".price-row", { hasText: "Free hour" })).toContainText("-$88");
   await shot(page, "20-free-hour");
 
-  // One studio for one hour: nothing to pay, and no card is asked for.
+  // A reward is used once: the same code is refused for a second booking.
+  await page.goto("/book");
+  await pickStudio(page, "Studio Paris");
+  await next(page);
+  await byLabel(page, "Date").fill(FREE_HOUR_DAY);
+  await page.getByRole("button", { name: "1 hr", exact: true }).click();
+  await next(page);
+  await page.getByRole("button", { name: "2:00 PM", exact: true }).click();
+  await next(page);
+  await fillDetails(page, jane);
+  await byLabel(page, "Have a code?").fill(freeHourCodes[0]);
+  await page.getByRole("button", { name: "Apply" }).click();
+  await expect(byText(page, "That code has already been used.")).toBeVisible();
+
+  // One studio for one hour, with her second free hour: nothing to pay, and no card is asked for.
   await bookStudioFirstToPayment(page, {
     studios: ["Studio Paris"],
     date: FREE_HOUR_DAY,
     duration: "1 hr",
     time: "2:00 PM",
     customer: jane,
-    code: freeHourCode,
+    code: freeHourCodes[1],
   });
   await expect(byText(page, "Nothing to pay: your code covers this booking. No card is needed.")).toBeVisible();
   await expect(totalRow(page)).toContainText("$0");
   await confirmAndGetRef(page, "Confirm booking");
+});
+
+test("the account lists every reward with its status, and a code is copied with one press", async ({ page }) => {
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await signIn(page, jane.email, "/account/rewards");
+  await expect(page.getByRole("heading", { name: "My Rewards", level: 1 })).toBeVisible();
+
+  // Three rewards: two were used, each for a named appointment, and one can still be used.
+  const rewards = onScreen(page.locator("li.reward"));
+  await expect(rewards).toHaveCount(3);
+  await expect(onScreen(page.locator("li.reward-redeemed"))).toHaveCount(2);
+  for (const used of freeHourCodes.slice(0, 2)) {
+    const reward = onScreen(page.locator("li.reward", { hasText: used }));
+    await expect(reward).toContainText("Free Studio Hour");
+    await expect(reward).toContainText("Redeemed");
+    await expect(reward).toContainText(/Used on .+ for your appointment on .+ \(VS-[0-9A-Z]{6}\)\./);
+    await expect(reward.getByRole("button")).toHaveCount(0); // a used code is not offered for copying
+  }
+  const spare = onScreen(page.locator("li.reward", { hasText: freeHourCodes[2] }));
+  await expect(spare).toContainText("Available");
+  await expect(spare).toContainText(/Issued/);
+  await expect(spare).toContainText(/Expires/);
+  await shot(page, "20a-account-rewards");
+
+  // Copy Code puts the code on the clipboard and says so.
+  await spare.getByRole("button", { name: `Copy code ${freeHourCodes[2]}` }).click();
+  await expect(spare.getByRole("button", { name: `Copy code ${freeHourCodes[2]}` })).toHaveText("Copied");
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(freeHourCodes[2]);
+
+  // The overview offers the same reward, and the appointments made with the others.
+  await page.getByRole("link", { name: "Overview", exact: true }).click();
+  const usable = onScreen(page.locator(".account-card", { hasText: "Rewards you can use" }));
+  await expect(usable).toContainText(freeHourCodes[2]);
+  await expect(usable).not.toContainText(freeHourCodes[0]);
+  await expect(onScreen(page.locator(".account-card", { hasText: "Your next appointment" }))).toContainText("upcoming appointments in all");
 });
 
 test("a client without a photographer books a session, and the photographer cannot be booked twice", async ({ page }) => {

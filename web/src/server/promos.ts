@@ -165,17 +165,24 @@ export interface IssuePromoInput {
   maxUses?: number;
   rescheduleGeneration?: number;
   originBookingId?: string | null;
+  /** For a free hour earned by visits: which one of the customer's it is. The database allows each once. */
+  loyaltySeq?: number | null;
   note?: string;
+  /** When it was issued: the moment of the change that issued it. The database's clock when left out. */
+  issuedAt?: Date;
 }
 
 const PREFIX: Record<PromoSource, string> = { loyalty: "THANKS", reschedule: "MOVE", manual: "VS", pet_fee: "PET" };
 
 /**
- * Create a new code. Returns null when a code for the same origin booking and
- * source already exists (the database allows only one), which makes issuing
- * safe to repeat.
+ * Create a new code. Returns null when the code already exists: one for the
+ * same origin booking and source, or the same numbered free hour of the same
+ * customer (the database allows only one of each), which makes issuing safe
+ * to repeat.
  */
-export async function issuePromo(tx: DbLike, input: IssuePromoInput): Promise<{ id: string; code: string } | null> {
+export async function issuePromo(tx: DbLike, given: IssuePromoInput): Promise<{ id: string; code: string } | null> {
+  let input = given;
+  const email = input.email ? input.email.trim().toLowerCase() : null;
   for (let attempt = 0; attempt < 6; attempt++) {
     // ON CONFLICT DO NOTHING instead of catching an error: a failed statement
     // would abort the surrounding transaction.
@@ -186,24 +193,40 @@ export async function issuePromo(tx: DbLike, input: IssuePromoInput): Promise<{ 
         kind: input.kind,
         value: input.value,
         source: input.source,
-        email: input.email ? input.email.trim().toLowerCase() : null,
+        email,
         expiresAt: input.expiresAt,
         maxUses: input.maxUses ?? 1,
         rescheduleGeneration: input.rescheduleGeneration ?? 0,
         originBookingId: input.originBookingId ?? null,
+        loyaltySeq: input.loyaltySeq ?? null,
         note: input.note ?? "",
+        ...(input.issuedAt ? { createdAt: input.issuedAt } : {}),
       })
       .onConflictDoNothing()
       .returning({ id: promoCodes.id, code: promoCodes.code });
     if (rows[0]) return rows[0];
 
+    if (input.loyaltySeq != null && email) {
+      const numbered = await tx
+        .select({ id: promoCodes.id })
+        .from(promoCodes)
+        .where(and(eq(promoCodes.email, email), eq(promoCodes.loyaltySeq, input.loyaltySeq)))
+        .limit(1);
+      if (numbered.length > 0) return null; // this free hour of this customer was already sent
+    }
     if (input.originBookingId) {
       const existing = await tx
         .select({ id: promoCodes.id })
         .from(promoCodes)
         .where(and(eq(promoCodes.originBookingId, input.originBookingId), eq(promoCodes.source, input.source)))
         .limit(1);
-      if (existing.length > 0) return null; // already issued for this booking
+      if (existing.length > 0) {
+        if (input.loyaltySeq == null) return null; // already issued for this booking
+        // The visit already stands for another of this customer's free hours (their stamps were corrected
+        // since). This one is still owed: it is sent without naming a visit.
+        input = { ...input, originBookingId: null };
+        continue;
+      }
     }
     // Otherwise the random code text collided with an existing one; try another.
   }

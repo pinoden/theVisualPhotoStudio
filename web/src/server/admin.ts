@@ -3,6 +3,7 @@ import {
   addons,
   blocks,
   bookings,
+  loyaltyLedger,
   payments,
   priceRules,
   promoCodes,
@@ -388,9 +389,28 @@ export async function listCodes(db: DbLike, limit = 200): Promise<CodeView[]> {
   }));
 }
 
-/** Stop a code from being used again. What was already spent stays spent. */
-export async function voidCode(db: DbLike, codeId: string, now: Date): Promise<void> {
-  await db.update(promoCodes).set({ voidedAt: now }).where(eq(promoCodes.id, codeId));
+/**
+ * Stop a code from being used again. What was already spent stays spent. A
+ * customer's reward (a free hour that is theirs) cancelled here gets the same
+ * line in the loyalty ledger as one cancelled on the customer's page, with
+ * `actor`, so that its history says who cancelled it.
+ */
+export async function voidCode(db: DbLike, codeId: string, now: Date, actor = "an owner"): Promise<void> {
+  const [code] = await db
+    .update(promoCodes)
+    .set({ voidedAt: now })
+    .where(and(eq(promoCodes.id, codeId), sql`${promoCodes.voidedAt} is null`))
+    .returning({ id: promoCodes.id, kind: promoCodes.kind, email: promoCodes.email });
+  if (code && code.kind === "free_hour" && code.email) {
+    await db.insert(loyaltyLedger).values({
+      email: code.email,
+      kind: "reward_cancelled",
+      codeId: code.id,
+      reason: "Cancelled on the Codes page",
+      actor,
+      createdAt: now,
+    });
+  }
 }
 
 export type CreateCodeResult = { ok: true; code: string } | { ok: false; message: string };
@@ -427,8 +447,10 @@ export async function createManualCode(
     source: "manual",
     email,
     expiresAt: new Date(now.getTime() + input.validDays * 86_400_000),
-    maxUses: input.kind === "amount" ? 1_000_000 : input.maxUses,
+    // Credit is limited by the money left on it. A free hour is a reward, and a reward is used once.
+    maxUses: input.kind === "amount" ? 1_000_000 : input.kind === "free_hour" ? 1 : input.maxUses,
     note: input.note.slice(0, 200),
+    issuedAt: now,
   });
   return issued ? { ok: true, code: issued.code } : { ok: false, message: "Could not create the code." };
 }

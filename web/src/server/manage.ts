@@ -530,6 +530,7 @@ export async function requestRescheduleCode(db: Db, ref: string, actor: Actor, d
       rescheduleGeneration: booking.rescheduledCount + 1,
       originBookingId: booking.id,
       note: `Credit from ${booking.ref}`,
+      issuedAt: deps.now,
     });
     if (!issued) throw new Error(`A reschedule code already exists for ${booking.ref}.`);
 
