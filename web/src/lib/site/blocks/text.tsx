@@ -2,7 +2,7 @@ import { defineBlock } from "./block";
 import { paragraphs } from "../paragraphs";
 import { ALIGN, EditorNote, SiteAnchor } from "./shared";
 
-/** The blocks that are words: a heading, running text, buttons, small cards, and questions with their answers. */
+/** The blocks that are words: a heading, running text, buttons, small cards, questions with their answers, reviews and a table. */
 
 export const BUTTON_LOOKS = { dark: "Dark", accent: "Accent colour", outline: "Outline", ghost: "Outline in the accent colour" } as const;
 export const BUTTON_CLASS: Record<keyof typeof BUTTON_LOOKS, string> = { dark: "btn-dark", accent: "btn-primary", outline: "btn-outline", ghost: "btn-ghost" };
@@ -151,6 +151,74 @@ export const Questions = defineBlock({
             <div className="faq-answer">{entry.answer}</div>
           </details>
         ))}
+      </div>
+    );
+  },
+});
+
+/** The stars a review can show: none, or one to five out of five. */
+const STARS = { none: "None shown", "5": "5 of 5", "4": "4 of 5", "3": "3 of 5", "2": "2 of 5", "1": "1 of 5" } as const;
+
+/**
+ * What clients wrote about the studio, with their name and where they wrote
+ * it. A new block holds no words at all, and a review without words is not
+ * shown, so nothing that a client did not write can reach the website. No
+ * review markup goes to search engines: they do not count the reviews a
+ * business shows of itself.
+ */
+export const Reviews = defineBlock({
+  label: "Reviews",
+  group: "text",
+  fields: {
+    reviews: {
+      kind: "list",
+      label: "Reviews",
+      max: 24,
+      title: "name",
+      of: {
+        quote: { kind: "text", label: "What they wrote, in their words", max: 800, start: "", lines: true },
+        name: { kind: "text", label: "Their name, as they agreed to show it", max: 80, start: "" },
+        source: { kind: "text", label: "Where they wrote it (optional), such as Google", max: 60, start: "" },
+        stars: { kind: "choice", label: "Stars they gave", options: STARS, start: "none" },
+      },
+      start: [{}],
+    },
+    columns: { kind: "number", label: "How many side by side", min: 1, max: 3, start: 3, phone: true },
+    look: { kind: "choice", label: "Look", options: { boxed: "In boxes", plain: "Plain" }, start: "boxed" },
+  },
+  render: ({ reviews, columns, columnsPhone, look, editing }) => {
+    const shown = reviews.filter((review) => review.quote !== "");
+    if (shown.length === 0) return <EditorNote editing={editing}>Reviews: write the first one in the panel, in the words its writer used.</EditorNote>;
+    // Two reviews take two columns, not two of three.
+    const style = {
+      "--cols": Math.min(columns, shown.length),
+      ...(columnsPhone === null ? {} : { "--cols-phone": Math.min(columnsPhone, shown.length) }),
+    } as React.CSSProperties;
+    return (
+      // One review to a row is kept as wide as a line can be read (data-wide).
+      <div className={`blk blk-reviews blk-reviews-${look}`} data-wide={Math.min(columns, shown.length) === 1 || undefined} style={style}>
+        {shown.map((review, index) => {
+          const stars = review.stars === "none" ? 0 : Number(review.stars);
+          return (
+            <figure className="blk-review" key={index}>
+              {stars > 0 && (
+                <p className="blk-review-stars">
+                  <span aria-hidden="true">{"★".repeat(stars) + "☆".repeat(5 - stars)}</span>
+                  <span className="visually-hidden">{`${stars} out of 5 stars`}</span>
+                </p>
+              )}
+              <blockquote>
+                <p>{review.quote}</p>
+              </blockquote>
+              {(review.name || review.source) && (
+                <figcaption>
+                  {review.name && review.source ? `${review.name}, ` : review.name}
+                  {review.source && <cite>{review.source}</cite>}
+                </figcaption>
+              )}
+            </figure>
+          );
+        })}
       </div>
     );
   },

@@ -6,7 +6,7 @@ import { parseVideo, VIDEO_SERVICES } from "../video";
 import { defineBlock } from "./block";
 import { EditorNote, SiteAnchor } from "./shared";
 
-/** The blocks that are pictures: one picture, a gallery of them, and a video. */
+/** The blocks that are pictures: one picture, a gallery of them, a row of logos, and a video. */
 
 /** The shapes a picture can be cropped to, as width over height. "original" keeps the picture's own. */
 const SHAPES = { original: "As it is", wide: "Wide (16:9)", photo: "Photo (3:2)", standard: "Standard (4:3)", square: "Square", tall: "Tall (4:5)" } as const;
@@ -100,6 +100,36 @@ export const Gallery = defineBlock({
           ))}
         </ul>
       </div>
+    );
+  },
+});
+
+/**
+ * The logos of the brands the studio has worked for, all as tall as each
+ * other, in a row that wraps on a narrow screen. Each is a picture of the
+ * library, named by what the library says it shows: the brand's name.
+ */
+export const Logos = defineBlock({
+  label: "Logos",
+  group: "pictures",
+  fields: {
+    logos: { kind: "pictures", label: "Logos, from the library", max: 24 },
+    height: { kind: "choice", label: "How tall", options: { medium: "Medium", small: "Small", large: "Large" }, start: "medium" },
+    look: { kind: "choice", label: "Colours", options: { own: "Their own colours", grey: "In grey" }, start: "own" },
+  },
+  render: ({ logos, height, look, site, editing }) => {
+    const shown = logos.map((id) => site.pictures[id]).filter((picture): picture is LibraryPicture => picture !== undefined);
+    if (shown.length === 0) {
+      return <EditorNote editing={editing}>Logos: choose their pictures in the panel. In the library, say what each shows: the brand&rsquo;s name.</EditorNote>;
+    }
+    return (
+      <ul className="blk blk-logos" data-height={height} data-look={look}>
+        {shown.map((picture) => (
+          <li key={picture.id}>
+            <Image src={picture.url} width={picture.width} height={picture.height} alt={picture.alt} sizes="(max-width: 640px) 45vw, 320px" />
+          </li>
+        ))}
+      </ul>
     );
   },
 });

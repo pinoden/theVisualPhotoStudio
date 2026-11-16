@@ -1834,6 +1834,22 @@ button { font-family: inherit; }
 .blk-card-symbol { font-size: 2rem; margin-bottom: 1rem; color: var(--color-rose); }
 .blk-card h4 { --h4-base: 1.2rem; margin: 0 0 .5rem; }
 .blk-card p { font-size: .875rem; margin: 0; white-space: pre-line; }
+/* Reviews: what clients wrote, in their words, with their name and where they wrote it. */
+.blk-reviews { display: grid; grid-template-columns: repeat(var(--cols, 3), minmax(0, 1fr)); gap: 2rem; }
+.blk-review { display: flex; flex-direction: column; gap: .75rem; min-width: 0; margin: 0; padding: 1.75rem 1.5rem; }
+.blk-reviews-boxed .blk-review { background: var(--color-ivory); border: 1px solid var(--color-border); }
+/* One review to a row: no wider than a line can be read, in the middle. */
+.blk-reviews[data-wide] .blk-review { width: min(100%, 760px); margin-inline: auto; text-align: center; }
+.blk-review blockquote { flex: 1; margin: 0; }
+.blk-review blockquote p {
+  margin: 0; font-family: var(--font-subheading); font-size: 1.2rem; font-style: italic; line-height: 1.5;
+  color: var(--color-dark); white-space: pre-line; overflow-wrap: anywhere;
+}
+.blk-review blockquote p::before { content: "\201C"; }
+.blk-review blockquote p::after { content: "\201D"; }
+.blk-review figcaption { font-size: .8rem; letter-spacing: .08em; text-transform: uppercase; overflow-wrap: anywhere; }
+.blk-review cite { font-style: normal; }
+.blk-review-stars { margin: 0; color: var(--color-rose); letter-spacing: .15em; }
 
 .blk-questions { width: min(800px, 100%); margin-inline: auto; }
 
@@ -1872,6 +1888,13 @@ button { font-family: inherit; }
 .blk-gallery a, .blk-gallery span { display: block; overflow: hidden; }
 .blk-gallery img { display: block; width: 100%; height: auto; aspect-ratio: var(--ratio); object-fit: cover; transition: transform .4s; }
 .blk-gallery a:hover img { transform: scale(1.04); }
+/* Logos: the brands the studio has worked for, all as tall as each other, in a row that wraps. */
+.blk-logos { --logo-h: 48px; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 1.75rem 3rem; list-style: none; margin: 0; padding: 0; }
+.blk-logos[data-height="small"] { --logo-h: 32px; }
+.blk-logos[data-height="large"] { --logo-h: 72px; }
+.blk-logos li { min-width: 0; max-width: 45%; }
+.blk-logos img { display: block; width: auto; height: var(--logo-h); max-width: 100%; object-fit: contain; }
+.blk-logos[data-look="grey"] img { filter: grayscale(1); opacity: .7; }
 
 .blk-video { position: relative; width: 100%; aspect-ratio: 16 / 9; background: var(--color-dark); }
 .blk-video[data-shape="standard"] { aspect-ratio: 4 / 3; }
@@ -1899,6 +1922,21 @@ button { font-family: inherit; }
 .blk-heading[data-size="large"] h3 { --h3-base: 2rem; }
 .blk-heading[data-size="large"] h4 { --h4-base: 1.5rem; }
 
+/* A studio's facts on the studios page: what photographers choose by. */
+.studio-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: .75rem 1.5rem; margin: 1rem 0; }
+.studio-facts dt { font-size: .72rem; letter-spacing: .12em; text-transform: uppercase; color: var(--color-rose); }
+.studio-facts dd { margin: .15rem 0 0; color: var(--color-dark); overflow-wrap: anywhere; }
+.studio-included-title { margin: 1rem 0 .4rem; font-size: .72rem; letter-spacing: .12em; text-transform: uppercase; color: var(--color-rose); }
+.studio-included { margin: 0 0 1.25rem; padding-left: 1.1rem; columns: 2 12rem; column-gap: 1.5rem; }
+.studio-included li { margin-bottom: .3rem; break-inside: avoid; }
+.studio-floor-plan { margin: 1rem 0 0; }
+.studio-floor-plan img { display: block; width: 100%; height: auto; background: #fff; border: 1px solid var(--color-border); }
+.studio-floor-plan figcaption { font-size: .8rem; margin-top: .4rem; }
+.studio-facts-fields { border: 0; padding: 0; margin: 1rem 0 0; }
+.studio-floor-plan-admin { margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--color-border); }
+.studio-floor-plan-admin .editor-subtitle { margin-top: 0; }
+.studio-floor-plan-admin img { display: block; max-width: 200px; height: auto; margin-bottom: .5rem; border: 1px solid var(--color-border); }
+
 /* The blocks that show the studio's data reuse the site's own cards and tables. */
 .blk-location {
   min-height: 320px; display: flex; align-items: center; justify-content: center; text-align: center;
@@ -1922,21 +1960,6 @@ button { font-family: inherit; }
 .blk-when-note { margin: 0; padding: .3rem .6rem; font-size: .75rem; line-height: 1.4; background: var(--color-ivory); color: var(--color-muted); }
 .blk-when[data-shown="false"] > :not(.blk-when-note) { opacity: .45; }
 
-/* A studio's facts on the studios page: what photographers choose by. */
-.studio-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: .75rem 1.5rem; margin: 1rem 0; }
-.studio-facts dt { font-size: .72rem; letter-spacing: .12em; text-transform: uppercase; color: var(--color-rose); }
-.studio-facts dd { margin: .15rem 0 0; color: var(--color-dark); overflow-wrap: anywhere; }
-.studio-included-title { margin: 1rem 0 .4rem; font-size: .72rem; letter-spacing: .12em; text-transform: uppercase; color: var(--color-rose); }
-.studio-included { margin: 0 0 1.25rem; padding-left: 1.1rem; columns: 2 12rem; column-gap: 1.5rem; }
-.studio-included li { margin-bottom: .3rem; break-inside: avoid; }
-.studio-floor-plan { margin: 1rem 0 0; }
-.studio-floor-plan img { display: block; width: 100%; height: auto; background: #fff; border: 1px solid var(--color-border); }
-.studio-floor-plan figcaption { font-size: .8rem; margin-top: .4rem; }
-.studio-facts-fields { border: 0; padding: 0; margin: 1rem 0 0; }
-.studio-floor-plan-admin { margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--color-border); }
-.studio-floor-plan-admin .editor-subtitle { margin-top: 0; }
-.studio-floor-plan-admin img { display: block; max-width: 200px; height: auto; margin-bottom: .5rem; border: 1px solid var(--color-border); }
-
 /* Only in the page editor: where a block has nothing to show yet. */
 .blk-note {
   padding: 1rem; border: 1px dashed var(--color-border); background: color-mix(in srgb, var(--color-ivory) 70%, transparent);
@@ -1957,6 +1980,9 @@ button { font-family: inherit; }
   .blk-spacer { height: var(--h-phone, var(--h, 48px)); }
   .blk-cards { grid-template-columns: repeat(var(--cols-phone, 1), minmax(0, 1fr)); }
   .blk-gallery { grid-template-columns: repeat(var(--cols-phone, 2), minmax(0, 1fr)); }
+  .blk-reviews { grid-template-columns: repeat(var(--cols-phone, 1), minmax(0, 1fr)); }
+  .blk-logos { gap: 1.25rem 2rem; }
+  .blk-logos img { height: calc(var(--logo-h) * .75); }
   .blk-picture[data-size] { width: 100%; }
   .blk-picture img { aspect-ratio: var(--ratio-phone, var(--ratio)); object-position: var(--focus-phone, var(--focus, center)); }
   /* Columns go one under the other, unless the page asks to keep them side by side. */

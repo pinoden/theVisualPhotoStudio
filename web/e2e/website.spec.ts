@@ -929,3 +929,92 @@ test("a page that would be wider than a phone is not published, and is once it f
   expect((await guest.goto(path))?.status()).toBe(200);
   await guest.context().close();
 });
+
+// ── Reviews and logos (ideas taken from another studio's website) ──
+
+/** A logo drawn as a picture: a coloured mark beside a bar, on white. */
+async function logoFile(name: string, colour: string) {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="480" height="160" viewBox="0 0 480 160">
+    <rect width="480" height="160" fill="#ffffff"/>
+    <circle cx="80" cy="80" r="56" fill="${colour}"/>
+    <rect x="160" y="60" width="280" height="40" rx="8" fill="${colour}"/>
+  </svg>`;
+  return { name, mimeType: "image/png", buffer: await sharp(Buffer.from(svg)).png().toBuffer() };
+}
+
+test("a page shows what clients wrote, with their stars, and the logos of brands the studio worked for", async ({ page, browser }) => {
+  await page.setViewportSize({ width: 1440, height: 1200 });
+  // The tenth owner's second sign-in code. Two logos first, each described by the brand's name.
+  await signIn(page, GUARD_OWNER, "/admin/website/media");
+  await expect(page.getByLabel("Add pictures", { exact: true })).toBeEnabled();
+  await page.getByLabel("Add pictures", { exact: true }).setInputFiles([await logoFile("logo-north.png", "#1f3b5a"), await logoFile("logo-bloom.png", "#b0526e")]);
+  await expect(onScreen(page.locator(".media-sent")).locator("li.added")).toHaveCount(2);
+  for (const [file, words] of [
+    ["logo-north.png", "Logo of North Apparel"],
+    ["logo-bloom.png", "Logo of Bloom Beauty"],
+  ]) {
+    const card = onScreen(page.locator(".media-card")).filter({ hasText: file });
+    await card.getByLabel("What the picture shows").fill(words);
+    await card.getByRole("button", { name: "Save" }).click();
+    await expect(card).not.toContainText("Needs a description before it can be shown.");
+  }
+
+  await page.goto("/admin/website/pages");
+  await byLabel(page, "Name of a new page").fill("Kind Words");
+  await page.getByRole("button", { name: "Make the page" }).click();
+  const canvas = canvasOf(page);
+  await expect(canvas.locator("h1")).toHaveText("Kind Words");
+  const path = /\/kind-words(-\d+)?/.exec(await page.locator(".page-editor-where").innerText())![0];
+  await canvas.locator("h1").click();
+  await expect(page.getByRole("textbox", { name: "Heading" })).toHaveValue("Kind Words");
+
+  // A review block starts with no words, so nothing a client did not write can be published by mistake.
+  await dragBlock(page, "Reviews", canvas.locator(".blk-text"));
+  const reviewsNote = canvas.locator(".blk-note", { hasText: "Reviews: write the first one in the panel" });
+  await expect(reviewsNote).toBeVisible();
+  await reviewsNote.click();
+  // The review in the panel's list, opened to write it. The editor keeps a copy of its panel out of sight: the one on screen is pressed.
+  await onScreen(page.locator('[class*="ArrayFieldItem-summary"]', { hasText: "New" })).first().click();
+  // One field at a time, each seen on the page before the next.
+  await page.getByRole("textbox", { name: "What they wrote, in their words" }).fill("The light in Blanche is unreal. We shot a whole lookbook in three hours.");
+  await expect(canvas.locator(".blk-review blockquote")).toHaveText("The light in Blanche is unreal. We shot a whole lookbook in three hours.");
+  await page.getByRole("textbox", { name: "Their name, as they agreed to show it" }).fill("Ana R.");
+  await expect(canvas.locator(".blk-review figcaption")).toHaveText("Ana R.");
+  await page.getByRole("textbox", { name: "Where they wrote it (optional), such as Google" }).fill("Google");
+  await expect(canvas.locator(".blk-review cite")).toHaveText("Google");
+  await page.getByRole("combobox", { name: "Stars they gave" }).selectOption({ label: "5 of 5" });
+  await expect(canvas.locator(".blk-review-stars")).toContainText("5 out of 5 stars");
+
+  // The logos, from the library.
+  await dragBlock(page, "Logos", canvas.locator(".blk-reviews"));
+  const logosNote = canvas.locator(".blk-note", { hasText: "Logos: choose their pictures in the panel" });
+  await expect(logosNote).toBeVisible();
+  await logosNote.click();
+  await page.getByRole("button", { name: "Add pictures" }).click();
+  const chooser = page.getByRole("dialog", { name: "Choose from the media library" });
+  await chooser.getByRole("button", { name: /Logo of North Apparel/ }).click();
+  await chooser.getByRole("button", { name: /Logo of Bloom Beauty/ }).click();
+  await chooser.getByRole("button", { name: "Use these 2 pictures" }).click();
+  await expect(canvas.locator(".blk-logos img")).toHaveCount(2);
+  await page.getByRole("combobox", { name: "Colours" }).selectOption({ label: "In grey" });
+  await expect(canvas.locator(".blk-logos")).toHaveAttribute("data-look", "grey");
+  await expect(byText(page, /Draft saved at/)).toBeVisible();
+  // Publishing measures the page on a phone first: both blocks fit.
+  await page.getByRole("button", { name: "Publish", exact: true }).click();
+  await expect(byText(page, "Published. Visitors see it now.")).toBeVisible();
+
+  const guest = await visitor(browser);
+  expect((await guest.goto(path))?.status()).toBe(200);
+  const review = guest.locator(".blk-review");
+  await expect(review.locator("blockquote")).toHaveText("The light in Blanche is unreal. We shot a whole lookbook in three hours.");
+  await expect(review.locator("figcaption")).toHaveText("Ana R., Google");
+  await expect(review.locator(".blk-review-stars")).toHaveText("★★★★★5 out of 5 stars");
+  const logos = guest.locator(".blk-logos img");
+  await expect(logos).toHaveCount(2);
+  await expect(logos.nth(0)).toHaveAttribute("alt", "Logo of North Apparel");
+  await expect(logos.nth(1)).toHaveAttribute("alt", "Logo of Bloom Beauty");
+  await drawn(logos.nth(0));
+  expect(await accessibilityProblems(guest)).toEqual([]);
+  await shot(guest, "53b-website-reviews-and-logos");
+  await guest.context().close();
+});
