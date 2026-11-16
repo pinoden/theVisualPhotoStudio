@@ -25,7 +25,7 @@ import {
 } from "@/server/admin";
 import { CATALOG_TAG } from "@/server/cached";
 import { FREE_HOUR_MINUTES } from "@/server/loyalty";
-import { ownerCancelBooking, ownerRefund } from "@/server/manage";
+import { ownerCancelBooking, ownerRefund, recordRefundMadeInSquare } from "@/server/manage";
 import { flushEmailsSoon, manageDeps } from "@/server/runtime";
 import { notFound } from "next/navigation";
 import { can, type Ability } from "@/lib/abilities";
@@ -254,6 +254,14 @@ export async function ownerCancelAction(formData: FormData): Promise<void> {
   flushEmailsSoon();
   if (!result.ok) failed(back, result.message);
   done(back, `Booking cancelled. ${refundNote(result.refund, result.refundCents)}`);
+}
+
+/** The owner refunded a payment by hand in Square after the site could not: the site stops trying, and counts it as made. */
+export async function recordRefundMadeInSquareAction(formData: FormData): Promise<void> {
+  const owner = await requireOwner("/admin");
+  const result = await recordRefundMadeInSquare(await getDb(), owner, text(formData, "refundId"), new Date());
+  if (!result.ok) failed("/admin", result.message);
+  done("/admin", "Recorded: the refund was made in Square. The site no longer tries to make it.");
 }
 
 export async function ownerRefundAction(formData: FormData): Promise<void> {

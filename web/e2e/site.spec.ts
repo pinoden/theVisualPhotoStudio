@@ -36,6 +36,7 @@ const MOVE_TO = dateAhead(45);
 const FREE_HOUR_DAY = dateAhead(52); // and for the bookings made with a free hour
 const PHOTO_DAY = dateAhead(59); // and for the photography sessions
 const LOST_DAY = dateAhead(66); // and for the booking whose answer is lost on the way
+const REFUSED_DAY = dateAhead(73); // and for the booking whose refund the card processor refuses
 
 const jane = { name: "Jane Smith", email: "jane.e2e@example.com", phone: "407-555-0100" };
 const bob = { name: "Bob Brown", email: "bob.e2e@example.com", phone: "407-555-0111" };
@@ -1298,4 +1299,38 @@ test("a booking whose answer is lost on the way is found when the customer press
   await expect(confirmations).toHaveCount(1);
   await expect(confirmations).toContainText(ref);
   await outbox.close();
+});
+
+test("a refund the card processor refuses is shown to the owner, who records it once it is made by hand in Square", async ({ page }) => {
+  const rita = { name: "Rita Refused", email: "rita.refused@example.com", phone: "407-555-0177" };
+  await bookStudioFirstToPayment(page, { studios: ["Studio Paris"], date: REFUSED_DAY, duration: "1 hr", time: "10:00 AM", customer: rita });
+  // Paid with a pretend card whose refunds are all refused (the pretend processor's MOCK_TOKEN_REFUNDS_REFUSED).
+  await page.route("**/api/bookings", (route) =>
+    route.continue({ postData: JSON.stringify({ ...route.request().postDataJSON(), paymentToken: "mock-card-refunds-refused" }) }),
+  );
+  const ref = await confirmAndGetRef(page, "Confirm & pay $68");
+  await page.unroute("**/api/bookings");
+
+  // The fifth owner's third sign-in code. A refund of $20 for goodwill: the processor refuses it.
+  await signIn(page, FIFTH_OWNER, `/admin/bookings?from=${REFUSED_DAY}&to=${REFUSED_DAY}`);
+  const row = page.getByRole("row", { name: /Rita Refused/ });
+  await row.getByText("Refund", { exact: true }).click();
+  await byLabel(row, "Amount ($)").fill("20");
+  await byLabel(row, "Reason").fill("Goodwill");
+  await row.getByRole("button", { name: "Send refund" }).click();
+  await expect(byText(page, "$20 refund recorded; it has not gone through yet and will be retried.")).toBeVisible();
+
+  // The overview shows it first, with Square's reason. Once the owner has refunded it in Square, they record it there.
+  await page.goto("/admin");
+  const problem = onScreen(page.locator(".admin-card", { hasText: "Refunds that need attention" })).getByRole("row", { name: new RegExp(ref) });
+  await expect(problem).toContainText("Failed");
+  await expect(problem).toContainText("The card account is closed (test mode).");
+  expect(await accessibilityProblems(page), "the overview with a refund that failed").toEqual([]);
+  await problem.getByText("Refunded it in Square", { exact: true }).click();
+  await problem.getByRole("button", { name: "Yes, I refunded $20 in Square" }).click();
+  await expect(byText(page, "Recorded: the refund was made in Square. The site no longer tries to make it.")).toBeVisible();
+  await expect(onScreen(page.locator(".admin-card", { hasText: "Refunds that need attention" }))).toHaveCount(0);
+  // The booking's history says who recorded it.
+  await page.goto(`/admin/appointments/${ref}`);
+  await expect(byText(page, "A refund of $20 that the site could not make was made by hand in Square")).toBeVisible();
 });

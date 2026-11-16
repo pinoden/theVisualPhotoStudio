@@ -9,6 +9,7 @@ import { resolveEmailTransport } from "@/server/email";
 import { resolvePayments } from "@/server/payments";
 import { requireOwner } from "@/server/session";
 import { localDateOf } from "@/server/tz";
+import { recordRefundMadeInSquareAction } from "./actions";
 import { AdminFrame, AdminLoading } from "./frame";
 
 export const metadata: Metadata = { title: "Admin", robots: { index: false } };
@@ -72,7 +73,8 @@ async function Overview({ searchParams }: Pick<PageProps<"/admin">, "searchParam
         <div className="admin-card">
           <h3>Refunds that need attention</h3>
           <p style={{ fontSize: ".875rem" }}>
-            These are retried automatically. If one keeps failing, refund the payment in Square.
+            These are retried automatically. If one keeps failing, refund the payment in Square, then record it here: the
+            site then stops trying, and the client&rsquo;s receipt shows the refund.
           </p>
           <table className="data-table">
             <thead>
@@ -82,6 +84,7 @@ async function Overview({ searchParams }: Pick<PageProps<"/admin">, "searchParam
                 <th>Amount</th>
                 <th>State</th>
                 <th>Reason</th>
+                <th>Made in Square?</th>
               </tr>
             </thead>
             <tbody>
@@ -92,6 +95,20 @@ async function Overview({ searchParams }: Pick<PageProps<"/admin">, "searchParam
                   <td>{formatCents(p.amountCents)}</td>
                   <td>{p.status === "failed" ? "Failed" : "Waiting"}</td>
                   <td>{p.error ?? ""}</td>
+                  <td>
+                    {p.status === "failed" && (
+                      <details>
+                        <summary style={{ cursor: "pointer" }}>Refunded it in Square</summary>
+                        <form action={recordRefundMadeInSquareAction} style={{ marginTop: ".5rem" }}>
+                          <input type="hidden" name="refundId" value={p.refundId} />
+                          <p style={{ fontSize: ".8rem", margin: "0 0 .4rem" }}>Only once the money was sent back in Square.</p>
+                          <button type="submit" className="btn btn-dark btn-small">
+                            Yes, I refunded {formatCents(p.amountCents)} in Square
+                          </button>
+                        </form>
+                      </details>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>

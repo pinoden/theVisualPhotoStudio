@@ -109,6 +109,12 @@ export interface PaymentProvider {
 
 export const MOCK_TOKEN_OK = "mock-card-ok";
 export const MOCK_TOKEN_DECLINED = "mock-card-declined";
+/**
+ * A pretend card that pays, and whose every refund is refused: to try in a
+ * browser what happens when a refund does not go through. The booking screen
+ * never offers it; a test sends it.
+ */
+export const MOCK_TOKEN_REFUNDS_REFUSED = "mock-card-refunds-refused";
 
 /** Pretend card processor for development and tests. Moves no money. */
 export const mockProvider: PaymentProvider = {
@@ -116,10 +122,12 @@ export const mockProvider: PaymentProvider = {
   async charge(request) {
     if (request.token === MOCK_TOKEN_OK) return { ok: true, paymentId: `mock_${request.idempotencyKey}` };
     if (request.token === MOCK_TOKEN_DECLINED) return { ok: false, message: "Card declined." };
+    if (request.token === MOCK_TOKEN_REFUNDS_REFUSED) return { ok: true, paymentId: `mock_norefund_${request.idempotencyKey}` };
     return { ok: false, message: "Invalid card token." };
   },
   async refund(request) {
     if (!request.paymentId.startsWith("mock_")) return { ok: false, message: "Unknown payment." };
+    if (request.paymentId.startsWith("mock_norefund_")) return { ok: false, message: "The card account is closed (test mode)." };
     return { ok: true, refundId: `mock_refund_${request.idempotencyKey}`, settled: true };
   },
   async capture(paymentId) {

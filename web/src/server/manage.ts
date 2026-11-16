@@ -14,6 +14,7 @@ import {
   type RescheduleBlock,
   type RescheduleOutcome,
 } from "@/lib/domain/policy";
+import type { AuthUser } from "./auth";
 import { isBookingRef, tokenMatches } from "./bookings";
 import { cancellationEmail, ownerHandRefundNotice, ownerRefundNotice, queueEmail, rescheduleCodeEmail } from "./email";
 import { BY_CUSTOMER, BY_STUDIO, recordEvent } from "./history";
@@ -363,6 +364,60 @@ export async function checkUnsettledRefunds(db: Db, deps: ManageDeps): Promise<{
     }
   }
   return { settled, rejected };
+}
+
+export type HandRefundResult = { ok: true } | { ok: false; reason: "forbidden" | "not_found" | "not_failed"; message: string };
+
+/**
+ * An owner refunded a payment by hand in Square after the site could not:
+ * Square answers a refund it rejected the same way each time it is tried
+ * again. The refund the site recorded then counts as made. It is no longer
+ * tried again or listed as a problem, the payment's refunded amount includes
+ * it, receipts show it, and the booking's history says who recorded it.
+ *
+ * Only for a refund that failed. One still waiting may yet be sent by the
+ * site, and the money would then go back twice.
+ */
+export async function recordRefundMadeInSquare(db: Db, viewer: AuthUser, refundId: string, now: Date): Promise<HandRefundResult> {
+  if (viewer.role !== "owner") return { ok: false, reason: "forbidden", message: "Only an owner can record a refund made in Square." };
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(refundId)) {
+    return { ok: false, reason: "not_found", message: "That refund was not found." };
+  }
+  return db.transaction(async (tx): Promise<HandRefundResult> => {
+    // Locked, so the scheduled task cannot send it while it is recorded as made.
+    const [refund] = await tx.select().from(refunds).where(eq(refunds.id, refundId)).for("update").limit(1);
+    if (!refund) return { ok: false, reason: "not_found", message: "That refund was not found." };
+    if (refund.status !== "failed") {
+      return {
+        ok: false,
+        reason: "not_failed",
+        message: refund.status === "succeeded" ? "That refund is made already." : "That refund has not failed: the site may still send it. Only a refund that failed can be recorded as made in Square.",
+      };
+    }
+    await tx.update(refunds).set({ status: "succeeded", settledAt: now, error: null }).where(eq(refunds.id, refund.id));
+    await tx
+      .update(payments)
+      .set({ refundedCents: sql`${payments.refundedCents} + ${refund.amountCents}` })
+      .where(eq(payments.id, refund.paymentId));
+    const [booking] = await tx
+      .select()
+      .from(bookings)
+      .innerJoin(payments, eq(payments.bookingId, bookings.id))
+      .where(eq(payments.id, refund.paymentId))
+      .limit(1);
+    if (booking) {
+      const label = labelOf(booking.bookings);
+      await recordEvent(tx, {
+        bookingId: booking.bookings.id,
+        from: label,
+        to: label,
+        actor: viewer.email,
+        at: now,
+        note: `A refund of ${formatCents(refund.amountCents)} that the site could not make was made by hand in Square`,
+      });
+    }
+    return { ok: true };
+  });
 }
 
 /** Record refunds of `totalCents` against a booking's payments, newest payment first. */
