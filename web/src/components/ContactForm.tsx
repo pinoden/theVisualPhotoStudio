@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
-import { sendMessageAction, type ContactState } from "@/app/contact/actions";
+import { sendMessageAction, type ContactState } from "./contact-actions";
 import { CONTACT_LIMITS, CONTACT_TOPICS } from "@/lib/contact";
 
 const START: ContactState = {

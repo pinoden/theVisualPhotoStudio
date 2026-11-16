@@ -96,7 +96,10 @@ async function Website({ searchParams }: Pick<PageProps<"/admin/website">, "sear
         {pages && (
           <section className="admin-card" aria-labelledby="website-pages">
             <h3 id="website-pages">Pages</h3>
-            <p>Pages you make yourself, from blocks: headings, text, pictures, galleries, videos, buttons and columns, arranged by dragging.</p>
+            <p>
+              Every page of the website, from the home page to the policies, and new ones you make: blocks of headings,
+              text, pictures, galleries, videos, buttons, columns and the studio&rsquo;s own data, arranged by dragging.
+            </p>
             <p className="website-state">
               {pages.all === 0 ? (
                 "None made yet."

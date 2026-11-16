@@ -1,0 +1,2 @@
+ALTER TABLE "site_documents" ADD COLUMN "built_in" text;--> statement-breakpoint
+CREATE UNIQUE INDEX "site_documents_built_in" ON "site_documents" USING btree ("built_in") WHERE "site_documents"."built_in" is not null;

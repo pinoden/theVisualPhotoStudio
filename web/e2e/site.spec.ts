@@ -87,7 +87,7 @@ test("public pages show the studios and the live price list", async ({ page }) =
   await expect(byText(page, /Cancellations made 14 days \(336 hours\) or more before the appointment/)).toBeVisible();
   await expect(byText(page, /excluding the non-refundable payment processing fee \(5%\)/)).toBeVisible();
   await expect(byText(page, /Sessions are booked at least 14 days ahead\./)).toBeVisible();
-  await expect(byText(page, /A \$40 pet fee applies per reservation.* If your pet does not come, the fee is returned to you as\s+studio credit/)).toBeVisible();
+  await expect(byText(page, /A pet fee of \$40 applies per reservation.* If your pet does not come, the fee is returned to you as\s+studio credit/)).toBeVisible();
   await page.goto("/studios");
   await expect(page.getByRole("heading", { name: "Studio Paris" })).toBeVisible();
 
@@ -127,8 +127,8 @@ test("guest information answers with the current rules and prices", async ({ pag
   const pets = page.locator("details.faq-item", { hasText: "Can I bring my pet?" });
   await pets.locator("summary").click();
   await expect(pets.locator(".faq-answer")).toContainText("Pets are welcome in Studio Dayglow only.");
-  await expect(pets.locator(".faq-answer")).toContainText("Studio Blanche, Studio Paris and all common areas are pet-free.");
-  await expect(pets.locator(".faq-answer")).toContainText("A $40 pet fee applies");
+  await expect(pets.locator(".faq-answer")).toContainText("The other studios and all common areas are pet-free.");
+  await expect(pets.locator(".faq-answer")).toContainText("A pet fee of $40 applies");
   await shot(page, "02b-guest-information");
 
   // The menu leads here.
@@ -830,7 +830,7 @@ test("the owner changes an add-on's price and a studio's guest number, and custo
   await page.goto("/faq");
   const pets = page.locator("details.faq-item", { hasText: "Can I bring my pet?" });
   await pets.locator("summary").click();
-  await expect(pets.locator(".faq-answer")).toContainText("A $45 pet fee applies");
+  await expect(pets.locator(".faq-answer")).toContainText("A pet fee of $45 applies");
 
   // The answer about pets follows what the owner says an add-on is for, whatever it is called.
   await page.goto("/admin/studios");
@@ -843,8 +843,8 @@ test("the owner changes an add-on's price and a studio's guest number, and custo
   await page.goto("/faq");
   await pets.locator("summary").click();
   await expect(pets.locator(".faq-answer")).toContainText("Pets are welcome in Studio Dayglow and Studio Paris only.");
-  await expect(pets.locator(".faq-answer")).toContainText("Studio Blanche and all common areas are pet-free.");
-  await expect(pets.locator(".faq-answer")).toContainText("$45 for Studio Dayglow and $30 for Studio Paris");
+  await expect(pets.locator(".faq-answer")).toContainText("The other studios and all common areas are pet-free.");
+  await expect(pets.locator(".faq-answer")).toContainText("A pet fee of $45 for Studio Dayglow and $30 for Studio Paris applies");
 
   // A customer reaches the payment step with the pet fee on their booking...
   const shop = await page.context().newPage();

@@ -8,6 +8,7 @@ import { PictureChooser } from "@/components/media/PictureChooser";
 import { BLOCK_GROUPS, type BlockSpec, type SiteContext } from "@/lib/site/blocks/block";
 import { hasPhone, startProps, type Field, type Fields } from "@/lib/site/blocks/fields";
 import { BLOCK_NAMES, BLOCKS } from "@/lib/site/blocks/registry";
+import { whenHolds, whenWords } from "@/lib/site/conditions";
 import { parseHref } from "@/lib/site/frame";
 import type { PageContent } from "@/lib/site/page";
 
@@ -134,15 +135,8 @@ export interface EditorLists {
   links: { path: string; title: string }[];
 }
 
-/** The site's own pages, offered as link suggestions beside the pages made in the admin. */
+/** The site's own screens, which are not pages of the admin, offered as link suggestions beside the pages. */
 const SITE_LINKS: { path: string; title: string }[] = [
-  { path: "/", title: "Home" },
-  { path: "/studios", title: "Our Studios" },
-  { path: "/rates", title: "Rates" },
-  { path: "/services", title: "Photography" },
-  { path: "/faq", title: "Guest Information" },
-  { path: "/policies", title: "Policies" },
-  { path: "/contact", title: "Contact" },
   { path: "/book", title: "Book a studio" },
   { path: "/book/photography", title: "Book a photographer" },
   { path: "/account", title: "My Bookings" },
@@ -361,14 +355,30 @@ function puckFields(fields: Fields, lists: EditorLists, nested: boolean): Record
 
 // ── The blocks on the canvas ─────────────────────────────────────────────────
 
-/** A block as the editor draws it: the site's own drawing, with Puck's values turned into the site's. */
+/**
+ * A block as the editor draws it: the site's own drawing, with Puck's values
+ * turned into the site's. A block that shows only at times says so above it,
+ * and whether visitors see it now; one they do not see is drawn faded.
+ */
 function EditorBlock({ spec, props }: { spec: BlockSpec<Fields>; props: Props }) {
   const { site } = useSite();
   const values: Props = { ...props };
   delete values.puck;
   delete values.editMode;
   const id = typeof values.id === "string" ? values.id : "";
-  return <>{spec.render({ ...convert(spec.fields, values, false), id, site, editing: true } as never)}</>;
+  const drawn = spec.render({ ...convert(spec.fields, values, false), id, site, editing: true } as never);
+  const when = typeof values.when === "string" ? values.when : "";
+  const words = whenWords(when);
+  if (!words) return <>{drawn}</>;
+  const shown = whenHolds(when, site.conditions);
+  return (
+    <div className="blk-when" data-shown={shown}>
+      <p className="blk-when-note">
+        {words}: {shown ? "visitors see it now." : "visitors do not see it now."}
+      </p>
+      {drawn}
+    </div>
+  );
 }
 
 /** Puck's configuration: every block, sorted into the editor's groups, and the page's own settings as the root's. */

@@ -31,9 +31,9 @@ const STATE: Record<PageSummary["state"], string> = {
 };
 
 /**
- * The pages made in the admin: the list, a new page, the trash and the old
- * addresses. For an owner, or a manager who may edit pages. Anyone else gets
- * "not found".
+ * The website's pages: the list (the home page first, then by name), a new
+ * page, the trash and the old addresses. For an owner, or a manager who may
+ * edit pages. Anyone else gets "not found".
  */
 async function Pages({ searchParams }: Pick<PageProps<"/admin/website/pages">, "searchParams">) {
   await connection();
@@ -47,10 +47,10 @@ async function Pages({ searchParams }: Pick<PageProps<"/admin/website/pages">, "
       <WebsiteTabs active="/admin/website/pages" viewer={viewer} />
       <div className="admin-card">
         <p style={{ margin: 0, fontSize: ".9rem" }}>
-          A page is made of blocks: sections, columns, headings, text, pictures, galleries, videos, buttons. A new page
-          is a draft; it is on the website once it is published. The home page, the studios, rates, photography,
-          guest information, policies and contact pages are still part of the site itself, and are not listed here
-          yet.
+          A page is made of blocks: sections, columns, headings, text, pictures, galleries, videos, buttons, and the
+          blocks that show the studios, their prices and the contact details. A new page is a draft; it is on the
+          website once it is published. The pages the website was built with are here too, from the home page to the
+          policies, and change the same way. Only the booking steps, the accounts and the admin are not pages.
         </p>
       </div>
 
@@ -78,7 +78,7 @@ async function Pages({ searchParams }: Pick<PageProps<"/admin/website/pages">, "
         </div>
       ) : (
         <ul className="page-list">
-          {pages.map((page) => (
+          {[...pages.filter((page) => page.home), ...pages.filter((page) => !page.home)].map((page) => (
             <li key={page.id} className="admin-card">
               <div>
                 <h3>
@@ -116,7 +116,8 @@ async function Pages({ searchParams }: Pick<PageProps<"/admin/website/pages">, "
         <section className="admin-card" aria-labelledby="pages-trash">
           <h3 id="pages-trash">Trash</h3>
           <p className="editor-hint" style={{ margin: "0 0 1rem" }}>
-            A deleted page is kept here for {TRASH_DAYS} days, then removed for good. Brought back, it is a draft.
+            A deleted page is kept here for {TRASH_DAYS} days, then removed for good; a page the website was built with
+            stays until it is brought back. Brought back, a page is a draft.
           </p>
           <ul className="trash-list">
             {trash.map((page) => (

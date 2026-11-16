@@ -1,8 +1,8 @@
 import type { BlockSpec } from "./block";
 import type { Fields } from "./fields";
-import { Columns, Divider, Section, Spacer } from "./layout";
+import { Banner, Columns, Divider, Section, Spacer } from "./layout";
 import { Gallery, Picture, Video } from "./pictures";
-import { AddonPrices, ContactDetails, ContactForm, RateCards, StudioCards, StudioDetails } from "./site-data";
+import { AddonPrices, ContactDetails, ContactForm, LocationCard, RateCards, StudioCards, StudioDetails } from "./site-data";
 import { Buttons, Cards, Heading, Questions, Table, Text } from "./text";
 
 /**
@@ -16,6 +16,7 @@ import { Buttons, Cards, Heading, Questions, Table, Text } from "./text";
  * the description.
  */
 export const BLOCKS = {
+  Banner,
   Section,
   Columns,
   Heading,
@@ -34,6 +35,7 @@ export const BLOCKS = {
   RateCards,
   AddonPrices,
   ContactDetails,
+  LocationCard,
   ContactForm,
 } as const;
 

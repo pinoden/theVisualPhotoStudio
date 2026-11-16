@@ -63,12 +63,15 @@ export function getDb(): Promise<Db> {
       const url = process.env.DATABASE_URL;
       if (url) return (await openPostgres(url)).db;
       const { seed } = await import("./seed");
+      // The pages the website was built with, into a database that never had them (src/server/pages.ts).
+      const { ensureBuiltInPages } = await import("../server/pages");
       if (process.env.NEXT_PHASE === "phase-production-build") {
         // `next build` without a database server: prerender pages from the
         // starting catalog held in memory. Build workers run in parallel and
         // PGlite's data directory can only be opened by one process.
         const { db } = await openPglite(undefined);
         await seed(db);
+        await ensureBuiltInPages(db, new Date());
         return db;
       }
       if (process.env.NODE_ENV === "production" && process.env.ALLOW_PGLITE_IN_PRODUCTION !== "1") {
@@ -81,6 +84,7 @@ export function getDb(): Promise<Db> {
       mkdirSync(dataDir, { recursive: true });
       const { db } = await openPglite(dataDir);
       await seed(db);
+      await ensureBuiltInPages(db, new Date());
       return db;
     })();
     globalForDb.__studioDb.catch(() => {

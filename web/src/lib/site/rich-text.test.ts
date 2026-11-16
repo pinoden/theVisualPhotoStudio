@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { paragraphs, plainText, RICH_TEXT_MAX, sanitizeRichText } from "./rich-text";
+import { describe, expect, it, vi } from "vitest";
+import { paragraphs, plainText, RICH_TEXT_MAX, sanitizeRichText, showRichText } from "./rich-text";
 
 /** Formatted text from the page editor: "never raw HTML" (the owner's requirement 23). */
 describe("formatted text", () => {
@@ -57,6 +57,21 @@ describe("formatted text", () => {
     expect(sanitizeRichText("2 < 3 and <b>bold")).toBe("2 &lt; 3 and <strong>bold</strong>");
   });
 
+  it("keeps no style but an alignment, written anew, whatever the style held", () => {
+    expect(sanitizeRichText('<p style="color:red;TEXT-ALIGN : Right ; font-size:90px">x</p>')).toBe('<p style="text-align: right">x</p>');
+    expect(sanitizeRichText('<h1 style="text-align:center;position:fixed">T</h1><h6 style="position:fixed">S</h6>')).toBe('<h2 style="text-align: center">T</h2><h4>S</h4>');
+    expect(sanitizeRichText('<p style="text-align: justify">x</p><p style="text-align:center&quot;onclick=&quot;x">y</p>')).toBe("<p>x</p><p>y</p>");
+    expect(sanitizeRichText('<li style="text-align:center">x</li><strong style="text-align:center">y</strong>')).toBe("<li>x</li><strong>y</strong>");
+  });
+
+  it("never draws a random number, which Next.js refuses while it prerenders a page", () => {
+    const random = vi.spyOn(Math, "random");
+    sanitizeRichText('<p style="text-align: center">A</p><h2 style="text-align:right">B</h2>');
+    showRichText('<p style="text-align: center">{if pets}A</p>', { pets: true });
+    expect(random).not.toHaveBeenCalled();
+    random.mockRestore();
+  });
+
   it("demotes headings that belong to the page, not to its text", () => {
     expect(sanitizeRichText("<h1>Title</h1><h5>Small</h5><h6>Smaller</h6>")).toBe("<h2>Title</h2><h4>Small</h4><h4>Smaller</h4>");
   });
@@ -74,5 +89,57 @@ describe("formatted text", () => {
   it("makes paragraphs from plain lines, and plain words from formatted text", () => {
     expect(paragraphs("Tom & Jerry <3", "Second line")).toBe("<p>Tom &amp; Jerry &lt;3</p><p>Second line</p>");
     expect(plainText('<h2>Our decor</h2><p>A <strong>bright</strong> space &amp; more.</p><ul><li>One</li></ul>')).toBe("Our decorA bright space & more.One");
+  });
+});
+
+/** Pieces of formatted text that show only at times (src/lib/site/conditions.ts). */
+describe("formatted text as a visitor gets it", () => {
+  const list = "<ul><li>{if pets}Pets are welcome.</li><li>{if not pets}Pets are not permitted.</li><li>Children are welcome.</li></ul>";
+
+  it("leaves out a list item whose condition does not hold, and never shows a marker", () => {
+    expect(showRichText(list, { pets: true })).toBe("<ul><li>Pets are welcome.</li><li>Children are welcome.</li></ul>");
+    expect(showRichText(list, { pets: false })).toBe("<ul><li>Pets are not permitted.</li><li>Children are welcome.</li></ul>");
+  });
+
+  it("does the same for paragraphs, headings and quotes, and leaves the rest alone", () => {
+    const html = '<h2>{if moving}Moving</h2><p style="text-align: center">{if moving}Move it once.</p><blockquote><p>{if not moving}It stays.</p></blockquote><p>Always.</p>';
+    expect(showRichText(html, { moving: false })).toBe("<blockquote><p>It stays.</p></blockquote><p>Always.</p>");
+    expect(showRichText(html, { moving: true })).toBe('<h2>Moving</h2><p style="text-align: center">Move it once.</p><p>Always.</p>');
+  });
+
+  it("leaves out a list or a quote when nothing in it is left", () => {
+    expect(showRichText("<p>Pets:</p><ul><li>{if pets}Dogs.</li><li>{if pets}Cats.</li></ul><p>End.</p>", { pets: false })).toBe("<p>Pets:</p><p>End.</p>");
+    expect(showRichText("<ol><li>{if pets}Dogs.</li></ol>", { pets: true })).toBe("<ol><li>Dogs.</li></ol>");
+  });
+
+  it("leaves out a piece unless every one of its markers holds", () => {
+    const html = "<ul><li>{if pets}{if pet free studios}Pets in Dayglow only.</li><li>{if pets}{if not pet free studios}Pets everywhere.</li></ul>";
+    expect(showRichText(html, { pets: true, "pet free studios": true })).toBe("<ul><li>Pets in Dayglow only.</li></ul>");
+    expect(showRichText(html, { pets: true, "pet free studios": false })).toBe("<ul><li>Pets everywhere.</li></ul>");
+    expect(showRichText(html, { pets: false, "pet free studios": true })).toBe("");
+  });
+
+  it("reads a marker made bold or turned into a link like any other", () => {
+    expect(showRichText("<p><strong>{if pets}</strong>Bring your dog.</p><p>Rest.</p>", { pets: false })).toBe("<p>Rest.</p>");
+    expect(showRichText('<p><a href="/rates">{if pets}Pet fee</a></p>', { pets: true })).toBe('<p><a href="/rates">Pet fee</a></p>');
+  });
+
+  it("shows a marker that names no condition, or stands inside a sentence, as it was typed", () => {
+    for (const html of ["<p>{if unicorns}Hello</p>", "<p>Hello {if pets} there</p>", "<p>{If pets}Hello</p>"]) {
+      expect(showRichText(html, { pets: false }), html).toBe(html);
+    }
+  });
+
+  it("is cleaned first, whatever it holds", () => {
+    expect(showRichText('<p onclick="x()">{if pets}<script>bad()</script>Hi</p><img src=x onerror=alert(1)>', { pets: true })).toBe("<p>Hi</p>");
+  });
+
+  it("shows everything, without markers, when what holds is not known", () => {
+    expect(showRichText(list, undefined)).toBe("<ul><li>Pets are welcome.</li><li>Pets are not permitted.</li><li>Children are welcome.</li></ul>");
+  });
+
+  it("is the cleaned text itself when it has no marker", () => {
+    const html = '<p style="text-align: center">A <strong>b</strong><br>c <a href="https://example.org">d</a></p>';
+    expect(showRichText(html, { pets: false })).toBe(sanitizeRichText(html));
   });
 });

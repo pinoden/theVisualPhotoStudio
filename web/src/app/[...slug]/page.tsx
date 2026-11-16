@@ -5,10 +5,11 @@ import { getRedirect } from "@/server/cached";
 import { sitePage } from "@/server/site";
 
 /**
- * A page made in the admin (Admin, Website, Pages), at its own address. The
- * site's own pages (booking, account, admin, and the public pages still
- * written in code) have routes of their own, which Next.js tries first: this
- * route only gets addresses none of them has.
+ * A page of the admin (Admin, Website, Pages), at its own address: the ones
+ * the website was built with (studios, rates, guest information...) and the
+ * ones the owners made. The home page has a route of its own (src/app/page.tsx).
+ * The site's own screens (booking, account, admin) have routes of their own,
+ * which Next.js tries first: this route only gets addresses none of them has.
  *
  * What is published is cached and shown to everyone; in a preview the page's
  * draft is shown instead (src/server/site.ts). An address that is no page is

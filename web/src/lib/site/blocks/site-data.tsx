@@ -100,9 +100,14 @@ export const StudioDetails = defineBlock({
                       <ul className="studio-photo-strip" aria-label={`More photos of ${studio.name}`}>
                         {more.map((picture) => (
                           <li key={picture.id}>
-                            <SiteAnchor href={picture.url} editing={editing}>
+                            {/* The picture's file opens in a tab of its own: it is not a page, so it is not a link of the router. */}
+                            {editing ? (
                               <Image src={picture.url} width={picture.width} height={picture.height} alt={picture.alt} sizes="120px" />
-                            </SiteAnchor>
+                            ) : (
+                              <a href={picture.url} target="_blank" rel="noopener">
+                                <Image src={picture.url} width={picture.width} height={picture.height} alt={picture.alt} sizes="120px" />
+                              </a>
+                            )}
                           </li>
                         ))}
                       </ul>
@@ -301,6 +306,40 @@ export const ContactDetails = defineBlock({
             </div>
           </div>
         )}
+      </div>
+    );
+  },
+});
+
+export const LocationCard = defineBlock({
+  label: "Address and map, in a box",
+  group: "site",
+  fields: {
+    sign: { kind: "toggle", label: "A pin above the address", start: true },
+    buttonLabel: { kind: "text", label: "Words on the button that opens the map (empty: no button)", max: 30, start: "Open in Maps" },
+  },
+  render: ({ sign, buttonLabel, site, editing }) => {
+    const { business } = site;
+    if (!business) return <EditorNote editing={editing}>{MISSING}</EditorNote>;
+    return (
+      <div className="blk blk-location">
+        <div>
+          {sign && (
+            <div className="blk-location-sign" aria-hidden="true">
+              📍
+            </div>
+          )}
+          <p>
+            {business.addressLine1}
+            <br />
+            {business.addressLine2}
+          </p>
+          {buttonLabel && (
+            <SiteAnchor href={business.mapsUrl} className="btn btn-primary" editing={editing}>
+              {buttonLabel}
+            </SiteAnchor>
+          )}
+        </div>
       </div>
     );
   },

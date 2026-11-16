@@ -5,9 +5,10 @@ import { connection } from "next/server";
 import { Suspense } from "react";
 import { PageEditorLoader } from "@/components/site-editor/PageEditorLoader";
 import { getDb } from "@/db/client";
+import { CONDITIONS, type ConditionName } from "@/lib/site/conditions";
 import { liveValues } from "@/lib/site/live-values";
 import { PAGE_LIMITS } from "@/lib/site/page";
-import { linkablePages, listPageVersions, loadPageForEditing, pageEditorContext } from "@/server/pages";
+import { linkablePages, listPageVersions, loadPageForEditing, pageEditorContext, TRASH_DAYS } from "@/server/pages";
 import { requireManager } from "@/server/session";
 import { loadSettings } from "@/server/settings";
 import { FONT_CLASSES } from "../../../../fonts";
@@ -57,6 +58,7 @@ async function EditPage({ params, searchParams }: Pick<PageProps<"/admin/website
           draftAt: state.draftAt,
           may: state.may,
           site: context.site,
+          builtIn: state.builtIn,
         }}
         versions={versions ?? []}
         collections={context.collections}
@@ -65,7 +67,7 @@ async function EditPage({ params, searchParams }: Pick<PageProps<"/admin/website
       />
 
       {context.site.values && (
-        <details className="admin-card live-values">
+        <details className="admin-card live-values" id="live-values">
           <summary>Live values: facts from the settings that any text can show</summary>
           <p className="editor-hint">
             Type a name between braces into any text, for example <code>{"{refund window}"}</code>. The editor shows the
@@ -88,6 +90,33 @@ async function EditPage({ params, searchParams }: Pick<PageProps<"/admin/website
         </details>
       )}
 
+      {context.site.conditions && (
+        <details className="admin-card live-values" id="page-conditions">
+          <summary>Shown only at times: what follows what the studio offers</summary>
+          <p className="editor-hint">
+            Start a paragraph, a list item, a heading or a quote with <code>{"{if pets}"}</code> and visitors see it only
+            while pets can come; <code>{"{if not pets}"}</code> does the opposite. The same works at the start of a
+            question, a card&rsquo;s title, a button&rsquo;s words and a row of a table. A whole block has a &ldquo;Show
+            it&rdquo; choice of its own, at the end of its fields. The editor shows everything; Preview shows the page as
+            visitors see it now.
+          </p>
+          <table className="price-table">
+            <tbody>
+              {(Object.keys(CONDITIONS) as ConditionName[]).map((name) => (
+                <tr key={name}>
+                  <td>
+                    <code>{`{if ${name}}`}</code>
+                    <br />
+                    <span className="editor-hint">While {CONDITIONS[name].yes}</span>
+                  </td>
+                  <td>{context.site.conditions?.[name] ? "Shown now" : "Not shown now"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </details>
+      )}
+
       <form action={savePageSettingsAction} className="admin-card">
         <h3>Name and address</h3>
         <input type="hidden" name="id" value={state.id} />
@@ -98,23 +127,26 @@ async function EditPage({ params, searchParams }: Pick<PageProps<"/admin/website
             </label>
             <input id="page-name" name="title" className="form-control" maxLength={PAGE_LIMITS.title} defaultValue={state.title} required />
           </div>
-          <div className="form-group" style={{ flex: "2 1 14rem" }}>
-            <label className="form-label" htmlFor="page-address">
-              Address
-            </label>
-            <input id="page-address" name="slug" className="form-control" maxLength={PAGE_LIMITS.slug} defaultValue={state.slug} required pattern="[A-Za-z0-9\/\-]+" title="Small letters, digits and hyphens: gift-cards, or studios/decor" />
-          </div>
+          {!state.home && (
+            <div className="form-group" style={{ flex: "2 1 14rem" }}>
+              <label className="form-label" htmlFor="page-address">
+                Address
+              </label>
+              <input id="page-address" name="slug" className="form-control" maxLength={PAGE_LIMITS.slug} defaultValue={state.slug} required pattern="[A-Za-z0-9\/\-]+" title="Small letters, digits and hyphens: gift-cards, or studios/decor" />
+            </div>
+          )}
           <button type="submit" className="btn btn-dark btn-small">
             Save
           </button>
         </div>
         <p className="editor-hint">
-          These change at once, without a draft. When a page that is on the website gets a new address, its old address
-          keeps working: it leads to the new one.
+          {state.home
+            ? "The name changes at once, without a draft. The home page is the website's own address, /, and keeps it."
+            : "These change at once, without a draft. When a page that is on the website gets a new address, its old address keeps working: it leads to the new one."}
         </p>
       </form>
 
-      {state.isLive && state.may.publish && (
+      {state.isLive && state.may.publish && !state.home && (
         <form action={unpublishPageAction} className="admin-card">
           <h3>Take it off the website</h3>
           <input type="hidden" name="id" value={state.id} />
@@ -127,12 +159,16 @@ async function EditPage({ params, searchParams }: Pick<PageProps<"/admin/website
         </form>
       )}
 
-      {(!state.isLive || state.may.publish) && (
+      {(!state.isLive || state.may.publish) && !state.home && (
         <details className="admin-card media-delete">
           <summary>Delete this page</summary>
           <form action={deletePageAction}>
             <input type="hidden" name="id" value={state.id} />
-            <p className="editor-hint">It goes to the trash, under Pages, and can be brought back for 30 days.</p>
+            <p className="editor-hint">
+              {state.builtIn
+                ? "It goes to the trash, under Pages, and can be brought back from there at any time: a page the website was built with is never removed from it."
+                : `It goes to the trash, under Pages, and can be brought back for ${TRASH_DAYS} days.`}
+            </p>
             <button type="submit" className="btn btn-outline btn-small">
               Yes, delete {state.title}
             </button>

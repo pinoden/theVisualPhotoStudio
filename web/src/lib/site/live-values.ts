@@ -44,8 +44,13 @@ export function liveValues(catalog: Catalog, business: Business): LiveValue[] {
     value("photography notice", "How far ahead a photography session is booked at the latest", hoursInWords(noticeHours(s, true))),
     value("photography refund window", "How long before a photography session a cancellation is refunded", hoursInWords(s.photoRefundWindowHours)),
     value("sessions from", "The lowest price of a photography session", sessions.length > 0 ? formatCents(Math.min(...sessions)) : ""),
-    value("pet fee", "The fee for bringing a pet", pets.fees.length > 0 ? formatCents(Math.min(...pets.fees.map((fee) => fee.cents))) : ""),
+    value(
+      "pet fee",
+      "The fee for bringing a pet: one amount, or each studio's when they differ",
+      pets.fees.length === 0 ? "" : pets.oneFee ? formatCents(pets.fees[0].cents) : listInWords(pets.fees.map((fee) => `${formatCents(fee.cents)} for ${fee.studio}`)),
+    ),
     value("pet studios", "The studios that welcome pets", listInWords(pets.studios)),
+    value("included guests", "The guests each studio's price includes", listInWords(catalog.studios.map((studio) => `${studio.name} up to ${studio.includedGuests}`))),
     value("several studios offer", "The discount for booking several studios together", multiStudioOffer(catalog)),
   ];
 }

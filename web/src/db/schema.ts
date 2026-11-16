@@ -567,9 +567,18 @@ export const siteDocuments = pgTable(
     publishedAt: ts("published_at"),
     /** A deleted page waits in the trash. */
     deletedAt: ts("deleted_at"),
+    /**
+     * For a page the website was built with (src/lib/site/built-in-pages.ts):
+     * which one. Null for every other page. It is how a database knows it had
+     * the page once, whatever was done to it since.
+     */
+    builtIn: text("built_in"),
     createdAt: createdAt(),
   },
-  (t) => [uniqueIndex("site_documents_kind_slug").on(t.kind, t.slug).where(sql`${t.deletedAt} is null`)],
+  (t) => [
+    uniqueIndex("site_documents_kind_slug").on(t.kind, t.slug).where(sql`${t.deletedAt} is null`),
+    uniqueIndex("site_documents_built_in").on(t.builtIn).where(sql`${t.builtIn} is not null`),
+  ],
 );
 
 /** A full copy of a document as it was published, kept so that an earlier version can be brought back. */

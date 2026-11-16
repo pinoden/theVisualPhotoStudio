@@ -13,6 +13,9 @@ import type { SiteContext } from "@/lib/site/blocks/block";
 import type { PageContent } from "@/lib/site/page";
 import type { VersionSummary } from "@/server/website";
 import { EditorBar, History } from "./parts";
+
+/** What `restorePageVersion` takes, in place of a version's id, for how the page was built (BUILT_VERSION in src/server/pages.ts). */
+const BUILT_VERSION = "built";
 import { buildPuckConfig, fromPuckData, SiteProvider, toPuckData, type EditorLists } from "./puck-config";
 import { useDraftEditor, type DraftActions, type DraftStart } from "./useDocumentEditor";
 
@@ -26,6 +29,8 @@ export interface PageEditorStart extends DraftStart<PageContent> {
   isLive: boolean;
   /** The pictures and collections its blocks can show. */
   site: SiteContext;
+  /** True for a page the website was built with: its history can start again from how it was built. */
+  builtIn: boolean;
 }
 
 export interface PageEditorProps extends EditorLists {
@@ -106,7 +111,12 @@ function PageEditorBody({ initial, versions, collections, links, fontClasses, no
             overrides={overrides}
           />
         </div>
-        <History editor={editor} versions={versions} />
+        <History
+          editor={editor}
+          versions={versions}
+          onOriginal={initial.builtIn ? () => void editor.restore(BUILT_VERSION) : undefined}
+          originalLabel="Start again from the page as it was built"
+        />
       </div>
     </SiteProvider>
   );

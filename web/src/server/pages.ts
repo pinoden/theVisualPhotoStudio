@@ -6,6 +6,8 @@ import type { SiteContext } from "@/lib/site/blocks/block";
 import { cleanLine, parseHref } from "@/lib/site/frame";
 import { liveValues } from "@/lib/site/live-values";
 import { PAGE_LIMITS, pagePath, pageReferences, parsePage, parseSlug, RESERVED_SEGMENTS, slugFromTitle, type PageContent } from "@/lib/site/page";
+import { builtInPage, builtInPages } from "@/lib/site/built-in-pages";
+import { conditionsOf } from "@/lib/site/conditions";
 import { paragraphs } from "@/lib/site/rich-text";
 import type { AuthUser } from "./auth";
 import { loadCatalog } from "./catalog";
@@ -30,6 +32,14 @@ import { loadBusiness, type VersionSummary } from "./website";
  * A deleted page waits in the trash for `TRASH_DAYS`, from where it can be
  * brought back; its address is free at once.
  *
+ * The pages the website was built with (src/lib/site/built-in-pages.ts) are
+ * pages like these, with three differences. `ensureBuiltInPages` puts each
+ * into a database once. One of them can start again from how it was built.
+ * And one deleted waits in the trash for good, never removed, so that it
+ * cannot come back by itself. The home page, at "/", is one of them: it
+ * cannot move, leave the website or be deleted, because the website's own
+ * address shows it.
+ *
  * Every function that changes something checks the viewer itself. Editing
  * needs `editPages`; whatever changes what the public sees (publishing,
  * taking offline, deleting or moving a published page) needs `publishWebsite`
@@ -52,6 +62,14 @@ async function abilities(db: DbLike, viewer: { role: string }): Promise<{ edit: 
   const edit = can(viewer, "editPages", settings);
   return { edit, publish: edit && can(viewer, "publishWebsite", settings) };
 }
+
+/** Who published a page the website was built with, in its history. */
+export const AS_BUILT = "the site as it was built";
+
+/** What `restorePageVersion` is given, in place of a version's id, to start again from how a page was built. */
+export const BUILT_VERSION = "built";
+
+const isHome = (row: Row) => row.slug === "";
 
 const CANNOT_EDIT = "You cannot change the website's pages.";
 const CANNOT_PUBLISH = "You cannot change what is published on the website. An owner can.";
@@ -102,7 +120,7 @@ export async function pageSite(db: DbLike, content: PageContent, now: Date): Pro
   }
   const [pictures, catalog, business] = await Promise.all([loadPictures(db, [...pictureIds]), loadCatalog(db), loadBusiness(db)]);
   const values = Object.fromEntries(liveValues(catalog, business).map((entry) => [entry.name, entry.value]));
-  return { pictures: Object.fromEntries(pictures), collections, catalog, business, values };
+  return { pictures: Object.fromEntries(pictures), collections, catalog, business, values, conditions: conditionsOf(catalog) };
 }
 
 /**
@@ -184,12 +202,18 @@ export interface PageSummary {
   publishedBy: string | null;
   publishedAt: string | null;
   deletedAt: string | null;
+  /** True for a page the website was built with. */
+  builtIn: boolean;
+  /** True for the home page, which keeps its address and stays on the website. */
+  home: boolean;
 }
 
 function summary(row: Row): PageSummary {
   return {
     id: row.id,
     slug: row.slug,
+    builtIn: row.builtIn != null,
+    home: isHome(row),
     path: pagePath(row.slug),
     title: row.title,
     state: row.published == null ? "draft" : row.draft == null ? "live" : "changed",
@@ -276,7 +300,7 @@ export async function duplicatePage(db: Db, viewer: AuthUser, id: string, now: D
     const row = await pageRow(tx, id);
     if (!row) return { ok: false, message: NOT_FOUND };
     const title = cleanLine(`Copy of ${row.title}`, PAGE_LIMITS.title);
-    const slug = await freeSlug(tx, `${row.slug.slice(0, PAGE_LIMITS.slug - 10)}-copy`);
+    const slug = await freeSlug(tx, `${(isHome(row) ? "home" : row.slug).slice(0, PAGE_LIMITS.slug - 10)}-copy`);
     const [copy] = await tx
       .insert(siteDocuments)
       .values({ kind: "page", slug, title, draft: parsePage(row.draft ?? row.published), draftRevision: 1, draftBy: viewer.email, draftAt: now, createdAt: now })
@@ -306,6 +330,10 @@ export interface PageEditingState {
   /** The pictures and collections the page names, for drawing it in the editor. */
   site: SiteContext;
   may: { publish: boolean };
+  /** True for a page the website was built with, which can start again from how it was built. */
+  builtIn: boolean;
+  /** True for the home page, which keeps its address and stays on the website. */
+  home: boolean;
 }
 
 /** A page as its editor needs it. Null for someone who may not edit pages, and for a page that is not there. */
@@ -330,6 +358,8 @@ export async function loadPageForEditing(db: DbLike, viewer: AuthUser, id: strin
     publishedAt: row.publishedAt?.toISOString() ?? null,
     site: await pageSite(db, content, now),
     may: { publish: may.publish },
+    builtIn: row.builtIn != null,
+    home: isHome(row),
   };
 }
 
@@ -423,6 +453,7 @@ export async function unpublishPage(db: Db, viewer: AuthUser, id: string, now: D
     const row = await pageRow(tx, id, true);
     if (!row) return { ok: false, message: NOT_FOUND };
     if (row.published == null) return { ok: false, message: "This page is not on the website." };
+    if (isHome(row)) return { ok: false, message: "The home page cannot be taken off the website: the website's own address shows it." };
     await tx
       .update(siteDocuments)
       .set({
@@ -463,22 +494,35 @@ export async function listPageVersions(db: DbLike, viewer: AuthUser, id: string,
   return versions.map((version) => ({ id: version.id, number: version.number, publishedBy: version.publishedBy, publishedAt: version.createdAt.toISOString(), current: version.id === currentId }));
 }
 
-/** Bring an earlier version of a page back as its draft. The website shows what it showed until the draft is published. */
+/**
+ * Bring an earlier version of a page back as its draft. The website shows
+ * what it showed until the draft is published. `BUILT_VERSION` in place of a
+ * version's id brings back how a page the website was built with started.
+ */
 export async function restorePageVersion(db: Db, viewer: AuthUser, id: string, versionId: string, now: Date): Promise<{ ok: true; number: number } | { ok: false; message: string }> {
   if (!(await abilities(db, viewer)).edit) return { ok: false, message: CANNOT_EDIT };
-  if (!isUuid(versionId)) return { ok: false, message: "That version was not found." };
+  if (!isUuid(versionId) && versionId !== BUILT_VERSION) return { ok: false, message: "That version was not found." };
   return db.transaction(async (tx) => {
     const row = await pageRow(tx, id, true);
     if (!row) return { ok: false as const, message: NOT_FOUND };
-    const [version] = await tx.select().from(siteVersions).where(and(eq(siteVersions.id, versionId), eq(siteVersions.documentId, row.id))).limit(1);
-    if (!version) return { ok: false as const, message: "That version was not found." };
-    const content = parsePage(version.content);
+    let content: PageContent;
+    let number = 0;
+    if (versionId === BUILT_VERSION) {
+      const built = builtInPage(row.builtIn);
+      if (!built) return { ok: false as const, message: "This page was made here, not built with the website: bring back one of its versions instead." };
+      content = parsePage(built.content);
+    } else {
+      const [version] = await tx.select().from(siteVersions).where(and(eq(siteVersions.id, versionId), eq(siteVersions.documentId, row.id))).limit(1);
+      if (!version) return { ok: false as const, message: "That version was not found." };
+      content = parsePage(version.content);
+      number = version.number;
+    }
     const hasDraft = row.published == null || !same(content, parsePage(row.published));
     await tx
       .update(siteDocuments)
       .set({ draft: hasDraft ? content : null, draftBy: hasDraft ? viewer.email : null, draftAt: hasDraft ? now : null, draftRevision: row.draftRevision + 1 })
       .where(eq(siteDocuments.id, row.id));
-    return { ok: true as const, number: version.number };
+    return { ok: true as const, number };
   });
 }
 
@@ -494,11 +538,12 @@ export async function savePageSettings(db: Db, viewer: AuthUser, id: string, inp
   if (!may.edit) return { ok: false, message: CANNOT_EDIT };
   const title = cleanLine(input.title, PAGE_LIMITS.title);
   if (!title) return { ok: false, message: "Give the page a name." };
-  const parsed = parseSlug(input.slug);
-  if (!parsed.ok) return parsed;
   return db.transaction(async (tx): Promise<PageChangeResult> => {
     const row = await pageRow(tx, id, true);
     if (!row) return { ok: false, message: NOT_FOUND };
+    // The home page keeps its address, whatever was sent: it is the website's own.
+    const parsed = isHome(row) ? { ok: true as const, slug: "" } : parseSlug(input.slug);
+    if (!parsed.ok) return parsed;
     const moved = parsed.slug !== row.slug;
     if (moved && row.published != null && !may.publish) return { ok: false, message: "This page is on the website, so changing its address changes the website. An owner can." };
     if (moved && (await freeSlug(tx, parsed.slug, row.id)) !== parsed.slug) return { ok: false, message: `Another page already has the address /${parsed.slug}.` };
@@ -525,6 +570,7 @@ export async function deletePage(db: Db, viewer: AuthUser, id: string, now: Date
   return db.transaction(async (tx): Promise<PageChangeResult> => {
     const row = await pageRow(tx, id, true);
     if (!row) return { ok: false, message: NOT_FOUND };
+    if (isHome(row)) return { ok: false, message: "The home page cannot be deleted: the website's own address shows it." };
     if (row.published != null && !may.publish) return { ok: false, message: "This page is on the website, so deleting it changes the website. An owner can." };
     // In the trash a page is a draft: brought back, it is not on the website until it is published again.
     await tx
@@ -548,11 +594,52 @@ export async function restorePage(db: Db, viewer: AuthUser, id: string): Promise
   });
 }
 
-/** Remove from the trash, for good, the pages that have been in it longer than `TRASH_DAYS`. Their versions go with them. Run by the scheduled task. */
+/**
+ * Remove from the trash, for good, the pages that have been in it longer than
+ * `TRASH_DAYS`. Their versions go with them. A page the website was built
+ * with stays: removed, it would be put back by `ensureBuiltInPages`. Run by
+ * the scheduled task.
+ */
 export async function emptyOldTrash(db: DbLike, now: Date): Promise<number> {
   const before = new Date(now.getTime() - TRASH_DAYS * 24 * 60 * 60 * 1000);
-  const gone = await db.delete(siteDocuments).where(and(isPage, isNotNull(siteDocuments.deletedAt), lt(siteDocuments.deletedAt, before))).returning({ id: siteDocuments.id });
+  const gone = await db
+    .delete(siteDocuments)
+    .where(and(isPage, isNotNull(siteDocuments.deletedAt), lt(siteDocuments.deletedAt, before), isNull(siteDocuments.builtIn)))
+    .returning({ id: siteDocuments.id });
   return gone.length;
+}
+
+/**
+ * Put into the database, published, each page the website was built with
+ * that it has never had, with that first version in its history. A page it
+ * had once is left as the owners left it, changed, moved or deleted; and an
+ * address one of their own pages has stays theirs. Run when the local
+ * database opens, and by `npm run db:migrate` for a database server.
+ * Answers how many pages it added.
+ */
+export async function ensureBuiltInPages(db: Db, now: Date): Promise<number> {
+  const had = new Set(
+    (await db.select({ key: siteDocuments.builtIn }).from(siteDocuments).where(isNotNull(siteDocuments.builtIn))).map((row) => row.key),
+  );
+  let added = 0;
+  for (const page of builtInPages()) {
+    if (had.has(page.key)) continue;
+    const content = parsePage(page.content);
+    const done = await db.transaction(async (tx) => {
+      if (await rowBySlug(tx, page.slug)) return false;
+      const [row] = await tx
+        .insert(siteDocuments)
+        .values({ kind: "page", slug: page.slug, title: page.title, builtIn: page.key, published: content, publishedBy: AS_BUILT, publishedAt: now, createdAt: now })
+        // Two servers starting at once: the second finds the page there and adds nothing.
+        .onConflictDoNothing()
+        .returning({ id: siteDocuments.id });
+      if (!row) return false;
+      await tx.insert(siteVersions).values({ documentId: row.id, number: 1, content, publishedBy: AS_BUILT, createdAt: now });
+      return true;
+    });
+    if (done) added++;
+  }
+  return added;
 }
 
 // ── Old addresses ────────────────────────────────────────────────────────────
@@ -579,7 +666,7 @@ export async function listRedirects(db: DbLike, viewer: { role: string }): Promi
 function oldPath(input: string): string | null {
   const path = `/${input.trim().toLowerCase().replace(/^\/+|\/+$/g, "")}`;
   if (path === "/" || path.length > 200 || !/^(\/[a-z0-9._~-]+)+$/.test(path)) return null;
-  return RESERVED_SEGMENTS.filter((segment) => !["contact", "faq", "policies", "rates", "services", "studios"].includes(segment)).includes(path.split("/")[1]) ? null : path;
+  return RESERVED_SEGMENTS.includes(path.split("/")[1]) ? null : path;
 }
 
 /**

@@ -260,7 +260,17 @@ export function PreviewPane({ path, css, reload }: { path: string; css?: string;
 // ── The history ──────────────────────────────────────────────────────────────
 
 /** The versions that were published, each of which can be brought back as the draft. */
-export function History<T>({ editor, versions, onOriginal }: { editor: DocumentEditor<T>; versions: VersionSummary[]; onOriginal?: () => void }) {
+export function History<T>({
+  editor,
+  versions,
+  onOriginal,
+  originalLabel = "Start again from the site as it was built",
+}: {
+  editor: DocumentEditor<T>;
+  versions: VersionSummary[];
+  onOriginal?: () => void;
+  originalLabel?: string;
+}) {
   return (
     <section className="admin-card editor-history" aria-labelledby="editor-history-title">
       <h3 id="editor-history-title">History</h3>
@@ -292,7 +302,7 @@ export function History<T>({ editor, versions, onOriginal }: { editor: DocumentE
       {onOriginal && (
         <p className="editor-original">
           <button type="button" className="btn btn-outline btn-small" disabled={editor.busy} onClick={onOriginal}>
-            Start again from the site as it was built
+            {originalLabel}
           </button>
         </p>
       )}

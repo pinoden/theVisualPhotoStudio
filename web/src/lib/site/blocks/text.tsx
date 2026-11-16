@@ -4,8 +4,8 @@ import { ALIGN, EditorNote, SiteAnchor } from "./shared";
 
 /** The blocks that are words: a heading, running text, buttons, small cards, and questions with their answers. */
 
-const BUTTON_LOOKS = { dark: "Dark", accent: "Accent colour", outline: "Outline", ghost: "Outline in the accent colour" } as const;
-const BUTTON_CLASS: Record<keyof typeof BUTTON_LOOKS, string> = { dark: "btn-dark", accent: "btn-primary", outline: "btn-outline", ghost: "btn-ghost" };
+export const BUTTON_LOOKS = { dark: "Dark", accent: "Accent colour", outline: "Outline", ghost: "Outline in the accent colour" } as const;
+export const BUTTON_CLASS: Record<keyof typeof BUTTON_LOOKS, string> = { dark: "btn-dark", accent: "btn-primary", outline: "btn-outline", ghost: "btn-ghost" };
 
 export const Heading = defineBlock({
   label: "Heading",
@@ -18,12 +18,13 @@ export const Heading = defineBlock({
       options: { h2: "Heading of a section", h1: "Title of the page (one on a page)", h3: "Smaller heading", h4: "Smallest heading" },
       start: "h2",
     },
+    size: { kind: "choice", label: "Size", options: { normal: "Normal", small: "Smaller, as within running text", large: "Larger" }, start: "normal" },
     eyebrow: { kind: "text", label: "A few small words above it", max: 80, start: "" },
     line: { kind: "toggle", label: "A short line under it", start: false },
     align: { kind: "choice", label: "Where it sits", options: ALIGN, start: "center", phone: true },
   },
-  render: ({ text, level: Level, eyebrow, line, align, alignPhone }) => (
-    <div className="blk blk-heading" data-align={align} data-align-phone={alignPhone || undefined}>
+  render: ({ text, level: Level, size, eyebrow, line, align, alignPhone }) => (
+    <div className="blk blk-heading" data-size={size} data-align={align} data-align-phone={alignPhone || undefined}>
       {eyebrow && <p className="section-eyebrow">{eyebrow}</p>}
       <Level>{text}</Level>
       {line && <div className="divider" />}

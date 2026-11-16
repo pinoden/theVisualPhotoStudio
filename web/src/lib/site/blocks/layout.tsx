@@ -1,7 +1,71 @@
 import { cssVars, defineBlock } from "./block";
-import { anchorId } from "./shared";
+import { anchorId, SiteAnchor } from "./shared";
+import { BUTTON_CLASS, BUTTON_LOOKS } from "./text";
 
-/** The blocks that arrange a page: a section across it, columns side by side, and space between things. */
+/** The blocks that arrange a page: a title band, a section across it, columns side by side, and space between things. */
+
+export const Banner = defineBlock({
+  label: "Title band",
+  group: "layout",
+  fields: {
+    look: {
+      kind: "choice",
+      label: "Look",
+      options: { page: "A page's title band, across the top", hero: "Large, filling the screen: for the home page" },
+      start: "page",
+    },
+    eyebrow: { kind: "text", label: "A few small words above the title", max: 80, start: "" },
+    title: { kind: "text", label: "Title", max: 120, start: "The page's title", inline: true },
+    accent: { kind: "text", label: "Words on a line of their own under the title, in italics", max: 120, start: "" },
+    text: { kind: "text", label: "A sentence or two under it", max: 400, start: "", lines: true },
+    buttons: {
+      kind: "list",
+      label: "Buttons",
+      max: 3,
+      title: "label",
+      of: {
+        label: { kind: "text", label: "Words on the button", max: 40, start: "Book a Studio" },
+        link: { kind: "link", label: "Where it leads", start: "/book" },
+        look: { kind: "choice", label: "Look", options: BUTTON_LOOKS, start: "dark" },
+      },
+      start: [],
+    },
+  },
+  render: ({ look, eyebrow, title, accent, text, buttons, editing }) => {
+    const shown = buttons.filter((button) => button.label !== "" && (button.link !== "" || editing));
+    const inside = (
+      <>
+        {eyebrow && <p className={look === "hero" ? "hero-eyebrow" : "section-eyebrow"}>{eyebrow}</p>}
+        <h1>
+          {title}
+          {accent && (
+            <>
+              <br />
+              <em>{accent}</em>
+            </>
+          )}
+        </h1>
+        {text && <p className="blk-banner-text">{text}</p>}
+        {shown.length > 0 && (
+          <div className="blk-buttons">
+            {shown.map((button, index) => (
+              <SiteAnchor key={index} href={button.link} editing={editing} className={`btn ${BUTTON_CLASS[button.look]}`}>
+                {button.label}
+              </SiteAnchor>
+            ))}
+          </div>
+        )}
+      </>
+    );
+    return look === "hero" ? (
+      <section className="blk blk-banner hero">
+        <div className="hero-content">{inside}</div>
+      </section>
+    ) : (
+      <div className="blk blk-banner page-banner">{inside}</div>
+    );
+  },
+});
 
 export const Section = defineBlock({
   label: "Section",

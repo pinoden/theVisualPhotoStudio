@@ -216,13 +216,15 @@ describe("the address of a page", () => {
   });
 
   it("cannot start with a part the site uses itself", () => {
-    for (const taken of ["admin", "book", "account", "api", "media", "staff", "booking", "pay", "rates", "studios/decor", "ADMIN/x"]) {
+    for (const taken of ["admin", "book", "account", "api", "media", "staff", "booking", "pay", "book/decor", "ADMIN/x"]) {
       const result = parseSlug(taken);
       expect(result.ok, taken).toBe(false);
       expect(!result.ok && result.message).toContain("the site uses that itself");
     }
     // Only the first part: "decor/admin" is a page like any other.
     expect(parseSlug("decor/admin").ok).toBe(true);
+    // The public pages that were written in the code are pages now (2026-11-16): their addresses are ordinary ones.
+    for (const free of ["rates", "studios/decor", "faq", "policies", "contact", "services"]) expect(parseSlug(free).ok, free).toBe(true);
     expect(RESERVED_SEGMENTS).toContain("font-files");
   });
 

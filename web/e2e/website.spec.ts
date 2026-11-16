@@ -169,7 +169,7 @@ test("the owner changes the menu, the phone number and the announcement, and bri
   await shot(guest, "44-website-new-menu");
   await guest.locator(".site-nav").getByRole("link", { name: "Gift Cards" }).click();
   await expect(guest.getByRole("heading", { name: "Contact Us" })).toBeVisible();
-  await expect(onScreen(guest.locator(".contact-grid"))).toContainText("(407) 555-0142");
+  await expect(onScreen(guest.locator(".blk-contact"))).toContainText("(407) 555-0142");
   await guest.getByRole("button", { name: "Close this announcement" }).click();
   await expect(guest.getByText("Holiday sets are up until January 5.")).toHaveCount(0);
   await guest.locator(".site-nav").getByRole("link", { name: "Rates", exact: true }).click();
@@ -516,7 +516,8 @@ test("the owner makes a page from blocks, previews it, and visitors see it at it
   await page.setViewportSize({ width: 1440, height: 1200 });
   await signIn(page, PAGES_OWNER, "/admin/website/pages");
   await expect(page.getByRole("heading", { name: "Pages", level: 1 })).toBeVisible();
-  await expect(byText(page, "No pages made yet.")).toBeVisible();
+  // The pages the website was built with are there already, the home page first.
+  await expect(page.locator(".page-list h3").first()).toHaveText("Home");
   // The old addresses of the live site are already sent on.
   await expect(onScreen(page.locator(".trash-list"))).toContainText("/guestinfo → /faq");
 
@@ -692,7 +693,7 @@ test("a page shows the studios, prices, contact details and form from the studio
   await expect(byText(page, /Draft saved at/)).toBeVisible();
   // The list of live values beside the editor says what each shows now.
   await page.locator("summary", { hasText: "Live values" }).click();
-  await expect(onScreen(page.locator(".live-values"))).toContainText("{refund window}");
+  await expect(onScreen(page.locator("#live-values"))).toContainText("{refund window}");
   await page.getByRole("button", { name: "Publish", exact: true }).click();
   await expect(byText(page, "Published. Visitors see it now.")).toBeVisible();
 
@@ -718,5 +719,60 @@ test("a page shows the studios, prices, contact details and form from the studio
   await byLabel(page, "Refund window (hours before start)").fill("336");
   await page.getByRole("button", { name: "Save settings" }).click();
   await expect(byText(page, /saved/i).first()).toBeVisible();
+  await guest.context().close();
+});
+
+// ── The website's own pages, made pages of the admin (requirement 29's content inventory) ──
+
+test("the website's own pages are edited like any other: the home page keeps its address, and a page starts again from how it was built", async ({ page, browser }) => {
+  await page.setViewportSize({ width: 1440, height: 1200 });
+  // The ninth owner's second sign-in code.
+  await signIn(page, DATA_OWNER, "/admin/website/pages");
+  // The home page first, then the others by name: the pages the website was built with are all there, on the website.
+  await expect(page.locator(".page-list h3").first()).toHaveText("Home");
+  for (const name of ["Our Studios", "Rates", "Professional Photography", "Guest Information", "Studio Policies", "Contact"]) {
+    await expect(onScreen(page.locator(".page-list li", { hasText: name }).first())).toContainText("On the website");
+  }
+
+  // The home page keeps the website's own address, and can neither leave the website nor be deleted.
+  await page.getByRole("link", { name: "Edit Home" }).click();
+  await expect(page.locator(".page-editor-where")).toContainText("/ · On the website");
+  await expect(canvasOf(page).locator(".hero h1")).toContainText("Where Every Frame");
+  await expect(page.locator("#page-address")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /off the website/ })).toHaveCount(0);
+  await expect(page.getByText("Delete this page", { exact: true })).toHaveCount(0);
+
+  // The photography page holds both ways to book; the editor shows both, and says which visitors see now.
+  await page.goto("/admin/website/pages");
+  await page.getByRole("link", { name: "Edit Professional Photography" }).click();
+  const canvas = canvasOf(page);
+  await expect(canvas.locator(".blk-when[data-shown='true']")).toContainText("Only while a photography session can be booked: visitors see it now.");
+  await expect(canvas.locator(".blk-when[data-shown='false']")).toContainText("Only while no photography session can be booked: visitors do not see it now.");
+  await page.locator("summary", { hasText: "Shown only at times" }).click();
+  await expect(onScreen(page.locator("#page-conditions"))).toContainText("{if photography}");
+  await shot(page, "52-admin-built-in-page");
+
+  // Its words change like those of any page.
+  await canvas.locator(".page-banner h1").click();
+  await page.getByRole("textbox", { name: "Title", exact: true }).fill("Photography Sessions");
+  await expect(canvas.locator(".page-banner h1")).toHaveText("Photography Sessions");
+  await expect(byText(page, /Draft saved at/)).toBeVisible();
+  await page.getByRole("button", { name: "Publish", exact: true }).click();
+  await expect(byText(page, "Published. Visitors see it now.")).toBeVisible();
+  const guest = await visitor(browser);
+  await guest.goto("/services");
+  await expect(guest.getByRole("heading", { name: "Photography Sessions", level: 1 })).toBeVisible();
+  // The part for when no session can be booked is not there for visitors.
+  await expect(guest.getByRole("link", { name: "Ask About a Session" })).toHaveCount(0);
+  await expect(guest.getByRole("link", { name: "Book a Photographer" })).toBeVisible();
+
+  // And it starts again from how it was built, which the website shows once it is published.
+  await page.getByRole("button", { name: "Start again from the page as it was built" }).click();
+  await expect(byText(page, "That version is now the draft. Look at it, then publish it or discard it.")).toBeVisible();
+  await expect(canvasOf(page).locator(".page-banner h1")).toHaveText("Professional Photography");
+  await page.getByRole("button", { name: "Publish", exact: true }).click();
+  await expect(byText(page, "Published. Visitors see it now.")).toBeVisible();
+  await guest.goto("/services");
+  await expect(guest.getByRole("heading", { name: "Professional Photography", level: 1 })).toBeVisible();
   await guest.context().close();
 });

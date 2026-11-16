@@ -1,8 +1,9 @@
 import type { CSSProperties, ReactNode } from "react";
 import type { Catalog } from "@/server/catalog";
 import type { Picture } from "@/server/media";
+import { WHEN_OPTIONS, type Holds } from "../conditions";
 import type { Business } from "../frame";
-import type { Fields, Shown } from "./fields";
+import type { ChoiceField, Fields, Shown } from "./fields";
 
 /**
  * A block of a page: what it is called, what it is made of (its fields), and
@@ -35,6 +36,8 @@ export interface SiteContext {
   business?: Business;
   /** The live values a page's text can name (src/lib/site/live-values.ts), by name. */
   values?: Record<string, string>;
+  /** Which conditions hold now (src/lib/site/conditions.ts), by name. */
+  conditions?: Holds;
 }
 
 export const EMPTY_SITE: SiteContext = { pictures: {}, collections: {} };
@@ -54,9 +57,19 @@ export interface BlockSpec<F extends Fields = Fields> {
   render: (props: Shown<F> & BlockExtras) => ReactNode;
 }
 
+/**
+ * The field every block has besides its own, last in its panel: whether it
+ * shows always, or only while a condition holds (src/lib/site/conditions.ts).
+ * It is the page's business, not the block's: `PageBlocks` leaves out a block
+ * whose condition does not hold, and the editor marks it.
+ */
+export const WHEN_FIELD = { kind: "choice", label: "Show it", options: WHEN_OPTIONS, start: "" } as const satisfies ChoiceField;
+
+type WithWhen<F extends Fields> = F & { when: typeof WHEN_FIELD };
+
 /** Describe a block. The fields are read exactly as written, which is what lets the drawing know its values' types. */
-export function defineBlock<const F extends Fields>(spec: BlockSpec<F>): BlockSpec<F> {
-  return spec;
+export function defineBlock<const F extends Fields>(spec: BlockSpec<F>): BlockSpec<WithWhen<F>> {
+  return { ...spec, fields: { ...spec.fields, when: WHEN_FIELD } } as unknown as BlockSpec<WithWhen<F>>;
 }
 
 /**

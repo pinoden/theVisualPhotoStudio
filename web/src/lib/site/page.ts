@@ -114,8 +114,8 @@ export function pageReferences(content: PageContent): { pictures: string[]; coll
 /**
  * First parts of an address that belong to the site itself: the booking
  * steps, the account, the admin and the files it serves. A page cannot have
- * an address that starts with one of them. The public pages that are still
- * written in the code are listed too, until they become pages of this kind.
+ * an address that starts with one of them. A new route of the site's own
+ * needs its first part here too.
  */
 export const RESERVED_SEGMENTS: readonly string[] = [
   "_next",
@@ -132,13 +132,6 @@ export const RESERVED_SEGMENTS: readonly string[] = [
   "favicon.ico",
   "robots.txt",
   "sitemap.xml",
-  // Written in the code for now:
-  "contact",
-  "faq",
-  "policies",
-  "rates",
-  "services",
-  "studios",
 ];
 
 export type SlugResult = { ok: true; slug: string } | { ok: false; message: string };

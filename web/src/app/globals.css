@@ -1776,7 +1776,7 @@ button { font-family: inherit; }
 .blk-root { display: flow-root; min-width: 0; }
 /* A block placed on a page outside any section gets the width a section would give it, and room above and below.
    Written with descendant selectors, so that it holds in the editor too, where the editor wraps each block. */
-.blk-root .blk:not(.blk-section, .blk-section .blk, .blk-columns .blk, .blk-studio-details) {
+.blk-root .blk:not(.blk-section, .blk-section .blk, .blk-columns .blk, .blk-studio-details, .blk-banner) {
   max-width: min(1200px, calc(100% - 3rem));
   margin-inline: auto;
   margin-block: 2rem;
@@ -1819,6 +1819,7 @@ button { font-family: inherit; }
 .rich-text h4 { --h4-base: 1.1rem; margin: 1rem 0 .5rem; }
 .rich-text blockquote { margin: 1rem 0; padding-left: 1rem; border-left: 3px solid var(--color-rose); font-style: italic; }
 .rich-text a { text-decoration: underline; text-underline-offset: 3px; }
+.blk-text .rich-text li { margin-bottom: .5rem; }
 
 .blk-buttons { display: flex; flex-wrap: wrap; gap: .75rem; justify-content: center; }
 .blk-buttons[data-align="start"] { justify-content: flex-start; }
@@ -1883,7 +1884,26 @@ button { font-family: inherit; }
 }
 .blk-video-start small { opacity: .7; }
 
+/* A title band is a page's banner or the home page's hero, drawn by the site's own rules for them. */
+.page-banner .blk-buttons { margin-top: 1.5rem; }
+.hero .blk-buttons { gap: 1rem; }
+.blk-heading[data-size="small"] h1 { --h1-base: 2rem; }
+.blk-heading[data-size="small"] h2 { --h2-base: 1.6rem; }
+.blk-heading[data-size="small"] h3 { --h3-base: 1.25rem; }
+.blk-heading[data-size="small"] h4 { --h4-base: 1.05rem; }
+.blk-heading[data-size="large"] h1 { --h1-base: clamp(2.8rem, 6vw, 5rem); }
+.blk-heading[data-size="large"] h2 { --h2-base: clamp(2rem, 4vw, 3.5rem); }
+.blk-heading[data-size="large"] h3 { --h3-base: 2rem; }
+.blk-heading[data-size="large"] h4 { --h4-base: 1.5rem; }
+
 /* The blocks that show the studio's data reuse the site's own cards and tables. */
+.blk-location {
+  min-height: 320px; display: flex; align-items: center; justify-content: center; text-align: center;
+  padding: 2rem 1rem; background: var(--color-ivory); border: 1px solid var(--color-border);
+}
+.blk-location-sign { font-size: 2.5rem; margin-bottom: .75rem; }
+.blk-location p { font-size: .9rem; }
+.blk-location .btn { margin-top: 1rem; font-size: .78rem; padding: .5rem 1.25rem; }
 .studio-card-buttons { margin-top: 1.25rem; display: flex; gap: .75rem; flex-wrap: wrap; }
 .studio-card-buttons .btn { padding: .5rem 1.25rem; font-size: .78rem; }
 .rate-card .rate-book { width: 100%; }
@@ -1893,6 +1913,11 @@ button { font-family: inherit; }
 .blk-table th, .blk-table td { padding-right: 1rem; }
 .live-values > summary { cursor: pointer; font-family: var(--font-serif); font-size: 1.1rem; color: var(--color-dark); }
 .live-values table { margin-top: 1rem; }
+
+/* Only in the page editor: a block that shows only at times says so, and one that visitors do not see now is faded. */
+.blk-when { outline: 1px dashed var(--color-border); outline-offset: -1px; }
+.blk-when-note { margin: 0; padding: .3rem .6rem; font-size: .75rem; line-height: 1.4; background: var(--color-ivory); color: var(--color-muted); }
+.blk-when[data-shown="false"] > :not(.blk-when-note) { opacity: .45; }
 
 /* Only in the page editor: where a block has nothing to show yet. */
 .blk-note {

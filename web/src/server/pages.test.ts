@@ -98,7 +98,7 @@ describe("a new page", () => {
     await make("Decor", "studios-decor/winter");
     expect((await listPages(world.db, owner))![0].path).toBe("/studios-decor/winter");
     expect(await createPage(world.db, owner, { title: "Again", slug: "studios-decor/winter" }, NOW)).toMatchObject({ ok: false, message: "Another page already has the address /studios-decor/winter." });
-    for (const taken of ["admin", "book/gift", "rates", "account"]) {
+    for (const taken of ["admin", "book/gift", "staff", "account"]) {
       const result = await createPage(world.db, owner, { title: "X", slug: taken }, NOW);
       expect(!result.ok && result.message, taken).toContain("the site uses that itself");
     }
@@ -112,7 +112,7 @@ describe("a new page", () => {
     await make("Gift Cards");
     expect((await listPages(world.db, owner))!.map((page) => page.slug).sort()).toEqual(["gift-cards", "gift-cards-2", "gift-cards-3"]);
     // A name that would give one of the site's own addresses gets another.
-    expect((await state(await make("Rates"))).slug).toBe("rates-page");
+    expect((await state(await make("Book"))).slug).toBe("book-page");
   });
 });
 

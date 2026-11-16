@@ -20,15 +20,8 @@ import type { EditingState, VersionSummary } from "@/server/website";
 import { CheckField, EditorBar, Group, History, PreviewPane, SelectField, TextArea, TextField } from "./parts";
 import { useDocumentEditor } from "./useDocumentEditor";
 
-/** The pages a link can lead to, offered as suggestions while typing an address. */
+/** The site's own screens a link can lead to, offered as suggestions beside the pages of the admin. */
 const PAGES: [path: string, name: string][] = [
-  ["/", "Home"],
-  ["/studios", "Our Studios"],
-  ["/rates", "Rates"],
-  ["/services", "Photography"],
-  ["/faq", "Guest Information"],
-  ["/policies", "Policies"],
-  ["/contact", "Contact"],
   ["/book", "Book a studio"],
   ["/book/photography", "Book a photographer"],
   ["/account", "My Bookings"],
@@ -123,7 +116,7 @@ function LinkRows({
 export interface FrameEditorProps {
   initial: EditingState<SiteFrame>;
   versions: VersionSummary[];
-  /** The pages made in the admin, offered as link suggestions beside the site's own. */
+  /** The pages of the admin, the home page among them, offered as link suggestions beside the site's own screens. */
   pages: { path: string; title: string }[];
   /** The logo's picture as the draft has it, when it has one: the frame itself only holds the picture's id. */
   logoPicture: ChoosablePicture | null;
