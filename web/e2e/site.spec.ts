@@ -748,6 +748,12 @@ test("the owner sets a weekend price and the booking screen charges it on Saturd
   await expect(byText(page, "Prices saved.")).toBeVisible();
   await expect(byLabel(page, "Studio Blanche 1 hour weekend price")).toHaveValue("120");
   await shot(page, "17-admin-prices");
+  // A price above the most a price can be: the form is refused whole, and the other price changed with it is not saved.
+  await byLabel(page, "Studio Blanche 1 hour weekday price").fill("89");
+  await byLabel(page, "Studio Blanche 1.5 hours weekday price").fill("150000");
+  await page.getByRole("button", { name: "Save Studio Blanche prices" }).click();
+  await expect(byText(page, /Not saved: the price for 1\.5 hours Mon–Fri is more than \$100,000, the most a price can be\. Nothing was changed\./)).toBeVisible();
+  await expect(byLabel(page, "Studio Blanche 1 hour weekday price")).toHaveValue("88");
 
   await page.goto("/book");
   await pickStudio(page, "Studio Blanche");

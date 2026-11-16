@@ -7,10 +7,12 @@ import { isAddonKind } from "@/lib/addon-kinds";
 import { dollarsToCents, formText, hhmmToMinutes, intInRange } from "@/lib/parse";
 import { ADMIN_LEVELS, ATTENDANT_SWITCH_KEYS, isAdminLevel, MANAGER_SWITCH_KEYS } from "@/lib/abilities";
 import { formatCents } from "@/lib/domain/pricing";
+import { durationLabel } from "@/lib/domain/time";
 import {
   addStaff,
   createBlock,
   createManualCode,
+  PRICE_MAX_CENTS,
   removeBlock,
   removeStaff,
   saveAddon,
@@ -138,9 +140,24 @@ export async function savePricesAction(formData: FormData): Promise<void> {
     if (value.trim() !== "" && priceCents === null) failed("/admin/prices", `"${value}" is not a valid price.`);
     changes.push({ dayType: match[1] as "weekday" | "weekend", durationMinutes: Number(match[2]), priceCents });
   }
+  // Checked whole before anything is saved, and saved together: a form is never half saved.
   for (const change of changes) {
-    if (!(await savePrice(db, { studioId, ...change }))) failed("/admin/prices", "A price could not be saved.");
+    if (change.priceCents !== null && change.priceCents > PRICE_MAX_CENTS) {
+      failed(
+        "/admin/prices",
+        `Not saved: the price for ${durationLabel(change.durationMinutes)} ${change.dayType === "weekday" ? "Mon–Fri" : "Sat–Sun"} is more than ${formatCents(PRICE_MAX_CENTS)}, the most a price can be. Nothing was changed.`,
+      );
+    }
   }
+  let saved = true;
+  try {
+    await db.transaction(async (tx) => {
+      for (const change of changes) if (!(await savePrice(tx, { studioId, ...change }))) throw new Error("A price was refused.");
+    });
+  } catch {
+    saved = false;
+  }
+  if (!saved) failed("/admin/prices", "The prices could not be saved, and none was changed. Check that each is an amount in dollars.");
   updateTag(CATALOG_TAG);
   done("/admin/prices", "Prices saved.");
 }
@@ -148,17 +165,25 @@ export async function savePricesAction(formData: FormData): Promise<void> {
 export async function addDurationAction(formData: FormData): Promise<void> {
   await requireOwner("/admin/prices");
   const minutes = intInRange(text(formData, "minutes"), 15, 1440);
+  if (minutes === null || minutes % 15 !== 0) failed("/admin/prices", "Enter the duration in minutes, from 15 to 1440, in steps of 15: 90 is an hour and a half.");
   const weekday = dollarsToCents(text(formData, "weekday"));
   const weekendRaw = text(formData, "weekend");
   const weekend = weekendRaw === "" ? weekday : dollarsToCents(weekendRaw);
-  if (minutes === null || weekday === null || weekend === null) {
-    failed("/admin/prices", "Enter a duration and a price. Durations are in steps of 15 minutes.");
-  }
+  if (weekday === null || weekend === null) failed("/admin/prices", "Enter each price as an amount in dollars, for example 88 or 88.50.");
+  if (weekday > PRICE_MAX_CENTS || weekend > PRICE_MAX_CENTS) failed("/admin/prices", `A price can be at most ${formatCents(PRICE_MAX_CENTS)}.`);
   const db = await getDb();
   const studioId = text(formData, "studioId");
-  const a = await savePrice(db, { studioId, dayType: "weekday", durationMinutes: minutes, priceCents: weekday });
-  const b = await savePrice(db, { studioId, dayType: "weekend", durationMinutes: minutes, priceCents: weekend });
-  if (!a || !b) failed("/admin/prices", "That duration could not be added. Durations are in steps of 15 minutes.");
+  let added = true;
+  try {
+    await db.transaction(async (tx) => {
+      const a = await savePrice(tx, { studioId, dayType: "weekday", durationMinutes: minutes, priceCents: weekday });
+      const b = await savePrice(tx, { studioId, dayType: "weekend", durationMinutes: minutes, priceCents: weekend });
+      if (!a || !b) throw new Error("A price was refused.");
+    });
+  } catch {
+    added = false;
+  }
+  if (!added) failed("/admin/prices", "That duration could not be added: the studio was not found.");
   updateTag(CATALOG_TAG);
   done("/admin/prices", "Duration added.");
 }

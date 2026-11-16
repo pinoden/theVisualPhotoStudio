@@ -440,6 +440,9 @@ export async function publishPage(db: Db, viewer: AuthUser, id: string, now: Dat
       .update(siteDocuments)
       .set({ published: content, publishedBy: viewer.email, publishedAt: now, draft: null, draftBy: null, draftAt: null, draftRevision: row.draftRevision + 1 })
       .where(eq(siteDocuments.id, row.id));
+    // The page answers at its address from now on. An old address that led away from it is dropped: taken off the
+    // website later, the page would leave it leading on again, perhaps round to where it started.
+    await tx.delete(siteRedirects).where(eq(siteRedirects.fromPath, pagePath(row.slug)));
     return { ok: true, version, path: pagePath(row.slug) };
   });
 }
@@ -691,24 +694,48 @@ function oldPath(input: string): string | null {
  * Send an old address on to where its page is now: for the addresses of the
  * website this one replaced, which other sites and search engines still name.
  */
-/** The path a link of this site leads to, without what follows ? or #, which the public route does not look at. Null for a web address. */
-function pathOf(href: string): string | null {
-  return href.startsWith("/") ? href.split(/[?#]/)[0] || "/" : null;
+/**
+ * The page a link leads to on this site, as the public route finds it: by its
+ * path alone (not what follows ? or #), and without a slash at the end, which
+ * the website takes off. A web address of the site itself (`ownOrigin`, with
+ * or without "www.") counts as its path. Null for a link elsewhere.
+ */
+function pathOf(href: string, ownOrigin: string | null): string | null {
+  let path: string | null = href.startsWith("/") ? href : null;
+  if (path === null && ownOrigin) {
+    try {
+      const url = new URL(href);
+      const own = new URL(ownOrigin);
+      const host = (name: string) => name.replace(/^www\./, "");
+      if (host(url.hostname) === host(own.hostname) && url.port === own.port) path = url.pathname;
+    } catch {
+      return null;
+    }
+  }
+  if (path === null) return null;
+  return path.split(/[?#]/)[0].replace(/\/+$/, "") || "/";
 }
 
-export async function addRedirect(db: Db, viewer: AuthUser, input: { from: string; to: string }): Promise<{ ok: true } | { ok: false; message: string }> {
+/** `ownOrigin` is the website's own address ("https://..."), so that a full address of the site is known for what it is. */
+export async function addRedirect(
+  db: Db,
+  viewer: AuthUser,
+  input: { from: string; to: string },
+  ownOrigin: string | null = null,
+): Promise<{ ok: true } | { ok: false; message: string }> {
   if (!(await abilities(db, viewer)).publish) return { ok: false, message: CANNOT_PUBLISH };
   const from = oldPath(input.from);
   if (!from) return { ok: false, message: "Give the old address as it comes after the site's name: /old-page." };
   const to = parseHref(input.to);
   if (!to || to.startsWith("mailto:") || to.startsWith("tel:")) return { ok: false, message: "Give where it should lead: a page of this site (/rates) or a web address (https://...)." };
-  if (pathOf(to) === from) return { ok: false, message: "An address cannot lead to itself." };
+  if (pathOf(to, ownOrigin) === from) return { ok: false, message: "An address cannot lead to itself." };
   if (await rowBySlug(db, from.slice(1))) return { ok: false, message: `${from} is the address of a page here. A page's own address cannot lead elsewhere.` };
   // Nor back to itself through other old addresses: a visitor's browser would go round until it gave up.
-  for (let at = pathOf(to), steps = 0; at !== null && steps < 50; steps++) {
-    if (await rowBySlug(db, at.slice(1))) break; // a page answers there
+  for (let at = pathOf(to, ownOrigin), steps = 0; at !== null && steps < 50; steps++) {
+    // A published page answers there. A draft does not: visitors are sent on.
+    if ((await rowBySlug(db, at.slice(1)))?.published != null) break;
     const onward = await findRedirect(db, at);
-    const next = onward === null ? null : pathOf(onward);
+    const next = onward === null ? null : pathOf(onward, ownOrigin);
     if (next === from) return { ok: false, message: `That would send visitors round in a circle: ${at} already leads back to ${from}.` };
     at = next;
   }

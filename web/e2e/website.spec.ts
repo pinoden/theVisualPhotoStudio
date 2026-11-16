@@ -54,7 +54,7 @@ const saved = (page: Page) => expect(byText(page, /Draft saved at .+ Visitors do
  * Published. A page is measured on a phone first (the editor's phone check), which on the development server
  * can take longer than the usual wait: it draws the page twice, and resizes its pictures the first time.
  */
-const published = (page: Page) => expect(byText(page, "Published. Visitors see it now.")).toBeVisible({ timeout: 60_000 });
+const published = (page: Page) => expect(byText(page, "Published. Visitors see it now.")).toBeVisible({ timeout: 90_000 });
 const nothingToPublish = (page: Page) => expect(byText(page, "Nothing to publish: the website shows exactly this.")).toBeVisible();
 const preview = (page: Page) => page.frameLocator('iframe[title="Preview of the website"]');
 const group = (page: Page, title: string) =>
@@ -946,20 +946,24 @@ test("a page that would be wider than a phone is not published, and is once it f
   await guest.context().close();
 });
 
-test("a header that would be wider than a phone is not published: a change that reaches every page is checked on the website first", async ({ page, browser }) => {
+test("a header that would be wider than a phone is not published, whatever other drafts wait: each change is checked as it will be published", async ({ page, browser }) => {
   await page.setViewportSize({ width: 1440, height: 1200 });
-  // The tenth owner's second sign-in code.
-  await signIn(page, GUARD_OWNER, "/admin/website/navigation");
-  // A logo of many words, which the header keeps on one line.
+  // The tenth owner's second sign-in code. A design with narrower headings first, left as a draft.
+  await signIn(page, GUARD_OWNER, "/admin/website/design");
+  await group(page, "Fonts").locator("summary").click();
+  await byLabel(page, "Headings").selectOption({ label: "Bebas Neue" });
+  await saved(page);
+
+  // A logo that fits a phone in those narrow letters, and not in the design that is published.
+  await page.goto("/admin/website/navigation");
   await group(page, "Logo").locator("summary").click();
-  await byLabel(page, "Logo text").fill("The Visuals Photography and Portraits");
+  await byLabel(page, "Logo text").fill("The Visuals Atelier");
   await saved(page);
   await page.getByRole("button", { name: "Publish", exact: true }).click();
   const refused = byText(page, /^Not published: on a phone, the website with this header, menu and footer would be hard to use\./);
-  await expect(refused).toBeVisible({ timeout: 60_000 });
-  // It says on which pages, at which width, and what, once for both pages: the header is the same on every page.
-  await expect(refused).toContainText(/At 320px, on the home page and the booking page: "The Visuals Photography and Portraits[^"]*" reaches \d+px; "Menu" reaches \d+px\./);
-  await expect(refused).toContainText(/At 390px, on the home page and the booking page: /);
+  await expect(refused).toBeVisible({ timeout: 90_000 });
+  // Measured with the published design, on every page, and said once for all of them: the header is the same everywhere.
+  await expect(refused).toContainText(/At 320px, on the home page, the booking page, .+ and the account: "The Visuals Atelier[^"]*" reaches \d+px; "Menu" reaches \d+px\./);
   await shot(page, "53a-admin-header-phone-check");
   // Visitors still have the header as it was.
   const guest = await visitor(browser);
@@ -967,7 +971,17 @@ test("a header that would be wider than a phone is not published: a change that 
   await expect(guest.locator(".site-nav .site-logo")).toHaveText(/^The Visuals\s*Photo Studio$/);
   await guest.context().close();
 
-  // Given up, the header is as it was built, for the tests that follow.
+  // The design is checked with the header as it is published, not with that draft: it is published.
+  await page.goto("/admin/website/design");
+  await page.getByRole("button", { name: "Publish", exact: true }).click();
+  await published(page);
+
+  // Back to the site as it was built, for the tests that follow: the design, then the header.
+  await page.getByRole("button", { name: "Start again from the site as it was built" }).click();
+  await saved(page);
+  await page.getByRole("button", { name: "Publish", exact: true }).click();
+  await published(page);
+  await page.goto("/admin/website/navigation");
   await page.getByRole("button", { name: "Discard changes" }).click();
   await page.getByRole("button", { name: "Yes, discard them" }).click();
   await expect(byText(page, "The changes were discarded.")).toBeVisible();

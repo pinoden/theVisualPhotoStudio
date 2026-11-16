@@ -187,7 +187,8 @@ export const Reviews = defineBlock({
     look: { kind: "choice", label: "Look", options: { boxed: "In boxes", plain: "Plain" }, start: "boxed" },
   },
   render: ({ reviews, columns, columnsPhone, look, editing }) => {
-    const shown = reviews.filter((review) => review.quote !== "");
+    // Words a reader can see: a quote of spaces, or of characters that take no room, is no review.
+    const shown = reviews.filter((review) => /[^\s\u200B-\u200D\u2060\uFEFF]/.test(review.quote));
     if (shown.length === 0) return <EditorNote editing={editing}>Reviews: write the first one in the panel, in the words its writer used.</EditorNote>;
     // Two reviews take two columns, not two of three.
     const style = {

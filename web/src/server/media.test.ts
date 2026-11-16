@@ -302,6 +302,21 @@ describe("a studio's facts and floor plan", () => {
   });
 });
 
+describe("a picture's description", () => {
+  it("cannot be taken away while the picture is shown somewhere, where it is read out in its place", async () => {
+    const shown = await described("shown.jpg", "The cyclorama wall");
+    expectOk(await addStudioPhotos(world.db, owner, world.ids.blanche, [shown.id]));
+    expect(await describeMedia(world.db, owner, shown.id, { alt: "   ", caption: "" }, NOW)).toEqual({
+      ok: false,
+      message: "This picture is shown in the studio Studio Blanche, where its description is read out in its place: it needs one.",
+    });
+    expect((await loadPictures(world.db, [shown.id])).get(shown.id)!.alt).toBe("The cyclorama wall");
+    // Shown nowhere, it can be left without one again.
+    const unused = await described("unused.jpg", "Spare");
+    expect(expectOk(await describeMedia(world.db, owner, unused.id, { alt: "", caption: "" }, NOW)).picture.alt).toBe("");
+  });
+});
+
 describe("a studio's photos", () => {
   it("are pictures of the library in the owners' order, and customers get them with the studio", async () => {
     const [a, b, c] = [await described("a.jpg", "The cyclorama wall"), await described("b.jpg", "The window side"), await described("c.jpg", "The dressing area")];

@@ -4,7 +4,7 @@ import { bookings, payments, refunds } from "@/db/schema";
 import { listRefundProblems } from "./admin";
 import { getAppointment } from "./appointments";
 import type { AuthUser } from "./auth";
-import { netCardPaidCents, ownerRefund, recordRefundMadeInSquare, retryOpenRefunds } from "./manage";
+import { netCardPaidCents, ownerCancelBooking, ownerRefund, recordRefundMadeInSquare, retryOpenRefunds } from "./manage";
 import { loadReceipts } from "./receipts";
 import { createTestWorld, expectOk, FAR, NOW, type TestWorld } from "./testing";
 
@@ -44,7 +44,8 @@ describe("a refund made by hand in Square", () => {
   it("is recorded by an owner: the site stops trying, counts it as made, and the client's receipt shows it", async () => {
     const { ref, bookingId, problem } = await failedRefund();
     expect(problem).toMatchObject({ ref, amountCents: 5000, status: "failed", error: "The card account is closed" });
-    expect(await netCardPaidCents(world.db, bookingId)).toBe(17600);
+    // Owed already: it counts against what the card holds, so it cannot be refunded a second time.
+    expect(await netCardPaidCents(world.db, bookingId)).toBe(12600);
 
     expectOk(await recordRefundMadeInSquare(world.db, owner, problem.refundId, NOW));
     expect(await listRefundProblems(world.db)).toEqual([]);
@@ -60,13 +61,49 @@ describe("a refund made by hand in Square", () => {
 
     const [receipt] = (await loadReceipts(world.db, "jane@example.com")).receipts;
     expect(receipt).toMatchObject({ refundedCents: 5000, netCents: 12600, status: "partly_refunded" });
-    expect(receipt.payments[0].refunds).toMatchObject([{ amountCents: 5000, pending: false }]);
+    // Made, on the day it was recorded as made in Square.
+    expect(receipt.payments[0].refunds).toMatchObject([{ amountCents: 5000, state: "made", at: NOW.toISOString() }]);
     expect((await getAppointment(world.db, owner, ref, NOW))!.history.at(-1)).toMatchObject({
       actor: "owner@studio.test",
       note: "A refund of $50 that the site could not make was made by hand in Square",
     });
     // Done once: a second time is refused.
     expect(await recordRefundMadeInSquare(world.db, owner, problem.refundId, NOW)).toMatchObject({ ok: false, message: "That refund is made already." });
+  });
+
+  it("counts while it is owed: no more can be refunded than what is left, and both made add up to what was paid", async () => {
+    const { ref, bookingId, problem } = await failedRefund();
+    expect(await ownerCancelBooking(world.db, ref, { refundCents: 17600 }, world.manageDeps())).toMatchObject({
+      ok: false,
+      message: "At most $126 can be refunded to the card for this booking.",
+    });
+    expectOk(await ownerCancelBooking(world.db, ref, { refundCents: 12600 }, world.manageDeps()));
+    expectOk(await recordRefundMadeInSquare(world.db, owner, problem.refundId, NOW));
+    expect((await world.db.select().from(payments))[0].refundedCents).toBe(17600);
+    expect(await netCardPaidCents(world.db, bookingId)).toBe(0);
+    const [receipt] = (await loadReceipts(world.db, "jane@example.com")).receipts;
+    expect(receipt).toMatchObject({ paidCents: 17600, refundedCents: 17600, netCents: 0, status: "refunded" });
+  });
+
+  it("stays made when a retry by the scheduled task fails at the same moment", async () => {
+    const { problem } = await failedRefund();
+    const deps = world.manageDeps();
+    const provider = deps.payments!;
+    // The processor answers the retry with a failure, after the owner has recorded the refund as made.
+    const racing = {
+      ...deps,
+      payments: {
+        ...provider,
+        refund: async () => {
+          expectOk(await recordRefundMadeInSquare(world.db, owner, problem.refundId, NOW));
+          return { ok: false as const, message: "The card account is closed" };
+        },
+      },
+    };
+    await retryOpenRefunds(world.db, racing);
+    expect((await world.db.select().from(refunds))[0]).toMatchObject({ status: "succeeded" });
+    expect((await world.db.select().from(payments))[0].refundedCents).toBe(5000);
+    expect(await listRefundProblems(world.db)).toEqual([]);
   });
 
   it("is not for a refund still waiting to be sent, which the site may yet make", async () => {

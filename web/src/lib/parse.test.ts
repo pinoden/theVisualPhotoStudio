@@ -67,6 +67,9 @@ describe("times and numbers typed into a form", () => {
   it("reads whole numbers within a range", () => {
     expect(intInRange("5", 0, 100)).toBe(5);
     expect(intInRange(" 100 ", 0, 100)).toBe(100);
-    for (const bad of ["101", "-1", "5.5", "five", "", null, 5]) expect(intInRange(bad, 0, 100)).toBeNull();
+    for (const bad of ["101", "-1", "5.5", "five", "", null, 5, "0x10", "1e3"]) expect(intInRange(bad, 0, 100)).toBeNull();
+    // What a number field sends for a whole number, written another way.
+    expect(intInRange("5.0", 0, 100)).toBe(5);
+    expect(intInRange("1e3", 0, 1000)).toBe(1000);
   });
 });

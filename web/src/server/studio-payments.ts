@@ -277,6 +277,8 @@ export async function recordHandRefund(
       reason: why || `Refunded by hand for ${booking.ref}`,
       automatic: false,
       createdAt: now,
+      // Given back at the studio: made, not on its way.
+      settledAt: now,
     });
     await tx
       .update(payments)

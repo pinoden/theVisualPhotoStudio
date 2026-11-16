@@ -4,11 +4,12 @@ import { Suspense } from "react";
 import { getDb } from "@/db/client";
 import { formatCents } from "@/lib/domain/pricing";
 import { durationLabel } from "@/lib/domain/time";
-import { MONEY_FIELD } from "@/lib/parse";
+import { EMAIL_FIELD } from "@/lib/parse";
 import { listCodes } from "@/server/admin";
 import { requireOwner } from "@/server/session";
 import { formatInstant } from "@/server/tz";
 import { createCodeAction, voidCodeAction } from "../actions";
+import { CodeKindAndValue } from "./CodeKindAndValue";
 import { AdminFrame, AdminLoading } from "../frame";
 
 export const metadata: Metadata = { title: "Codes", robots: { index: false } };
@@ -39,28 +40,12 @@ async function Codes({ searchParams }: Pick<PageProps<"/admin/codes">, "searchPa
       <div className="admin-card">
         <h3>Create a code</h3>
         <form action={createCodeAction} className="admin-form-row" style={{ marginBottom: 0 }}>
-          <div className="form-group">
-            <label className="form-label" htmlFor="code-kind">
-              Kind
-            </label>
-            <select id="code-kind" name="kind" className="form-control" defaultValue="percent">
-              <option value="percent">Percent off the rental</option>
-              <option value="amount">Credit in dollars</option>
-              <option value="free_hour">One free hour (one studio)</option>
-            </select>
-          </div>
-          <div className="form-group">
-            <label className="form-label" htmlFor="code-value">
-              Value (% or $; none for a free hour)
-            </label>
-            {/* A whole percent or an amount in dollars: both fit the pattern for dollars; the kind decides which it is. */}
-            <input id="code-value" name="value" className="form-control" {...MONEY_FIELD} />
-          </div>
+          <CodeKindAndValue />
           <div className="form-group">
             <label className="form-label" htmlFor="code-email">
               Only for email (optional)
             </label>
-            <input id="code-email" name="email" type="email" className="form-control" />
+            <input id="code-email" name="email" className="form-control" {...EMAIL_FIELD} />
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="code-days">

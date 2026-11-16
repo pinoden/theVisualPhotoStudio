@@ -415,8 +415,16 @@ describe("old addresses", () => {
     expect(await refused("/old", "javascript:alert(1)")).toContain("Give where it should lead");
     expect(await refused("/old", "mailto:a@b.co")).toContain("Give where it should lead");
     expect(await refused("/old", "/old")).toBe("An address cannot lead to itself.");
-    // The public route goes by the path alone, so this would lead to itself as well.
+    // The public route goes by the path alone, and the website takes off a slash at the end: these lead to themselves as well.
     expect(await refused("/old", "/old?from=menu")).toBe("An address cannot lead to itself.");
+    expect(await refused("/old", "/old/")).toBe("An address cannot lead to itself.");
+    // So does the website's own full address, with or without "www.".
+    const own = "https://thevisuals.example";
+    for (const to of ["https://thevisuals.example/old", "http://www.thevisuals.example/old/"]) {
+      expect((await addRedirect(world.db, owner, { from: "/old", to }, own)).ok, to).toBe(false);
+    }
+    expectOk(await addRedirect(world.db, owner, { from: "/old", to: "https://example.org/old" }, own));
+    expectOk(await removeRedirect(world.db, owner, "/old"));
     expect(await listRedirects(world.db, owner)).toEqual([]);
   });
 
@@ -433,6 +441,25 @@ describe("old addresses", () => {
     expectOk(await addRedirect(world.db, owner, { from: "/gift-cards-old", to: "/ring-1" }));
     expectOk(await addRedirect(world.db, owner, { from: "/away", to: "https://example.org/ring-1" }));
     expect((await listRedirects(world.db, owner))!.map((redirect) => redirect.from)).toEqual(["/away", "/gift-cards-old", "/ring-1", "/ring-2", "/ring-3"]);
+  });
+
+  it("go round through a page that is only a draft: a draft does not answer, so visitors are sent on", async () => {
+    expectOk(await addRedirect(world.db, owner, { from: "/draft-a", to: "/onward-a" }));
+    await make("Draft A", "draft-a"); // not published
+    expect(await addRedirect(world.db, owner, { from: "/onward-a", to: "/draft-a" })).toMatchObject({ ok: false, message: expect.stringMatching(/round in a circle/) });
+  });
+
+  it("are dropped from a page's own address once it is published, so taking it off leaves no circle", async () => {
+    expectOk(await addRedirect(world.db, owner, { from: "/gifts-b", to: "/shop-b" }));
+    const id = await make("Gifts B", "gifts-b");
+    expectOk(await publishPage(world.db, owner, id, NOW));
+    expect(await findRedirect(world.db, "/gifts-b")).toBeNull();
+    // Leading to the page is fine while it is on the website...
+    expectOk(await addRedirect(world.db, owner, { from: "/shop-b", to: "/gifts-b" }));
+    // ...and taken off, it answers "not found" instead of sending visitors round.
+    expectOk(await unpublishPage(world.db, owner, id, NOW));
+    expect(await findRedirect(world.db, "/gifts-b")).toBeNull();
+    expect(await findRedirect(world.db, "/shop-b")).toBe("/gifts-b");
   });
 });
 

@@ -88,7 +88,7 @@ export function useDocumentEditor<T>(kind: DocumentKind, initial: DraftStart<T>,
       publish: () => publishAction(kind),
       discard: () => discardAction(kind),
       restore: (versionId) => restoreVersionAction(kind, versionId),
-      check: { busy: "Checking the website at the width of a phone…", subject: WEBSITE_SUBJECT[kind], run: checkWebsiteOnPhones },
+      check: { busy: "Checking the website at the width of a phone…", subject: WEBSITE_SUBJECT[kind], run: () => checkWebsiteOnPhones(kind) },
     },
     report,
   );

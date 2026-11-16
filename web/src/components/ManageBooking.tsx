@@ -118,7 +118,7 @@ export function ManageBooking({
           <strong style={{ color: "var(--color-dark)" }}>Cancel this booking?</strong>
           <p>{choices.cancel.text}</p>
           {choices.cancel.allowed && choices.reschedule.allowed && (
-            <p style={{ fontSize: ".85rem" }}>You can also reschedule instead and keep the full value as a credit.</p>
+            <p style={{ fontSize: ".85rem" }}>You can also reschedule instead, for a code to book a new time.</p>
           )}
           <form action={cancelAction} style={{ display: "flex", gap: ".75rem", flexWrap: "wrap" }}>
             {hidden}

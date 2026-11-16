@@ -1,7 +1,7 @@
 import { PDFDocument, rgb, StandardFonts, type PDFFont, type PDFPage } from "@cantoo/pdf-lib";
 import { durationLabel } from "@/lib/domain/time";
 import type { Business } from "@/lib/site/frame";
-import { RECEIPT_STATUS_TEXT, type Receipt, type YearStatement } from "./receipts";
+import { RECEIPT_STATUS_TEXT, REFUND_STATE_WORDS, type Receipt, type YearStatement } from "./receipts";
 import { formatDay, formatInstant, formatRange } from "./tz";
 
 /**
@@ -180,7 +180,7 @@ function drawReceipt(sheet: Sheet, receipt: Receipt, business: Business): void {
     sheet.row(`${formatInstant(new Date(payment.at))}  ${payment.how}`, money(payment.amountCents));
     for (const refund of payment.refunds) {
       sheet.row(
-        `Refund ${formatDay(new Date(refund.at))}${refund.pending ? " (on its way)" : ""}${refund.reason ? `: ${refund.reason}` : ""}`,
+        `Refund ${formatDay(new Date(refund.at))}${REFUND_STATE_WORDS[refund.state]}${refund.reason ? `: ${refund.reason}` : ""}`,
         money(-refund.amountCents),
         { indent: 14, soft: true },
       );

@@ -56,7 +56,7 @@ async function AppointmentDetails({
   const viewer = await requireStaff(`/admin/appointments/${encodeURIComponent(ref)}`);
   const db = await getDb();
   const now = new Date();
-  const appointment = await getAppointment(db, viewer, ref, now);
+  const [appointment, settings] = await Promise.all([getAppointment(db, viewer, ref, now), loadSettings(db)]);
   if (!appointment) notFound();
   const query = await searchParams;
   // "Move to a new time" works in two steps: choose the date, then one of the times that are free on it.
@@ -74,7 +74,7 @@ async function AppointmentDetails({
       title={appointment.customerName}
       query={query}
       viewer={viewer}
-      settings={await loadSettings(db)}
+      settings={settings}
     >
       <div className="admin-card">
         <h3>
@@ -228,11 +228,18 @@ async function AppointmentDetails({
                   Move booking
                 </button>
               </div>
-              <label style={{ display: "block", fontSize: ".85rem" }}>
-                <input type="checkbox" name="countsAsClientMove" defaultChecked /> The client asked for this move. It
-                counts as their one reschedule: the booking is then no longer refunded automatically, as the rental
-                terms say. Untick it when the studio needs the change.
-              </label>
+              {settings.maxReschedules > 0 ? (
+                <label style={{ display: "block", fontSize: ".85rem" }}>
+                  <input type="checkbox" name="countsAsClientMove" defaultChecked /> The client asked for this move. It
+                  counts as their one reschedule: the booking is then no longer refunded automatically, as the rental
+                  terms say. Untick it when the studio needs the change.
+                </label>
+              ) : (
+                <p style={{ fontSize: ".85rem", margin: 0 }}>
+                  Moving is switched off under Settings, so the rental terms say nothing about it: the move does not
+                  count against the client, and the booking keeps its refund.
+                </p>
+              )}
             </form>
           )}
           <p style={{ fontSize: ".78rem", margin: ".75rem 0 0" }}>

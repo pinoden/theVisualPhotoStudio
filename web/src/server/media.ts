@@ -218,9 +218,17 @@ const oneLine = (value: string, max: number) => value.replace(/\s+/g, " ").trim(
 export async function describeMedia(db: Db, viewer: AuthUser, id: string, text: { alt: string; caption: string }, now: Date): Promise<MediaResult> {
   if (!(await mayEdit(db, viewer))) return { ok: false, message: "You cannot change the website's pictures." };
   if (!isUuid(id)) return { ok: false, message: "That picture was not found." };
+  const alt = oneLine(text.alt, MEDIA_LIMITS.alt);
+  // A picture that is shown somewhere is read out by its description: it cannot lose it there.
+  if (alt === "") {
+    const uses = (await mediaUses(db, [id])).get(id) ?? [];
+    if (uses.length > 0) {
+      return { ok: false, message: `This picture is shown in ${usesInWords(uses)}, where its description is read out in its place: it needs one.` };
+    }
+  }
   const [row] = await db
     .update(media)
-    .set({ alt: oneLine(text.alt, MEDIA_LIMITS.alt), caption: oneLine(text.caption, MEDIA_LIMITS.caption), updatedAt: now })
+    .set({ alt, caption: oneLine(text.caption, MEDIA_LIMITS.caption), updatedAt: now })
     .where(eq(media.id, id))
     .returning();
   return row ? { ok: true, picture: toPicture(row) } : { ok: false, message: "That picture was not found." };

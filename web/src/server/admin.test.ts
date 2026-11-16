@@ -275,7 +275,8 @@ describe("the bookings list", () => {
       { ref: booked.ref, customerName: "Jane Smith", amountCents: 16720, status: "failed", error: "Card network down" },
     ]);
     const [row] = await listBookings(world.db, { from: FAR, to: FAR }, { includeCancelled: true });
-    expect(row).toMatchObject({ refundProblem: true, cardHeldCents: 17600 }); // the money has not left yet
+    // The money has not left yet, and it is owed: it cannot be refunded a second time while the refund is tried again.
+    expect(row).toMatchObject({ refundProblem: true, cardHeldCents: 880, refundableCents: 880 });
   });
 });
 

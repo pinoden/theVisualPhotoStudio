@@ -5,7 +5,7 @@ import { addons, bookings, payments, priceRules, refunds } from "@/db/schema";
 import { DEFAULT_FRAME } from "@/lib/site/frame";
 import { createAdminBooking } from "./appointments";
 import type { AuthUser } from "./auth";
-import { cancelBooking, checkUnsettledRefunds, ownerRefund, requestRescheduleCode } from "./manage";
+import { cancelBooking, checkUnsettledRefunds, ownerRefund, requestRescheduleCode, retryOpenRefunds } from "./manage";
 import { money, pdfSafe, receiptPdf, yearPdf } from "./receipt-pdf";
 import { getReceipt, loadReceipts, transactionsOf, yearsOf, yearStatement } from "./receipts";
 import { recordHandRefund, recordStudioPayment } from "./studio-payments";
@@ -98,32 +98,41 @@ describe("a receipt", () => {
     expectOk(await ownerRefund(world.db, booked.ref, { amountCents: 2000, reason: "Lights failed for a while" }, world.manageDeps()));
     let receipt = (await getReceipt(world.db, JANE, booked.ref))!;
     expect(receipt).toMatchObject({ paidCents: 17600, refundedCents: 2000, netCents: 15600, status: "partly_refunded" });
-    expect(receipt.payments[0].refunds).toMatchObject([{ amountCents: 2000, pending: false, reason: "Lights failed for a while" }]);
+    expect(receipt.payments[0].refunds).toMatchObject([{ amountCents: 2000, state: "made", reason: "Lights failed for a while" }]);
 
     // The customer cancels in time. The processor is down, so the refund is recorded and waits.
     world.failRefunds = "Square is not answering";
     expectOk(await cancelBooking(world.db, booked.ref, byToken(booked.manageToken), world.manageDeps()));
     receipt = (await getReceipt(world.db, JANE, booked.ref))!;
     expect(receipt.bookingStatus).toBe("Cancelled");
-    expect(receipt.payments[0].refunds.map((refund) => [refund.amountCents, refund.pending])).toEqual([
-      [2000, false],
-      [14820, true], // what was left, less the 5% fee
+    // Owed and listed, and not counted as refunded until it is made: what was left, less the 5% fee.
+    expect(receipt.payments[0].refunds.map((refund) => [refund.amountCents, refund.state])).toEqual([
+      [2000, "made"],
+      [14820, "owed"],
     ]);
-    expect(receipt).toMatchObject({ refundedCents: 16820, netCents: 780, status: "partly_refunded" });
+    expect(receipt).toMatchObject({ refundedCents: 2000, netCents: 15600, status: "partly_refunded" });
+    expect(transactionsOf([receipt]).map((t) => t.cents).sort((a, b) => a - b)).toEqual([-2000, 17600]);
+    // Sent again by the scheduled task, it is made, and counted.
+    world.failRefunds = null;
+    await retryOpenRefunds(world.db, world.manageDeps());
+    expect(await getReceipt(world.db, JANE, booked.ref)).toMatchObject({ refundedCents: 16820, netCents: 780 });
   });
 
-  it("leaves out a refund the processor accepted and then rejected: that money did not go back", async () => {
+  it("does not count a refund the processor accepted and then rejected: that money did not go back", async () => {
     const booked = expectOk(await world.book({ date: FAR }));
-    // Accepted, not completed yet: on its way.
+    // Accepted, not completed yet: on its way, and counted.
     world.pendingRefunds = true;
     expectOk(await ownerRefund(world.db, booked.ref, { amountCents: 5000, reason: "Goodwill" }, world.manageDeps()));
     expect(await getReceipt(world.db, JANE, booked.ref)).toMatchObject({ refundedCents: 5000, status: "partly_refunded" });
+    expect((await getReceipt(world.db, JANE, booked.ref))!.payments[0].refunds).toMatchObject([{ amountCents: 5000, state: "on_its_way" }]);
     // Then rejected. A retry is answered the same way, so the receipt does not show it as on its way.
     world.refundAnswer = { state: "rejected", message: "The card account is closed" };
     expect(await checkUnsettledRefunds(world.db, world.manageDeps())).toEqual({ settled: 0, rejected: 1 });
     const receipt = (await getReceipt(world.db, JANE, booked.ref))!;
     expect(receipt).toMatchObject({ paidCents: 17600, refundedCents: 0, netCents: 17600, status: "paid" });
-    expect(receipt.payments[0].refunds).toEqual([]);
+    expect(receipt.payments[0].refunds).toMatchObject([{ amountCents: 5000, state: "owed" }]);
+    // Still owed: nothing more can be refunded than what is left once it is made.
+    expect(await ownerRefund(world.db, booked.ref, { amountCents: 12601, reason: "" }, world.manageDeps())).toMatchObject({ ok: false });
   });
 
   it("says Refunded when everything paid was given back", async () => {
@@ -158,7 +167,7 @@ describe("a receipt", () => {
     // A refund given by hand is on the receipt like any other.
     const [cash] = await world.db.select().from(payments);
     expect(await recordHandRefund(world.db, owner, cash.id, { amountCents: 1000, note: "Left early" }, NOW)).toEqual({ ok: true });
-    expect((await getReceipt(world.db, JANE, made.ref))!.payments[0].refunds).toMatchObject([{ amountCents: 1000, pending: false, reason: "Left early" }]);
+    expect((await getReceipt(world.db, JANE, made.ref))!.payments[0].refunds).toMatchObject([{ amountCents: 1000, state: "made", reason: "Left early" }]);
   });
 
   it("is not made for a booking a code paid for in full, an abandoned checkout, or a failed card", async () => {
@@ -188,7 +197,7 @@ describe("payments by year", () => {
     const second = expectOk(await world.book({ date: FAR, studioIds: [world.ids.paris], durationMinutes: 60 }));
     expectOk(await ownerRefund(world.db, second.ref, { amountCents: 1800, reason: "Goodwill" }, world.manageDeps()));
     // The refund was made in January 2027, on the studio's clock.
-    await world.db.update(refunds).set({ createdAt: new Date("2027-01-04T15:00:00Z") });
+    await world.db.update(refunds).set({ createdAt: new Date("2027-01-04T15:00:00Z"), settledAt: new Date("2027-01-04T15:00:00Z") });
     return { first, second };
   }
 

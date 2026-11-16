@@ -30,6 +30,7 @@ describe("the reviews block", () => {
         reviews: [
           { quote: "Beautiful light.\nWe will be back.", name: "Ana R.", source: "Google", stars: "5" },
           { quote: "", name: "Never written", source: "", stars: "4" },
+          { quote: "\u200B\u2060", name: "Invisible", source: "", stars: "5" },
           { quote: "A great space for a team shoot.", name: "Marco", source: "", stars: "none" },
         ],
       }),
@@ -40,6 +41,7 @@ describe("the reviews block", () => {
     expect(html).toContain("<figcaption>Marco</figcaption>");
     expect(html.match(/blk-review-stars/g)).toHaveLength(1);
     expect(html).not.toContain("Never written");
+    expect(html).not.toContain("Invisible");
     // Two reviews take two columns, not two of three.
     expect(html).toContain('style="--cols:2"');
     expect(html).not.toContain("data-wide");

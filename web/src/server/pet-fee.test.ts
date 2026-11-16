@@ -1,11 +1,12 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { addons, bookingAddons, bookings, promoCodes, refunds } from "@/db/schema";
-import { getAppointment } from "./appointments";
+import { createAdminBooking, getAppointment } from "./appointments";
 import type { AuthUser } from "./auth";
 import { listBookings } from "./admin";
 import { cancelBooking, getManageChoices, ownerCancelBooking, ownerRefund, requestRescheduleCode } from "./manage";
 import { givePetFeeCredit, petFeeCentsOf } from "./pet-fee";
+import { recordStudioPayment } from "./studio-payments";
 import { BASE_URL, createTestWorld, daysAfter, expectOk, FAR, h, NEAR, NOW, type TestWorld } from "./testing";
 
 /**
@@ -81,6 +82,29 @@ describe("cancelling a booking that has a pet fee", () => {
     expect(mail.body).toContain("A refund of $74.10 is on its way to your card ($3.90 processing fee kept)");
     expect(mail.body).toContain("The pet fee of $40 is not refunded to a card. It is returned to you as studio credit:");
     expect(mail.body).toContain(`Code: ${credit.code}`);
+  });
+
+  it("paid at the studio, in time: the rest is to be refunded by hand, and the pet fee comes back as studio credit", async () => {
+    const dana = { name: "Dana Diaz", email: "dana@example.com", phone: "407-555-0133" };
+    const made = expectOk(
+      await createAdminBooking(
+        world.db,
+        owner,
+        { studioIds: [world.ids.dayglow], date: FAR, startMinute: h(10), durationMinutes: 60, addons: [{ addonId: petFeeId, quantity: 1 }], customer: dana },
+        { now: NOW, baseUrl: BASE_URL },
+      ),
+    );
+    expectOk(await recordStudioPayment(world.db, owner, made.ref, { amountCents: 11800, method: "cash", note: "" }, NOW));
+    const result = expectOk(await cancelBooking(world.db, made.ref, { kind: "customer", email: dana.email }, world.manageDeps()));
+    expect(result).toMatchObject({ refundCents: 0, creditCents: 4000, refund: "none" });
+    expect(result.message).toBe(
+      "This booking was paid at the studio, so no refund can be sent online. Please contact the studio about your refund. The pet fee ($40) is not refunded: it is returned as studio credit, and we email you the code.",
+    );
+    expect((await codes()).filter((code) => code.source === "pet_fee")).toMatchObject([{ value: 4000, email: dana.email }]);
+    // The owner is asked to give back the $78 of studio, not the pet fee.
+    const [notice] = await world.emails("owner_hand_refund");
+    expect(notice.body).toContain("$78");
+    expect(notice.body).not.toContain("$118");
   });
 
   it("too late to be refunded: nothing comes back by itself, the pet fee included", async () => {

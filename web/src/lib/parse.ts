@@ -62,7 +62,19 @@ export function hhmmToMinutes(raw: unknown): number | null {
 
 /** A whole number within [min, max], from a form field. */
 export function intInRange(raw: unknown, min: number, max: number): number | null {
-  if (typeof raw !== "string" || !/^-?\d{1,9}$/.test(raw.trim())) return null;
+  // Whatever a number field lets through that is a whole number: "5", "5.0" and "1e3" too. Never "0x10" or "5.5".
+  if (typeof raw !== "string" || !/^-?\d{1,9}(\.\d*)?(e\+?\d{1,2})?$/i.test(raw.trim())) return null;
   const value = Number(raw.trim());
-  return value >= min && value <= max ? value : null;
+  return Number.isInteger(value) && value >= min && value <= max ? value : null;
 }
+
+/** What the server takes for an email address (src/server/auth.ts), as a pattern for a field. */
+export const EMAIL_PATTERN = String.raw`[^\s@]+@[^\s@]+\.[^\s@]{2,}`;
+
+/** Attributes for an email field, so the browser refuses before the form is sent what the server would refuse after. */
+export const EMAIL_FIELD = {
+  type: "email",
+  pattern: EMAIL_PATTERN,
+  maxLength: 200,
+  title: "An email address, for example name@example.com",
+} as const;

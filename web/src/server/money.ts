@@ -12,7 +12,12 @@ import { MANUAL_PROVIDER } from "@/lib/payment-methods";
  * of it is the studio's to make, and to record.
  */
 
-/** Card money still held for a booking: payments charged through the site, less refunds sent or on their way. */
+/**
+ * Card money still held for a booking: payments charged through the site,
+ * less every refund recorded against them. A refund that failed counts too:
+ * it is owed, and is tried again until it is made (or the owner records it
+ * as made in Square), so it cannot be refunded a second time meanwhile.
+ */
 export async function netCardPaidCents(db: DbLike, bookingId: string): Promise<number> {
   const viaSite = and(eq(payments.bookingId, bookingId), ne(payments.provider, MANUAL_PROVIDER));
   const [paid] = await db
@@ -23,7 +28,7 @@ export async function netCardPaidCents(db: DbLike, bookingId: string): Promise<n
     .select({ total: sql<number>`coalesce(sum(${refunds.amountCents}), 0)::int` })
     .from(refunds)
     .innerJoin(payments, eq(payments.id, refunds.paymentId))
-    .where(and(viaSite, inArray(refunds.status, ["pending", "succeeded"])));
+    .where(and(viaSite, inArray(refunds.status, ["pending", "succeeded", "failed"])));
   return paid.total - back.total;
 }
 

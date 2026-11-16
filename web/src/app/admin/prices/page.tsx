@@ -124,7 +124,10 @@ async function Prices({ searchParams }: Pick<PageProps<"/admin/prices">, "search
               id="discount-two"
               name="two"
               className="form-control"
-              inputMode="numeric"
+              type="number"
+              min={0}
+              max={100}
+              step={1}
               defaultValue={catalog.settings.multiStudioPercent[2] ?? 0}
               required
             />
@@ -137,7 +140,10 @@ async function Prices({ searchParams }: Pick<PageProps<"/admin/prices">, "search
               id="discount-three"
               name="three"
               className="form-control"
-              inputMode="numeric"
+              type="number"
+              min={0}
+              max={100}
+              step={1}
               defaultValue={catalog.settings.multiStudioPercent[3] ?? 0}
               required
             />

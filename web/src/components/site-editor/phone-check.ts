@@ -1,4 +1,5 @@
 import { hardToTouch, tooSmallToRead, widerThanScreen } from "@/lib/site/phone-checks";
+import { WEBSITE_CHECK_PARAM } from "@/lib/site/website-check";
 import { previewUrl } from "./parts";
 
 /**
@@ -9,9 +10,11 @@ import { previewUrl } from "./parts";
  * with a problem is not published; the editor says what the problem is.
  *
  * A page is checked by itself (`checkOnPhones`). A change of the design, or
- * of the header, menu and footer, reaches every page: it is checked on the
- * home page and the booking page, drawn with the drafts as a preview draws
- * them (`checkWebsiteOnPhones`).
+ * of the header, menu and footer, reaches every page: it is checked on every
+ * page of the sitemap and on the account (`checkWebsiteOnPhones`). Each is
+ * drawn as it will be once this one change is published: with its draft, and
+ * everything else as published, whatever other drafts are waiting
+ * (src/lib/site/website-check.ts).
  *
  * In the browser only. It is a guard against a change that would break on a
  * phone, not a lock: the server publishes what an editor sends it.
@@ -102,37 +105,81 @@ export async function checkOnPhones(url: string): Promise<string[]> {
   return sentences;
 }
 
-/**
- * The pages a change that reaches every page is checked on. Between them they
- * show every part of the design that can break a phone (headings, running
- * text, buttons, fields, cards), and the header and the footer.
- */
-const WEBSITE_PAGES = [
-  { path: "/", name: "the home page", drawn: pageDrawn(".blk-root") },
-  // The booking screen draws itself in the browser: its first step is there once the choice of how to book is.
-  { path: "/book", name: "the booking page", drawn: pageDrawn(".wizard-container .mode-toggle") },
-] as const;
+/** What the editor calls the pages that have a name of their own; any other is called by its address. */
+const PAGE_NAMES: Record<string, string> = {
+  "/": "the home page",
+  "/book": "the booking page",
+  "/book/photography": "the photography booking page",
+  "/account": "the account",
+};
+const nameOf = (path: string) => PAGE_NAMES[path] ?? path;
+
+/** The pages checked at an iPhone's width as well: the two with the most on them. Every page is checked at the narrowest. */
+const ALSO_WIDER = new Set(["/", "/book"]);
+
+/** How a page shows it is drawn: the booking screens draw themselves in the browser, the account has its title. */
+function drawnFor(path: string): Drawn {
+  if (path.startsWith("/book")) return pageDrawn(".wizard-container .wizard-progress");
+  if (path.startsWith("/account")) return pageDrawn("main h1");
+  return pageDrawn(".blk-root");
+}
+
+/** The pages a change that reaches every page is checked on: the home page and the booking page, every page of the sitemap, and the account. */
+async function websitePaths(): Promise<string[]> {
+  const paths = new Set(["/", "/book"]);
+  try {
+    const sitemap = await (await fetch("/sitemap.xml", { cache: "no-store" })).text();
+    for (const [, address] of sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)) paths.add(new URL(address, window.location.origin).pathname);
+  } catch {
+    // Without the sitemap the home page and the booking page are still checked.
+  }
+  paths.add("/account");
+  return [...paths];
+}
+
+/** Run `work` on every item, `at` at a time, keeping their order. */
+async function inTurns<T, R>(items: T[], at: number, work: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await work(items[index]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(at, items.length) }, worker));
+  return results;
+}
 
 /**
- * What would be wrong on a phone with the website as its drafts make it (the
- * design, the header, menu and footer, and the pages): a sentence for each
- * page and width with a problem, "At 320px, on the home page: ...".
+ * What would be wrong on a phone once this change of the design (`design`)
+ * or of the header, menu and footer (`frame`) is published: a sentence for
+ * each width and set of pages with the same problems, "At 320px, on the home
+ * page and the booking page: ...". The header and the footer are on every
+ * page, so their problems are said once, for every page that has them.
  */
-export async function checkWebsiteOnPhones(): Promise<string[]> {
+export async function checkWebsiteOnPhones(scope: "design" | "frame"): Promise<string[]> {
+  const paths = await websitePaths();
+  const jobs = CHECK_WIDTHS.flatMap((width) => paths.filter((path) => width === CHECK_WIDTHS[0] || ALSO_WIDER.has(path)).map((path) => ({ width, path })));
+  // Three at a time: each is a whole page in a frame of its own.
+  const found = await inTurns(jobs, 3, (job) => checkAt(previewUrl(`${job.path}?${WEBSITE_CHECK_PARAM}=${scope}`), job.width, drawnFor(job.path)));
   const sentences: string[] = [];
   for (const width of CHECK_WIDTHS) {
-    // The header and the footer are on every page: the same problems on both pages are said once, for both.
     const groups: { problems: string[]; pages: string[] }[] = [];
-    for (const page of WEBSITE_PAGES) {
-      const problems = await checkAt(previewUrl(page.path), width, page.drawn);
-      if (problems.length === 0) continue;
-      const same = groups.find((group) => group.problems.join("\n") === problems.join("\n"));
-      if (same) same.pages.push(page.name);
-      else groups.push({ problems, pages: [page.name] });
-    }
-    for (const group of groups) sentences.push(...said(`At ${width}px, on ${group.pages.join(" and ")}`, group.problems));
+    jobs.forEach((job, index) => {
+      if (job.width !== width || found[index].length === 0) return;
+      const same = groups.find((group) => group.problems.join("\n") === found[index].join("\n"));
+      if (same) same.pages.push(nameOf(job.path));
+      else groups.push({ problems: found[index], pages: [nameOf(job.path)] });
+    });
+    for (const group of groups) sentences.push(...said(`At ${width}px, on ${listed(group.pages)}`, group.problems));
   }
   return sentences;
+}
+
+/** "a", "a and b", "a, b and c". */
+function listed(names: string[]): string {
+  return names.length <= 1 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }
 
 /** The problems found at one place, as one sentence that starts with `where`; nothing when there are none. */

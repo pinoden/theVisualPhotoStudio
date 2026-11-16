@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { cache } from "react";
-import { draftMode } from "next/headers";
+import { draftMode, headers } from "next/headers";
 import { getDb } from "@/db/client";
+import { isCheckScope, WEBSITE_CHECK_HEADER, type CheckScope } from "@/lib/site/website-check";
 import type { Picture } from "./media";
 import { getCatalog, getPublishedDesign, getPublishedFrame, getPublishedPage, shownFrame, type ShownDesign, type ShownFrame } from "./cached";
 import { configuredSiteUrl } from "./runtime";
@@ -35,14 +36,32 @@ export const isPreview = cache(async (): Promise<boolean> => {
   return may.editDesign || may.editPages;
 });
 
+/**
+ * In a preview made for the editor's phone check, the one document whose
+ * draft shows (src/lib/site/website-check.ts); null in an ordinary preview,
+ * which shows every draft. Asked only in a preview: anywhere else the
+ * request stays as static as it was.
+ */
+const checkScope = cache(async (): Promise<CheckScope | null> => {
+  const value = (await headers()).get(WEBSITE_CHECK_HEADER);
+  return isCheckScope(value) ? value : null;
+});
+
+/** Whether this request shows the draft of `what`: in a preview, unless it is the phone check of something else. */
+async function showsDraftOf(what: "design" | "frame" | "pages"): Promise<boolean> {
+  if (!(await isPreview())) return false;
+  const scope = await checkScope();
+  return scope === null || scope === what;
+}
+
 export async function siteDesign(): Promise<ShownDesign> {
-  if (!(await isPreview())) return getPublishedDesign();
+  if (!(await showsDraftOf("design"))) return getPublishedDesign();
   const db = await getDb();
   return { design: await loadDraftOrPublished(db, DESIGN_DOC), fonts: await loadCustomFonts(db) };
 }
 
 export async function siteFrame(): Promise<ShownFrame> {
-  if (!(await isPreview())) return getPublishedFrame();
+  if (!(await showsDraftOf("frame"))) return getPublishedFrame();
   const db = await getDb();
   return shownFrame(db, await loadDraftOrPublished(db, FRAME_DOC));
 }
@@ -83,6 +102,7 @@ export function metadataBase(): URL | undefined {
 
 /** The page at an address, as this request shows it: what is published, or in a preview its draft. Null when there is none. */
 export async function sitePage(slug: string): Promise<ShownPage | null> {
-  if (!(await isPreview())) return getPublishedPage(slug);
+  // The page editor's check draws its page's draft by itself; every other check shows the pages as published.
+  if (!(await showsDraftOf("pages"))) return getPublishedPage(slug);
   return loadPagePreview(await getDb(), slug, new Date());
 }

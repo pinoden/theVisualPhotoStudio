@@ -11,6 +11,7 @@ import {
 } from "@/app/admin/website/pages/actions";
 import type { SiteContext } from "@/lib/site/blocks/block";
 import type { PageContent } from "@/lib/site/page";
+import { WEBSITE_CHECK_PARAM } from "@/lib/site/website-check";
 import type { VersionSummary } from "@/server/website";
 import { EditorBar, History } from "./parts";
 import { checkOnPhones } from "./phone-check";
@@ -80,7 +81,8 @@ function PageEditorBody({ initial, versions, collections, links, fontClasses, no
       check: {
         busy: "Checking the page at the width of a phone…",
         subject: "this page",
-        run: () => checkOnPhones(`/admin/website/pages/${encodeURIComponent(initial.id)}/check`),
+        // Drawn with the design and the header, menu and footer as published, whatever drafts of them are waiting.
+        run: () => checkOnPhones(`/admin/website/pages/${encodeURIComponent(initial.id)}/check?${WEBSITE_CHECK_PARAM}=page`),
       },
     }),
     [initial.id],

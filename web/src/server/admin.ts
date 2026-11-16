@@ -140,6 +140,9 @@ export async function setShift(db: DbLike, userId: string, day: string, assigned
  * duration on weekdays or weekends. Removing a price makes that duration
  * unbookable for the studio on that kind of day.
  */
+/** The most a price can be: $100,000. */
+export const PRICE_MAX_CENTS = 10_000_000;
+
 export async function savePrice(
   db: DbLike,
   input: { studioId: string; dayType: DayType; durationMinutes: number; priceCents: number | null },
@@ -156,7 +159,7 @@ export async function savePrice(
       .where(and(eq(priceRules.studioId, studioId), eq(priceRules.dayType, dayType), eq(priceRules.durationMinutes, durationMinutes)));
     return true;
   }
-  if (!Number.isInteger(priceCents) || priceCents < 0 || priceCents > 10_000_000) return false;
+  if (!Number.isInteger(priceCents) || priceCents < 0 || priceCents > PRICE_MAX_CENTS) return false;
   await db
     .insert(priceRules)
     .values({ studioId, dayType, durationMinutes, priceCents })
@@ -296,7 +299,7 @@ export async function listBlocks(db: DbLike, from: Date): Promise<BlockView[]> {
 export interface AdminBooking extends BookingView {
   customerPhone: string;
   notes: string;
-  /** Card money still held: payments less refunds sent or on their way. */
+  /** Card money still held: payments less every refund recorded, made, on its way or owed (one that failed is tried again). */
   cardHeldCents: number;
   /** What the studio can still send back to the card: what it holds, less a pet fee already returned as studio credit. */
   refundableCents: number;
@@ -360,7 +363,7 @@ export async function listBookings(
   const views = await toBookingViews(db, rows);
   return views.map((view, i) => {
     const refundRows = back.filter((b) => b.bookingId === view.id);
-    const returned = refundRows.filter((b) => b.status !== "failed").reduce((sum, b) => sum + b.cents, 0);
+    const returned = refundRows.reduce((sum, b) => sum + b.cents, 0);
     const cardHeldCents = (paid.find((p) => p.bookingId === view.id)?.paidCents ?? 0) - returned;
     const asCredit = Math.min(Math.max(0, cardHeldCents), petReturned.find((p) => p.bookingId === view.id)?.cents ?? 0);
     return {

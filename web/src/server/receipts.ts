@@ -28,10 +28,17 @@ export interface ReceiptLine {
 }
 
 export interface ReceiptRefund {
+  /** When it was made; for one not made yet, when it was recorded. */
   at: string;
   amountCents: number;
-  /** True while the money is on its way: recorded, and not yet confirmed by the card processor. */
-  pending: boolean;
+  /**
+   * `made`: the money went back. `on_its_way`: the card processor accepted
+   * it and has not completed it yet. `owed`: recorded and not made, because
+   * it failed or has not been sent yet; it does not count as refunded until
+   * it is made (the scheduled task tries it again, or the owner makes it in
+   * Square and records that).
+   */
+  state: "made" | "on_its_way" | "owed";
   reason: string;
 }
 
@@ -45,6 +52,9 @@ export interface ReceiptPayment {
 }
 
 export type ReceiptStatus = "paid" | "partly_paid" | "partly_refunded" | "refunded";
+
+/** What a receipt says after a refund's date: nothing for one that was made. */
+export const REFUND_STATE_WORDS: Record<ReceiptRefund["state"], string> = { made: "", on_its_way: " (on its way)", owed: " (owed, not made yet)" };
 
 export const RECEIPT_STATUS_TEXT: Record<ReceiptStatus, string> = {
   paid: "Paid",
@@ -73,11 +83,7 @@ export interface Receipt {
   /** The payments that succeeded, oldest first. */
   payments: ReceiptPayment[];
   paidCents: number;
-  /**
-   * Given back, or on its way back. A refund the processor accepted and then
-   * rejected is neither: the scheduled task cannot make it, so it is left out
-   * (the owner, who is told, refunds it by hand).
-   */
+  /** Given back, or accepted by the card processor and on its way back. A refund owed and not made is not counted. */
   refundedCents: number;
   /** Paid, less what was given back. */
   netCents: number;
@@ -178,18 +184,23 @@ export async function loadReceipts(db: DbLike, email: string): Promise<{ receipt
             : "Card, online",
       amountCents: payment.amountCents,
       refunds: back
-        // A refund that failed at once is tried again by the scheduled task, so it is on its way. One the processor
-        // accepted and then rejected (it failed with the processor's id) is answered the same way each time.
-        .filter((refund) => refund.paymentId === payment.id && !(refund.status === "failed" && refund.providerRefundId !== null))
-        .map((refund) => ({
-          at: refund.createdAt.toISOString(),
-          amountCents: refund.amountCents,
-          pending: refund.status !== "succeeded",
-          reason: refund.reason,
-        })),
+        .filter((refund) => refund.paymentId === payment.id)
+        .map((refund): ReceiptRefund => {
+          // Money given back at the studio was made when it was recorded; a card refund once the processor completed it.
+          const state = refund.status !== "succeeded" ? "owed" : payment.provider === MANUAL_PROVIDER || refund.settledAt !== null ? "made" : "on_its_way";
+          return {
+            at: (state === "made" ? (refund.settledAt ?? refund.createdAt) : refund.createdAt).toISOString(),
+            amountCents: refund.amountCents,
+            state,
+            reason: refund.reason,
+          };
+        }),
     }));
     const paidCents = list.reduce((sum, payment) => sum + payment.amountCents, 0);
-    const refundedCents = list.reduce((sum, payment) => sum + payment.refunds.reduce((part, refund) => part + refund.amountCents, 0), 0);
+    const refundedCents = list.reduce(
+      (sum, payment) => sum + payment.refunds.reduce((part, refund) => part + (refund.state === "owed" ? 0 : refund.amountCents), 0),
+      0,
+    );
     receipts.push({
       ref: booking.ref,
       customerName: booking.customerName,
@@ -241,8 +252,10 @@ export function transactionsOf(receipts: Receipt[]): Transaction[] {
     for (const payment of receipt.payments) {
       const shared = { ref: receipt.ref, visitStart: receipt.visitStart, studios: receipt.studios };
       all.push({ ...shared, at: payment.at, kind: "payment", detail: payment.how, cents: payment.amountCents, pending: false });
+      // Money that moved: a refund owed and not made yet is on its receipt, not among the payments and refunds.
       for (const refund of payment.refunds) {
-        all.push({ ...shared, at: refund.at, kind: "refund", detail: refund.reason, cents: -refund.amountCents, pending: refund.pending });
+        if (refund.state === "owed") continue;
+        all.push({ ...shared, at: refund.at, kind: "refund", detail: refund.reason, cents: -refund.amountCents, pending: refund.state === "on_its_way" });
       }
     }
   }

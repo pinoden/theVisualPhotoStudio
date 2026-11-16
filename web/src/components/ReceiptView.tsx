@@ -1,7 +1,7 @@
 import { durationLabel } from "@/lib/domain/time";
 import type { Business } from "@/lib/site/frame";
 import { money } from "@/server/receipt-pdf";
-import { RECEIPT_STATUS_TEXT, type Receipt } from "@/server/receipts";
+import { RECEIPT_STATUS_TEXT, REFUND_STATE_WORDS, type Receipt } from "@/server/receipts";
 import { formatDay, formatInstant, formatRange } from "@/server/tz";
 
 /**
@@ -76,7 +76,7 @@ export function ReceiptView({ receipt, business }: { receipt: Receipt; business:
               <div className="price-row price-discount" key={index}>
                 <span>
                   Refund {formatDay(new Date(refund.at))}
-                  {refund.pending && " (on its way)"}
+                  {REFUND_STATE_WORDS[refund.state]}
                   {refund.reason && (
                     <>
                       <br />

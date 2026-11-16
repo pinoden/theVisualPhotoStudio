@@ -200,8 +200,14 @@ export function cancelOutcomeText(outcome: Extract<CancelOutcome, { allowed: tru
         "Nothing is refunded to your card: what it paid was the pet fee, which was already returned to you as studio credit."
       );
     }
-    case "paid_at_studio":
-      return "This booking was paid at the studio, so no refund can be sent online. Please contact the studio about your refund.";
+    case "paid_at_studio": {
+      const byHand = outcome.byHandCents > 0 ? "This booking was paid at the studio, so no refund can be sent online. Please contact the studio about your refund." : "";
+      const pet =
+        outcome.creditCents > 0
+          ? `The pet fee (${formatCents(outcome.creditCents)}) is not refunded: it is returned as studio credit, and we email you the code.`
+          : "";
+      return [byHand, pet].filter(Boolean).join(" ") || "Nothing is to be refunded: what was paid was the pet fee, which was already returned to you as studio credit.";
+    }
     case "inside_window":
       return `No refund is due, because the booking starts in less than ${hoursInWords(settings.refundWindowHours)}.`;
     case "rescheduled":
@@ -274,10 +280,15 @@ export async function processRefund(db: Db, refundId: string, deps: ManageDeps):
     return "succeeded";
   }
 
-  // Tell the owner the first time a refund fails, not on every retry.
+  // Tell the owner the first time a refund fails, not on every retry. Only a refund still open becomes failed:
+  // one an owner recorded as made in Square while the processor was answering stays made.
   const wasPending = row.refund.status === "pending";
-  await db.update(refunds).set({ status: "failed", error: result.message }).where(eq(refunds.id, refundId));
-  if (wasPending && deps.ownerEmail) {
+  const marked = await db
+    .update(refunds)
+    .set({ status: "failed", error: result.message })
+    .where(and(eq(refunds.id, refundId), inArray(refunds.status, ["pending", "failed"])))
+    .returning({ id: refunds.id });
+  if (marked.length > 0 && wasPending && deps.ownerEmail) {
     await queueEmail(
       db,
       ownerRefundNotice({
@@ -394,6 +405,10 @@ export async function recordRefundMadeInSquare(db: Db, viewer: AuthUser, refundI
         message: refund.status === "succeeded" ? "That refund is made already." : "That refund has not failed: the site may still send it. Only a refund that failed can be recorded as made in Square.",
       };
     }
+    const [payment] = await tx.select().from(payments).where(eq(payments.id, refund.paymentId)).for("update").limit(1);
+    if (!payment || payment.refundedCents + refund.amountCents > payment.amountCents) {
+      return { ok: false, reason: "not_failed", message: "That is more than the payment still holds: it cannot be recorded as made." };
+    }
     await tx.update(refunds).set({ status: "succeeded", settledAt: now, error: null }).where(eq(refunds.id, refund.id));
     await tx
       .update(payments)
@@ -442,7 +457,8 @@ async function recordRefunds(
     const [{ already }] = await tx
       .select({ already: sql<number>`coalesce(sum(${refunds.amountCents}), 0)::int` })
       .from(refunds)
-      .where(and(eq(refunds.paymentId, payment.id), inArray(refunds.status, ["pending", "succeeded"])));
+      // A refund that failed is owed, and still counts: it is tried again until it is made.
+      .where(and(eq(refunds.paymentId, payment.id), inArray(refunds.status, ["pending", "succeeded", "failed"])));
     const amount = Math.min(left, payment.amountCents - already);
     if (amount <= 0) continue;
     const [refund] = await tx

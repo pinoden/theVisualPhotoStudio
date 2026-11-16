@@ -84,21 +84,18 @@ export function cancellationOutcome(booking: BookingFacts, now: Date, settings: 
   if (booking.rescheduledCount > 0) return nothing(booking.madeWithRescheduleCode === false ? "moved" : "rescheduled");
   if (booking.cardPaidCents <= 0 && atStudioCents <= 0) return nothing("nothing_paid");
   if (hoursUntil(booking.startAt, now) < settings.refundWindowHours) return nothing("inside_window");
-  // Cancelled in time. Money taken at the studio is the studio's to give back.
-  if (booking.cardPaidCents <= 0) return { ...nothing("paid_at_studio"), byHandCents: atStudioCents };
+  // Cancelled in time. The pet fee stays out of every refund, and so out of the fee: it comes back whole, as credit,
+  // taken first from what the card paid and then from what was paid at the studio, which is the studio's to give back.
+  const petFeeCents = Math.max(0, booking.petFeeCents ?? 0);
+  const petOnCard = Math.min(petFeeCents, booking.cardPaidCents);
+  const petAtStudio = Math.min(petFeeCents - petOnCard, atStudioCents);
+  const creditCents = booking.petCreditGiven ? 0 : petOnCard + petAtStudio;
+  const byHandCents = atStudioCents - petAtStudio;
+  if (booking.cardPaidCents <= 0) return { ...nothing("paid_at_studio"), creditCents, byHandCents };
 
-  // The pet fee stays out of the card refund, and so out of the fee: it comes back whole, as credit.
-  const petFeeCents = Math.min(Math.max(0, booking.petFeeCents ?? 0), booking.cardPaidCents);
-  const refundable = booking.cardPaidCents - petFeeCents;
+  const refundable = booking.cardPaidCents - petOnCard;
   const feeCents = Math.round((refundable * settings.refundFeePercent) / 100);
-  return {
-    allowed: true,
-    refundCents: refundable - feeCents,
-    feeCents,
-    creditCents: booking.petCreditGiven ? 0 : petFeeCents,
-    byHandCents: atStudioCents,
-    why: "refund",
-  };
+  return { allowed: true, refundCents: refundable - feeCents, feeCents, creditCents, byHandCents, why: "refund" };
 }
 
 export type RescheduleBlock =

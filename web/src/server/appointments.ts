@@ -262,7 +262,8 @@ export type MoveResult =
  * every booking obeys: opening hours, no overlap, and the gap between
  * appointments; and the database refuses an overlap whatever happens here.
  *
- * `countsAsClientMove` says the client asked for the move. It then counts as
+ * `countsAsClientMove` says the client asked for the move. While moving is
+ * offered (`maxReschedules` above 0), it then counts as
  * their one reschedule: the booking is no longer refunded automatically and
  * the client cannot move it again themselves, as the rental terms say. Leave
  * it off when the studio is the one that needs the change.
@@ -292,6 +293,8 @@ export async function moveBooking(
   const startAt = localToUtc(input.date, input.startMinute);
   const endAt = localToUtc(input.date, input.startMinute + found.durationMinutes);
   if (startAt.getTime() === found.startAt.getTime()) return refuse("invalid_time", "That is the time the booking already has.");
+  // With moving switched off the rental terms say nothing about a move, so one made for the client costs them nothing.
+  const clientMove = input.countsAsClientMove && settings.maxReschedules > 0;
   // Across the hour the clocks change, the booking would not last as long as it was paid for.
   if (endAt.getTime() - startAt.getTime() !== found.durationMinutes * 60_000) {
     return refuse("slot_taken", "The clocks change at that time, so the booking cannot move there. Choose another.");
@@ -333,7 +336,7 @@ export async function moveBooking(
           startAt,
           endAt,
           label: "rescheduled",
-          rescheduledCount: booking.rescheduledCount + (input.countsAsClientMove ? 1 : 0),
+          rescheduledCount: booking.rescheduledCount + (clientMove ? 1 : 0),
         })
         .where(eq(bookings.id, booking.id));
       // Each studio keeps its own gap after the booking, as when the booking was made.
@@ -362,7 +365,7 @@ export async function moveBooking(
         to: "rescheduled",
         actor: viewer.email,
         at: now,
-        note: `Moved from ${was} to ${is}${input.countsAsClientMove ? ", at the client's request" : ""}`,
+        note: `Moved from ${was} to ${is}${clientMove ? ", at the client's request" : ""}`,
       });
       await queueEmail(
         tx,
@@ -374,7 +377,7 @@ export async function moveBooking(
           was,
           now: is,
           duration: durationLabel(booking.durationMinutes),
-          ...(input.countsAsClientMove ? { clientAsked: { canMoveAgain: booking.rescheduledCount + 1 < settings.maxReschedules } } : {}),
+          ...(clientMove ? { clientAsked: { canMoveAgain: booking.rescheduledCount + 1 < settings.maxReschedules } } : {}),
         }),
       );
       return { ok: true, startAt, endAt };

@@ -137,6 +137,29 @@ describe("cancelling", () => {
   });
 });
 
+describe("cancelling a booking with a pet fee", () => {
+  it("returns the fee as credit when it was paid at the studio, and leaves the rest to be refunded by hand", () => {
+    // $78 of studio and a $40 pet fee, paid in cash at the studio.
+    const atStudio = booking({ cardPaidCents: 0, paidAtStudioCents: 11800, petFeeCents: 4000 });
+    expect(cancellationOutcome(atStudio, hoursBefore(400), settings)).toEqual({
+      allowed: true,
+      refundCents: 0,
+      feeCents: 0,
+      creditCents: 4000,
+      byHandCents: 7800,
+      why: "paid_at_studio",
+    });
+    // Already returned as credit: it is not returned again, and still not refunded.
+    expect(cancellationOutcome({ ...atStudio, petCreditGiven: true }, hoursBefore(400), settings)).toMatchObject({ creditCents: 0, byHandCents: 7800 });
+    // Paid partly by card: the fee comes off the card first, then off what was paid at the studio.
+    expect(cancellationOutcome(booking({ cardPaidCents: 2000, paidAtStudioCents: 9800, petFeeCents: 4000 }), hoursBefore(400), settings)).toMatchObject({
+      refundCents: 0,
+      creditCents: 4000,
+      byHandCents: 7800,
+    });
+  });
+});
+
 describe("moving a booking", () => {
   it("turns everything paid into credit, including credit already used on it", () => {
     expect(rescheduleOutcome(booking(), hoursBefore(48), settings)).toEqual({
