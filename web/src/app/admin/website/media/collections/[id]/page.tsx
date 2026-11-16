@@ -124,7 +124,7 @@ async function OneCollection({ params, searchParams }: Pick<PageProps<"/admin/we
                     <input type="hidden" name="id" value={collection.id} />
                     <input type="hidden" name="mediaId" value={picture.id} />
                     <input type="hidden" name="back" value={here} />
-                    <button type="submit" className="btn btn-outline btn-small" aria-label={`Take picture ${index + 1} out of the collection`}>
+                    <button type="submit" className="btn btn-outline btn-small" aria-label={`Take out picture ${index + 1} from the collection`}>
                       Take out
                     </button>
                   </form>

@@ -21,6 +21,7 @@ import { isAddonKind, type AddonKind } from "@/lib/addon-kinds";
 import type { PromoKind } from "@/lib/domain/pricing";
 import { isIsoDate, type DayType, type IsoDate } from "@/lib/domain/time";
 import { MANUAL_PROVIDER } from "@/lib/payment-methods";
+import { parseStudioFacts, type StudioFacts } from "@/lib/studio-facts";
 import { deleteAllSessions, normalizeEmail } from "./auth";
 import { toBookingViews, type BookingView } from "./bookings";
 import { issuePromo } from "./promos";
@@ -511,6 +512,8 @@ export interface StudioDetails {
   includedGuests: number;
   /** Clean-up minutes kept free after each booking. */
   bufferMinutes: number;
+  /** Its facts, but the floor plan, which is chosen on its own (`setStudioFloorPlan`). Text the limits do not take is cut. */
+  facts?: Omit<StudioFacts, "floorPlan">;
 }
 
 /**
@@ -524,9 +527,13 @@ export async function saveStudioDetails(db: DbLike, studioId: string, input: Stu
   if (!UUID.test(studioId) || tagline.length > 200 || description.length > 2000) return false;
   if (!Number.isInteger(input.includedGuests) || input.includedGuests < 1 || input.includedGuests > 100) return false;
   if (!Number.isInteger(input.bufferMinutes) || input.bufferMinutes < 0 || input.bufferMinutes > 240) return false;
+  const [current] = await db.select({ facts: studios.facts }).from(studios).where(eq(studios.id, studioId)).limit(1);
+  if (!current) return false;
+  // The floor plan stays as it was: it is chosen on its own.
+  const facts = input.facts ? parseStudioFacts({ ...input.facts, floorPlan: parseStudioFacts(current.facts).floorPlan }) : parseStudioFacts(current.facts);
   const updated = await db
     .update(studios)
-    .set({ tagline, description, includedGuests: input.includedGuests, bufferMinutes: input.bufferMinutes })
+    .set({ tagline, description, includedGuests: input.includedGuests, bufferMinutes: input.bufferMinutes, facts })
     .where(eq(studios.id, studioId))
     .returning({ id: studios.id });
   return updated.length === 1;

@@ -120,6 +120,8 @@ export const studios = pgTable("studios", {
   bufferMinutes: integer("buffer_minutes").notNull().default(15),
   /** The studio's colour in the admin calendar, the same in every view. A hex colour. */
   color: text("color").notNull().default("#8a7f72"),
+  /** Its size, ceiling, light, cyclorama, what comes with it and a floor plan: see src/lib/studio-facts.ts. Read through `parseStudioFacts`. */
+  facts: jsonb("facts").notNull().default({}),
   sortOrder: integer("sort_order").notNull().default(0),
   active: boolean("active").notNull().default(true),
 });

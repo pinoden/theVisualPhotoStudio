@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useId, useState } from "react";
+import { useStarted } from "../use-started";
 import { PICTURE_TYPES, uploadPicture } from "./upload";
 
 /**
@@ -13,6 +14,8 @@ export function ReplacePicture({ id, name }: { id: string; name: string }) {
   const input = useId();
   const [state, setState] = useState<"idle" | "sending" | "done">("idle");
   const [problem, setProblem] = useState("");
+  // Until the page has started, a chosen file would be lost: the button waits.
+  const ready = useStarted() && state !== "sending";
 
   const replace = async (file: File | undefined) => {
     if (!file) return;
@@ -30,7 +33,7 @@ export function ReplacePicture({ id, name }: { id: string; name: string }) {
 
   return (
     <div className="media-replace">
-      <label htmlFor={input} className="btn btn-outline btn-small" aria-disabled={state === "sending"}>
+      <label htmlFor={input} className="btn btn-outline btn-small" aria-disabled={!ready}>
         {state === "sending" ? "Sending…" : "Replace the file"}
       </label>
       <input
@@ -39,7 +42,7 @@ export function ReplacePicture({ id, name }: { id: string; name: string }) {
         type="file"
         accept={PICTURE_TYPES}
         aria-label={`Replace the file of ${name}`}
-        disabled={state === "sending"}
+        disabled={!ready}
         onChange={(event) => {
           const file = event.target.files?.[0];
           event.target.value = "";

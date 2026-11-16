@@ -1,6 +1,5 @@
-import AxeBuilder from "@axe-core/playwright";
-import { expect, test, type Page } from "@playwright/test";
-import { byLabel, dateAhead, fillDetails, next, pickStudio, signIn } from "./helpers";
+import { expect, test } from "@playwright/test";
+import { accessibilityProblems, byLabel, dateAhead, fillDetails, next, pickStudio, signIn } from "./helpers";
 
 /**
  * Accessibility: what a screen reader, a keyboard and a person who enlarges
@@ -30,23 +29,6 @@ test.beforeEach(({ page }) => {
 test.afterEach(() => {
   expect(browserProblems, "errors reported by the browser").toEqual([]);
 });
-
-/** What axe-core finds wrong on the page as it is now, one line for each kind of problem, naming up to three places. */
-async function accessibilityProblems(page: Page): Promise<string[]> {
-  const result = await new AxeBuilder({ page })
-    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
-    .disableRules(["color-contrast"])
-    // The development server's own button, which visitors never get.
-    .exclude("nextjs-portal")
-    .analyze();
-  return result.violations.map(
-    (violation) =>
-      `${violation.id} (${violation.impact}): ${violation.help}. At ${violation.nodes
-        .slice(0, 3)
-        .map((node) => node.target.join(" "))
-        .join(", ")}${violation.nodes.length > 3 ? ` and ${violation.nodes.length - 3} more` : ""}`,
-  );
-}
 
 const PUBLIC_PAGES = ["/", "/studios", "/rates", "/services", "/faq", "/policies", "/contact", "/book", "/book/photography", "/account/sign-in"];
 

@@ -162,6 +162,13 @@
       "when": 1794833882079,
       "tag": "0022_payment_authorized",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1794837499947,
+      "tag": "0023_studio_facts",
+      "breakpoints": true
     }
   ]
 }

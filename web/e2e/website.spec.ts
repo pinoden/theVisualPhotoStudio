@@ -1,6 +1,6 @@
 import { expect, test, type Browser, type Locator, type Page } from "@playwright/test";
 import sharp from "sharp";
-import { byLabel, byText, onScreen, shot, signIn } from "./helpers";
+import { accessibilityProblems, byLabel, byText, onScreen, shot, signIn } from "./helpers";
 
 /**
  * The website's editor (the owner's requirements 21, 25, 26 and 27, and the
@@ -10,8 +10,9 @@ import { byLabel, byText, onScreen, shot, signIn } from "./helpers";
  *
  * Runs after site.spec.ts and before z-mobile.spec.ts, on the same database.
  * It ends with the design, the menu and the footer as the site was built, so
- * the phone tests that follow measure the site's own design. The two photos
- * it gives Studio Blanche stay, so those tests also measure pages with photos.
+ * the phone tests that follow measure the site's own design. The two photos,
+ * the facts and the floor plan it gives Studio Blanche stay, so those tests
+ * also measure a studio that has all of them.
  */
 test.describe.configure({ mode: "serial" });
 
@@ -287,6 +288,7 @@ test("the owner adds pictures, describes them, puts them on a studio, replaces o
   await expect(byText(page, "No pictures yet. Add the first with the button above.")).toBeVisible();
 
   // Two pictures at once. A file that is not a picture is refused with the reason, and the others still arrive.
+  await expect(page.getByLabel("Add pictures", { exact: true })).toBeEnabled();
   await page.getByLabel("Add pictures", { exact: true }).setInputFiles([
     await pictureFile("Blanche Wide (final).JPG", 1600, 1000, "#d9d2c5"),
     { name: "notes.jpg", mimeType: "image/jpeg", buffer: Buffer.from("these are words, not a picture") },
@@ -312,6 +314,8 @@ test("the owner adds pictures, describes them, puts them on a studio, replaces o
   await wide.getByRole("button", { name: "Save" }).click();
   await expect(byText(page, "Saved.")).toBeVisible();
   await expect(byText(page, "Needs a description before it can be shown.")).toHaveCount(1);
+  // The library with pictures in it, as the accessibility scan sees it.
+  expect(await accessibilityProblems(page)).toEqual([]);
 
   // A studio's photos come from the library. A picture that says nothing about itself is not taken.
   await page.goto("/admin/studios");
@@ -373,6 +377,7 @@ test("the owner adds pictures, describes them, puts them on a studio, replaces o
   await page.goto("/admin/website/media");
   const shown = onScreen(page.locator(".media-card")).filter({ hasText: "blanche-window.png" });
   await expect(shown).toContainText("Shown in the studio Studio Blanche.");
+  await expect(shown.getByLabel(/^Replace the file of/)).toBeEnabled();
   await shown.getByLabel(/^Replace the file of/).setInputFiles(await pictureFile("window-retouched.jpg", 1000, 1000, "#8fa3b8"));
   const replaced = onScreen(page.locator(".media-card")).filter({ hasText: "window-retouched.jpg" });
   await expect(replaced).toContainText("1000 × 1000");
@@ -396,6 +401,7 @@ test("the owner adds pictures, describes them, puts them on a studio, replaces o
   await chooser.getByRole("button", { name: "Use this picture" }).click();
   await expect(byText(page, "Added.")).toBeVisible();
   await expect(onScreen(page.locator(".media-ordered li"))).toHaveCount(1);
+  expect(await accessibilityProblems(page)).toEqual([]);
   await byLabel(page, "First day it shows").fill("2020-12-01");
   await byLabel(page, "Last day it shows").fill("2020-12-26");
   await page.getByRole("button", { name: "Save", exact: true }).click();
@@ -486,6 +492,80 @@ test("the owner adds a font of their own and uses it in the design, and gives th
   await page.goto("/");
   await page.getByRole("button", { name: "Leave the preview" }).click();
   await expect(page.getByText("This shows changes that are not published yet")).toHaveCount(0);
+});
+
+/** A floor plan drawn as a picture: the walls, the windows along one long side, and the cyclorama's curve in a corner. */
+async function floorPlanFile(name: string) {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="840" viewBox="0 0 1200 840">
+    <rect width="1200" height="840" fill="#ffffff"/>
+    <rect x="60" y="60" width="1080" height="720" fill="none" stroke="#222222" stroke-width="14"/>
+    <rect x="240" y="52" width="720" height="16" fill="#8fb3d9"/>
+    <path d="M 760 780 L 760 560 Q 760 500 820 500 L 1140 500" fill="none" stroke="#999999" stroke-width="8"/>
+  </svg>`;
+  return { name, mimeType: "image/png", buffer: await sharp(Buffer.from(svg)).png().toBuffer() };
+}
+
+test("the owner writes what photographers choose a studio by and gives it a floor plan, and visitors see them on the studios page", async ({ page, browser }) => {
+  // The seventh owner's third sign-in.
+  await signIn(page, PICTURES_OWNER, "/admin/studios");
+  const blanche = onScreen(page.locator(".admin-card").filter({ has: page.getByRole("heading", { name: "Studio Blanche", level: 3, exact: true }) }));
+  await expect(byText(blanche, /^None yet\. A drawing of the room/)).toBeVisible();
+  await byLabel(blanche, "Size").fill("850 sq ft");
+  await byLabel(blanche, "Ceiling height").fill("14 ft");
+  await byLabel(blanche, "Light").fill("Floor-to-ceiling windows facing southeast");
+  await byLabel(blanche, "Cyclorama").fill("10 × 15 ft white cyclorama wall");
+  await byLabel(blanche, "What comes with it, one thing a line").fill("Paper backdrops\n\n  C-stands and sandbags  \nClothing rack and steamer\n");
+  await page.getByRole("button", { name: "Save Studio Blanche" }).click();
+  await expect(byText(page, "Studio saved.")).toBeVisible();
+  // What is kept: one thing a line, without the empty line and the spaces around a thing.
+  await page.goto("/admin/studios");
+  await expect(byLabel(blanche, "What comes with it, one thing a line")).toHaveValue("Paper backdrops\nC-stands and sandbags\nClothing rack and steamer");
+
+  // A floor plan is a picture of the library, described like any other.
+  await page.goto("/admin/website/media");
+  await expect(page.getByLabel("Add pictures", { exact: true })).toBeEnabled();
+  await page.getByLabel("Add pictures", { exact: true }).setInputFiles([await floorPlanFile("blanche-plan.png")]);
+  await expect(onScreen(page.locator(".media-sent")).locator("li.added")).toHaveCount(1);
+  const plan = onScreen(page.locator(".media-card")).filter({ hasText: "blanche-plan.png" });
+  await plan.getByLabel("What the picture shows").fill("Floor plan of Studio Blanche: 25 by 34 feet, the windows along the long wall");
+  await plan.getByRole("button", { name: "Save" }).click();
+  await expect(byText(page, "Saved.")).toBeVisible();
+
+  await page.goto("/admin/studios");
+  await page.getByRole("button", { name: "Choose a floor plan for Studio Blanche" }).click();
+  const chooser = page.getByRole("dialog", { name: "Choose from the media library" });
+  await chooser.getByRole("button", { name: /Floor plan of Studio Blanche/ }).click();
+  await chooser.getByRole("button", { name: "Use this picture" }).click();
+  await expect(byText(page, "Floor plan chosen. Customers see it now.")).toBeVisible();
+  await drawn(blanche.getByRole("img", { name: /^Floor plan of Studio Blanche/ }));
+  await expect(page.getByRole("button", { name: "Take the floor plan of Studio Blanche away" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Choose another floor plan for Studio Blanche" })).toBeVisible();
+  expect(await accessibilityProblems(page)).toEqual([]);
+  await shot(page, "46b-admin-studio-facts");
+
+  // Visitors get the facts that are written, in their order, and the floor plan under the studio's photo.
+  const guest = await visitor(browser);
+  await guest.goto("/studios");
+  const shown = guest.locator("#blanche");
+  await expect(shown.locator("dl.studio-facts dt")).toHaveText(["Size", "Ceiling", "Light", "Cyclorama"]);
+  await expect(shown.locator("dl.studio-facts dd")).toHaveText(["850 sq ft", "14 ft", "Floor-to-ceiling windows facing southeast", "10 × 15 ft white cyclorama wall"]);
+  await expect(shown.locator(".studio-included li")).toHaveText(["Paper backdrops", "C-stands and sandbags", "Clothing rack and steamer"]);
+  const drawing = shown.locator(".studio-floor-plan img");
+  await expect(drawing).toHaveAttribute("alt", "Floor plan of Studio Blanche: 25 by 34 feet, the windows along the long wall");
+  await drawn(drawing);
+  await expect(shown.locator(".studio-floor-plan figcaption")).toHaveText("Floor plan of Studio Blanche");
+  // A studio with none of them shows no empty list.
+  await expect(guest.locator("#paris").locator(".studio-facts, .studio-included, .studio-floor-plan")).toHaveCount(0);
+  expect(await accessibilityProblems(guest)).toEqual([]);
+  await shot(guest, "47b-studios-with-facts");
+
+  // A fact taken out is no longer shown.
+  await byLabel(blanche, "Cyclorama").fill("");
+  await page.getByRole("button", { name: "Save Studio Blanche" }).click();
+  await expect(byText(page, "Studio saved.")).toBeVisible();
+  await guest.reload();
+  await expect(guest.locator("#blanche dl.studio-facts dt")).toHaveText(["Size", "Ceiling", "Light"]);
+  await guest.context().close();
 });
 
 // ── Pages made of blocks (requirements 22, 23 and 24) ──

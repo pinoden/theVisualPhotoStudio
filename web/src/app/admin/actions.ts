@@ -31,7 +31,8 @@ import { notFound } from "next/navigation";
 import { can, type Ability } from "@/lib/abilities";
 import { requireManager, requireOwner } from "@/server/session";
 import { ACCESS_INSTRUCTIONS_MAX, loadSettings, saveAccessInstructions, saveSetting } from "@/server/settings";
-import { addStudioPhotos, moveStudioPhoto, removeStudioPhoto } from "@/server/studio-photos";
+import { addStudioPhotos, moveStudioPhoto, removeStudioPhoto, setStudioFloorPlan } from "@/server/studio-photos";
+import { includedList } from "@/lib/studio-facts";
 
 /**
  * Everything the owners can change. Every action starts with `requireOwner`:
@@ -371,10 +372,34 @@ export async function saveStudioDetailsAction(formData: FormData): Promise<void>
     description: text(formData, "description"),
     includedGuests,
     bufferMinutes,
+    facts: {
+      size: text(formData, "size"),
+      ceiling: text(formData, "ceiling"),
+      light: text(formData, "light"),
+      cyclorama: text(formData, "cyclorama"),
+      included: includedList(formText(formData.get("included"))),
+    },
   });
   if (!saved) failed("/admin/studios", "Not saved: the tagline or the description is too long.");
   updateTag(CATALOG_TAG);
   done("/admin/studios", "Studio saved.");
+}
+
+/** Choose a studio's floor plan: the first of `mediaIds`, as the chooser sends them. */
+export async function setStudioFloorPlanAction(formData: FormData): Promise<void> {
+  const viewer = await requireOwner("/admin/studios");
+  const result = await setStudioFloorPlan(await getDb(), viewer, text(formData, "studioId"), text(formData, "mediaIds").split(",")[0] ?? "");
+  if (!result.ok) failed("/admin/studios", result.message);
+  updateTag(CATALOG_TAG);
+  done("/admin/studios", "Floor plan chosen. Customers see it now.");
+}
+
+export async function removeStudioFloorPlanAction(formData: FormData): Promise<void> {
+  const viewer = await requireOwner("/admin/studios");
+  const result = await setStudioFloorPlan(await getDb(), viewer, text(formData, "studioId"), "");
+  if (!result.ok) failed("/admin/studios", result.message);
+  updateTag(CATALOG_TAG);
+  done("/admin/studios", "Floor plan taken away.");
 }
 
 /** Add pictures of the media library to a studio's photos. `mediaIds` is their ids with commas between, as the chooser sends them. */

@@ -32,6 +32,11 @@ const PATHS = [
   "/admin/website/media/collections",
   "/admin/website/fonts",
   "/admin/website/pages",
+  // Pages with an id in their address: an id that does not exist still compiles the page. The page editor is
+  // the largest of all, and compiling it while a test waits for it took longer than the test waits.
+  "/admin/website/pages/00000000-0000-4000-8000-000000000000",
+  "/admin/website/pages/00000000-0000-4000-8000-000000000000/check",
+  "/admin/website/media/collections/00000000-0000-4000-8000-000000000000",
   "/dev/outbox",
   "/booking/VS-AAAAAA?t=warm-up-warm-up-warm-up",
   "/api/availability?date=2030-01-09",

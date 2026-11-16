@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useId, useState, type DragEvent } from "react";
+import { useStarted } from "../use-started";
 import { PICTURE_TYPES, uploadPicture } from "./upload";
 
 interface Sent {
@@ -22,6 +23,8 @@ export function MediaUploader({ onDone, compact }: { onDone?: (ids: string[]) =>
   const [sent, setSent] = useState<Sent[]>([]);
   const [busy, setBusy] = useState(false);
   const [over, setOver] = useState(false);
+  // Until the page has started, a chosen file would be lost: the button waits.
+  const ready = useStarted() && !busy;
 
   const send = async (files: File[]) => {
     if (files.length === 0 || busy) return;
@@ -60,7 +63,7 @@ export function MediaUploader({ onDone, compact }: { onDone?: (ids: string[]) =>
       onDragLeave={() => setOver(false)}
       onDrop={drop}
     >
-      <label htmlFor={input} className="btn btn-dark btn-small" aria-disabled={busy}>
+      <label htmlFor={input} className="btn btn-dark btn-small" aria-disabled={!ready}>
         {busy ? "Sending…" : "Add pictures"}
       </label>
       <input
@@ -69,7 +72,7 @@ export function MediaUploader({ onDone, compact }: { onDone?: (ids: string[]) =>
         type="file"
         accept={PICTURE_TYPES}
         multiple
-        disabled={busy}
+        disabled={!ready}
         onChange={(event) => {
           const files = Array.from(event.target.files ?? []);
           event.target.value = ""; // the same file can be chosen again

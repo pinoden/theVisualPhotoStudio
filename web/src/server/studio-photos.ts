@@ -1,6 +1,7 @@
 import { and, asc, eq, inArray, max, sql } from "drizzle-orm";
 import { media, studioPhotos, studios } from "@/db/schema";
 import type { Db, DbLike } from "@/db/client";
+import { parseStudioFacts } from "@/lib/studio-facts";
 import type { AuthUser } from "./auth";
 import { loadPictures, type Picture } from "./media";
 
@@ -67,6 +68,28 @@ export async function addStudioPhotos(db: Db, viewer: AuthUser, studioId: string
     if ((last?.count ?? 0) + toAdd.length > STUDIO_PHOTO_LIMIT) return { ok: false, message: `A studio takes ${STUDIO_PHOTO_LIMIT} photos at most.` };
     let position = (last?.position ?? -1) + 1;
     for (const mediaId of toAdd) await tx.insert(studioPhotos).values({ studioId, mediaId, position: position++ });
+    return { ok: true };
+  });
+}
+
+/**
+ * Choose the picture of a studio's floor plan, or take it away with "". Like
+ * a photo, it must say what it shows first. Owners only.
+ */
+export async function setStudioFloorPlan(db: Db, viewer: AuthUser, studioId: string, mediaId: string): Promise<StudioPhotoResult> {
+  if (viewer.role !== "owner") return { ok: false, message: OWNERS_ONLY };
+  if (!isUuid(studioId)) return { ok: false, message: "That studio was not found." };
+  if (mediaId !== "" && !isUuid(mediaId)) return { ok: false, message: "Choose a picture." };
+  return db.transaction(async (tx): Promise<StudioPhotoResult> => {
+    const [studio] = await tx.select({ id: studios.id, facts: studios.facts }).from(studios).where(eq(studios.id, studioId)).for("update").limit(1);
+    if (!studio) return { ok: false, message: "That studio was not found." };
+    if (mediaId !== "") {
+      const [picture] = await tx.select({ alt: media.alt, filename: media.filename }).from(media).where(eq(media.id, mediaId)).limit(1);
+      if (!picture) return { ok: false, message: "That picture is no longer in the library." };
+      if (picture.alt.trim() === "") return { ok: false, message: `Say what the picture ${picture.filename} shows first, in the media library. Then choose it here.` };
+    }
+    const facts = parseStudioFacts({ ...parseStudioFacts(studio.facts), floorPlan: mediaId });
+    await tx.update(studios).set({ facts }).where(eq(studios.id, studioId));
     return { ok: true };
   });
 }

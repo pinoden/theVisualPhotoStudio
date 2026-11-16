@@ -3,6 +3,7 @@ import { ContactForm as ContactFormView } from "@/components/ContactForm";
 import { hasWeekendPricing, hourlyFromCents, hoursLines, openingHours, priceTable } from "@/lib/catalog-view";
 import { formatCents } from "@/lib/domain/pricing";
 import { durationLabel } from "@/lib/domain/time";
+import { FACT_LABELS } from "@/lib/studio-facts";
 import { telHref } from "../frame";
 import { defineBlock } from "./block";
 import { EditorNote, SiteAnchor } from "./shared";
@@ -96,6 +97,18 @@ export const StudioDetails = defineBlock({
                         <span className="studio-placeholder-text">{studio.name}</span>
                       )}
                     </div>
+                    {studio.floorPlan && (
+                      <figure className="studio-floor-plan">
+                        {editing ? (
+                          <Image src={studio.floorPlan.url} width={studio.floorPlan.width} height={studio.floorPlan.height} alt={studio.floorPlan.alt} sizes="(max-width: 768px) 100vw, 560px" />
+                        ) : (
+                          <a href={studio.floorPlan.url} target="_blank" rel="noopener">
+                            <Image src={studio.floorPlan.url} width={studio.floorPlan.width} height={studio.floorPlan.height} alt={studio.floorPlan.alt} sizes="(max-width: 768px) 100vw, 560px" />
+                          </a>
+                        )}
+                        <figcaption>Floor plan of {studio.name}</figcaption>
+                      </figure>
+                    )}
                     {more.length > 0 && (
                       <ul className="studio-photo-strip" aria-label={`More photos of ${studio.name}`}>
                         {more.map((picture) => (
@@ -126,6 +139,29 @@ export const StudioDetails = defineBlock({
                       ))}
                       {from !== null && <li>From {formatCents(from)} per hour</li>}
                     </ul>
+                    {(Object.keys(FACT_LABELS) as (keyof typeof FACT_LABELS)[]).some((name) => studio.facts[name] !== "") && (
+                      <dl className="studio-facts">
+                        {(Object.keys(FACT_LABELS) as (keyof typeof FACT_LABELS)[])
+                          .filter((name) => studio.facts[name] !== "")
+                          .map((name) => (
+                            <div key={name}>
+                              <dt>{FACT_LABELS[name]}</dt>
+                              <dd>{studio.facts[name]}</dd>
+                            </div>
+                          ))}
+                      </dl>
+                    )}
+                    {studio.facts.included.length > 0 && (
+                      <>
+                        <p className="studio-included-title">Included</p>
+                        <ul className="studio-included">
+                          {/* By place, not by words: the owners may write one thing twice. */}
+                          {studio.facts.included.map((thing, place) => (
+                            <li key={place}>{thing}</li>
+                          ))}
+                        </ul>
+                      </>
+                    )}
                     {bookLabel && (
                       <SiteAnchor href={`/book?studio=${studio.slug}`} className="btn btn-dark" editing={editing}>
                         {bookLabel} {studio.name.replace(/^Studio /, "")}

@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defaultDayType, isoWeekday } from "@/lib/domain/time";
+import { NO_FACTS } from "@/lib/studio-facts";
 import type { Catalog } from "@/server/catalog";
 import { DEFAULT_SETTINGS } from "@/server/settings";
 import { BookingFlow } from "./BookingFlow";
@@ -44,9 +45,9 @@ function rulesFor(studioId: string, weekday: Record<number, number>, weekend: Re
 
 const catalog: Catalog = {
   studios: [
-    { id: B, slug: "blanche", name: "Studio Blanche", tagline: "All white.", description: "", includedGuests: 6, bufferMinutes: 10, color: "#4f7cac", hours, photos: [] },
-    { id: D, slug: "dayglow", name: "Studio Dayglow", tagline: "Boho.", description: "", includedGuests: 6, bufferMinutes: 10, color: "#c9851a", hours, photos: [] },
-    { id: P, slug: "paris", name: "Studio Paris", tagline: "Vintage.", description: "", includedGuests: 4, bufferMinutes: 10, color: "#b4517b", hours, photos: [] },
+    { id: B, slug: "blanche", name: "Studio Blanche", tagline: "All white.", description: "", includedGuests: 6, bufferMinutes: 10, color: "#4f7cac", hours, photos: [], facts: NO_FACTS, floorPlan: null },
+    { id: D, slug: "dayglow", name: "Studio Dayglow", tagline: "Boho.", description: "", includedGuests: 6, bufferMinutes: 10, color: "#c9851a", hours, photos: [], facts: NO_FACTS, floorPlan: null },
+    { id: P, slug: "paris", name: "Studio Paris", tagline: "Vintage.", description: "", includedGuests: 4, bufferMinutes: 10, color: "#b4517b", hours, photos: [], facts: NO_FACTS, floorPlan: null },
   ],
   rules: [
     ...rulesFor(B, { 60: 88, 120: 176, 600: 720 }, { 60: 110, 120: 200, 600: 800 }),

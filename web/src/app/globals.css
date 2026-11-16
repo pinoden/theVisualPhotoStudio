@@ -1922,6 +1922,21 @@ button { font-family: inherit; }
 .blk-when-note { margin: 0; padding: .3rem .6rem; font-size: .75rem; line-height: 1.4; background: var(--color-ivory); color: var(--color-muted); }
 .blk-when[data-shown="false"] > :not(.blk-when-note) { opacity: .45; }
 
+/* A studio's facts on the studios page: what photographers choose by. */
+.studio-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: .75rem 1.5rem; margin: 1rem 0; }
+.studio-facts dt { font-size: .72rem; letter-spacing: .12em; text-transform: uppercase; color: var(--color-rose); }
+.studio-facts dd { margin: .15rem 0 0; color: var(--color-dark); overflow-wrap: anywhere; }
+.studio-included-title { margin: 1rem 0 .4rem; font-size: .72rem; letter-spacing: .12em; text-transform: uppercase; color: var(--color-rose); }
+.studio-included { margin: 0 0 1.25rem; padding-left: 1.1rem; columns: 2 12rem; column-gap: 1.5rem; }
+.studio-included li { margin-bottom: .3rem; break-inside: avoid; }
+.studio-floor-plan { margin: 1rem 0 0; }
+.studio-floor-plan img { display: block; width: 100%; height: auto; background: #fff; border: 1px solid var(--color-border); }
+.studio-floor-plan figcaption { font-size: .8rem; margin-top: .4rem; }
+.studio-facts-fields { border: 0; padding: 0; margin: 1rem 0 0; }
+.studio-floor-plan-admin { margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--color-border); }
+.studio-floor-plan-admin .editor-subtitle { margin-top: 0; }
+.studio-floor-plan-admin img { display: block; max-width: 200px; height: auto; margin-bottom: .5rem; border: 1px solid var(--color-border); }
+
 /* Only in the page editor: where a block has nothing to show yet. */
 .blk-note {
   padding: 1rem; border: 1px dashed var(--color-border); background: color-mix(in srgb, var(--color-ivory) 70%, transparent);

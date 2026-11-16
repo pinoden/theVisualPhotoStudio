@@ -30,7 +30,8 @@ import {
   uploadImage,
   usesInWords,
 } from "./media";
-import { addStudioPhotos, moveStudioPhoto, removeStudioPhoto, STUDIO_PHOTO_LIMIT } from "./studio-photos";
+import { addStudioPhotos, moveStudioPhoto, removeStudioPhoto, setStudioFloorPlan, STUDIO_PHOTO_LIMIT } from "./studio-photos";
+import { saveStudioDetails } from "./admin";
 import { createTestWorld, expectOk, minutesAfter, NOW, type TestWorld } from "./testing";
 import { FRAME_DOC, saveDraft } from "./website";
 
@@ -255,6 +256,49 @@ describe("deleting a picture", () => {
     // A page in the trash shows nothing.
     await world.db.update(siteDocuments).set({ deletedAt: NOW });
     expect(await deleteMedia(world.db, owner, one.id)).toEqual({ ok: true });
+  });
+});
+
+describe("a studio's facts and floor plan", () => {
+  const blanche = async () => (await loadCatalog(world.db)).studios.find((studio) => studio.slug === "blanche")!;
+  const details = { tagline: "A modern, all-white space.", description: "Bright.", includedGuests: 6, bufferMinutes: 15 };
+
+  it("are written by the owners, and customers get them with the studio", async () => {
+    expect(
+      await saveStudioDetails(world.db, world.ids.blanche, {
+        ...details,
+        facts: { size: "850 sq ft", ceiling: "14 ft", light: "Windows facing southeast", cyclorama: "10 × 15 ft", included: ["Paper backdrops", "C-stands"] },
+      }),
+    ).toBe(true);
+    expect((await blanche()).facts).toEqual({ size: "850 sq ft", ceiling: "14 ft", light: "Windows facing southeast", cyclorama: "10 × 15 ft", included: ["Paper backdrops", "C-stands"], floorPlan: "" });
+  });
+
+  it("take a floor plan that is described, keep it when the facts are saved again, and let it go", async () => {
+    const silent = await added("plan-silent.jpg");
+    expect(await setStudioFloorPlan(world.db, owner, world.ids.blanche, silent.id)).toMatchObject({
+      ok: false,
+      message: "Say what the picture plan-silent.jpg shows first, in the media library. Then choose it here.",
+    });
+    const plan = await described("plan.png", "Floor plan of Studio Blanche: 25 by 34 feet, windows on the long side");
+    expectOk(await setStudioFloorPlan(world.db, owner, world.ids.blanche, plan.id));
+    expect((await blanche()).floorPlan).toMatchObject({ id: plan.id, alt: "Floor plan of Studio Blanche: 25 by 34 feet, windows on the long side" });
+    // Saving the studio's text keeps the floor plan, which is chosen on its own.
+    expect(await saveStudioDetails(world.db, world.ids.blanche, { ...details, facts: { size: "850 sq ft", ceiling: "", light: "", cyclorama: "", included: [] } })).toBe(true);
+    expect((await blanche()).facts).toMatchObject({ size: "850 sq ft", floorPlan: plan.id });
+    // In use, it cannot be deleted from the library.
+    expect(usesInWords((await mediaUses(world.db, [plan.id])).get(plan.id)!)).toBe("the studio Studio Blanche");
+    expect(await deleteMedia(world.db, owner, plan.id)).toMatchObject({ ok: false });
+
+    expectOk(await setStudioFloorPlan(world.db, owner, world.ids.blanche, ""));
+    expect((await blanche()).floorPlan).toBeNull();
+    expect((await mediaUses(world.db, [plan.id])).get(plan.id)).toEqual([]);
+  });
+
+  it("are the owners' to change", async () => {
+    const plan = await described("plan.png", "A floor plan");
+    for (const viewer of [mia, sam]) {
+      expect(await setStudioFloorPlan(world.db, viewer, world.ids.blanche, plan.id)).toMatchObject({ ok: false, message: "Only an owner can change a studio's photos." });
+    }
   });
 });
 

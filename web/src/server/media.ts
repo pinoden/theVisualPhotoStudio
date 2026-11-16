@@ -248,6 +248,12 @@ export async function mediaUses(db: DbLike, ids: string[]): Promise<Map<string, 
       .where(isNull(siteDocuments.deletedAt)),
   ]);
   for (const row of ofStudios) uses.get(row.mediaId)?.push({ where: "studio", name: row.name });
+  // A studio's floor plan, which its facts name.
+  const plans = await db
+    .select({ name: studios.name, plan: sql<string>`${studios.facts}->>'floorPlan'` })
+    .from(studios)
+    .where(inArray(sql`${studios.facts}->>'floorPlan'`, ids));
+  for (const row of plans) uses.get(row.plan)?.push({ where: "studio", name: row.name });
   for (const row of ofCollections) uses.get(row.mediaId)?.push({ where: "collection", name: row.name });
   for (const document of documents) {
     for (const id of ids) {

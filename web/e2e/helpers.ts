@@ -1,3 +1,4 @@
+import AxeBuilder from "@axe-core/playwright";
 import { expect, type Locator, type Page } from "@playwright/test";
 
 const STUDIO_TZ = "America/New_York";
@@ -31,6 +32,27 @@ type Scope = Page | Locator;
 export const onScreen = (locator: Locator) => locator.filter({ visible: true });
 export const byLabel = (scope: Scope, label: string) => onScreen(scope.getByLabel(label, { exact: true }));
 export const byText = (scope: Scope, text: string | RegExp) => onScreen(scope.getByText(text));
+
+/**
+ * What axe-core finds wrong on the page as it is now, against WCAG 2.1 A and
+ * AA, one line for each kind of problem, naming up to three places. Colour
+ * contrast is left out: see e2e/a11y.spec.ts.
+ */
+export async function accessibilityProblems(page: Page): Promise<string[]> {
+  const result = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+    .disableRules(["color-contrast"])
+    // The development server's own button, which visitors never get.
+    .exclude("nextjs-portal")
+    .analyze();
+  return result.violations.map(
+    (violation) =>
+      `${violation.id} (${violation.impact}): ${violation.help}. At ${violation.nodes
+        .slice(0, 3)
+        .map((node) => node.target.join(" "))
+        .join(", ")}${violation.nodes.length > 3 ? ` and ${violation.nodes.length - 3} more` : ""}`,
+  );
+}
 
 /**
  * Save a full-page picture for a person to look at. Only when E2E_SHOTS is

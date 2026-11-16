@@ -10,14 +10,17 @@ import { listAddons, type AdminAddon } from "@/server/admin";
 import { loadCatalog, type CatalogStudio } from "@/server/catalog";
 import { requireOwner } from "@/server/session";
 import { STUDIO_PHOTO_LIMIT } from "@/server/studio-photos";
+import { STUDIO_FACT_LIMITS } from "@/lib/studio-facts";
 import {
   addStudioPhotosAction,
   moveStudioPhotoEarlierAction,
   moveStudioPhotoLaterAction,
   offerAddonAgainAction,
+  removeStudioFloorPlanAction,
   removeStudioPhotoAction,
   saveAddonAction,
   saveStudioDetailsAction,
+  setStudioFloorPlanAction,
   stopOfferingAddonAction,
 } from "../actions";
 import { AdminFrame, AdminLoading } from "../frame";
@@ -107,6 +110,34 @@ function AddonFields({ id, addon, studios }: { id: string; addon?: AdminAddon; s
   );
 }
 
+/** A studio's floor plan: a picture of the media library, shown on the studios page with its photos. */
+function StudioFloorPlan({ studio }: { studio: CatalogStudio }) {
+  return (
+    <div className="studio-floor-plan-admin">
+      <h4 className="editor-subtitle">Floor plan of {studio.name}</h4>
+      {studio.floorPlan ? (
+        <>
+          <Image src={studio.floorPlan.url} width={studio.floorPlan.width} height={studio.floorPlan.height} alt={studio.floorPlan.alt} sizes="200px" />
+          <form action={removeStudioFloorPlanAction}>
+            <input type="hidden" name="studioId" value={studio.id} />
+            <button type="submit" className="btn btn-outline btn-small">
+              Take the floor plan of {studio.name} away
+            </button>
+          </form>
+        </>
+      ) : (
+        <p style={HELP}>None yet. A drawing of the room, with its size and where the windows are, helps photographers plan.</p>
+      )}
+      <ChoosePictures
+        label={studio.floorPlan ? `Choose another floor plan for ${studio.name}` : `Choose a floor plan for ${studio.name}`}
+        action={setStudioFloorPlanAction}
+        fields={{ studioId: studio.id }}
+        multiple={false}
+      />
+    </div>
+  );
+}
+
 /** A studio's photos: pictures of the media library in the owners' order, with the buttons to reorder and remove them. */
 function StudioPhotos({ studio }: { studio: CatalogStudio }) {
   const last = studio.photos.length - 1;
@@ -141,7 +172,7 @@ function StudioPhotos({ studio }: { studio: CatalogStudio }) {
                 <form action={removeStudioPhotoAction}>
                   <input type="hidden" name="studioId" value={studio.id} />
                   <input type="hidden" name="mediaId" value={photo.id} />
-                  <button type="submit" className="btn btn-outline btn-small" aria-label={`Take photo ${index + 1} off ${studio.name}`}>
+                  <button type="submit" className="btn btn-outline btn-small" aria-label={`Take off photo ${index + 1} of ${studio.name}`}>
                     Take off
                   </button>
                 </form>
@@ -228,6 +259,49 @@ async function StudiosAndAddons({ searchParams }: Pick<PageProps<"/admin/studios
                   required
                 />
               </div>
+            </div>
+            <fieldset className="studio-facts-fields">
+              <legend className="form-label">What photographers choose by (each shown only when written)</legend>
+              <div className="admin-form-row">
+                {(
+                  [
+                    ["size", "Size", "850 sq ft"],
+                    ["ceiling", "Ceiling height", "14 ft"],
+                    ["light", "Light", "Floor-to-ceiling windows facing southeast"],
+                    ["cyclorama", "Cyclorama", "10 × 15 ft white cyclorama wall"],
+                  ] as const
+                ).map(([name, label, example]) => (
+                  <div className="form-group" key={name} style={{ flex: "1 1 14rem" }}>
+                    <label className="form-label" htmlFor={`studio-${studio.slug}-${name}`}>
+                      {label}
+                    </label>
+                    <input
+                      id={`studio-${studio.slug}-${name}`}
+                      name={name}
+                      className="form-control"
+                      maxLength={STUDIO_FACT_LIMITS.line}
+                      placeholder={example}
+                      defaultValue={studio.facts[name]}
+                    />
+                  </div>
+                ))}
+              </div>
+              <div className="form-group">
+                <label className="form-label" htmlFor={`studio-${studio.slug}-included`}>
+                  What comes with it, one thing a line
+                </label>
+                <textarea
+                  id={`studio-${studio.slug}-included`}
+                  name="included"
+                  className="form-control"
+                  rows={4}
+                  maxLength={STUDIO_FACT_LIMITS.included * (STUDIO_FACT_LIMITS.includedLine + 1)}
+                  placeholder={"Paper backdrops\nC-stands and sandbags\nClothing rack and steamer"}
+                  defaultValue={studio.facts.included.join("\n")}
+                />
+              </div>
+            </fieldset>
+            <div className="admin-form-row">
               <button type="submit" className="btn btn-dark btn-small">
                 Save {studio.name}
               </button>
@@ -239,6 +313,7 @@ async function StudiosAndAddons({ searchParams }: Pick<PageProps<"/admin/studios
             </div>
           </form>
           <StudioPhotos studio={studio} />
+          <StudioFloorPlan studio={studio} />
         </div>
       ))}
 
