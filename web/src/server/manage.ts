@@ -21,7 +21,7 @@ import { releaseHolds } from "./holds";
 import { netCardPaidCents, paidAtStudioCents } from "./money";
 import { closePayLinkOf } from "./pay-links";
 import type { PaymentProvider } from "./payments";
-import { issuePetCredit, petCreditOf, petFeeCentsOf } from "./pet-fee";
+import { issuePetCredit, petCreditOf, petFeeCentsOf, petFeeReturnedCents } from "./pet-fee";
 import { issuePromo, restorePromo } from "./promos";
 import { loadSettings, type Settings } from "./settings";
 import { formatInstant } from "./tz";
@@ -63,10 +63,14 @@ export { netCardPaidCents } from "./money";
 
 async function factsFor(db: DbLike, booking: BookingRow): Promise<BookingFacts> {
   const petFeeCents = await petFeeCentsOf(db, booking.id);
+  const [code] = booking.promoCodeId
+    ? await db.select({ source: promoCodes.source }).from(promoCodes).where(eq(promoCodes.id, booking.promoCodeId)).limit(1)
+    : [];
   return {
     status: booking.status,
     startAt: booking.startAt,
     rescheduledCount: booking.rescheduledCount,
+    madeWithRescheduleCode: code?.source === "reschedule",
     cardPaidCents: await netCardPaidCents(db, booking.id),
     creditAppliedCents: booking.creditAppliedCents,
     // promoDiscountCents holds whatever the code took off: for a credit code that is the credit itself.
@@ -201,6 +205,8 @@ export function cancelOutcomeText(outcome: Extract<CancelOutcome, { allowed: tru
       return `No refund is due, because the booking starts in less than ${hoursInWords(settings.refundWindowHours)}.`;
     case "rescheduled":
       return "No refund is due, because this booking was made with a reschedule code.";
+    case "moved":
+      return "No refund is due, because this booking was moved at your request: a moved booking is not refunded.";
     case "nothing_paid":
       return "Nothing was charged to a card for this booking, so there is nothing to refund.";
   }
@@ -621,8 +627,25 @@ export type OwnerRefundResult =
   | { ok: false; status: number; code: "not_found" | "bad_amount" | "not_cancellable"; message: string };
 
 /**
+ * What the owner can still send back to the card for a booking: what the card
+ * holds, less a pet fee that was already returned as studio credit.
+ */
+async function ownerRefundable(db: DbLike, bookingId: string): Promise<{ available: number; returned: number }> {
+  const held = await netCardPaidCents(db, bookingId);
+  const returned = Math.min(held, await petFeeReturnedCents(db, bookingId));
+  return { available: held - returned, returned };
+}
+
+function tooMuchText(outcome: { available: number; returned: number }): string {
+  return `At most ${formatCents(outcome.available)} can be refunded to the card for this booking.${
+    outcome.returned > 0 ? ` Its pet fee of ${formatCents(outcome.returned)} was already returned as studio credit.` : ""
+  }`;
+}
+
+/**
  * The owner's cancel: any booking that has not been cancelled already, with
- * whatever refund the owner chooses, up to what the card still holds.
+ * whatever refund the owner chooses, up to what the card still holds, less a
+ * pet fee already returned as credit.
  */
 export async function ownerCancelBooking(
   db: Db,
@@ -639,8 +662,8 @@ export async function ownerCancelBooking(
     const [booking] = await tx.select().from(bookings).where(eq(bookings.ref, ref)).for("update").limit(1);
     if (!booking) return { kind: "not_found" as const };
     if (!["confirmed", "completed", "no_show"].includes(booking.status)) return { kind: "not_cancellable" as const };
-    const available = await netCardPaidCents(tx, booking.id);
-    if (input.refundCents > available) return { kind: "bad_amount" as const, available };
+    const refundable = await ownerRefundable(tx, booking.id);
+    if (input.refundCents > refundable.available) return { kind: "bad_amount" as const, ...refundable };
 
     await tx
       .update(bookings)
@@ -678,14 +701,7 @@ export async function ownerCancelBooking(
   if (outcome.kind === "not_cancellable") {
     return { ok: false, status: 409, code: "not_cancellable", message: "This booking is already cancelled or was never confirmed." };
   }
-  if (outcome.kind === "bad_amount") {
-    return {
-      ok: false,
-      status: 400,
-      code: "bad_amount",
-      message: `At most ${formatCents(outcome.available)} can be refunded to the card for this booking.`,
-    };
-  }
+  if (outcome.kind === "bad_amount") return { ok: false, status: 400, code: "bad_amount", message: tooMuchText(outcome) };
   await closePayLinkOf(db, outcome.bookingId, deps);
   let refund: "sent" | "pending" | "none" = outcome.refundIds.length === 0 ? "none" : "sent";
   for (const id of outcome.refundIds) {
@@ -708,20 +724,13 @@ export async function ownerRefund(
   const outcome = await db.transaction(async (tx) => {
     const [booking] = await tx.select().from(bookings).where(eq(bookings.ref, ref)).for("update").limit(1);
     if (!booking) return { kind: "not_found" as const };
-    const available = await netCardPaidCents(tx, booking.id);
-    if (input.amountCents > available) return { kind: "bad_amount" as const, available };
+    const refundable = await ownerRefundable(tx, booking.id);
+    if (input.amountCents > refundable.available) return { kind: "bad_amount" as const, ...refundable };
     const refundIds = await recordRefunds(tx, booking.id, input.amountCents, input.reason.slice(0, 180) || `Refund for ${booking.ref}`, false);
     return { kind: "done" as const, refundIds };
   });
   if (outcome.kind === "not_found") return { ok: false, status: 404, code: "not_found", message: "Booking not found." };
-  if (outcome.kind === "bad_amount") {
-    return {
-      ok: false,
-      status: 400,
-      code: "bad_amount",
-      message: `At most ${formatCents(outcome.available)} can be refunded to the card for this booking.`,
-    };
-  }
+  if (outcome.kind === "bad_amount") return { ok: false, status: 400, code: "bad_amount", message: tooMuchText(outcome) };
   let refund: "sent" | "pending" | "none" = "sent";
   for (const id of outcome.refundIds) {
     if ((await processRefund(db, id, deps)) !== "succeeded") refund = "pending";

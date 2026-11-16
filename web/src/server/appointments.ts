@@ -285,11 +285,17 @@ export async function moveBooking(
   if (found.status !== "confirmed" || now.getTime() >= found.endAt.getTime()) {
     return refuse("not_movable", "Only a booking that is still to come can be moved.");
   }
-  if (!isIsoDate(input.date) || !Number.isInteger(input.startMinute)) return refuse("invalid_time", "Choose a date and a time.");
+  if (!isIsoDate(input.date) || !Number.isInteger(input.startMinute) || input.startMinute < 0 || input.startMinute >= 1440) {
+    return refuse("invalid_time", "Choose a date and a time.");
+  }
 
   const startAt = localToUtc(input.date, input.startMinute);
   const endAt = localToUtc(input.date, input.startMinute + found.durationMinutes);
   if (startAt.getTime() === found.startAt.getTime()) return refuse("invalid_time", "That is the time the booking already has.");
+  // Across the hour the clocks change, the booking would not last as long as it was paid for.
+  if (endAt.getTime() - startAt.getTime() !== found.durationMinutes * 60_000) {
+    return refuse("slot_taken", "The clocks change at that time, so the booking cannot move there. Choose another.");
+  }
 
   const catalog = await loadCatalog(db);
   const day = await loadDayAvailability(db, catalog, input.date, now, {
@@ -368,6 +374,7 @@ export async function moveBooking(
           was,
           now: is,
           duration: durationLabel(booking.durationMinutes),
+          ...(input.countsAsClientMove ? { clientAsked: { canMoveAgain: booking.rescheduledCount + 1 < settings.maxReschedules } } : {}),
         }),
       );
       return { ok: true, startAt, endAt };

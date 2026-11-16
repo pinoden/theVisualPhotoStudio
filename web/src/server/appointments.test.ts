@@ -5,7 +5,7 @@ import { createAdminBooking, getAppointment, moveBooking, moveOptions, setLabel 
 import type { AuthUser } from "./auth";
 import { loadCalendar } from "./calendar";
 import { loadCatalog } from "./catalog";
-import { cancelBooking, getManageOptions } from "./manage";
+import { cancelBooking, getManageChoices, getManageOptions } from "./manage";
 import { getDaySheet } from "./staff";
 import { completeVisits } from "./tasks";
 import { BASE_URL, createTestWorld, expectOk, h, hoursAfter, NEAR, NOW, type TestWorld } from "./testing";
@@ -308,8 +308,16 @@ describe("moving a booking to a new time", () => {
     await moveBooking(world.db, owner, nextDayRef, to(h(14), "2026-12-09", true), NOW);
     expect(await row(nextDayRef)).toMatchObject({ rescheduledCount: 1 });
     const options = await getManageOptions(world.db, nextDayRef, { kind: "owner" }, NOW);
-    expect(options?.cancel).toMatchObject({ allowed: true, refundCents: 0, why: "rescheduled" });
+    // Moved, not made with a reschedule code: the client is told so, and why.
+    expect(options?.cancel).toMatchObject({ allowed: true, refundCents: 0, why: "moved" });
     expect(options?.reschedule).toEqual({ allowed: false, reason: "limit_reached" });
+    expect((await getManageChoices(world.db, nextDayRef, { kind: "owner" }, NOW))?.cancel.text).toBe(
+      "No refund is due, because this booking was moved at your request: a moved booking is not refunded.",
+    );
+    const [mail] = await world.emails("booking_moved");
+    expect(mail.body).toContain(
+      "As you asked for this change, it counts as your reschedule under the rental terms: if the booking is cancelled now, it is not refunded, and it cannot be moved again online.",
+    );
   });
 
   it("is only for a booking that is still to come", async () => {

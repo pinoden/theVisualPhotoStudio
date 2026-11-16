@@ -252,8 +252,10 @@ export const Table = defineBlock({
     const heads = [first, second, third, fourth].slice(0, count);
     const shown = rows.filter((row) => [row.a, row.b, row.c, row.d].slice(0, count).some((cell) => cell !== ""));
     if (shown.length === 0) return <EditorNote editing={editing}>Table: write its rows in the panel.</EditorNote>;
+    const named = heads.filter((head) => head !== "");
     return (
-      <div className="blk blk-table-wrap">
+      // On a narrow screen the table scrolls sideways in its frame, which the keyboard reaches too (tabIndex).
+      <div className="blk blk-table-wrap" tabIndex={0} role="region" aria-label={named.length > 0 ? `Table: ${named.join(", ")}` : "Table"}>
         <table className="price-table blk-table">
           {heads.some((head) => head !== "") && (
             <thead>

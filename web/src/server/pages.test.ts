@@ -415,7 +415,24 @@ describe("old addresses", () => {
     expect(await refused("/old", "javascript:alert(1)")).toContain("Give where it should lead");
     expect(await refused("/old", "mailto:a@b.co")).toContain("Give where it should lead");
     expect(await refused("/old", "/old")).toBe("An address cannot lead to itself.");
+    // The public route goes by the path alone, so this would lead to itself as well.
+    expect(await refused("/old", "/old?from=menu")).toBe("An address cannot lead to itself.");
     expect(await listRedirects(world.db, owner)).toEqual([]);
+  });
+
+  it("cannot send visitors round in a circle through other old addresses", async () => {
+    await make();
+    expectOk(await addRedirect(world.db, owner, { from: "/ring-1", to: "/ring-2" }));
+    expectOk(await addRedirect(world.db, owner, { from: "/ring-2", to: "/ring-3#top" }));
+    expect(await addRedirect(world.db, owner, { from: "/ring-3", to: "/ring-1" })).toEqual({
+      ok: false,
+      message: "That would send visitors round in a circle: /ring-2 already leads back to /ring-3.",
+    });
+    // A chain that ends at a page is no circle, nor is one that leaves the site.
+    expectOk(await addRedirect(world.db, owner, { from: "/ring-3", to: "/gift-cards" }));
+    expectOk(await addRedirect(world.db, owner, { from: "/gift-cards-old", to: "/ring-1" }));
+    expectOk(await addRedirect(world.db, owner, { from: "/away", to: "https://example.org/ring-1" }));
+    expect((await listRedirects(world.db, owner))!.map((redirect) => redirect.from)).toEqual(["/away", "/gift-cards-old", "/ring-1", "/ring-2", "/ring-3"]);
   });
 });
 

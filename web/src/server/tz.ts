@@ -3,9 +3,9 @@
  * Server only (uses the time zone database through luxon).
  */
 import { DateTime } from "luxon";
-import { parseIsoDate, type IsoDate } from "@/lib/domain/time";
+import { parseIsoDate, STUDIO_TIME_ZONE, type IsoDate } from "@/lib/domain/time";
 
-export const STUDIO_TZ = "America/New_York";
+export const STUDIO_TZ = STUDIO_TIME_ZONE;
 
 /**
  * The instant at which the studio's clocks show `minute` past midnight on
@@ -48,6 +48,29 @@ export function localMinuteOnFloor(instant: Date, date: IsoDate): number {
   if (d < date) return 0;
   if (d > date) return 1440;
   return dt.hour * 60 + dt.minute;
+}
+
+/**
+ * The wall-clock minutes of `date` that do not happen exactly once: the hour
+ * the clocks skip when they go forward (2:00 to 3:00), or the hour they show
+ * twice when they go back (1:00 to 2:00). Null on any other day. A booking
+ * that started, ended or ran across them would not last as long as it costs,
+ * so they are taken time in every studio's day.
+ */
+export function clockChangeOn(date: IsoDate): { start: number; end: number } | null {
+  const p = parseIsoDate(date);
+  if (!p) return null;
+  const midnight = DateTime.fromObject({ year: p.year, month: p.month, day: p.day }, { zone: STUDIO_TZ });
+  const before = midnight.offset;
+  const after = midnight.plus({ days: 1 }).minus({ minutes: 1 }).offset;
+  if (before === after) return null;
+  const shift = Math.abs(after - before);
+  // Real time from midnight, in quarter hours, until the clocks have changed. Until then real and wall-clock minutes agree.
+  for (let minute = 15; minute <= 1440; minute += 15) {
+    if (midnight.plus({ minutes: minute }).offset === before) continue;
+    return after > before ? { start: minute, end: minute + shift } : { start: minute - shift, end: minute };
+  }
+  return null;
 }
 
 /** The instants at which the given local day starts and ends. */

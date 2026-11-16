@@ -46,6 +46,15 @@ export async function petCreditOf(db: DbLike, bookingId: string): Promise<{ code
 }
 
 /**
+ * How much of a booking's pet fee was returned as studio credit: the fee, once
+ * a code returned it, and 0 before. That money was given back once, so it is
+ * neither refunded to the card nor carried by a reschedule code as well.
+ */
+export async function petFeeReturnedCents(db: DbLike, bookingId: string): Promise<number> {
+  return (await petCreditOf(db, bookingId)) ? petFeeCentsOf(db, bookingId) : 0;
+}
+
+/**
  * Turn `cents` of a booking's pet fee into a code for studio credit, in the
  * caller's transaction. Returns null when this booking's fee was already
  * returned. The code is the customer's alone and lasts as long as a

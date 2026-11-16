@@ -50,6 +50,11 @@ const designValue = (page: Page, name: string) =>
   page.evaluate((variable) => getComputedStyle(document.documentElement).getPropertyValue(variable).trim(), name);
 
 const saved = (page: Page) => expect(byText(page, /Draft saved at .+ Visitors do not see it yet\./)).toBeVisible();
+/**
+ * Published. A page is measured on a phone first (the editor's phone check), which on the development server
+ * can take longer than the usual wait: it draws the page twice, and resizes its pictures the first time.
+ */
+const published = (page: Page) => expect(byText(page, "Published. Visitors see it now.")).toBeVisible({ timeout: 60_000 });
 const nothingToPublish = (page: Page) => expect(byText(page, "Nothing to publish: the website shows exactly this.")).toBeVisible();
 const preview = (page: Page) => page.frameLocator('iframe[title="Preview of the website"]');
 const group = (page: Page, title: string) =>
@@ -109,7 +114,7 @@ test("the owner changes the design as a draft, sees it in the preview, and visit
   await page.getByRole("link", { name: "Edit the design" }).click();
   await expect(byLabel(page, "Accent, as a colour code")).toHaveValue("#336699");
   await page.getByRole("button", { name: "Publish", exact: true }).click();
-  await expect(byText(page, "Published. Visitors see it now.")).toBeVisible();
+  await published(page);
   await nothingToPublish(page);
   await expect(onScreen(page.locator(".editor-history"))).toContainText("Version 1 · on the website now");
   await expect(onScreen(page.locator(".editor-history"))).toContainText(`by ${OWNER}`);
@@ -159,7 +164,7 @@ test("the owner changes the menu, the phone number and the announcement, and bri
   await expect(guest.locator(".site-footer")).toContainText("(407) 663-6109");
 
   await page.getByRole("button", { name: "Publish", exact: true }).click();
-  await expect(byText(page, "Published. Visitors see it now.")).toBeVisible();
+  await published(page);
 
   // Visitors: the new item leads somewhere, the phone number is everywhere, the announcement can be closed.
   await guest.goto("/");
@@ -186,7 +191,7 @@ test("the owner changes the menu, the phone number and the announcement, and bri
   await expect(byLabel(page, "Phone number")).toHaveValue("(407) 663-6109");
   await saved(page);
   await page.getByRole("button", { name: "Publish", exact: true }).click();
-  await expect(byText(page, "Published. Visitors see it now.")).toBeVisible();
+  await published(page);
   const history = onScreen(page.locator(".editor-history"));
   await expect(history).toContainText("Version 2 · on the website now");
   await guest.goto("/");
@@ -212,7 +217,7 @@ test("the owner changes the menu, the phone number and the announcement, and bri
   await expect(byLabel(page, "Accent, as a colour code")).toHaveValue("#c8a882");
   await saved(page);
   await page.getByRole("button", { name: "Publish", exact: true }).click();
-  await expect(byText(page, "Published. Visitors see it now.")).toBeVisible();
+  await published(page);
   await guest.goto("/");
   expect(await designValue(guest, "--color-rose")).toBe("#c8a882");
   expect(await guest.locator("h1").first().evaluate((h1) => getComputedStyle(h1).fontFamily)).toMatch(/Cormorant/i);
@@ -441,7 +446,7 @@ test("the owner adds a font of their own and uses it in the design, and gives th
   await expect.poll(() => preview(page).locator("h1").first().evaluate((h1) => getComputedStyle(h1).fontFamily)).toMatch(/^"?uf-[0-9a-f]{12}/);
   await saved(page);
   await page.getByRole("button", { name: "Publish", exact: true }).click();
-  await expect(byText(page, "Published. Visitors see it now.")).toBeVisible();
+  await published(page);
   const guest = await visitor(browser);
   await guest.goto("/");
   expect(await guest.locator("h1").first().evaluate((h1) => getComputedStyle(h1).fontFamily)).toMatch(/^"?uf-[0-9a-f]{12}/);
@@ -459,7 +464,7 @@ test("the owner adds a font of their own and uses it in the design, and gives th
   await page.getByRole("button", { name: "Start again from the site as it was built" }).click();
   await saved(page);
   await page.getByRole("button", { name: "Publish", exact: true }).click();
-  await expect(byText(page, "Published. Visitors see it now.")).toBeVisible();
+  await published(page);
   await page.goto("/admin/website/fonts");
   await page.locator("summary", { hasText: "Delete Horizon Test" }).click();
   await page.getByRole("button", { name: "Yes, delete Horizon Test" }).click();
@@ -600,6 +605,15 @@ async function dragBlock(page: Page, name: string, onto: Locator, where: "bottom
   await page.locator(".page-editor-canvas").scrollIntoViewIfNeeded();
   const source = page.locator("[data-puck-drawer-item]").filter({ has: page.getByText(name, { exact: true }) }).first();
   await source.scrollIntoViewIfNeeded();
+  // In the middle of the list of blocks, which scrolls on its own: a drag that starts at an edge of it makes the
+  // editor scroll by itself, and the drop then lands somewhere else. The window itself is not scrolled.
+  await source.evaluate((element) => {
+    let list = element.parentElement;
+    while (list && list !== document.documentElement && list.scrollHeight <= list.clientHeight) list = list.parentElement;
+    if (!list || list === document.documentElement) return;
+    const off = element.getBoundingClientRect().top - list.getBoundingClientRect().top;
+    list.scrollTop += off - (list.clientHeight - element.clientHeight) / 2;
+  });
   const from = (await source.boundingBox())!;
   const target = where === "middle" ? await onCanvas(page, onto) : (await onto.boundingBox())!;
   const to = { x: target.x + target.width / 2, y: where === "middle" ? target.y + target.height / 2 : target.y + target.height - 2 };
@@ -655,7 +669,7 @@ test("the owner makes a page from blocks, previews it, and visitors see it at it
   await preview.close();
 
   await page.getByRole("button", { name: "Publish", exact: true }).click();
-  await expect(byText(page, "Published. Visitors see it now.")).toBeVisible();
+  await published(page);
   await expect(page.locator(".page-editor-where")).toContainText("/gift-cards · On the website");
 
   // A visitor finds it at its address, with the studio's name after the page's on the tab.
@@ -692,7 +706,7 @@ test("a page shows a picture shaped differently on a phone, and its address can 
   await page.getByRole("combobox", { name: "Shape, on a phone" }).selectOption({ label: "Square" });
   await expect(byText(page, /Draft saved at/)).toBeVisible();
   await page.getByRole("button", { name: "Publish", exact: true }).click();
-  await expect(byText(page, "Published. Visitors see it now.")).toBeVisible();
+  await published(page);
 
   const guest = await visitor(browser);
   await guest.goto("/gift-cards");
@@ -759,7 +773,7 @@ test("a manager who may edit pages prepares one as a draft, and an owner publish
   await page.getByRole("link", { name: "Edit Winter Offer" }).click();
   await expect(canvasOf(page).locator("h1")).toHaveText("Winter Offer");
   await page.getByRole("button", { name: "Publish", exact: true }).click();
-  await expect(byText(page, "Published. Visitors see it now.")).toBeVisible();
+  await published(page);
   const guest = await visitor(browser);
   await guest.goto("/winter-offer");
   await expect(guest.getByRole("heading", { name: "Winter Offer", level: 1 })).toBeVisible();
@@ -795,7 +809,7 @@ test("a page shows the studios, prices, contact details and form from the studio
   await page.locator("summary", { hasText: "Live values" }).click();
   await expect(onScreen(page.locator("#live-values"))).toContainText("{refund window}");
   await page.getByRole("button", { name: "Publish", exact: true }).click();
-  await expect(byText(page, "Published. Visitors see it now.")).toBeVisible();
+  await published(page);
 
   const guest = await visitor(browser);
   await guest.goto("/visit-us");
@@ -861,7 +875,7 @@ test("the website's own pages are edited like any other: the home page keeps its
   await expect(canvas.locator(".page-banner h1")).toHaveText("Photography Sessions");
   await expect(byText(page, /Draft saved at/)).toBeVisible();
   await page.getByRole("button", { name: "Publish", exact: true }).click();
-  await expect(byText(page, "Published. Visitors see it now.")).toBeVisible();
+  await published(page);
   const guest = await visitor(browser);
   await guest.goto("/services");
   await expect(guest.getByRole("heading", { name: "Photography Sessions", level: 1 })).toBeVisible();
@@ -874,7 +888,7 @@ test("the website's own pages are edited like any other: the home page keeps its
   await expect(byText(page, "That version is now the draft. Look at it, then publish it or discard it.")).toBeVisible();
   await expect(canvasOf(page).locator(".page-banner h1")).toHaveText("Professional Photography");
   await page.getByRole("button", { name: "Publish", exact: true }).click();
-  await expect(byText(page, "Published. Visitors see it now.")).toBeVisible();
+  await published(page);
   await guest.goto("/services");
   await expect(guest.getByRole("heading", { name: "Professional Photography", level: 1 })).toBeVisible();
   await guest.context().close();
@@ -925,7 +939,7 @@ test("a page that would be wider than a phone is not published, and is once it f
   await expect(canvas.locator(".blk-columns")).toHaveAttribute("data-phone", "stack");
   await expect(byText(page, /Draft saved at/)).toBeVisible();
   await page.getByRole("button", { name: "Publish", exact: true }).click();
-  await expect(byText(page, "Published. Visitors see it now.")).toBeVisible();
+  await published(page);
   expect((await guest.goto(path))?.status()).toBe(200);
   await guest.context().close();
 });
@@ -1001,7 +1015,7 @@ test("a page shows what clients wrote, with their stars, and the logos of brands
   await expect(byText(page, /Draft saved at/)).toBeVisible();
   // Publishing measures the page on a phone first: both blocks fit.
   await page.getByRole("button", { name: "Publish", exact: true }).click();
-  await expect(byText(page, "Published. Visitors see it now.")).toBeVisible();
+  await published(page);
 
   const guest = await visitor(browser);
   expect((await guest.goto(path))?.status()).toBe(200);

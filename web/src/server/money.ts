@@ -40,12 +40,18 @@ export async function paidAtStudioCents(db: DbLike, bookingId: string): Promise<
  * For several bookings at once: what each has received (every payment that
  * succeeded, before refunds). A booking that received nothing is not in the map.
  */
-export async function receivedCentsByBooking(db: DbLike, bookingIds: string[]): Promise<Map<string, number>> {
+export async function receivedCentsByBooking(db: DbLike, bookingIds: string[], where: "anywhere" | "at_studio" = "anywhere"): Promise<Map<string, number>> {
   if (bookingIds.length === 0) return new Map();
   const rows = await db
     .select({ bookingId: payments.bookingId, total: sql<number>`coalesce(sum(${payments.amountCents}), 0)::int` })
     .from(payments)
-    .where(and(inArray(payments.bookingId, bookingIds), eq(payments.status, "succeeded")))
+    .where(
+      and(
+        inArray(payments.bookingId, bookingIds),
+        eq(payments.status, "succeeded"),
+        where === "at_studio" ? eq(payments.provider, MANUAL_PROVIDER) : undefined,
+      ),
+    )
     .groupBy(payments.bookingId);
   return new Map(rows.map((row) => [row.bookingId, row.total]));
 }

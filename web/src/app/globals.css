@@ -1950,6 +1950,7 @@ button { font-family: inherit; }
 .rate-card .rate-book { width: 100%; }
 .blk-contact .contact-detail strong { color: var(--color-dark); }
 .blk-table-wrap { overflow-x: auto; }
+.blk-table-wrap:focus-visible { outline: 2px solid var(--color-rose-dark); outline-offset: 2px; }
 .blk-table th:last-child, .blk-table td:last-child { text-align: left; }
 .blk-table th, .blk-table td { padding-right: 1rem; }
 .live-values > summary { cursor: pointer; font-family: var(--font-serif); font-size: 1.1rem; color: var(--color-dark); }

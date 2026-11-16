@@ -5,7 +5,7 @@ import { noticeHours, type StudioDay } from "@/lib/domain/availability";
 import { daysBetween, isIsoDate, isoWeekday, type DayType, type IsoDate } from "@/lib/domain/time";
 import { dayTypeFor, type Catalog } from "./catalog";
 import { releaseHolds } from "./holds";
-import { dayBoundsUtc, localDateOf, localMinuteOn, localMinuteOnFloor } from "./tz";
+import { clockChangeOn, dayBoundsUtc, localDateOf, localMinuteOn, localMinuteOnFloor } from "./tz";
 
 /**
  * Free the slots of bookings whose payment never completed. Runs before every
@@ -117,9 +117,16 @@ async function loadPhotographerDay(
         end: localMinuteOn(new Date(hold.end_at), date),
       }))
       .filter((span) => span.end > span.start)
+      .concat(clockChange(date))
       .sort((a, b) => a.start - b.start),
     anyStart: true,
   };
+}
+
+/** The hour the clocks skip or repeat on `date`, as taken time; nothing on any other day. */
+function clockChange(date: IsoDate): { start: number; end: number }[] {
+  const change = clockChangeOn(date);
+  return change ? [change] : [];
 }
 
 /** Opening hours and taken time for every active studio on one date. */
@@ -164,7 +171,9 @@ export async function loadDayAvailability(
           start: localMinuteOnFloor(new Date(hold.start_at), date),
           end: localMinuteOn(new Date(hold.end_at), date),
         }))
-        .filter((span) => span.end > span.start),
+        .filter((span) => span.end > span.start)
+        .concat(clockChange(date))
+        .sort((a, b) => a.start - b.start),
     };
   });
 

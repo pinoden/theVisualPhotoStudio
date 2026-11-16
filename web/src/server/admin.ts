@@ -2,6 +2,7 @@ import { and, asc, desc, eq, gte, inArray, isNotNull, lt, ne, sql } from "drizzl
 import {
   addons,
   blocks,
+  bookingAddons,
   bookings,
   loyaltyLedger,
   payments,
@@ -297,6 +298,8 @@ export interface AdminBooking extends BookingView {
   notes: string;
   /** Card money still held: payments less refunds sent or on their way. */
   cardHeldCents: number;
+  /** What the studio can still send back to the card: what it holds, less a pet fee already returned as studio credit. */
+  refundableCents: number;
   refundProblem: boolean;
 }
 
@@ -341,15 +344,31 @@ export async function listBookings(
     .where(and(inArray(payments.bookingId, ids), ne(payments.provider, MANUAL_PROVIDER)))
     .groupBy(payments.bookingId, refunds.status);
 
+  // The pet fees already returned as studio credit (see src/server/pet-fee.ts): not to be refunded to the card as well.
+  const petReturned = await db
+    .select({ bookingId: bookingAddons.bookingId, cents: sql<number>`coalesce(sum(${bookingAddons.unitCents} * ${bookingAddons.quantity}), 0)::int` })
+    .from(bookingAddons)
+    .where(
+      and(
+        inArray(bookingAddons.bookingId, ids),
+        eq(bookingAddons.kind, "pet"),
+        sql`exists (select 1 from ${promoCodes} where ${promoCodes.originBookingId} = ${bookingAddons.bookingId} and ${promoCodes.source} = 'pet_fee')`,
+      ),
+    )
+    .groupBy(bookingAddons.bookingId);
+
   const views = await toBookingViews(db, rows);
   return views.map((view, i) => {
     const refundRows = back.filter((b) => b.bookingId === view.id);
     const returned = refundRows.filter((b) => b.status !== "failed").reduce((sum, b) => sum + b.cents, 0);
+    const cardHeldCents = (paid.find((p) => p.bookingId === view.id)?.paidCents ?? 0) - returned;
+    const asCredit = Math.min(Math.max(0, cardHeldCents), petReturned.find((p) => p.bookingId === view.id)?.cents ?? 0);
     return {
       ...view,
       customerPhone: rows[i].customerPhone,
       notes: rows[i].notes,
-      cardHeldCents: (paid.find((p) => p.bookingId === view.id)?.paidCents ?? 0) - returned,
+      cardHeldCents,
+      refundableCents: Math.max(0, cardHeldCents - asCredit),
       refundProblem: refundRows.some((b) => b.status === "failed"),
     };
   });

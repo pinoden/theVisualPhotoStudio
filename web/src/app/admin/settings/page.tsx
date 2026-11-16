@@ -3,47 +3,12 @@ import { connection } from "next/server";
 import { Suspense } from "react";
 import { getDb } from "@/db/client";
 import { requireOwner } from "@/server/session";
-import { ACCESS_INSTRUCTIONS_MAX, loadAccessInstructions, loadSettings, type Settings } from "@/server/settings";
+import { ACCESS_INSTRUCTIONS_MAX, loadAccessInstructions, loadSettings, NUMBER_SETTING_RANGES } from "@/server/settings";
 import { saveAccessInstructionsAction, saveSettingsAction } from "../actions";
 import { AdminFrame, AdminLoading } from "../frame";
+import { SETTING_GROUPS } from "./fields";
 
 export const metadata: Metadata = { title: "Settings", robots: { index: false } };
-
-type NumberKey = {
-  [K in keyof Settings]: Settings[K] extends number ? K : never;
-}[keyof Settings];
-
-const GROUPS: { title: string; fields: { key: NumberKey; label: string; help: string }[] }[] = [
-  {
-    title: "Booking",
-    fields: [
-      { key: "minLeadHours", label: "Minimum notice (hours)", help: "How far ahead a booking must be made." },
-      { key: "maxAdvanceDays", label: "Booking horizon (days)", help: "How far ahead the calendar is open." },
-      { key: "photoMinLeadHours", label: "Minimum notice for photography (hours)", help: "336 is two weeks. A session with the photographer cannot be booked closer than this." },
-      { key: "slotIncrementMinutes", label: "Start times every (minutes)", help: "15 offers 9:00, 9:15, 9:30 and so on." },
-      { key: "holdMinutes", label: "Hold while paying (minutes)", help: "How long a slot is kept for a customer at checkout." },
-    ],
-  },
-  {
-    title: "Cancelling and rescheduling",
-    fields: [
-      { key: "refundWindowHours", label: "Refund window (hours before start)", help: "336 is 14 days. Earlier cancellations are refunded automatically." },
-      { key: "photoRefundWindowHours", label: "Refund window for photography (hours before start)", help: "336 is 14 days." },
-      { key: "refundFeePercent", label: "Processing fee kept (%)", help: "0 refunds in full." },
-      { key: "rescheduleCutoffHours", label: "Reschedule cut-off (hours before start)", help: "After this, customers must call." },
-      { key: "maxReschedules", label: "Reschedules allowed per booking", help: "0 switches reschedule codes off." },
-      { key: "creditValidDays", label: "Reschedule code valid for (days)", help: "" },
-    ],
-  },
-  {
-    title: "Loyalty: a free hour for regular visitors",
-    fields: [
-      { key: "loyaltyVisits", label: "Visits that earn a free hour", help: "Counted on separate days. A visit made with a free hour does not count." },
-      { key: "loyaltyValidDays", label: "Free hour valid for (days)", help: "" },
-      { key: "loyaltyDelayHours", label: "A visit counts after (hours)", help: "Time after the visit ends, so staff can mark a no-show first." },
-    ],
-  },
-];
 
 export default function SettingsPage(props: PageProps<"/admin/settings">) {
   return (
@@ -85,7 +50,7 @@ async function SettingsForm({ searchParams }: Pick<PageProps<"/admin/settings">,
       </form>
 
       <form action={saveSettingsAction}>
-        {GROUPS.map((group) => (
+        {SETTING_GROUPS.map((group) => (
           <div className="admin-card" key={group.title}>
             <h3>{group.title}</h3>
             {group.title.startsWith("Loyalty") && (
@@ -104,7 +69,10 @@ async function SettingsForm({ searchParams }: Pick<PageProps<"/admin/settings">,
                     id={field.key}
                     name={field.key}
                     className="form-control"
-                    inputMode="numeric"
+                    type="number"
+                    min={NUMBER_SETTING_RANGES[field.key][0]}
+                    max={NUMBER_SETTING_RANGES[field.key][1]}
+                    step={1}
                     defaultValue={settings[field.key]}
                     required
                   />

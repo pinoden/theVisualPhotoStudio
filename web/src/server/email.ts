@@ -236,6 +236,8 @@ export function bookingMovedEmail(input: {
   was: string;
   now: string;
   duration: string;
+  /** Set when the client asked for the move: it counts as their reschedule, which the rental terms do not refund. */
+  clientAsked?: { canMoveAgain: boolean };
 }): QueuedEmail {
   return {
     to: input.to,
@@ -251,6 +253,12 @@ export function bookingMovedEmail(input: {
       `New time: ${input.now} (${input.duration})`,
       `It was: ${input.was}`,
       "",
+      ...(input.clientAsked
+        ? [
+            `As you asked for this change, it counts as your reschedule under the rental terms: if the booking is cancelled now, it is not refunded${input.clientAsked.canMoveAgain ? "" : ", and it cannot be moved again online"}.`,
+            "",
+          ]
+        : []),
       "The link in your confirmation email still opens this booking. If the new time does not suit you, please reply to this email or call us.",
       "",
       SIGN_OFF,

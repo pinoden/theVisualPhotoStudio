@@ -1,5 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { BookingSummary } from "@/components/BookingSummary";
 import { bookings, paymentLinks, payments, settings, staffShifts } from "@/db/schema";
 import { createAdminBooking, getAppointment } from "./appointments";
 import type { AuthUser } from "./auth";
@@ -199,6 +202,10 @@ describe("when the client pays the link", () => {
     const money = await moneyOf(world.db, await row(made.ref));
     expect(money).toMatchObject({ receivedCents: 17600, dueCents: 0 });
     expect(money.payments[0]).toMatchObject({ how: "Card, through the payment link", byHand: false });
+    // The client's booking page and the appointment say how it was paid: by card, not at the studio.
+    const summary = renderToStaticMarkup(createElement(BookingSummary, { booking: (await getAppointment(world.db, owner, made.ref, paidAt))!.money! }));
+    expect(summary).toContain("<span>Paid by card</span>");
+    expect(summary).not.toContain("at the studio");
     // It is card money, held by the processor: the site can send it back like any other card payment.
     expect(await netCardPaidCents(world.db, made.id)).toBe(17600);
 

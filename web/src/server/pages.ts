@@ -691,14 +691,27 @@ function oldPath(input: string): string | null {
  * Send an old address on to where its page is now: for the addresses of the
  * website this one replaced, which other sites and search engines still name.
  */
+/** The path a link of this site leads to, without what follows ? or #, which the public route does not look at. Null for a web address. */
+function pathOf(href: string): string | null {
+  return href.startsWith("/") ? href.split(/[?#]/)[0] || "/" : null;
+}
+
 export async function addRedirect(db: Db, viewer: AuthUser, input: { from: string; to: string }): Promise<{ ok: true } | { ok: false; message: string }> {
   if (!(await abilities(db, viewer)).publish) return { ok: false, message: CANNOT_PUBLISH };
   const from = oldPath(input.from);
   if (!from) return { ok: false, message: "Give the old address as it comes after the site's name: /old-page." };
   const to = parseHref(input.to);
   if (!to || to.startsWith("mailto:") || to.startsWith("tel:")) return { ok: false, message: "Give where it should lead: a page of this site (/rates) or a web address (https://...)." };
-  if (to === from) return { ok: false, message: "An address cannot lead to itself." };
+  if (pathOf(to) === from) return { ok: false, message: "An address cannot lead to itself." };
   if (await rowBySlug(db, from.slice(1))) return { ok: false, message: `${from} is the address of a page here. A page's own address cannot lead elsewhere.` };
+  // Nor back to itself through other old addresses: a visitor's browser would go round until it gave up.
+  for (let at = pathOf(to), steps = 0; at !== null && steps < 50; steps++) {
+    if (await rowBySlug(db, at.slice(1))) break; // a page answers there
+    const onward = await findRedirect(db, at);
+    const next = onward === null ? null : pathOf(onward);
+    if (next === from) return { ok: false, message: `That would send visitors round in a circle: ${at} already leads back to ${from}.` };
+    at = next;
+  }
   await db.insert(siteRedirects).values({ fromPath: from, toPath: to }).onConflictDoUpdate({ target: siteRedirects.fromPath, set: { toPath: to } });
   return { ok: true };
 }

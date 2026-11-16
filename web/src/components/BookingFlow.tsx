@@ -24,8 +24,10 @@ import {
   addDays,
   defaultDayType,
   durationLabel,
+  isIsoDate,
   longDateLabel,
   minutesToLabel,
+  studioToday,
   type DayType,
 } from "@/lib/domain/time";
 import { count, hoursInWords } from "@/lib/words";
@@ -94,12 +96,8 @@ function loadScript(src: string): Promise<void> {
   });
 }
 
-function localToday(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-/** Today's date is only known in the browser; the server renders without it. */
+/** Today's date is only known in the browser, on the studio's clock wherever the device is; the server renders without it. */
+const browserToday = () => studioToday();
 const subscribeNever = () => () => {};
 const serverToday = () => "";
 
@@ -137,7 +135,10 @@ export function BookingFlow({
     const match = catalog.studios.find((s) => s.slug === slug);
     return match ? [match.id] : [];
   });
-  const [date, setDate] = useState("");
+  /** What the date field holds. While a date is typed it passes through values such as 0002-12-28. */
+  const [dateInput, setDateInput] = useState("");
+  /** The date chosen: what the field holds, once that is a real date. */
+  const date = isIsoDate(dateInput) ? dateInput : "";
   const [durationChoice, setDuration] = useState(0);
   const [start, setStart] = useState<number | null>(null);
   const [addonIds, setAddonIds] = useState<string[]>([]);
@@ -151,7 +152,7 @@ export function BookingFlow({
   const [codeError, setCodeError] = useState("");
   const [checkingCode, setCheckingCode] = useState(false);
 
-  const today = useSyncExternalStore(subscribeNever, localToday, serverToday);
+  const today = useSyncExternalStore(subscribeNever, browserToday, serverToday);
   const [availability, setAvailability] = useState<DayAvailability | null>(null);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [config, setConfig] = useState<PaymentClientConfig | null>(null);
@@ -402,7 +403,7 @@ export function BookingFlow({
   }
 
   function chooseDate(value: string) {
-    setDate(value);
+    setDateInput(value);
     setStart(null);
     setAvailability(null);
     if (mode === "time") setStudioIds([]);
@@ -749,7 +750,7 @@ export function BookingFlow({
                 id="booking-date"
                 type="date"
                 className="form-control"
-                value={date}
+                value={dateInput}
                 min={firstDate || undefined}
                 max={today ? addDays(today, settings.maxAdvanceDays) : undefined}
                 onChange={(event) => chooseDate(event.target.value)}

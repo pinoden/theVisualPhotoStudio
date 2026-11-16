@@ -16,6 +16,12 @@ export interface BookingFacts {
   startAt: Date;
   /** How many times the money behind this booking has already been moved. */
   rescheduledCount: number;
+  /**
+   * Paid with a reschedule code: its money came from a booking that was
+   * moved. False for a booking that the studio moved at the client's request,
+   * which counts as moved too. Leave it out when it does not matter.
+   */
+  madeWithRescheduleCode?: boolean;
   /** Paid by card through the site and not yet refunded. */
   cardPaidCents: number;
   /** Paid with a reschedule credit (money from an earlier booking). */
@@ -51,7 +57,8 @@ export type CancelOutcome =
       /** Money taken at the studio that the terms say is refunded: the studio does that by hand. */
       byHandCents: number;
       /** Why the refund is what it is. */
-      why: "refund" | "inside_window" | "rescheduled" | "nothing_paid" | "paid_at_studio";
+      /** `rescheduled`: made with a reschedule code. `moved`: moved by the studio at the client's request. */
+      why: "refund" | "inside_window" | "rescheduled" | "moved" | "nothing_paid" | "paid_at_studio";
     };
 
 const HOUR = 3_600_000;
@@ -74,7 +81,7 @@ export function cancellationOutcome(booking: BookingFacts, now: Date, settings: 
     why,
   });
   const atStudioCents = Math.max(0, booking.paidAtStudioCents ?? 0);
-  if (booking.rescheduledCount > 0) return nothing("rescheduled");
+  if (booking.rescheduledCount > 0) return nothing(booking.madeWithRescheduleCode === false ? "moved" : "rescheduled");
   if (booking.cardPaidCents <= 0 && atStudioCents <= 0) return nothing("nothing_paid");
   if (hoursUntil(booking.startAt, now) < settings.refundWindowHours) return nothing("inside_window");
   // Cancelled in time. Money taken at the studio is the studio's to give back.
@@ -127,8 +134,10 @@ export function rescheduleOutcome(booking: BookingFacts, now: Date, settings: Po
   if (settings.maxReschedules <= 0) return { allowed: false, reason: "not_offered" };
   if (booking.rescheduledCount >= settings.maxReschedules) return { allowed: false, reason: "limit_reached" };
   if (hoursUntil(booking.startAt, now) < settings.rescheduleCutoffHours) return { allowed: false, reason: "too_late" };
-  // Money taken at the studio is held for the booking like any other, so it moves with it.
-  const paidCents = booking.cardPaidCents + booking.creditAppliedCents + Math.max(0, booking.paidAtStudioCents ?? 0);
+  // Money taken at the studio is held for the booking like any other, so it moves with it. A pet fee
+  // already returned as studio credit was given back once: it does not move with the booking a second time.
+  const returnedCents = booking.petCreditGiven ? Math.max(0, booking.petFeeCents ?? 0) : 0;
+  const paidCents = booking.cardPaidCents + booking.creditAppliedCents + Math.max(0, booking.paidAtStudioCents ?? 0) - returnedCents;
   // A booking that cost nothing is cancelled instead: that gives its code back.
   if (paidCents <= 0) return { allowed: false, reason: "nothing_paid" };
   const discountCents = Math.max(0, booking.discountCents);

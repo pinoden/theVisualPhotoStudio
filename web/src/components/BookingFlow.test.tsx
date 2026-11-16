@@ -253,6 +253,20 @@ describe("studio-first flow", () => {
     expect(screen.queryByRole("button", { name: "10 hr" })).toBeNull();
   });
 
+  it("keeps working while a date is typed digit by digit, and takes it once it is a real date", async () => {
+    render(<BookingFlow catalog={catalog} navigate={nav.push} />);
+    await user.click(studioBox("Studio Paris"));
+    await next();
+    // What a browser's date field holds as the year 2030 is typed into it, one digit at a time.
+    for (const typing of ["0002-01-09", "0020-01-09", "0203-01-09", WED]) pickDate(typing);
+    await pickDuration("1 hr");
+    expect(screen.getByText("Estimated total").nextElementSibling?.textContent).toBe("$68");
+    // A date that is not one yet is no date: the step asks for one.
+    pickDate("0002-01-09");
+    await next();
+    expect(screen.getByRole("alert").textContent).toBe("Please select a date.");
+  });
+
   it("does not let the customer skip a step", async () => {
     render(<BookingFlow catalog={catalog} navigate={nav.push} />);
     await next();

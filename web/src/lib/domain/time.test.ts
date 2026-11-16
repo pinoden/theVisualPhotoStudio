@@ -9,6 +9,7 @@ import {
   longDateLabel,
   minutesToHHMM,
   minutesToLabel,
+  studioToday,
 } from "./time";
 
 describe("dates", () => {
@@ -34,6 +35,22 @@ describe("dates", () => {
     expect(addDays("2026-03-01", -1)).toBe("2026-02-28");
     expect(daysBetween("2026-11-14", "2026-11-21")).toBe(7);
     expect(daysBetween("2026-11-21", "2026-11-14")).toBe(-7);
+  });
+
+  it("knows today on the studio's clock, whatever the device's time zone", () => {
+    // 3 AM in London on 17 November is 10 PM on the 16th in New York; noon in Tokyo on the 17th is still the 16th there.
+    expect(studioToday(new Date("2026-11-17T03:00:00Z"))).toBe("2026-11-16");
+    expect(studioToday(new Date("2026-11-17T03:00:00+09:00"))).toBe("2026-11-16");
+    expect(studioToday(new Date("2026-11-17T05:00:00Z"))).toBe("2026-11-17");
+    // Midsummer, when New York is four hours behind.
+    expect(studioToday(new Date("2026-07-01T03:59:00Z"))).toBe("2026-06-30");
+    expect(studioToday(new Date("2026-07-01T04:00:00Z"))).toBe("2026-07-01");
+  });
+
+  it("is no date while a date is still being typed", () => {
+    // A browser's date field holds these as the year is typed.
+    expect(isIsoDate("0002-12-28")).toBe(false);
+    expect(isIsoDate("0020-12-28")).toBe(false);
   });
 });
 

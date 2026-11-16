@@ -138,8 +138,13 @@ async function Bookings({ searchParams }: Pick<PageProps<"/admin/bookings">, "se
                             <label style={{ fontSize: ".8rem" }}>
                               Refund to card ($)
                               <br />
-                              <input name="refund" className="price-input" defaultValue={centsToInput(b.cardHeldCents)} {...MONEY_FIELD} />
+                              <input name="refund" className="price-input" defaultValue={centsToInput(b.refundableCents)} {...MONEY_FIELD} />
                             </label>
+                            {b.refundableCents < b.cardHeldCents && (
+                              <div style={{ fontSize: ".75rem", maxWidth: "12rem" }}>
+                                The pet fee was already returned as studio credit, so it is not refunded to the card.
+                              </div>
+                            )}
                             <br />
                             <button type="submit" className="btn btn-dark btn-small" style={{ marginTop: ".4rem" }}>
                               Cancel booking

@@ -3,7 +3,8 @@ import { eq } from "drizzle-orm";
 import { addons, bookingAddons, bookings, promoCodes, refunds } from "@/db/schema";
 import { getAppointment } from "./appointments";
 import type { AuthUser } from "./auth";
-import { cancelBooking, getManageChoices, ownerCancelBooking, requestRescheduleCode } from "./manage";
+import { listBookings } from "./admin";
+import { cancelBooking, getManageChoices, ownerCancelBooking, ownerRefund, requestRescheduleCode } from "./manage";
 import { givePetFeeCredit, petFeeCentsOf } from "./pet-fee";
 import { BASE_URL, createTestWorld, daysAfter, expectOk, FAR, h, NEAR, NOW, type TestWorld } from "./testing";
 
@@ -185,6 +186,31 @@ describe("the pet did not come", () => {
     const cancelled = expectOk(await cancelBooking(world.db, early.ref, byToken(early.manageToken), world.manageDeps()));
     expect(cancelled).toMatchObject({ refundCents: 7410, creditCents: 0 });
     expect((await codes()).filter((code) => code.source === "pet_fee")).toHaveLength(2); // one for each booking
+  });
+
+  it("once returned, is not given back again by moving the booking", async () => {
+    const booked = expectOk(await withPet({ date: FAR }));
+    expectOk(await givePetFeeCredit(world.db, owner, booked.ref, deps()));
+    // The reschedule code carries the $78 of studio: the $40 came back already, as credit.
+    const moved = expectOk(await requestRescheduleCode(world.db, booked.ref, byToken(booked.manageToken), world.manageDeps()));
+    expect(moved.valueCents).toBe(7800);
+    expect((await codes()).map((code) => [code.source, code.value]).sort()).toEqual([
+      ["pet_fee", 4000],
+      ["reschedule", 7800],
+    ]);
+  });
+
+  it("once returned, is not refunded to the card by the studio as well", async () => {
+    const booked = expectOk(await withPet({ date: FAR }));
+    expectOk(await givePetFeeCredit(world.db, owner, booked.ref, deps()));
+    // The bookings list offers the card money less the fee, and the studio cannot send more.
+    const [listed] = await listBookings(world.db, { from: FAR, to: FAR });
+    expect(listed).toMatchObject({ ref: booked.ref, cardHeldCents: 11800, refundableCents: 7800 });
+    const tooMuch = "At most $78 can be refunded to the card for this booking. Its pet fee of $40 was already returned as studio credit.";
+    expect(await ownerRefund(world.db, booked.ref, { amountCents: 7801, reason: "" }, world.manageDeps())).toMatchObject({ ok: false, message: tooMuch });
+    expect(await ownerCancelBooking(world.db, booked.ref, { refundCents: 11800 }, world.manageDeps())).toMatchObject({ ok: false, message: tooMuch });
+    expectOk(await ownerCancelBooking(world.db, booked.ref, { refundCents: 7800 }, world.manageDeps()));
+    expect(world.refundCalls.map((call) => call.amountCents)).toEqual([7800]);
   });
 
   it("has nothing to return once the studio refunded the whole booking to the card", async () => {

@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import { getDb } from "@/db/client";
 import { formatCents } from "@/lib/domain/pricing";
 import { durationLabel } from "@/lib/domain/time";
+import { MONEY_FIELD } from "@/lib/parse";
 import { listCodes } from "@/server/admin";
 import { requireOwner } from "@/server/session";
 import { formatInstant } from "@/server/tz";
@@ -52,7 +53,8 @@ async function Codes({ searchParams }: Pick<PageProps<"/admin/codes">, "searchPa
             <label className="form-label" htmlFor="code-value">
               Value (% or $; none for a free hour)
             </label>
-            <input id="code-value" name="value" className="form-control" inputMode="decimal" />
+            {/* A whole percent or an amount in dollars: both fit the pattern for dollars; the kind decides which it is. */}
+            <input id="code-value" name="value" className="form-control" {...MONEY_FIELD} />
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="code-email">
@@ -64,13 +66,13 @@ async function Codes({ searchParams }: Pick<PageProps<"/admin/codes">, "searchPa
             <label className="form-label" htmlFor="code-days">
               Valid for (days)
             </label>
-            <input id="code-days" name="validDays" className="form-control" inputMode="numeric" defaultValue="30" required />
+            <input id="code-days" name="validDays" className="form-control" type="number" min={1} max={730} step={1} defaultValue="30" required />
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="code-uses">
               Uses (discount codes only)
             </label>
-            <input id="code-uses" name="maxUses" className="form-control" inputMode="numeric" defaultValue="1" />
+            <input id="code-uses" name="maxUses" className="form-control" type="number" min={1} max={100000} step={1} defaultValue="1" />
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="code-note">

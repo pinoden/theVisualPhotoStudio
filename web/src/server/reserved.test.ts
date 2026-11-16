@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-import { bookings, payments } from "@/db/schema";
-import { cancelBooking, netCardPaidCents } from "./manage";
+import { bookings, payments, refunds } from "@/db/schema";
+import { cancelBooking, netCardPaidCents, retryOpenRefunds } from "./manage";
 import { settleReservedPayments } from "./reserved";
 import { createTestWorld, expectOk, FAR, hoursAfter, NOW, OWNER_EMAIL, type TestWorld } from "./testing";
 import { formatInstant } from "./tz";
@@ -62,6 +62,35 @@ describe("money reserved for a booking and not taken yet", () => {
     // Never taken, so nothing was refunded either.
     expect(world.refundCalls).toHaveLength(0);
     expect(await settle()).toEqual({ taken: 0, released: 0 });
+  });
+
+  it("is given back in full when the booking is cancelled while the money is being taken", async () => {
+    world.failCaptures = "Square answered HTTP 503";
+    const booked = expectOk(await world.book({ date: FAR }));
+    world.failCaptures = null;
+    const [booking] = await world.db.select().from(bookings).where(eq(bookings.ref, booked.ref));
+    // The booking stood when the scheduled task looked; the customer cancels while the processor takes the money.
+    // Only reserved at that moment, so the cancellation itself refunds nothing.
+    const deps = world.manageDeps();
+    const provider = deps.payments!;
+    const racing = {
+      ...deps,
+      payments: {
+        ...provider,
+        capture: async (paymentId: string) => {
+          expectOk(await cancelBooking(world.db, booked.ref, { kind: "token", token: booked.manageToken }, world.manageDeps()));
+          return provider.capture(paymentId);
+        },
+      },
+    };
+    expect(await settleReservedPayments(world.db, racing)).toEqual({ taken: 1, released: 0 });
+    expect(await world.db.select({ amountCents: refunds.amountCents, status: refunds.status, automatic: refunds.automatic }).from(refunds)).toEqual([
+      { amountCents: 17600, status: "pending", automatic: true },
+    ]);
+    // Sent with the other refunds, by the same run of the scheduled task.
+    expect(await retryOpenRefunds(world.db, world.manageDeps())).toEqual({ succeeded: 1, failed: 0 });
+    expect(world.refundCalls.map((call) => call.amountCents)).toEqual([17600]);
+    expect(await netCardPaidCents(world.db, booking.id)).toBe(0);
   });
 
   it("is taken at once in the ordinary case, and the scheduled task finds nothing to do", async () => {

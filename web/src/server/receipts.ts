@@ -73,7 +73,11 @@ export interface Receipt {
   /** The payments that succeeded, oldest first. */
   payments: ReceiptPayment[];
   paidCents: number;
-  /** Given back, or on its way back. */
+  /**
+   * Given back, or on its way back. A refund the processor accepted and then
+   * rejected is neither: the scheduled task cannot make it, so it is left out
+   * (the owner, who is told, refunds it by hand).
+   */
   refundedCents: number;
   /** Paid, less what was given back. */
   netCents: number;
@@ -174,7 +178,9 @@ export async function loadReceipts(db: DbLike, email: string): Promise<{ receipt
             : "Card, online",
       amountCents: payment.amountCents,
       refunds: back
-        .filter((refund) => refund.paymentId === payment.id)
+        // A refund that failed at once is tried again by the scheduled task, so it is on its way. One the processor
+        // accepted and then rejected (it failed with the processor's id) is answered the same way each time.
+        .filter((refund) => refund.paymentId === payment.id && !(refund.status === "failed" && refund.providerRefundId !== null))
         .map((refund) => ({
           at: refund.createdAt.toISOString(),
           amountCents: refund.amountCents,

@@ -8,6 +8,16 @@
 export type IsoDate = string; // 'YYYY-MM-DD'
 export type DayType = "weekday" | "weekend";
 
+/** The studio's time zone. `src/server/tz.ts` converts with it; the browser only asks it for today's date. */
+export const STUDIO_TIME_ZONE = "America/New_York";
+
+const studioDate = new Intl.DateTimeFormat("en-CA", { timeZone: STUDIO_TIME_ZONE, year: "numeric", month: "2-digit", day: "2-digit" });
+
+/** Today's date on the studio's clock, wherever the device that asks is. */
+export function studioToday(now: Date = new Date()): IsoDate {
+  return studioDate.format(now);
+}
+
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 export function parseIsoDate(value: string): { year: number; month: number; day: number } | null {

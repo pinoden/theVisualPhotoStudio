@@ -131,8 +131,32 @@ export const DEFAULT_SETTINGS: Settings = {
   managerPublishesWebsite: false,
 };
 
-const int = (min: number, max: number) => (v: unknown) =>
+const int = ([min, max]: readonly [number, number]) => (v: unknown) =>
   typeof v === "number" && Number.isInteger(v) && v >= min && v <= max;
+
+/**
+ * The whole numbers the owners set under Settings, each with the lowest and
+ * highest it may be. The server keeps to them, and the form gives its fields
+ * the same `min` and `max`, so the browser stops a value before it is sent.
+ */
+export const NUMBER_SETTING_RANGES = {
+  slotIncrementMinutes: [5, 240],
+  minLeadHours: [0, 24 * 60],
+  maxAdvanceDays: [1, 730],
+  photoMinLeadHours: [0, 24 * 365],
+  holdMinutes: [1, 60],
+  refundWindowHours: [0, 24 * 365],
+  photoRefundWindowHours: [0, 24 * 365],
+  refundFeePercent: [0, 100],
+  rescheduleCutoffHours: [0, 24 * 365],
+  maxReschedules: [0, 20],
+  creditValidDays: [1, 730],
+  loyaltyVisits: [1, 100],
+  loyaltyValidDays: [1, 730],
+  loyaltyDelayHours: [0, 24 * 14],
+} as const satisfies Partial<Record<keyof Settings, readonly [number, number]>>;
+
+export type NumberSettingKey = keyof typeof NUMBER_SETTING_RANGES;
 const bool = (v: unknown) => typeof v === "boolean";
 
 function discountTable(v: unknown): Record<number, number> | null {
@@ -149,21 +173,21 @@ function discountTable(v: unknown): Record<number, number> | null {
 
 /** Which values are acceptable for each simple setting. Anything else is ignored. */
 const VALIDATORS: { [K in Exclude<keyof Settings, "multiStudioPercent">]: (v: unknown) => boolean } = {
-  slotIncrementMinutes: int(5, 240),
-  minLeadHours: int(0, 24 * 60),
-  maxAdvanceDays: int(1, 730),
-  photoMinLeadHours: int(0, 24 * 365),
-  holdMinutes: int(1, 60),
-  refundWindowHours: int(0, 24 * 365),
-  photoRefundWindowHours: int(0, 24 * 365),
-  refundFeePercent: int(0, 100),
-  rescheduleCutoffHours: int(0, 24 * 365),
-  maxReschedules: int(0, 20),
-  creditValidDays: int(1, 730),
+  slotIncrementMinutes: int(NUMBER_SETTING_RANGES.slotIncrementMinutes),
+  minLeadHours: int(NUMBER_SETTING_RANGES.minLeadHours),
+  maxAdvanceDays: int(NUMBER_SETTING_RANGES.maxAdvanceDays),
+  photoMinLeadHours: int(NUMBER_SETTING_RANGES.photoMinLeadHours),
+  holdMinutes: int(NUMBER_SETTING_RANGES.holdMinutes),
+  refundWindowHours: int(NUMBER_SETTING_RANGES.refundWindowHours),
+  photoRefundWindowHours: int(NUMBER_SETTING_RANGES.photoRefundWindowHours),
+  refundFeePercent: int(NUMBER_SETTING_RANGES.refundFeePercent),
+  rescheduleCutoffHours: int(NUMBER_SETTING_RANGES.rescheduleCutoffHours),
+  maxReschedules: int(NUMBER_SETTING_RANGES.maxReschedules),
+  creditValidDays: int(NUMBER_SETTING_RANGES.creditValidDays),
   loyaltyEnabled: bool,
-  loyaltyVisits: int(1, 100),
-  loyaltyValidDays: int(1, 730),
-  loyaltyDelayHours: int(0, 24 * 14),
+  loyaltyVisits: int(NUMBER_SETTING_RANGES.loyaltyVisits),
+  loyaltyValidDays: int(NUMBER_SETTING_RANGES.loyaltyValidDays),
+  loyaltyDelayHours: int(NUMBER_SETTING_RANGES.loyaltyDelayHours),
   staffSeesContact: bool,
   staffSetsLabels: bool,
   staffSeesAllDays: bool,

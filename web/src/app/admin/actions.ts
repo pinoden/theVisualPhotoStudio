@@ -30,7 +30,8 @@ import { flushEmailsSoon, manageDeps } from "@/server/runtime";
 import { notFound } from "next/navigation";
 import { can, type Ability } from "@/lib/abilities";
 import { requireManager, requireOwner } from "@/server/session";
-import { ACCESS_INSTRUCTIONS_MAX, loadSettings, saveAccessInstructions, saveSetting } from "@/server/settings";
+import { ACCESS_INSTRUCTIONS_MAX, loadSettings, NUMBER_SETTING_RANGES, saveAccessInstructions, saveSetting, type NumberSettingKey } from "@/server/settings";
+import { settingLabel } from "./settings/fields";
 import { addStudioPhotos, moveStudioPhoto, removeStudioPhoto, setStudioFloorPlan } from "@/server/studio-photos";
 import { includedList } from "@/lib/studio-facts";
 
@@ -306,22 +307,7 @@ export async function voidCodeAction(formData: FormData): Promise<void> {
 
 // ── Settings ─────────────────────────────────────────────────────────────────
 
-const NUMBER_SETTINGS = [
-  "slotIncrementMinutes",
-  "minLeadHours",
-  "maxAdvanceDays",
-  "photoMinLeadHours",
-  "holdMinutes",
-  "refundWindowHours",
-  "photoRefundWindowHours",
-  "refundFeePercent",
-  "rescheduleCutoffHours",
-  "maxReschedules",
-  "creditValidDays",
-  "loyaltyVisits",
-  "loyaltyValidDays",
-  "loyaltyDelayHours",
-] as const;
+const NUMBER_SETTINGS = Object.keys(NUMBER_SETTING_RANGES) as NumberSettingKey[];
 // What staff can do is set on the Staff page (saveStaffAbilitiesAction), not here.
 const SWITCH_SETTINGS = ["loyaltyEnabled"] as const;
 
@@ -331,14 +317,17 @@ export async function saveSettingsAction(formData: FormData): Promise<void> {
   const rejected: string[] = [];
   for (const key of NUMBER_SETTINGS) {
     const value = intInRange(text(formData, key), 0, 100000);
-    if (value === null || !(await saveSetting(db, key, value))) rejected.push(key);
+    if (value === null || !(await saveSetting(db, key, value))) {
+      const [min, max] = NUMBER_SETTING_RANGES[key];
+      rejected.push(`${settingLabel(key)} is a whole number from ${min} to ${max}`);
+    }
   }
   for (const key of SWITCH_SETTINGS) {
     if (!(await saveSetting(db, key, formData.get(key) !== null))) rejected.push(key);
   }
   updateTag(CATALOG_TAG);
   if (rejected.length > 0) {
-    failed("/admin/settings", `Not saved, value out of range: ${rejected.join(", ")}. Everything else was saved.`);
+    failed("/admin/settings", `Not saved: ${rejected.join("; ")}. Everything else was saved.`);
   }
   done("/admin/settings", "Settings saved.");
 }

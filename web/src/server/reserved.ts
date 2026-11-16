@@ -1,5 +1,5 @@
 import { and, eq, inArray, isNull } from "drizzle-orm";
-import { bookings, payments } from "@/db/schema";
+import { bookings, payments, refunds } from "@/db/schema";
 import type { Db } from "@/db/client";
 import { ownerCaptureNotice, queueEmail } from "./email";
 import { RESERVE_HOURS, type PaymentProvider } from "./payments";
@@ -40,6 +40,9 @@ interface Reserved {
   createdAt: Date;
 }
 
+/** The booking statuses for which a reserved amount is taken: the booking stands, visited or not. */
+const STANDING = ["confirmed", "completed", "no_show"] as const;
+
 /**
  * Take a reserved amount. The payment becomes `succeeded`. When it does not go
  * through, it stays `authorized` for the scheduled task to try again, and the
@@ -50,7 +53,7 @@ export async function takeReserved(db: Db, payment: Reserved, deps: SettleDeps):
   if (!deps.payments) return false;
   const result = await deps.payments.capture(payment.providerPaymentId);
   if (result.ok) {
-    await db.update(payments).set({ status: "succeeded", error: null }).where(and(eq(payments.id, payment.id), eq(payments.status, "authorized")));
+    await recordTaken(db, payment);
     return true;
   }
   await db.transaction(async (tx) => {
@@ -76,8 +79,34 @@ export async function takeReserved(db: Db, payment: Reserved, deps: SettleDeps):
   return false;
 }
 
-/** The booking statuses for which a reserved amount is taken: the booking stands, visited or not. */
-const STANDING = ["confirmed", "completed", "no_show"] as const;
+/**
+ * Record a reserved amount as taken, with its booking locked. A cancellation
+ * sends no refund while the money is only reserved, so a booking cancelled
+ * while the processor was taking it would keep money it no longer stands for:
+ * it gets all of it back, as a refund recorded here and sent by the scheduled
+ * task with the others (`retryOpenRefunds`, which runs after this one).
+ */
+async function recordTaken(db: Db, payment: Reserved): Promise<void> {
+  await db.transaction(async (tx) => {
+    const [of] = await tx.select({ bookingId: payments.bookingId }).from(payments).where(eq(payments.id, payment.id)).limit(1);
+    if (!of) return;
+    // Locked as a cancellation locks it: the two cannot pass each other.
+    const [booking] = await tx.select({ status: bookings.status }).from(bookings).where(eq(bookings.id, of.bookingId)).for("update").limit(1);
+    const taken = await tx
+      .update(payments)
+      .set({ status: "succeeded", error: null })
+      .where(and(eq(payments.id, payment.id), eq(payments.status, "authorized")))
+      .returning({ id: payments.id });
+    if (taken.length === 0 || !booking || (STANDING as readonly string[]).includes(booking.status)) return;
+    await tx.insert(refunds).values({
+      paymentId: payment.id,
+      amountCents: payment.amountCents,
+      reason: `${payment.ref} was cancelled while its reserved amount was being taken: given back in full`,
+      automatic: true,
+      status: "pending",
+    });
+  });
+}
 
 /**
  * Settle every reserved amount the moment of booking left behind: take it

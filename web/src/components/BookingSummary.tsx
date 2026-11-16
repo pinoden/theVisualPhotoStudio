@@ -21,6 +21,8 @@ export function statusLabel(booking: Pick<BookingView, "status" | "cancelReason"
 export function BookingSummary({ booking }: { booking: BookingView }) {
   const when = formatRange(new Date(booking.startAt), new Date(booking.endAt));
   const paidStatus = booking.status === "confirmed" || booking.status === "completed";
+  /** What came by card: online, or through a payment link. */
+  const byCard = booking.receivedCents - booking.receivedAtStudioCents;
   return (
     <div className="price-summary">
       <div className="price-row">
@@ -81,10 +83,10 @@ export function BookingSummary({ booking }: { booking: BookingView }) {
           <span>{formatCents(-booking.promoDiscountCents)}</span>
         </div>
       )}
-      {/* A booking made in the admin is paid at the studio, perhaps in parts: what was received, then what is owed. */}
+      {/* A booking made in the admin is paid at the studio or through a payment link, perhaps in parts: what was received, then what is owed. */}
       {paidStatus && booking.madeByAdmin && booking.receivedCents > 0 && booking.dueCents > 0 && (
         <div className="price-row">
-          <span>Paid at the studio so far</span>
+          <span>{byCard > 0 ? "Paid so far" : "Paid at the studio so far"}</span>
           <span>{formatCents(booking.receivedCents)}</span>
         </div>
       )}
@@ -96,7 +98,11 @@ export function BookingSummary({ booking }: { booking: BookingView }) {
               ? "Charged to card"
               : booking.dueCents > 0
                 ? "To pay at the studio"
-                : "Paid at the studio"}
+                : byCard <= 0
+                  ? "Paid at the studio"
+                  : booking.receivedAtStudioCents > 0
+                    ? "Paid by card and at the studio"
+                    : "Paid by card"}
         </span>
         <span>{formatCents(paidStatus && booking.madeByAdmin && booking.dueCents > 0 ? booking.dueCents : booking.totalCents)}</span>
       </div>

@@ -39,6 +39,9 @@ export const byText = (scope: Scope, text: string | RegExp) => onScreen(scope.ge
  * contrast is left out: see e2e/a11y.spec.ts.
  */
 export async function accessibilityProblems(page: Page): Promise<string[]> {
+  // After a form is sent, the framework draws the page and puts its title back a moment later. Scanned in between,
+  // a page that is about to have a title is reported without one; a page that never gets one fails here instead.
+  await expect.poll(() => page.title(), { message: "the page has a title" }).not.toBe("");
   const result = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
     .disableRules(["color-contrast"])

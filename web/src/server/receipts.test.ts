@@ -5,7 +5,7 @@ import { addons, bookings, payments, priceRules, refunds } from "@/db/schema";
 import { DEFAULT_FRAME } from "@/lib/site/frame";
 import { createAdminBooking } from "./appointments";
 import type { AuthUser } from "./auth";
-import { cancelBooking, ownerRefund, requestRescheduleCode } from "./manage";
+import { cancelBooking, checkUnsettledRefunds, ownerRefund, requestRescheduleCode } from "./manage";
 import { money, pdfSafe, receiptPdf, yearPdf } from "./receipt-pdf";
 import { getReceipt, loadReceipts, transactionsOf, yearsOf, yearStatement } from "./receipts";
 import { recordHandRefund, recordStudioPayment } from "./studio-payments";
@@ -110,6 +110,20 @@ describe("a receipt", () => {
       [14820, true], // what was left, less the 5% fee
     ]);
     expect(receipt).toMatchObject({ refundedCents: 16820, netCents: 780, status: "partly_refunded" });
+  });
+
+  it("leaves out a refund the processor accepted and then rejected: that money did not go back", async () => {
+    const booked = expectOk(await world.book({ date: FAR }));
+    // Accepted, not completed yet: on its way.
+    world.pendingRefunds = true;
+    expectOk(await ownerRefund(world.db, booked.ref, { amountCents: 5000, reason: "Goodwill" }, world.manageDeps()));
+    expect(await getReceipt(world.db, JANE, booked.ref)).toMatchObject({ refundedCents: 5000, status: "partly_refunded" });
+    // Then rejected. A retry is answered the same way, so the receipt does not show it as on its way.
+    world.refundAnswer = { state: "rejected", message: "The card account is closed" };
+    expect(await checkUnsettledRefunds(world.db, world.manageDeps())).toEqual({ settled: 0, rejected: 1 });
+    const receipt = (await getReceipt(world.db, JANE, booked.ref))!;
+    expect(receipt).toMatchObject({ paidCents: 17600, refundedCents: 0, netCents: 17600, status: "paid" });
+    expect(receipt.payments[0].refunds).toEqual([]);
   });
 
   it("says Refunded when everything paid was given back", async () => {

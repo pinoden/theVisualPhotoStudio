@@ -542,6 +542,26 @@ describe("opening hours", () => {
     expect(day.dayType).toBe("weekday");
   });
 
+  it("neither offers nor books the hour the clocks skip, in a studio open all night", async () => {
+    await db.insert(settings).values({ key: "maxAdvanceDays", value: 365 });
+    await db.delete(studioHours).where(and(eq(studioHours.studioId, ids.blanche), eq(studioHours.weekday, 7)));
+    await db.insert(studioHours).values({ studioId: ids.blanche, weekday: 7, openMinute: 0, closeMinute: 1440 });
+    const SPRING = "2027-03-14"; // a Sunday: the clocks go from 2:00 to 3:00
+    const catalog = await loadCatalog(db);
+    const day = await loadDayAvailability(db, catalog, SPRING, NOW);
+    const blanche = day.days.filter((d) => d.studioId === ids.blanche);
+    const starts = combinedStarts(blanche, { durationMinutes: 60, incrementMinutes: 15 });
+    // 2:00 does not exist, and a visit from 1:00 or 1:30 would run into it: none of them is offered.
+    for (const minute of [h(1), h(1) + 30, h(2), h(2) + 30]) expect(starts).not.toContain(minute);
+    expect(starts).toContain(h(3));
+    // Sent anyway, they are refused with a reason, not a server error, and nothing is charged.
+    for (const startMinute of [h(2), h(1)]) {
+      expect(await book({ date: SPRING, startMinute, durationMinutes: startMinute === h(1) ? 120 : 60 })).toMatchObject({ ok: false, code: "slot_taken" });
+    }
+    expect(await db.select().from(bookings)).toHaveLength(0);
+    expect((await book({ date: SPRING, startMinute: h(3), durationMinutes: 60 })).ok).toBe(true);
+  });
+
   it("converts local time correctly on a daylight-saving change day", async () => {
     await db.insert(settings).values({ key: "maxAdvanceDays", value: 365 });
     // Sunday 2027-03-14: clocks jump from 2:00 to 3:00, so 10:00 is UTC-4.

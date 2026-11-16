@@ -163,6 +163,17 @@ describe("moving a booking", () => {
     });
   });
 
+  it("leaves out a pet fee that was already returned as studio credit, which was given back once", () => {
+    // $78 of studio and a $40 pet fee, by card. With the fee still held, all of it moves.
+    const withPet = booking({ cardPaidCents: 11800, petFeeCents: 4000 });
+    expect(rescheduleOutcome(withPet, hoursBefore(48), settings)).toMatchObject({ allowed: true, creditCents: 11800 });
+    expect(rescheduleOutcome({ ...withPet, petCreditGiven: true }, hoursBefore(48), settings)).toEqual({
+      allowed: true,
+      creditCents: 7800,
+      discountCents: 0,
+    });
+  });
+
   it("is allowed inside the refund window, which is when it matters most", () => {
     expect(rescheduleOutcome(booking(), hoursBefore(30), settings)).toMatchObject({ allowed: true });
   });

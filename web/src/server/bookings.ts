@@ -368,6 +368,11 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
 
   const startAt = localToUtc(input.date, input.startMinute);
   const endAt = localToUtc(input.date, input.startMinute + input.durationMinutes);
+  // Across the hour the clocks change, a booking would not last as long as it costs. The day's taken time
+  // already holds that hour (`clockChangeOn`); this is the last word.
+  if (endAt.getTime() - startAt.getTime() !== input.durationMinutes * 60_000) {
+    return fail(409, "slot_taken", "The clocks change at that time, so it cannot be booked. Please choose another.");
+  }
   const manageToken = randomBytes(24).toString("base64url");
   const holdExpiresAt = new Date(now.getTime() + catalog.settings.holdMinutes * 60_000);
   const spendsCode = promo !== null && price.promoDiscountCents > 0;
@@ -594,6 +599,8 @@ export interface BookingView {
   totalCents: number;
   /** Money received for the booking so far, by card through the site or at the studio, before any refund. */
   receivedCents: number;
+  /** The part of it taken at the studio and recorded by hand; the rest came by card (online, or through a payment link). */
+  receivedAtStudioCents: number;
   /**
    * What is still to pay. Only a booking made in the admin can owe anything:
    * a booking made online is paid in full when it is made.
@@ -609,7 +616,7 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[]): Promise<Bo
   if (rows.length === 0) return [];
   const ids = rows.map((r) => r.id);
   const codeIds = rows.map((r) => r.promoCodeId).filter((id): id is string => id !== null);
-  const [holdRows, addonRows, codeRows, received] = await Promise.all([
+  const [holdRows, addonRows, codeRows, received, atStudio] = await Promise.all([
     db
       .select({ bookingId: studioHolds.bookingId, name: studios.name, priceCents: studioHolds.priceCents, sort: studios.sortOrder })
       .from(studioHolds)
@@ -623,6 +630,7 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[]): Promise<Bo
           .where(inArray(promoCodes.id, codeIds))
       : [],
     receivedCentsByBooking(db, ids),
+    receivedCentsByBooking(db, ids, "at_studio"),
   ]);
   return rows.map((booking) => ({
     id: booking.id,
@@ -653,6 +661,7 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[]): Promise<Bo
     photography: booking.photographerId !== null ? { includes: booking.photoIncludes ?? "" } : null,
     totalCents: booking.totalCents,
     receivedCents: received.get(booking.id) ?? 0,
+    receivedAtStudioCents: atStudio.get(booking.id) ?? 0,
     dueCents: booking.madeBy !== null ? Math.max(0, booking.totalCents - (received.get(booking.id) ?? 0)) : 0,
     rescheduledCount: booking.rescheduledCount,
   }));

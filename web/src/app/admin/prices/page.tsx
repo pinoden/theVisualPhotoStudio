@@ -92,7 +92,7 @@ async function Prices({ searchParams }: Pick<PageProps<"/admin/prices">, "search
               <label className="form-label" htmlFor={`minutes-${studio.id}`}>
                 Add a duration (minutes)
               </label>
-              <input id={`minutes-${studio.id}`} name="minutes" className="form-control" inputMode="numeric" placeholder="360" required />
+              <input id={`minutes-${studio.id}`} name="minutes" className="form-control" type="number" min={15} max={1440} step={15} placeholder="360" required />
             </div>
             <div className="form-group">
               <label className="form-label" htmlFor={`weekday-${studio.id}`}>
