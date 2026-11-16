@@ -13,6 +13,7 @@ import type { SiteContext } from "@/lib/site/blocks/block";
 import type { PageContent } from "@/lib/site/page";
 import type { VersionSummary } from "@/server/website";
 import { EditorBar, History } from "./parts";
+import { checkOnPhones } from "./phone-check";
 
 /** What `restorePageVersion` takes, in place of a version's id, for how the page was built (BUILT_VERSION in src/server/pages.ts). */
 const BUILT_VERSION = "built";
@@ -75,6 +76,8 @@ function PageEditorBody({ initial, versions, collections, links, fontClasses, no
       publish: () => publishPageAction(initial.id),
       discard: () => discardPageDraftAction(initial.id),
       restore: (versionId) => restorePageVersionAction(initial.id, versionId),
+      // Requirement 24's guard rails: the draft, as visitors would get it, measured at phone widths before it is published.
+      check: () => checkOnPhones(`/admin/website/pages/${encodeURIComponent(initial.id)}/check`),
     }),
     [initial.id],
   );

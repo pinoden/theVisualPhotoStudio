@@ -58,6 +58,12 @@ export interface DraftActions<T> {
   publish(): Promise<Outcome>;
   discard(): Promise<Outcome>;
   restore(versionId: string): Promise<Outcome>;
+  /**
+   * Run after the draft is saved and before it is published: what would be
+   * wrong with it on the website. Nothing is published while anything is.
+   * The page editor's phone checks (phone-check.ts).
+   */
+  check?(): Promise<string[]>;
 }
 
 /** The editor of the design, or of the header, menu and footer. */
@@ -215,7 +221,28 @@ export function useDraftEditor<T>(initial: DraftStart<T>, actions: DraftActions<
     saveNow: () => save(false),
     overwrite: () => save(true),
     reload: () => router.refresh(),
-    publish: () => act(actions.publish, "Published. Visitors see it now.", true),
+    publish: () =>
+      act(
+        async () => {
+          if (actions.check) {
+            report("Checking the page at the width of a phone…");
+            let problems: string[];
+            try {
+              problems = await actions.check();
+            } catch (error) {
+              report("");
+              return { ok: false, message: `Not published: ${error instanceof Error ? error.message : "the page could not be checked."} Try again.` };
+            }
+            report("");
+            if (problems.length > 0) {
+              return { ok: false, message: `Not published: on a phone, this page would be hard to use. ${problems.join(" ")} Change it so it fits, then publish again.` };
+            }
+          }
+          return actions.publish();
+        },
+        "Published. Visitors see it now.",
+        true,
+      ),
     discard: () => act(actions.discard, "The changes were discarded.", false),
     restore: (versionId) => act(() => actions.restore(versionId), "That version is now the draft. Look at it, then publish it or discard it.", false),
   };

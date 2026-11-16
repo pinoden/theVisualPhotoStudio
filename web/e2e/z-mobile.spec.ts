@@ -14,6 +14,7 @@ import {
   signIn,
   totalRow,
 } from "./helpers";
+import { hardToTouch as hardToTouchIn, tooSmallToRead as tooSmallToReadIn, widerThanScreen as widerThanScreenIn } from "../src/lib/site/phone-checks";
 
 /**
  * The owner's requirement 13: the whole site on a phone. Runs after
@@ -54,81 +55,11 @@ test.afterEach(() => {
   expect(browserProblems, "errors reported by the browser").toEqual([]);
 });
 
-/**
- * What is wider than the screen. A box that scrolls sideways on purpose (a
- * wide table inside its own frame) is allowed; the page itself is not.
- */
-async function widerThanScreen(page: Page): Promise<string[]> {
-  return page.evaluate(() => {
-    const limit = document.documentElement.clientWidth + 1;
-    const found: string[] = [];
-    if (document.documentElement.scrollWidth > limit) {
-      found.push(`the page scrolls sideways (${document.documentElement.scrollWidth}px wide on a ${limit - 1}px screen)`);
-    }
-    for (const el of Array.from(document.querySelectorAll<HTMLElement>("body *"))) {
-      if (el.closest("nextjs-portal")) continue; // the development tools' own button
-      const rect = el.getBoundingClientRect();
-      if (rect.width === 0 || rect.height === 0) continue;
-      if (rect.right <= limit && rect.left >= -1) continue;
-      const style = getComputedStyle(el);
-      if (style.position === "fixed" || style.clipPath !== "none") continue; // overlays, and text kept for screen readers only
-      let box = el.parentElement;
-      let scrolls = false;
-      while (box && !scrolls) {
-        scrolls = /(auto|scroll|hidden)/.test(getComputedStyle(box).overflowX);
-        box = box.parentElement;
-      }
-      if (!scrolls) found.push(`<${el.tagName.toLowerCase()} class="${el.className}"> reaches ${Math.round(rect.right)}px`);
-    }
-    return [...new Set(found)].slice(0, 6);
-  });
-}
-
-/**
- * Controls that are hard to use on a phone: shorter than 40px, or a text
- * field with text under 16px, which makes an iPhone zoom the whole page when
- * the field is touched and leave it zoomed.
- */
-async function hardToTouch(page: Page): Promise<string[]> {
-  return page.evaluate(() => {
-    const found: string[] = [];
-    const visible = (el: Element) => {
-      const rect = el.getBoundingClientRect();
-      return rect.width > 0 && rect.height > 0 && getComputedStyle(el).visibility !== "hidden";
-    };
-    const name = (el: Element) =>
-      (el.getAttribute("aria-label") || (el as HTMLElement).innerText || (el as HTMLInputElement).name || el.id || el.tagName).trim().slice(0, 40);
-    for (const el of Array.from(document.querySelectorAll("main button, main a.btn, main select, main textarea, main input, .site-nav button, .site-nav a"))) {
-      if (!visible(el) || el.closest("nextjs-portal")) continue;
-      const input = el as HTMLInputElement;
-      if (el.tagName === "INPUT" && ["hidden", "checkbox", "radio"].includes(input.type)) continue;
-      const rect = el.getBoundingClientRect();
-      if (rect.height < 40) found.push(`"${name(el)}" is ${Math.round(rect.height)}px tall`);
-      if (["INPUT", "SELECT", "TEXTAREA"].includes(el.tagName) && parseFloat(getComputedStyle(el).fontSize) < 16) {
-        found.push(`"${name(el)}" has ${getComputedStyle(el).fontSize} text: an iPhone zooms in on it`);
-      }
-    }
-    return [...new Set(found)].slice(0, 10);
-  });
-}
-
-/** Text too small to read without zooming. */
-async function tooSmallToRead(page: Page): Promise<string[]> {
-  return page.evaluate(() => {
-    const found: string[] = [];
-    const walker = document.createTreeWalker(document.querySelector("main") ?? document.body, NodeFilter.SHOW_TEXT);
-    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-      const text = (node.textContent ?? "").trim();
-      const el = node.parentElement;
-      if (!el || text.length < 2 || el.closest("nextjs-portal")) continue;
-      const rect = el.getBoundingClientRect();
-      if (rect.width === 0 || rect.height === 0) continue;
-      const size = parseFloat(getComputedStyle(el).fontSize);
-      if (size < 11) found.push(`"${text.slice(0, 30)}" is ${size}px`);
-    }
-    return [...new Set(found)].slice(0, 6);
-  });
-}
+/** What is wider than the screen, controls hard to use by touch, and text too small to read: the page editor runs the same checks before it publishes a page. */
+// Each is sent into the page as it is written, and called there with no argument: it then reads the page's own document.
+const widerThanScreen = (page: Page) => page.evaluate(widerThanScreenIn as () => string[]);
+const hardToTouch = (page: Page) => page.evaluate(hardToTouchIn as () => string[]);
+const tooSmallToRead = (page: Page) => page.evaluate(tooSmallToReadIn as () => string[]);
 
 async function expectFits(page: Page, where: string): Promise<void> {
   expect(await widerThanScreen(page), `${where}: wider than the screen`).toEqual([]);

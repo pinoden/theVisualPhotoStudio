@@ -495,14 +495,34 @@ const PAGES_OWNER = "owner8@studio.test";
 
 const canvasOf = (page: Page) => page.frameLocator("iframe#preview-frame");
 
-/** Drag a block from the editor's list of blocks onto the page drawn in the editor, at the bottom of `onto`. */
-async function dragBlock(page: Page, name: string, onto: Locator) {
+/**
+ * Where an element of the page drawn in the editor is on the screen. The
+ * editor draws the page smaller than it is, to fit (its zoom), and
+ * `boundingBox` does not count that: the element's place inside its frame
+ * is scaled here as the frame is.
+ */
+async function onCanvas(page: Page, element: Locator): Promise<{ x: number; y: number; width: number; height: number }> {
+  const frame = (await page.locator("iframe#preview-frame").boundingBox())!;
+  const inside = await element.evaluate((el) => {
+    const rect = el.getBoundingClientRect();
+    return { x: rect.x, y: rect.y, width: rect.width, height: rect.height, frameWidth: el.ownerDocument.defaultView!.innerWidth };
+  });
+  const scale = frame.width / inside.frameWidth;
+  return { x: frame.x + inside.x * scale, y: frame.y + inside.y * scale, width: inside.width * scale, height: inside.height * scale };
+}
+
+/**
+ * Drag a block from the editor's list of blocks onto the page drawn in the
+ * editor: at the bottom of `onto`, which puts it after that block, or in the
+ * middle of `onto`, which puts it into an empty place for blocks.
+ */
+async function dragBlock(page: Page, name: string, onto: Locator, where: "bottom" | "middle" = "bottom") {
   await page.locator(".page-editor-canvas").scrollIntoViewIfNeeded();
   const source = page.locator("[data-puck-drawer-item]").filter({ has: page.getByText(name, { exact: true }) }).first();
   await source.scrollIntoViewIfNeeded();
   const from = (await source.boundingBox())!;
-  const target = (await onto.boundingBox())!;
-  const to = { x: target.x + target.width / 2, y: target.y + target.height - 2 };
+  const target = where === "middle" ? await onCanvas(page, onto) : (await onto.boundingBox())!;
+  const to = { x: target.x + target.width / 2, y: where === "middle" ? target.y + target.height / 2 : target.y + target.height - 2 };
   await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
   await page.mouse.down();
   await page.mouse.move(from.x + from.width / 2 + 20, from.y + from.height / 2, { steps: 5 });
@@ -774,5 +794,55 @@ test("the website's own pages are edited like any other: the home page keeps its
   await expect(byText(page, "Published. Visitors see it now.")).toBeVisible();
   await guest.goto("/services");
   await expect(guest.getByRole("heading", { name: "Professional Photography", level: 1 })).toBeVisible();
+  await guest.context().close();
+});
+
+// ── The page editor's guard rails (requirement 24) ──
+
+// A tenth owner: the ninth has used two of its sign-in codes above, and the guard rails want one of their own.
+const GUARD_OWNER = "owner10@studio.test";
+
+test("a page that would be wider than a phone is not published, and is once it fits", async ({ page, browser }) => {
+  await page.setViewportSize({ width: 1440, height: 1200 });
+  await signIn(page, GUARD_OWNER, "/admin/website/pages");
+  await byLabel(page, "Name of a new page").fill("Side by Side");
+  await page.getByRole("button", { name: "Make the page" }).click();
+  const canvas = canvasOf(page);
+  await expect(canvas.locator("h1")).toHaveText("Side by Side");
+  // Its address, as the editor says it: /side-by-side, or another when that one is taken.
+  const path = /\/side-by-side(-\d+)?/.exec(await page.locator(".page-editor-where").innerText())![0];
+
+  // The editor is ready once a block can be chosen.
+  await canvas.locator("h1").click();
+  await expect(page.getByRole("textbox", { name: "Heading" })).toHaveValue("Side by Side");
+
+  // Four columns kept side by side on a phone, with a button in the last: on a phone, the button is past the screen's edge.
+  await dragBlock(page, "Columns", canvas.locator(".blk-text"));
+  await expect(canvas.locator(".blk-columns")).toHaveCount(1);
+  await canvas.locator(".blk-columns").click({ position: { x: 5, y: 5 } });
+  // One choice at a time: each shows on the page before the next is made.
+  await page.getByRole("combobox", { name: "How many columns" }).selectOption({ label: "Four" });
+  await expect(canvas.locator(".blk-columns")).toHaveAttribute("data-count", "4");
+  await page.getByRole("combobox", { name: "On a phone" }).selectOption({ label: "Side by side" });
+  await expect(canvas.locator(".blk-columns")).toHaveAttribute("data-phone", "keep");
+  await dragBlock(page, "Buttons", canvas.locator(".blk-columns > .blk-stack").nth(3), "middle");
+  await expect(canvas.locator(".blk-columns .blk-buttons")).toHaveCount(1);
+  await expect(byText(page, /Draft saved at/)).toBeVisible();
+
+  await page.getByRole("button", { name: "Publish", exact: true }).click();
+  await expect(byText(page, /Not published: on a phone, this page would be hard to use\./)).toBeVisible();
+  await expect(byText(page, /At 320px: .*"BOOK A STUDIO" reaches \d+px/i)).toBeVisible();
+  await shot(page, "53-admin-page-phone-check");
+  const guest = await visitor(browser);
+  expect((await guest.goto(path))?.status()).toBe(404);
+
+  // Stacked on a phone, it fits, and is published.
+  await canvas.locator(".blk-columns").click({ position: { x: 5, y: 5 } });
+  await page.getByRole("combobox", { name: "On a phone" }).selectOption({ label: "One under the other" });
+  await expect(canvas.locator(".blk-columns")).toHaveAttribute("data-phone", "stack");
+  await expect(byText(page, /Draft saved at/)).toBeVisible();
+  await page.getByRole("button", { name: "Publish", exact: true }).click();
+  await expect(byText(page, "Published. Visitors see it now.")).toBeVisible();
+  expect((await guest.goto(path))?.status()).toBe(200);
   await guest.context().close();
 });
