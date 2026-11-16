@@ -154,7 +154,7 @@ async function Pages({ searchParams }: Pick<PageProps<"/admin/website/pages">, "
                 {may.publish && (
                   <form action={removeRedirectAction}>
                     <input type="hidden" name="from" value={entry.from} />
-                    <button type="submit" className="btn btn-outline btn-small" aria-label={`Stop sending ${entry.from} on`}>
+                    <button type="submit" className="btn btn-outline btn-small" aria-label={`Remove ${entry.from}: stop sending it on`}>
                       Remove
                     </button>
                   </form>

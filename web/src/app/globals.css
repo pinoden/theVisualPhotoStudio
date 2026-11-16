@@ -106,6 +106,9 @@ a {
   transition: color .2s;
 }
 a:hover { color: var(--color-rose-dark); }
+/* A link inside a sentence is underlined, so that it is told apart from the words around it by more than its
+   colour (WCAG 1.4.1; the accessibility tests check it). Buttons, the menu and the footer keep their own look. */
+.page-content :is(p, li, label, dd, blockquote, td, .stat-label) a:not(.btn) { text-decoration: underline; text-underline-offset: 3px; }
 
 /* ── Navigation ── */
 .site-nav {
