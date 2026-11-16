@@ -1,5 +1,7 @@
 import type { CSSProperties, ReactNode } from "react";
+import type { Catalog } from "@/server/catalog";
 import type { Picture } from "@/server/media";
+import type { Business } from "../frame";
 import type { Fields, Shown } from "./fields";
 
 /**
@@ -13,6 +15,7 @@ export const BLOCK_GROUPS = {
   layout: "Layout",
   text: "Text",
   pictures: "Pictures and video",
+  site: "From the studio's data",
 } as const;
 export type BlockGroup = keyof typeof BLOCK_GROUPS;
 
@@ -26,6 +29,12 @@ export interface SiteContext {
   pictures: Record<string, Picture>;
   /** The collections the page names, by id: their pictures in order, and whether today is inside their dates. */
   collections: Record<string, { name: string; pictures: string[]; shows: boolean }>;
+  /** The studios, their prices, hours and add-ons, and the settings: for the blocks that show the studio's data. */
+  catalog?: Catalog;
+  /** The studio's name and contact details. */
+  business?: Business;
+  /** The live values a page's text can name (src/lib/site/live-values.ts), by name. */
+  values?: Record<string, string>;
 }
 
 export const EMPTY_SITE: SiteContext = { pictures: {}, collections: {} };

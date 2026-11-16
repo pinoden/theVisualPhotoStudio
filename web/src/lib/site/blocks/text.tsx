@@ -154,3 +154,60 @@ export const Questions = defineBlock({
     );
   },
 });
+
+export const Table = defineBlock({
+  label: "Table",
+  group: "text",
+  fields: {
+    columns: { kind: "choice", label: "How many columns", options: { "3": "Three", "2": "Two", "4": "Four" }, start: "3" },
+    first: { kind: "text", label: "Heading of the first column", max: 40, start: "" },
+    second: { kind: "text", label: "Heading of the second column", max: 40, start: "" },
+    third: { kind: "text", label: "Heading of the third column", max: 40, start: "" },
+    fourth: { kind: "text", label: "Heading of the fourth column", max: 40, start: "" },
+    rows: {
+      kind: "list",
+      label: "Rows",
+      max: 40,
+      title: "a",
+      of: {
+        a: { kind: "text", label: "First column", max: 120, start: "" },
+        b: { kind: "text", label: "Second column", max: 120, start: "" },
+        c: { kind: "text", label: "Third column", max: 120, start: "" },
+        d: { kind: "text", label: "Fourth column", max: 120, start: "" },
+      },
+      start: [{}],
+    },
+  },
+  render: ({ columns, first, second, third, fourth, rows, editing }) => {
+    const count = Number(columns);
+    const heads = [first, second, third, fourth].slice(0, count);
+    const shown = rows.filter((row) => [row.a, row.b, row.c, row.d].slice(0, count).some((cell) => cell !== ""));
+    if (shown.length === 0) return <EditorNote editing={editing}>Table: write its rows in the panel.</EditorNote>;
+    return (
+      <div className="blk blk-table-wrap">
+        <table className="price-table blk-table">
+          {heads.some((head) => head !== "") && (
+            <thead>
+              <tr>
+                {heads.map((head, index) => (
+                  <th scope="col" key={index}>
+                    {head}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+          )}
+          <tbody>
+            {shown.map((row, index) => (
+              <tr key={index}>
+                {[row.a, row.b, row.c, row.d].slice(0, count).map((cell, column) => (
+                  <td key={column}>{column === 0 ? <strong style={{ color: "var(--color-dark)" }}>{cell}</strong> : cell}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  },
+});

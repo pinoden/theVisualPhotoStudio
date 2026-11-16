@@ -664,3 +664,59 @@ test("a manager who may edit pages prepares one as a draft, and an owner publish
   await expect(guest.getByRole("heading", { name: "Winter Offer", level: 1 })).toBeVisible();
   await guest.context().close();
 });
+
+// ── Blocks that show the studio's own data, and live values (requirements 22 and 29) ──
+
+// A ninth owner: the eighth has used its sign-in codes above.
+const DATA_OWNER = "owner9@studio.test";
+
+test("a page shows the studios, prices, contact details and form from the studio's data, and its text follows the settings", async ({ page, browser }) => {
+  await page.setViewportSize({ width: 1440, height: 1200 });
+  await signIn(page, DATA_OWNER, "/admin/website/pages");
+  await byLabel(page, "Name of a new page").fill("Visit Us");
+  await page.getByRole("button", { name: "Make the page" }).click();
+  const canvas = canvasOf(page);
+  await expect(canvas.locator("h1")).toHaveText("Visit Us");
+
+  // A live value is typed into the heading: the editor shows its name.
+  await canvas.locator("h1").click();
+  await page.getByRole("textbox", { name: "Heading" }).fill("Cancel {refund window} ahead");
+  await expect(canvas.locator("h1")).toHaveText("Cancel {refund window} ahead");
+  // The blocks that show the studio's data, dragged onto the page.
+  await dragBlock(page, "Studio cards", canvas.locator(".blk-text"));
+  await expect(canvas.locator(".studio-card")).toHaveCount(3);
+  await dragBlock(page, "Address, phone and hours", canvas.locator(".studios-grid"));
+  await expect(canvas.locator(".blk-contact")).toContainText("(407) 663-6109");
+  await dragBlock(page, "Contact form", canvas.locator(".blk-contact"));
+  await expect(canvas.getByText("The contact form. Visitors write to you here")).toBeVisible();
+  await expect(byText(page, /Draft saved at/)).toBeVisible();
+  // The list of live values beside the editor says what each shows now.
+  await page.locator("summary", { hasText: "Live values" }).click();
+  await expect(onScreen(page.locator(".live-values"))).toContainText("{refund window}");
+  await page.getByRole("button", { name: "Publish", exact: true }).click();
+  await expect(byText(page, "Published. Visitors see it now.")).toBeVisible();
+
+  const guest = await visitor(browser);
+  await guest.goto("/visit-us");
+  await expect(guest.getByRole("heading", { name: "Cancel 14 days ahead", level: 1 })).toBeVisible();
+  await expect(guest.locator(".studio-card")).toHaveCount(3);
+  await expect(guest.locator(".studio-card", { hasText: "Studio Paris" })).toContainText(/From \$\d+\/hour/);
+  await expect(guest.locator(".studio-card", { hasText: "Studio Paris" }).getByRole("link", { name: "Book Now" })).toHaveAttribute("href", "/book?studio=paris");
+  await expect(guest.locator(".blk-contact").getByRole("link", { name: "(407) 663-6109" })).toHaveAttribute("href", "tel:+14076636109");
+  await expect(guest.getByRole("button", { name: "Send Message" })).toBeVisible();
+  await shot(guest, "51-website-page-with-studio-data");
+
+  // A change of the settings shows on the page by itself.
+  await page.goto("/admin/settings");
+  await byLabel(page, "Refund window (hours before start)").fill("240");
+  await page.getByRole("button", { name: "Save settings" }).click();
+  await expect(byText(page, /saved/i).first()).toBeVisible();
+  await guest.reload();
+  await expect(guest.getByRole("heading", { name: "Cancel 10 days ahead", level: 1 })).toBeVisible();
+  // Back as it was, for the tests that follow.
+  await page.goto("/admin/settings");
+  await byLabel(page, "Refund window (hours before start)").fill("336");
+  await page.getByRole("button", { name: "Save settings" }).click();
+  await expect(byText(page, /saved/i).first()).toBeVisible();
+  await guest.context().close();
+});

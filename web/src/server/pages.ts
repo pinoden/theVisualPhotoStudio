@@ -4,14 +4,16 @@ import type { Db, DbLike } from "@/db/client";
 import { can } from "@/lib/abilities";
 import type { SiteContext } from "@/lib/site/blocks/block";
 import { cleanLine, parseHref } from "@/lib/site/frame";
+import { liveValues } from "@/lib/site/live-values";
 import { PAGE_LIMITS, pagePath, pageReferences, parsePage, parseSlug, RESERVED_SEGMENTS, slugFromTitle, type PageContent } from "@/lib/site/page";
 import { paragraphs } from "@/lib/site/rich-text";
 import type { AuthUser } from "./auth";
+import { loadCatalog } from "./catalog";
 import { collectionShows, loadCollection } from "./collections";
 import { loadPictures } from "./media";
 import { loadSettings } from "./settings";
 import { localDateOf } from "./tz";
-import type { VersionSummary } from "./website";
+import { loadBusiness, type VersionSummary } from "./website";
 
 /**
  * The website's pages: the ones the owners make and edit, each a list of
@@ -82,7 +84,11 @@ async function freeSlug(db: DbLike, wanted: string, except?: string): Promise<st
 
 // ── What a page needs to be drawn ────────────────────────────────────────────
 
-/** The pictures and collections a page names, loaded: what its blocks read besides their own values. */
+/**
+ * What a page's blocks read besides their own values: the pictures and
+ * collections it names, the studio's data (studios, prices, hours, add-ons,
+ * settings) and contact details, and the live values its text can name.
+ */
 export async function pageSite(db: DbLike, content: PageContent, now: Date): Promise<SiteContext> {
   const references = pageReferences(content);
   const today = localDateOf(now);
@@ -94,7 +100,9 @@ export async function pageSite(db: DbLike, content: PageContent, now: Date): Pro
     collections[id] = { name: collection.name, pictures: collection.pictures.map((picture) => picture.id), shows: collectionShows(collection, today) };
     for (const picture of collection.pictures) pictureIds.add(picture.id);
   }
-  return { pictures: Object.fromEntries(await loadPictures(db, [...pictureIds])), collections };
+  const [pictures, catalog, business] = await Promise.all([loadPictures(db, [...pictureIds]), loadCatalog(db), loadBusiness(db)]);
+  const values = Object.fromEntries(liveValues(catalog, business).map((entry) => [entry.name, entry.value]));
+  return { pictures: Object.fromEntries(pictures), collections, catalog, business, values };
 }
 
 /**

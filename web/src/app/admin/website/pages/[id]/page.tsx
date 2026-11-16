@@ -5,6 +5,7 @@ import { connection } from "next/server";
 import { Suspense } from "react";
 import { PageEditorLoader } from "@/components/site-editor/PageEditorLoader";
 import { getDb } from "@/db/client";
+import { liveValues } from "@/lib/site/live-values";
 import { PAGE_LIMITS } from "@/lib/site/page";
 import { linkablePages, listPageVersions, loadPageForEditing, pageEditorContext } from "@/server/pages";
 import { requireManager } from "@/server/session";
@@ -34,6 +35,7 @@ async function EditPage({ params, searchParams }: Pick<PageProps<"/admin/website
   const state = await loadPageForEditing(db, viewer, id, now);
   if (!state) notFound();
   const [versions, context, links, settings] = await Promise.all([listPageVersions(db, viewer, id), pageEditorContext(db, state.content, now), linkablePages(db), loadSettings(db)]);
+  const liveValueList = context.site.catalog && context.site.business ? liveValues(context.site.catalog, context.site.business) : [];
 
   return (
     <AdminFrame active="/admin/website" title={state.title} query={await searchParams} viewer={viewer} settings={settings} wide>
@@ -61,6 +63,30 @@ async function EditPage({ params, searchParams }: Pick<PageProps<"/admin/website
         links={links.filter((link) => link.path !== state.path)}
         fontClasses={FONT_CLASSES}
       />
+
+      {context.site.values && (
+        <details className="admin-card live-values">
+          <summary>Live values: facts from the settings that any text can show</summary>
+          <p className="editor-hint">
+            Type a name between braces into any text, for example <code>{"{refund window}"}</code>. The editor shows the
+            name; the website shows the value, and follows the settings and prices when they change.
+          </p>
+          <table className="price-table">
+            <tbody>
+              {liveValueList.map((entry) => (
+                <tr key={entry.name}>
+                  <td>
+                    <code>{`{${entry.name}}`}</code>
+                    <br />
+                    <span className="editor-hint">{entry.about}</span>
+                  </td>
+                  <td>{entry.value || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </details>
+      )}
 
       <form action={savePageSettingsAction} className="admin-card">
         <h3>Name and address</h3>

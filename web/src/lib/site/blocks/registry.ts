@@ -2,7 +2,8 @@ import type { BlockSpec } from "./block";
 import type { Fields } from "./fields";
 import { Columns, Divider, Section, Spacer } from "./layout";
 import { Gallery, Picture, Video } from "./pictures";
-import { Buttons, Cards, Heading, Questions, Text } from "./text";
+import { AddonPrices, ContactDetails, ContactForm, RateCards, StudioCards, StudioDetails } from "./site-data";
+import { Buttons, Cards, Heading, Questions, Table, Text } from "./text";
 
 /**
  * Every block a page can be made of, by the name a page stores it under.
@@ -25,8 +26,15 @@ export const BLOCKS = {
   Video,
   Cards,
   Questions,
+  Table,
   Spacer,
   Divider,
+  StudioCards,
+  StudioDetails,
+  RateCards,
+  AddonPrices,
+  ContactDetails,
+  ContactForm,
 } as const;
 
 export type BlockName = keyof typeof BLOCKS;

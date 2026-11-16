@@ -112,3 +112,15 @@ export function hoursLines(studio: CatalogStudio): string[] {
   }
   return lines;
 }
+
+/** Opening hours as lines of text: once when every studio keeps the same hours, otherwise for each group of studios that do. */
+export function openingHours(catalog: Pick<Catalog, "studios">): { studios: string; lines: string[] }[] {
+  const groups = new Map<string, { names: string[]; lines: string[] }>();
+  for (const studio of catalog.studios) {
+    const lines = hoursLines(studio);
+    const group = groups.get(lines.join("|")) ?? { names: [], lines };
+    group.names.push(studio.name);
+    groups.set(lines.join("|"), group);
+  }
+  return [...groups.values()].map((group) => ({ studios: groups.size === 1 ? "" : group.names.join(", "), lines: group.lines }));
+}

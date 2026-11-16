@@ -46,10 +46,10 @@ export default defineConfig({
     env: {
       PGLITE_DATA_NAME: NAME,
       NEXT_DIST_DIR: `.next-${NAME}`,
-      // Eight owners: sign-in codes are limited to three per address in 15 minutes. The fourth is for
-      // z-mobile.spec.ts, the fifth for the customers test of site.spec.ts, the sixth to eighth for website.spec.ts.
+      // Nine owners: sign-in codes are limited to three per address in 15 minutes. The fourth is for
+      // z-mobile.spec.ts, the fifth for the customers test of site.spec.ts, the sixth to ninth for website.spec.ts.
       OWNER_EMAILS:
-        "owner@studio.test,owner2@studio.test,owner3@studio.test,owner4@studio.test,owner5@studio.test,owner6@studio.test,owner7@studio.test,owner8@studio.test",
+        "owner@studio.test,owner2@studio.test,owner3@studio.test,owner4@studio.test,owner5@studio.test,owner6@studio.test,owner7@studio.test,owner8@studio.test,owner9@studio.test",
       // The whole suite books from one address, more often than the ten times a minute a visitor is allowed.
       BOOKING_REQUESTS_PER_MINUTE: "200",
       NEXT_TELEMETRY_DISABLED: "1",

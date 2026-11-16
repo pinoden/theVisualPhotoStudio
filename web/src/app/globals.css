@@ -1772,7 +1772,15 @@ button { font-family: inherit; }
    The same rules draw a page for visitors and in the page editor's frame. A value for phones arrives as
    a second variable (`--h-phone`, `--cols-phone`, `--ratio-phone`) or a second data attribute
    (`data-align-phone`, `data-space-phone`), used below 640px, the width the design's phone values use. */
-.blk-root { display: flex; flex-direction: column; min-width: 0; }
+/* An ordinary block, not a flex column: a block with automatic side margins then takes the width it is allowed. */
+.blk-root { display: flow-root; min-width: 0; }
+/* A block placed on a page outside any section gets the width a section would give it, and room above and below.
+   Written with descendant selectors, so that it holds in the editor too, where the editor wraps each block. */
+.blk-root .blk:not(.blk-section, .blk-section .blk, .blk-columns .blk, .blk-studio-details) {
+  max-width: min(1200px, calc(100% - 3rem));
+  margin-inline: auto;
+  margin-block: 2rem;
+}
 .blk-stack { display: flex; flex-direction: column; gap: 1.5rem; min-width: 0; }
 .blk-stack > * { min-width: 0; }
 .blk-width-wide { max-width: 1200px; width: 100%; margin: 0 auto; padding: 0 1.5rem; }
@@ -1801,7 +1809,7 @@ button { font-family: inherit; }
 .blk-heading[data-align="start"] .divider { margin-left: 0; }
 .blk-heading[data-align="end"] .divider { margin-right: 0; }
 
-.blk-text[data-width="narrow"] { max-width: 680px; width: 100%; margin: 0 auto; }
+.blk-text[data-width="narrow"] { width: min(680px, 100%); margin-inline: auto; }
 .blk-text-small { font-size: .875em; }
 .blk-text-large { font-size: 1.2em; }
 .rich-text > :first-child { margin-top: 0; }
@@ -1823,7 +1831,7 @@ button { font-family: inherit; }
 .blk-card h4 { --h4-base: 1.2rem; margin: 0 0 .5rem; }
 .blk-card p { font-size: .875rem; margin: 0; white-space: pre-line; }
 
-.blk-questions { max-width: 800px; width: 100%; margin: 0 auto; }
+.blk-questions { width: min(800px, 100%); margin-inline: auto; }
 
 .blk-columns { display: grid; gap: 2rem; align-items: start; }
 .blk-columns[data-count="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -1863,7 +1871,7 @@ button { font-family: inherit; }
 
 .blk-video { position: relative; width: 100%; aspect-ratio: 16 / 9; background: var(--color-dark); }
 .blk-video[data-shape="standard"] { aspect-ratio: 4 / 3; }
-.blk-video[data-shape="tall"] { aspect-ratio: 9 / 16; max-width: 420px; margin: 0 auto; }
+.blk-video[data-shape="tall"] { aspect-ratio: 9 / 16; width: min(420px, 100%); margin-inline: auto; }
 .blk-video iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
 .blk-video-start {
   position: absolute; inset: 0; width: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -1874,6 +1882,17 @@ button { font-family: inherit; }
   background: var(--color-rose); color: var(--on-accent); font-size: 1.4rem;
 }
 .blk-video-start small { opacity: .7; }
+
+/* The blocks that show the studio's data reuse the site's own cards and tables. */
+.studio-card-buttons { margin-top: 1.25rem; display: flex; gap: .75rem; flex-wrap: wrap; }
+.studio-card-buttons .btn { padding: .5rem 1.25rem; font-size: .78rem; }
+.rate-card .rate-book { width: 100%; }
+.blk-contact .contact-detail strong { color: var(--color-dark); }
+.blk-table-wrap { overflow-x: auto; }
+.blk-table th:last-child, .blk-table td:last-child { text-align: left; }
+.blk-table th, .blk-table td { padding-right: 1rem; }
+.live-values > summary { cursor: pointer; font-family: var(--font-serif); font-size: 1.1rem; color: var(--color-dark); }
+.live-values table { margin-top: 1rem; }
 
 /* Only in the page editor: where a block has nothing to show yet. */
 .blk-note {
