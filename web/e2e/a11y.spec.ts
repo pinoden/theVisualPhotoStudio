@@ -70,7 +70,13 @@ test("every step of a booking can be used with a screen reader and a keyboard", 
 });
 
 const ACCOUNT_PAGES = ["/account", "/account/appointments", "/account/rewards", "/account/receipts"];
-/** Every page of the admin with nothing to choose first, and the day sheet. The page editor is Puck's own, and is left out. */
+/**
+ * Every page of the admin with nothing to choose first, and the day sheet. The
+ * pages that need something chosen first (a booking, an appointment, a
+ * customer, a receipt, a payment link, a collection, the page editor around
+ * Puck's own canvas) are scanned where the other tests have made it, with
+ * `accessibilityProblems`.
+ */
 const ADMIN_PAGES = [
   "/admin",
   "/admin/calendar",

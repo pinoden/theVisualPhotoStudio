@@ -651,6 +651,8 @@ test("the owner makes a page from blocks, previews it, and visitors see it at it
   await expect(canvas.locator(".blk-buttons")).toContainText("Book a Studio");
   await expect(byText(page, /Draft saved at .+ Visitors do not see it yet\./)).toBeVisible();
   await shot(page, "48-admin-page-editor");
+  // The editor around the page: its bar, the page's settings and the lists beside it. The canvas is Puck's own.
+  expect(await accessibilityProblems(page, { exclude: [".page-editor-canvas"] }), "the page editor").toEqual([]);
 
   // Not on the website yet.
   const guest = await visitor(browser);

@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import {
+  accessibilityProblems,
   agreeToPolicies,
   byLabel,
   byText,
@@ -315,9 +316,11 @@ test("the admin fits a phone: the calendar in its three views, an appointment, a
   await expect(onScreen(client.locator(".price-row.total"))).toContainText("$68");
   await expectFits(client, "the page a payment link leads to");
   expect(await hardToTouch(client), "the page a payment link leads to: hard to use by touch").toEqual([]);
+  expect(await accessibilityProblems(client), "the page a payment link leads to").toEqual([]);
   await shot(client, "m-390-pay-link");
   await client.getByRole("button", { name: "Pay $68 (test mode)" }).click();
   await expect(client.getByRole("heading", { name: "Payment Received" })).toBeVisible();
+  expect(await accessibilityProblems(client), "the page a payment link leads to, once paid").toEqual([]);
   await expectFits(client, "the page a payment link leads to, once paid");
   await client.close();
   expect((await latestEmail(page, "payment_received", "pat.phone@example.com")).body).toContain("Paid by: Card, through the payment link");

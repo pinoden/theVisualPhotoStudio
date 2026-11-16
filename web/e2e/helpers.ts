@@ -36,18 +36,20 @@ export const byText = (scope: Scope, text: string | RegExp) => onScreen(scope.ge
 /**
  * What axe-core finds wrong on the page as it is now, against WCAG 2.1 A and
  * AA, one line for each kind of problem, naming up to three places. Colour
- * contrast is left out: see e2e/a11y.spec.ts.
+ * contrast is left out: see e2e/a11y.spec.ts. `exclude` leaves out parts of
+ * the page that are not the site's own (the page editor's canvas is Puck's).
  */
-export async function accessibilityProblems(page: Page): Promise<string[]> {
+export async function accessibilityProblems(page: Page, options: { exclude?: string[] } = {}): Promise<string[]> {
   // After a form is sent, the framework draws the page and puts its title back a moment later. Scanned in between,
   // a page that is about to have a title is reported without one; a page that never gets one fails here instead.
   await expect.poll(() => page.title(), { message: "the page has a title" }).not.toBe("");
-  const result = await new AxeBuilder({ page })
+  let builder = new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
     .disableRules(["color-contrast"])
     // The development server's own button, which visitors never get.
-    .exclude("nextjs-portal")
-    .analyze();
+    .exclude("nextjs-portal");
+  for (const selector of options.exclude ?? []) builder = builder.exclude(selector);
+  const result = await builder.analyze();
   return result.violations.map(
     (violation) =>
       `${violation.id} (${violation.impact}): ${violation.help}. At ${violation.nodes

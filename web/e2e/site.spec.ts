@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import {
+  accessibilityProblems,
   agreeToPolicies,
   bookStudioFirstToPayment,
   byLabel,
@@ -227,6 +228,7 @@ test("books two studios together, starting from the studios", async ({ page }) =
   await expect(card.getByText("Studio Dayglow", { exact: true })).toBeVisible();
   await expect(totalRow(card)).toContainText("$132.80");
   await shot(page, "06-confirmation");
+  expect(await accessibilityProblems(page), "the client's booking page").toEqual([]);
 
   const mail = await latestEmail(page, "booking_confirmation", jane.email);
   expect(mail.subject).toBe(`Booking confirmed: ${ref}`);
@@ -295,6 +297,7 @@ test("a customer signs in, sees their booking, and turns it into a reschedule co
   await expect(book.getByRole("link", { name: "Book a studio", exact: true })).toBeVisible();
   await expect(book.getByRole("link", { name: "Book a photographer", exact: true })).toBeVisible();
   await shot(page, "09-account");
+  expect(await accessibilityProblems(page), "the account's overview, with an appointment").toEqual([]);
 
   // My Appointments: everything still to come, with its details and the ways to change it.
   await page.getByRole("link", { name: "View all appointments" }).click();
@@ -305,6 +308,7 @@ test("a customer signs in, sees their booking, and turns it into a reschedule co
   // Bob's booking is not shown to Jane.
   await expect(byText(page.locator("main .container-sm"), "Studio Paris")).toHaveCount(0);
   await shot(page, "09a-account-appointments");
+  expect(await accessibilityProblems(page), "My Appointments, with an appointment").toEqual([]);
 
   await card.getByRole("button", { name: "Reschedule" }).click();
   await expect(byText(card, /you will get a code worth \$132\.80, valid for 90 days/)).toBeVisible();
@@ -330,6 +334,7 @@ test("a customer signs in, sees their booking, and turns it into a reschedule co
   await page.getByRole("button", { name: "Show", exact: true }).click();
   await expect(byText(page, "1 appointment of 1 shown.")).toBeVisible();
   await expect(onScreen(page.locator("details.past-item"))).toHaveCount(1);
+  expect(await accessibilityProblems(page), "past appointments, filtered").toEqual([]);
 
   // The code is listed in the account from now on: it is credit, not a reward.
   await page.getByRole("link", { name: "My Rewards", exact: true }).click();
@@ -337,6 +342,7 @@ test("a customer signs in, sees their booking, and turns it into a reschedule co
   await expect(byText(page, rescheduleCode)).toBeVisible();
   await expect(byText(page, "$132.80 credit from a rescheduled booking")).toBeVisible();
   await expect(byText(page, /You have not earned a reward yet\. Your first free studio hour comes with your 5th stamp\./)).toBeVisible();
+  expect(await accessibilityProblems(page), "My Rewards, with credit").toEqual([]);
 
   // What she paid has a receipt, on the screen and as a PDF file, and the year's payments are added up.
   await page.getByRole("link", { name: "Receipts & Payments", exact: true }).click();
@@ -345,6 +351,7 @@ test("a customer signs in, sees their booking, and turns it into a reschedule co
   const summary = onScreen(page.locator(".admin-card", { hasText: `Your payments in ${year}` }));
   await expect(summary).toContainText("$132.80");
   await shot(page, "10a-account-receipts");
+  expect(await accessibilityProblems(page), "Receipts & Payments, with a payment").toEqual([]);
   await page.getByRole("link", { name: "View", exact: true }).click();
   const receipt = onScreen(page.locator("article.receipt"));
   await expect(receipt).toContainText("Studio Blanche");
@@ -353,6 +360,7 @@ test("a customer signs in, sees their booking, and turns it into a reschedule co
   await expect(receipt).toContainText("Card, online");
   await expect(receipt).toContainText("Released for rescheduling");
   await shot(page, "10b-account-receipt");
+  expect(await accessibilityProblems(page), "a receipt").toEqual([]);
   const ref = /VS-[0-9A-Z]{6}/.exec(page.url())![0];
   for (const path of [`/account/receipts/${ref}/pdf`, `/account/receipts/year/${year}/pdf`]) {
     const file = await page.request.get(path);
@@ -708,6 +716,7 @@ test("the calendar shows a day, a week and a month, one studio or all, and a boo
   await expect(byText(page, /\$118 recorded\. The booking is paid in full\. The client has been emailed a confirmation\./)).toBeVisible();
   await expect(onScreen(page.locator("#payment"))).toContainText("Paid in full.");
   await expect(onScreen(page.locator(".price-row.total"))).toContainText("Paid at the studio");
+  expect(await accessibilityProblems(page), "an appointment with a payment recorded and its history").toEqual([]);
   await expect(page.getByRole("row", { name: /\$118 · Cash/ })).toContainText(THIRD_OWNER);
   await expect(page.getByRole("button", { name: "Record payment" })).toHaveCount(0); // nothing is owed any more
   const receipt = await latestEmail(page, "payment_received", "dana.e2e@example.com");
@@ -1088,6 +1097,7 @@ test("the owners look a customer up, see what they paid, and correct their stamp
   // The pet fee the owners returned to her is listed as credit, not as a reward.
   await expect(onScreen(page.locator(".admin-card", { hasText: "Credit and discount codes" }))).toContainText("A pet fee returned");
   await shot(page, "20b-admin-customer");
+  expect(await accessibilityProblems(page), "a customer's page, with appointments, payments and rewards").toEqual([]);
 
   // Five visits she made before the site counted them: five stamps, which complete a free hour at once.
   await byLabel(page, "What to do").selectOption({ label: "Add stamps" });
