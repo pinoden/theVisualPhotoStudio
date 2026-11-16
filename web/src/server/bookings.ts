@@ -19,11 +19,12 @@ import { count, hoursInWords } from "@/lib/words";
 import { durationLabel, isIsoDate } from "@/lib/domain/time";
 import { loadDayAvailability, releaseExpiredHolds } from "./availability";
 import { dayTypeFor, loadCatalog, type Catalog, type CatalogPhotoPackage } from "./catalog";
-import { bookingConfirmationEmail, ownerPaymentUnknownNotice, queueEmail } from "./email";
+import { bookingConfirmationEmail, queueEmail } from "./email";
 import { BY_CUSTOMER, recordEvent } from "./history";
 import { releaseHolds } from "./holds";
+import { takeReserved } from "./reserved";
 import { receivedCentsByBooking } from "./money";
-import type { PaymentProvider } from "./payments";
+import { RESERVE_HOURS, type PaymentProvider } from "./payments";
 import {
   creditName,
   findUsablePromo,
@@ -470,12 +471,12 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
     }
   }
 
-  // ── Charge the card ────────────────────────────────────────────────────────
+  // ── Pay by card: reserve the amount, confirm the booking, then take the amount (src/server/reserved.ts) ──
   if (chargesCard) {
     const provider = deps.payments!;
     const [payment] = await db
       .insert(payments)
-      .values({ bookingId, provider: provider.name, amountCents: price.totalCents, status: "pending" })
+      .values({ bookingId, provider: provider.name, amountCents: price.totalCents, status: "pending", createdAt: now })
       .returning({ id: payments.id });
 
     const charge = await provider.charge({
@@ -485,6 +486,7 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
       reference: ref,
       note: `${ref} ${studioNames}, ${input.customer.name}`,
       buyerEmail: input.customer.email,
+      reserve: true,
     });
 
     if (!charge.ok) {
@@ -496,24 +498,13 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
         await tx.update(bookings).set({ status: "expired" }).where(eq(bookings.id, bookingId));
         await releaseHolds(tx, bookingId);
         if (spendsCode) await restorePromo(tx, promo!.id, promo!.kind, price.promoDiscountCents);
-        // No answer from the processor: the card may have been charged, and only a person can check.
-        if (charge.unknown && deps.ownerEmail) {
-          await queueEmail(
-            tx,
-            ownerPaymentUnknownNotice({
-              to: deps.ownerEmail,
-              ref,
-              customer: input.customer.name,
-              amountCents: price.totalCents,
-            }),
-          );
-        }
       });
       return fail(
         402,
         "payment_failed",
+        // No answer: an amount may have been reserved, but nothing was taken, and the processor gives it back by itself.
         charge.unknown
-          ? `${charge.message} Your booking was not made. We cannot tell whether your card was charged: if a charge appears, contact us and we will refund it.`
+          ? `${charge.message} Your booking was not made, and your card was not charged. If an amount appears as held on your card, it is released by itself within ${RESERVE_HOURS} hours.`
           : `Payment failed: ${charge.message} Your card was not charged.`,
       );
     }
@@ -521,11 +512,17 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
     await db.transaction(async (tx) => {
       await tx
         .update(payments)
-        .set({ status: "succeeded", providerPaymentId: charge.paymentId })
+        .set({ status: "authorized", providerPaymentId: charge.paymentId })
         .where(eq(payments.id, payment.id));
       await tx.update(bookings).set({ status: "confirmed", holdExpiresAt: null }).where(eq(bookings.id, bookingId));
       await recordEvent(tx, { bookingId, from: "new", to: "confirmed", at: now, ...booked });
     });
+    // The booking stands now. Taking the money that does not go through is tried again by the scheduled task.
+    await takeReserved(
+      db,
+      { id: payment.id, providerPaymentId: charge.paymentId, amountCents: price.totalCents, error: null, ref, customer: input.customer.name, createdAt: now },
+      { now, payments: provider, ownerEmail: deps.ownerEmail ?? null },
+    );
   } else {
     await db.transaction(async (tx) => {
       await tx.update(bookings).set({ status: "confirmed", holdExpiresAt: null }).where(eq(bookings.id, bookingId));

@@ -136,6 +136,51 @@ describe("charging through Square", () => {
   });
 });
 
+/**
+ * A booking's card is reserved first and the money taken once the booking is
+ * confirmed. The answers below are shaped like those of Square's sandbox on
+ * 2026-11-16 (`npm run check:square`).
+ */
+describe("reserving through Square, then taking or giving back", () => {
+  it("asks Square to hold the amount without taking it, and to give it back by itself after a day", async () => {
+    const fetchMock = stubSquare(json(200, { payment: { id: "PAY9", status: "APPROVED" } }));
+    expect(await square().charge({ ...CHARGE, reserve: true })).toEqual({ ok: true, paymentId: "PAY9" });
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(body).toMatchObject({ autocomplete: false, delay_action: "CANCEL", delay_duration: "PT24H", idempotency_key: CHARGE.idempotencyKey });
+    // An ordinary charge is still taken at once.
+    stubSquare(json(200, { payment: { id: "PAY8", status: "COMPLETED" } }));
+    expect(await square().charge(CHARGE)).toEqual({ ok: true, paymentId: "PAY8" });
+  });
+
+  it("takes the amount, and counts one already taken as taken", async () => {
+    const fetchMock = stubSquare(json(200, { payment: { id: "PAY9", status: "COMPLETED" } }));
+    expect(await square().capture("PAY9")).toEqual({ ok: true });
+    expect(fetchMock.mock.calls[0][0]).toBe("https://connect.squareupsandbox.com/v2/payments/PAY9/complete");
+    // Square refuses to complete a payment twice; reading it shows it was.
+    const invalid = json(400, { errors: [{ code: "BAD_REQUEST", detail: "Payment PAY9 is in state COMPLETED, which is invalid for the requested operation" }] });
+    stubSquare(invalid, json(200, { payment: { id: "PAY9", status: "COMPLETED" } }));
+    expect(await square().capture("PAY9")).toEqual({ ok: true });
+  });
+
+  it("does not take an amount that was given back, and says why", async () => {
+    stubSquare(
+      json(400, { errors: [{ code: "BAD_REQUEST", detail: "Payment PAY9 is in state CANCELED, which is invalid for the requested operation" }] }),
+      json(200, { payment: { id: "PAY9", status: "CANCELED" } }),
+    );
+    expect(await square().capture("PAY9")).toEqual({ ok: false, message: "BAD_REQUEST: Payment PAY9 is in state CANCELED, which is invalid for the requested operation" });
+    stubSquare("down", "down", "down");
+    expect(await square().capture("PAY9")).toEqual({ ok: false, unknown: true, message: "No answer from Square" });
+  });
+
+  it("gives an amount back, and counts one already given back as given back", async () => {
+    const fetchMock = stubSquare(json(200, { payment: { id: "PAY9", status: "CANCELED" } }));
+    expect(await square().release("PAY9")).toEqual({ ok: true });
+    expect(fetchMock.mock.calls[0][0]).toBe("https://connect.squareupsandbox.com/v2/payments/PAY9/cancel");
+    stubSquare(json(400, { errors: [{ code: "BAD_REQUEST", detail: "invalid" }] }), json(200, { payment: { id: "PAY9", status: "CANCELED" } }));
+    expect(await square().release("PAY9")).toEqual({ ok: true });
+  });
+});
+
 describe("refunding through Square", () => {
   const REFUND = { paymentId: "PAY1", amountCents: 4400, idempotencyKey: "refund-key-1", reason: "Cancelled by customer" };
 

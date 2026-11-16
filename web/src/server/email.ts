@@ -1,6 +1,7 @@
 import { and, asc, eq, isNull, lt, sql } from "drizzle-orm";
 import { emailOutbox } from "@/db/schema";
 import type { DbLike } from "@/db/client";
+import { formatInstant } from "./tz";
 import { loadBusiness } from "./website";
 
 /**
@@ -518,25 +519,29 @@ export function ownerRefundNotice(input: {
  * server stopped before the answer was recorded. The booking was not made,
  * but the card may have been charged.
  */
-export function ownerPaymentUnknownNotice(input: {
+/**
+ * A booking whose card amount was reserved, and whose money could not be
+ * taken yet (src/server/reserved.ts). The booking stands; the site keeps
+ * trying; past `givenBackAt` the processor gives the amount back by itself.
+ */
+export function ownerCaptureNotice(input: {
   to: string;
   ref: string;
   customer: string;
   amountCents: number;
-  /** True when the server stopped mid-charge; otherwise the processor gave no answer. */
-  interrupted?: boolean;
+  reason: string;
+  givenBackAt: Date;
 }): QueuedEmail {
   return {
     to: input.to,
-    kind: "owner_payment_unknown",
-    subject: `ACTION NEEDED: check a payment for ${input.ref}`,
+    kind: "owner_capture_failed",
+    subject: `Payment not taken yet for ${input.ref}`,
     body: [
-      `A card payment of ${money(input.amountCents)} for booking ${input.ref} (${input.customer}) ${
-        input.interrupted ? "was interrupted before its result was recorded." : "got no answer from Square."
-      }`,
+      `The card for booking ${input.ref} (${input.customer}) has ${money(input.amountCents)} reserved on it, and the booking is confirmed, but taking the money did not go through.`,
       "",
-      "The booking was not made and its time was released. Square may still have charged the card.",
-      `Look in Square for a payment with the reference ${input.ref}. If it is there, refund it.`,
+      `Reason: ${input.reason}`,
+      "",
+      `The site tries again every time its scheduled task runs. If the money has not been taken by ${formatInstant(input.givenBackAt)}, Square gives the amount back to the card and the booking is unpaid: then take the payment at the studio, or cancel the booking.`,
     ].join("\n"),
   };
 }

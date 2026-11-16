@@ -38,7 +38,13 @@ export const bookingStatus = pgEnum("booking_status", [
   "expired", // payment never completed, slot released
 ]);
 /** `voided`: a payment recorded by hand in error, and taken back by an owner. */
-export const paymentStatus = pgEnum("payment_status", ["pending", "succeeded", "failed", "voided"]);
+/**
+ * A card payment of a booking is `pending` while it is on its way, then
+ * `authorized` (the amount reserved on the card), then `succeeded` once the
+ * money is taken; `failed` when it is refused or given back. `voided`: a
+ * payment recorded at the studio by mistake, struck out.
+ */
+export const paymentStatus = pgEnum("payment_status", ["pending", "authorized", "succeeded", "failed", "voided"]);
 export const refundStatus = pgEnum("refund_status", ["pending", "succeeded", "failed"]);
 export const paymentLinkStatus = pgEnum("payment_link_status", ["open", "paid", "cancelled"]);
 export const promoKind = pgEnum("promo_kind", ["percent", "amount", "free_hour"]);

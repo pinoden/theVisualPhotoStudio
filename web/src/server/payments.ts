@@ -12,7 +12,20 @@ export interface ChargeRequest {
   reference: string;
   note: string;
   buyerEmail: string;
+  /**
+   * Reserve the amount on the card without taking it yet: `capture` takes it,
+   * `release` gives it back, and the processor gives it back by itself if
+   * neither happens within `RESERVE_HOURS`. A booking is paid this way, so
+   * that a card is never charged for a booking that was not made.
+   */
+  reserve?: boolean;
 }
+
+/** How long a reserved amount waits to be taken before the processor gives it back by itself. */
+export const RESERVE_HOURS = 24;
+
+/** The outcome of taking or giving back a reserved amount. `unknown`: no answer came, and nothing is known to have happened. */
+export type SettleResult = { ok: true } | { ok: false; message: string; unknown?: boolean };
 
 export type ChargeResult =
   | { ok: true; paymentId: string }
@@ -81,6 +94,10 @@ export interface PaymentProvider {
   name: "square" | "mock";
   charge(request: ChargeRequest): Promise<ChargeResult>;
   refund(request: RefundRequest): Promise<RefundResult>;
+  /** Take an amount reserved with `reserve`. Taking one already taken succeeds. */
+  capture(paymentId: string): Promise<SettleResult>;
+  /** Give back an amount reserved with `reserve`. Giving back one already given back succeeds. */
+  release(paymentId: string): Promise<SettleResult>;
   /** What became of a refund the processor accepted: still pending, completed, or rejected after all. */
   refundState(refundId: string): Promise<RefundState>;
   createPayLink(request: PayLinkRequest): Promise<PayLinkResult>;
@@ -104,6 +121,12 @@ export const mockProvider: PaymentProvider = {
   async refund(request) {
     if (!request.paymentId.startsWith("mock_")) return { ok: false, message: "Unknown payment." };
     return { ok: true, refundId: `mock_refund_${request.idempotencyKey}`, settled: true };
+  },
+  async capture(paymentId) {
+    return paymentId.startsWith("mock_") ? { ok: true } : { ok: false, message: "Unknown payment." };
+  },
+  async release(paymentId) {
+    return paymentId.startsWith("mock_") ? { ok: true } : { ok: false, message: "Unknown payment." };
   },
   async refundState() {
     return { state: "completed" };
@@ -232,6 +255,20 @@ export function squareProvider(config: SquareConfig): PaymentProvider {
   }
   const post = (path: string, body: unknown) => send("POST", path, body);
 
+  /**
+   * Complete or cancel a reserved payment. A payment that is already where it
+   * is asked to go counts as done, so that doing it again is harmless; Square
+   * itself answers an error for that, so the payment is read to find out.
+   */
+  async function settle(paymentId: string, action: "complete" | "cancel", done: "COMPLETED" | "CANCELED"): Promise<SettleResult> {
+    const answer = await post(`/v2/payments/${encodeURIComponent(paymentId)}/${action}`, {});
+    if (!answer || answer.status >= 500) return { ok: false, unknown: true, message: answer ? `Square answered HTTP ${answer.status}` : "No answer from Square" };
+    if (answer.ok && answer.data.payment?.status === done) return { ok: true };
+    const read = await send("GET", `/v2/payments/${encodeURIComponent(paymentId)}`);
+    if (read?.ok && read.data.payment?.status === done) return { ok: true };
+    return { ok: false, message: inSquaresWords(answer.data.errors ?? []) || `Payment status ${answer.data.payment?.status ?? "missing"}, HTTP ${answer.status}` };
+  }
+
   return {
     name: "square",
 
@@ -244,7 +281,8 @@ export function squareProvider(config: SquareConfig): PaymentProvider {
         reference_id: request.reference,
         note: request.note.slice(0, 500),
         buyer_email_address: request.buyerEmail,
-        autocomplete: true,
+        // Reserved, the payment waits to be completed or cancelled; one left alone is cancelled by Square.
+        ...(request.reserve ? { autocomplete: false, delay_action: "CANCEL", delay_duration: `PT${RESERVE_HOURS}H` } : { autocomplete: true }),
       });
 
       if (!answer || answer.status >= 500) {
@@ -256,7 +294,8 @@ export function squareProvider(config: SquareConfig): PaymentProvider {
         };
       }
       const { payment, errors = [] } = answer.data;
-      if (answer.ok && payment?.id && payment.status === "COMPLETED") return { ok: true, paymentId: payment.id };
+      // Reserved, a payment is APPROVED: the money is held for us. Otherwise it must be COMPLETED: taken.
+      if (answer.ok && payment?.id && payment.status === (request.reserve ? "APPROVED" : "COMPLETED")) return { ok: true, paymentId: payment.id };
 
       const detail = inSquaresWords(errors) || `Payment status ${payment?.status ?? "missing"}, HTTP ${answer.status}`;
       // A refusal that is not about the card is ours to fix (keys, location, request), so make it visible.
@@ -282,6 +321,14 @@ export function squareProvider(config: SquareConfig): PaymentProvider {
       // Refund problems are read by the owner, so Square's own words are the useful ones.
       const detail = errors.map((error) => error.detail ?? error.code).filter(Boolean).join("; ");
       return { ok: false, message: detail || `Refund was not accepted (${refund?.status ?? `HTTP ${answer.status}`}).` };
+    },
+
+    async capture(paymentId) {
+      return settle(paymentId, "complete", "COMPLETED");
+    },
+
+    async release(paymentId) {
+      return settle(paymentId, "cancel", "CANCELED");
     },
 
     async refundState(refundId) {

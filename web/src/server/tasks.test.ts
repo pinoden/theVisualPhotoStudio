@@ -14,7 +14,6 @@ import {
   hoursAfter,
   minutesAfter,
   NOW,
-  OWNER_EMAIL,
   type TestWorld,
 } from "./testing";
 
@@ -142,6 +141,8 @@ describe("the scheduled run", () => {
     expect(summary).toEqual({
       holdsReleased: 0,
       paymentsFlagged: 0,
+      reservationsTaken: 0,
+      reservationsReleased: 0,
       visitsCompleted: 1,
       loyaltyCodes: 1,
       refundsSucceeded: 0,
@@ -173,7 +174,7 @@ describe("a charge that was interrupted", () => {
   const runAt = (minutes: number) =>
     runScheduledTasks(world.db, { ...world.manageDeps({ now: minutesAfter(NOW, minutes) }), email });
 
-  it("is closed once its hold has expired, and the owner is asked to check it, once", async () => {
+  it("is closed once its hold has expired, and nobody has to check it: the card was at most reserved", async () => {
     await expect(world.book({}, { payments: crashing })).rejects.toThrow("the server stopped");
     expect((await world.db.select().from(payments))[0].status).toBe("pending");
 
@@ -183,22 +184,15 @@ describe("a charge that was interrupted", () => {
     expect(await runAt(11)).toMatchObject({ holdsReleased: 1, paymentsFlagged: 1 });
     expect((await world.db.select().from(payments))[0]).toMatchObject({
       status: "failed",
-      error: "Interrupted: no result was recorded",
+      error: "Interrupted before its result was recorded. Nothing was taken: a reserved amount is given back by Square by itself.",
     });
-    const [notice] = await world.emails("owner_payment_unknown");
-    expect(notice.toEmail).toBe(OWNER_EMAIL);
-    expect(notice.subject).toMatch(/^ACTION NEEDED: check a payment for VS-/);
-    expect(notice.body).toContain("A card payment of $176 for booking");
-    expect(notice.body).toContain("was interrupted before its result was recorded.");
-
+    expect(await world.emails()).toHaveLength(0);
     expect((await runAt(12)).paymentsFlagged).toBe(0);
-    expect(await world.emails("owner_payment_unknown")).toHaveLength(1);
   });
 
   it("is not confused with a card that was simply refused", async () => {
     expect((await world.book({ paymentToken: MOCK_TOKEN_DECLINED })).ok).toBe(false);
     expect((await runAt(11)).paymentsFlagged).toBe(0);
-    expect(await world.emails("owner_payment_unknown")).toHaveLength(0);
   });
 });
 

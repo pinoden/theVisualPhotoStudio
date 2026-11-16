@@ -267,7 +267,7 @@ describe("payment", () => {
     expect((await book()).ok).toBe(true); // the slot is bookable again
   });
 
-  it("does not claim the card was spared when the processor gave no answer, and asks the owner to check", async () => {
+  it("says nothing was taken when the processor gave no answer: the card was at most reserved, and nobody has to check", async () => {
     const silent: PaymentProvider = {
       ...mockProvider,
       name: "square",
@@ -285,21 +285,36 @@ describe("payment", () => {
       status: 402,
       code: "payment_failed",
       message:
-        "We could not reach the card processor. Your booking was not made. We cannot tell whether your card was charged: if a charge appears, contact us and we will refund it.",
+        "We could not reach the card processor. Your booking was not made, and your card was not charged. If an amount appears as held on your card, it is released by itself within 24 hours.",
     });
 
     const [row] = await db.select().from(bookings);
     expect(row.status).toBe("expired");
     expect((await db.select().from(payments))[0]).toMatchObject({ status: "failed", error: "No answer from Square" });
-    const mail = await db.select().from(emailOutbox);
-    expect(mail).toHaveLength(1);
-    expect(mail[0]).toMatchObject({
-      toEmail: "owner@studio.test",
-      kind: "owner_payment_unknown",
-      subject: `ACTION NEEDED: check a payment for ${row.ref}`,
-    });
-    expect(mail[0].body).toContain(`A card payment of $176 for booking ${row.ref} (Test Person) got no answer from Square.`);
+    expect(await db.select().from(emailOutbox)).toHaveLength(0);
     expect((await book()).ok).toBe(true); // the time is free again
+  });
+
+  it("reserves the amount, confirms the booking, and only then takes the money", async () => {
+    const steps: string[] = [];
+    const watching: PaymentProvider = {
+      ...countingProvider,
+      async charge(request) {
+        steps.push(`reserve ${request.reserve === true}`);
+        return countingProvider.charge(request);
+      },
+      async capture(paymentId) {
+        // By the time the money is taken, the booking is confirmed and its payment recorded as reserved.
+        const [booking] = await db.select().from(bookings);
+        const [payment] = await db.select().from(payments);
+        steps.push(`take while the booking is ${booking.status} and the payment ${payment.status}`);
+        return mockProvider.capture(paymentId);
+      },
+    };
+    const made = await book({}, { payments: watching });
+    expect(made.ok).toBe(true);
+    expect(steps).toEqual(["reserve true", "take while the booking is confirmed and the payment authorized"]);
+    expect((await db.select().from(payments))[0]).toMatchObject({ status: "succeeded", error: null });
   });
 
   it("records the processor's own words for a refused card, and shows the customer a sentence", async () => {

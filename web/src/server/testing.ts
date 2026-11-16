@@ -57,6 +57,11 @@ export interface TestWorld {
   pendingRefunds: boolean;
   /** What the processor says when asked about a refund it accepted. */
   refundAnswer: RefundState;
+  /** The processor's payment ids it was asked to take, and to give back, after reserving them. */
+  captures: string[];
+  releases: string[];
+  /** While set, taking a reserved amount fails with this message. */
+  failCaptures: string | null;
   /** Payment links made so far, oldest first. */
   links: TestPayLink[];
   /** While set, the processor refuses to make or cancel a link, with this message. */
@@ -84,6 +89,9 @@ export async function createTestWorld(): Promise<TestWorld> {
     failRefunds: null,
     pendingRefunds: false,
     refundAnswer: { state: "completed" },
+    captures: [],
+    releases: [],
+    failCaptures: null,
     links: [],
     failLinks: null,
     provider: {
@@ -101,6 +109,15 @@ export async function createTestWorld(): Promise<TestWorld> {
       },
       async refundState() {
         return world.refundAnswer;
+      },
+      async capture(paymentId) {
+        world.captures.push(paymentId);
+        if (world.failCaptures) return { ok: false, message: world.failCaptures };
+        return mockProvider.capture(paymentId);
+      },
+      async release(paymentId) {
+        world.releases.push(paymentId);
+        return mockProvider.release(paymentId);
       },
       // A processor with a page of its own, as Square has: the test decides when a link is paid.
       async createPayLink(request) {
@@ -138,6 +155,9 @@ export async function createTestWorld(): Promise<TestWorld> {
       world.failRefunds = null;
       world.pendingRefunds = false;
       world.refundAnswer = { state: "completed" };
+      world.captures.length = 0;
+      world.releases.length = 0;
+      world.failCaptures = null;
       world.links.length = 0;
       world.failLinks = null;
     },

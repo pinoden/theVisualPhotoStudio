@@ -2,11 +2,12 @@ import { and, asc, eq, gt, inArray, isNull, lte, ne, or } from "drizzle-orm";
 import { bookings, payments } from "@/db/schema";
 import type { Db } from "@/db/client";
 import { releaseExpiredHolds } from "./availability";
-import { deliverPendingEmails, ownerPaymentUnknownNotice, queueEmail, type EmailTransport } from "./email";
+import { deliverPendingEmails, type EmailTransport } from "./email";
 import { labelOf } from "@/lib/domain/labels";
 import { BY_SYSTEM, recordEvent } from "./history";
 import { sendEarnedFreeHours } from "./loyalty";
 import { checkUnsettledRefunds, retryOpenRefunds, type ManageDeps } from "./manage";
+import { settleReservedPayments } from "./reserved";
 import { checkOpenPayLinks } from "./pay-links";
 import { emptyOldTrash } from "./pages";
 import { loadSettings } from "./settings";
@@ -22,8 +23,15 @@ export interface TaskDeps extends ManageDeps {
 
 export interface TaskSummary {
   holdsReleased: number;
-  /** Payments whose result was never recorded; the owner was asked to check each. */
+  /**
+   * Payments whose result was never recorded (the server stopped while a card was being reserved), closed.
+   * Nothing was taken: a reserved amount is given back by the processor by itself.
+   */
   paymentsFlagged: number;
+  /** Reserved amounts of bookings that stand, taken now. */
+  reservationsTaken: number;
+  /** Reserved amounts of bookings cancelled before the money was taken, given back. */
+  reservationsReleased: number;
   visitsCompleted: number;
   /** Free hours sent to customers who reached five visits. */
   loyaltyCodes: number;
@@ -129,7 +137,7 @@ export async function completeVisits(db: Db, now: Date, baseUrl: string): Promis
  * the charge ended and the processor may have taken the money. Close the
  * record and ask the owner to look, once.
  */
-export async function flagInterruptedPayments(db: Db, ownerEmail: string | null): Promise<number> {
+export async function flagInterruptedPayments(db: Db): Promise<number> {
   const stuck = await db
     .select({ id: payments.id, amountCents: payments.amountCents, ref: bookings.ref, customer: bookings.customerName })
     .from(payments)
@@ -139,34 +147,21 @@ export async function flagInterruptedPayments(db: Db, ownerEmail: string | null)
 
   let flagged = 0;
   for (const row of stuck) {
-    await db.transaction(async (tx) => {
-      const closed = await tx
-        .update(payments)
-        .set({ status: "failed", error: "Interrupted: no result was recorded" })
-        .where(and(eq(payments.id, row.id), eq(payments.status, "pending")))
-        .returning({ id: payments.id });
-      if (closed.length === 0) return; // another run closed it first
-      flagged++;
-      if (ownerEmail) {
-        await queueEmail(
-          tx,
-          ownerPaymentUnknownNotice({
-            to: ownerEmail,
-            ref: row.ref,
-            customer: row.customer,
-            amountCents: row.amountCents,
-            interrupted: true,
-          }),
-        );
-      }
-    });
+    // Nothing to tell anyone: the card was at most reserved, and the processor gives that back by itself.
+    const closed = await db
+      .update(payments)
+      .set({ status: "failed", error: "Interrupted before its result was recorded. Nothing was taken: a reserved amount is given back by Square by itself." })
+      .where(and(eq(payments.id, row.id), eq(payments.status, "pending")))
+      .returning({ id: payments.id });
+    flagged += closed.length;
   }
   return flagged;
 }
 
 export async function runScheduledTasks(db: Db, deps: TaskDeps): Promise<TaskSummary> {
   const holdsReleased = await releaseExpiredHolds(db, deps.now);
-  const paymentsFlagged = await flagInterruptedPayments(db, deps.ownerEmail);
+  const paymentsFlagged = await flagInterruptedPayments(db);
+  const reservations = await settleReservedPayments(db, deps);
   const visits = await completeVisits(db, deps.now, deps.baseUrl);
   const refundRuns = await retryOpenRefunds(db, deps);
   const settling = await checkUnsettledRefunds(db, deps);
@@ -176,6 +171,8 @@ export async function runScheduledTasks(db: Db, deps: TaskDeps): Promise<TaskSum
   return {
     holdsReleased,
     paymentsFlagged,
+    reservationsTaken: reservations.taken,
+    reservationsReleased: reservations.released,
     visitsCompleted: visits.completed,
     loyaltyCodes: visits.codes,
     refundsSucceeded: refundRuns.succeeded,

@@ -105,6 +105,52 @@ async function main() {
     );
   }
 
+  // ── Reserving, then taking or giving back ──
+  // How a booking is paid: the amount is reserved, the booking is confirmed, then the amount is taken.
+  const reserve = (idempotencyKey: string) =>
+    square.charge({
+      amountCents: 6800,
+      token: "cnon:card-nonce-ok",
+      idempotencyKey,
+      reference: "VS-CHECK2",
+      note: "VS-CHECK2 sandbox check",
+      buyerEmail: "sandbox-check@example.com",
+      reserve: true,
+    });
+  const held = await reserve(randomUUID());
+  report(held.ok, "$68.00 is reserved on a good card, not taken", held.ok ? `payment ${held.paymentId}` : held.message);
+  if (held.ok) {
+    const taken = await square.capture(held.paymentId);
+    report(taken.ok, "the reserved amount is taken", taken.ok ? "Square completed the payment" : taken.message);
+    const takenAgain = await square.capture(held.paymentId);
+    report(takenAgain.ok, "taking it again changes nothing and is not an error", takenAgain.ok ? "counted as done" : takenAgain.message);
+    const late = await square.release(held.paymentId);
+    report(!late.ok, "an amount already taken cannot be given back (a refund is needed)", late.ok ? "it was given back" : late.message);
+    const refunded = await square.refund({ paymentId: held.paymentId, amountCents: 6800, idempotencyKey: randomUUID(), reason: "Sandbox check" });
+    report(refunded.ok, "an amount taken that way is refunded like any payment", refunded.ok ? `refund ${refunded.refundId}` : refunded.message);
+  }
+  const heldThenFreed = await reserve(randomUUID());
+  if (heldThenFreed.ok) {
+    const freed = await square.release(heldThenFreed.paymentId);
+    report(freed.ok, "a reserved amount is given back", freed.ok ? "Square cancelled the payment" : freed.message);
+    const freedAgain = await square.release(heldThenFreed.paymentId);
+    report(freedAgain.ok, "giving it back again changes nothing and is not an error", freedAgain.ok ? "counted as done" : freedAgain.message);
+    const tooLate = await square.capture(heldThenFreed.paymentId);
+    report(!tooLate.ok, "an amount given back can no longer be taken", tooLate.ok ? "it was taken" : tooLate.message);
+  } else {
+    report(false, "a second amount is reserved", heldThenFreed.message);
+  }
+  const declinedHold = await square.charge({
+    amountCents: 6800,
+    token: "cnon:card-nonce-declined",
+    idempotencyKey: randomUUID(),
+    reference: "VS-CHECK3",
+    note: "VS-CHECK3 sandbox check",
+    buyerEmail: "sandbox-check@example.com",
+    reserve: true,
+  });
+  report(!declinedHold.ok && !declinedHold.unknown, "a declined card is refused when reserving too", declinedHold.ok ? "it was reserved" : declinedHold.message);
+
   // ── Refunding ──
   if (paid.ok) {
     const refund = (amountCents: number, idempotencyKey: string, paymentId = paid.paymentId) =>
