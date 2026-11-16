@@ -668,7 +668,7 @@ test("the calendar shows a day, a week and a month, one studio or all, and a boo
   expect((await latestEmail(page, "booking_moved", bob.email)).body).toContain("New time: ");
   await shot(page, "17f-appointment-moved");
 
-  // A booking made for a client, from the calendar: no card, and the price is paid at the studio.
+  // A booking made for a client, from the calendar, with their dog: no card, and the price is paid at the studio.
   await page.goto(`/admin/calendar?view=day&date=${NEAR}`);
   await expect(page.getByRole("link", { name: /Bob Brown/ })).toContainText("2:00 PM – 3:00 PM");
   await page.getByRole("link", { name: "New booking" }).click();
@@ -679,25 +679,28 @@ test("the calendar shows a day, a week and a month, one studio or all, and a boo
   await page.getByLabel("Client’s name").fill("Dana Diaz");
   await page.getByLabel("Client’s email").fill("dana.e2e@example.com");
   await page.getByLabel("Client’s phone").fill("407-555-0142");
+  // The add-ons of the booking screen are offered: those for any booking, and Dayglow's pet fee.
+  await expect(page.getByRole("checkbox", { name: /extra people/ })).toHaveCount(2);
+  await page.getByRole("checkbox", { name: /Pet fee/ }).check();
   await page.getByRole("button", { name: "Book for the client" }).click();
   await expect(page.getByRole("heading", { name: "Dana Diaz" })).toBeVisible();
   await expect(byText(page, /Nothing was charged: the price is paid at the studio\./)).toBeVisible();
   await expect(onScreen(page.locator(".price-row.total"))).toContainText("To pay at the studio");
-  expect((await latestEmail(page, "booking_confirmation", "dana.e2e@example.com")).body).toContain("To pay at the studio: $78");
+  expect((await latestEmail(page, "booking_confirmation", "dana.e2e@example.com")).body).toContain("To pay at the studio: $118");
 
-  // Dana pays in cash at the studio, and the owner marks the booking as paid.
-  await expect(byText(page, "$78 is still to pay.")).toBeVisible();
-  await expect(byLabel(page, "Amount paid ($)")).toHaveValue("78");
+  // Dana pays in cash at the studio, $78 for the hour and $40 for the dog, and the owner marks the booking as paid.
+  await expect(byText(page, "$118 is still to pay.")).toBeVisible();
+  await expect(byLabel(page, "Amount paid ($)")).toHaveValue("118");
   await byLabel(page, "How it was paid").selectOption({ label: "Cash" });
   await byLabel(page, "Note (optional)").fill("Paid at the desk");
   await page.getByRole("button", { name: "Record payment" }).click();
-  await expect(byText(page, /\$78 recorded\. The booking is paid in full\. The client has been emailed a confirmation\./)).toBeVisible();
+  await expect(byText(page, /\$118 recorded\. The booking is paid in full\. The client has been emailed a confirmation\./)).toBeVisible();
   await expect(onScreen(page.locator("#payment"))).toContainText("Paid in full.");
   await expect(onScreen(page.locator(".price-row.total"))).toContainText("Paid at the studio");
-  await expect(page.getByRole("row", { name: /\$78 · Cash/ })).toContainText(THIRD_OWNER);
+  await expect(page.getByRole("row", { name: /\$118 · Cash/ })).toContainText(THIRD_OWNER);
   await expect(page.getByRole("button", { name: "Record payment" })).toHaveCount(0); // nothing is owed any more
   const receipt = await latestEmail(page, "payment_received", "dana.e2e@example.com");
-  expect(receipt.body).toContain("We received your payment of $78");
+  expect(receipt.body).toContain("We received your payment of $118");
   expect(receipt.body).toContain("Your booking is paid in full.");
   await shot(page, "17g-marked-as-paid");
 

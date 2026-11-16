@@ -27,8 +27,9 @@ export default function NewBookingPage(props: PageProps<"/admin/calendar/new">) 
 /**
  * A booking made in the admin for a client. Two steps, each a plain form:
  * first what and when, then one of the start times that are really free and
- * the client's details. The rules are those of a booking made online, except
- * that the notice period does not apply and nothing is charged.
+ * the client's details, and the add-ons the client wants. The rules are those
+ * of a booking made online, except that the notice period does not apply and
+ * nothing is charged.
  */
 async function NewBooking({ searchParams }: Pick<PageProps<"/admin/calendar/new">, "searchParams">) {
   await connection();
@@ -54,6 +55,8 @@ async function NewBooking({ searchParams }: Pick<PageProps<"/admin/calendar/new"
   const duration = lengths.find((minutes) => String(minutes) === query.duration) ?? null;
 
   const ready = studioIds.length > 0 && duration !== null;
+  // The add-ons the booking screen would offer for these studios: those for any booking, and those of a chosen studio.
+  const addons = catalog.addons.filter((addon) => addon.studioId === null || studioIds.includes(addon.studioId));
   const free = ready ? await freeStartsFor(db, { studioIds, date, durationMinutes: duration }, now) : null;
   let price: number | null = null;
   if (ready) {
@@ -123,7 +126,8 @@ async function NewBooking({ searchParams }: Pick<PageProps<"/admin/calendar/new"
             {price !== null && (
               <>
                 {" "}
-                <strong>{formatCents(price)}</strong>, to be paid at the studio. Nothing is charged online.
+                <strong>{formatCents(price)}</strong>
+                {addons.length > 0 && ", and the add-ons ticked below,"} to be paid at the studio. Nothing is charged online.
               </>
             )}
           </p>
@@ -178,6 +182,22 @@ async function NewBooking({ searchParams }: Pick<PageProps<"/admin/calendar/new"
                 </label>
                 <textarea id="new-notes" name="notes" className="form-control" rows={2} maxLength={2000} />
               </div>
+              {addons.length > 0 && (
+                <fieldset className="form-group price-summary">
+                  <legend className="form-label">Add-ons</legend>
+                  {addons.map((addon) => (
+                    <label className="addon-row" key={addon.id}>
+                      <input type="checkbox" name="addon" value={addon.id} />
+                      <span>
+                        <strong>{addon.name}</strong>
+                        <br />
+                        {addon.description}
+                      </span>
+                      <span className="addon-price">{formatCents(addon.priceCents)}</span>
+                    </label>
+                  ))}
+                </fieldset>
+              )}
               <div className="form-group" style={{ maxWidth: "20rem" }}>
                 <label className="form-label" htmlFor="new-code">
                   Client&rsquo;s reward or credit code (optional)

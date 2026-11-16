@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
-import { bookings, settings, staffShifts, studioHolds } from "@/db/schema";
+import { addons, bookingAddons, bookings, settings, staffShifts, studioHolds } from "@/db/schema";
 import { createAdminBooking, getAppointment, moveBooking, moveOptions, setLabel } from "./appointments";
 import type { AuthUser } from "./auth";
 import { loadCalendar } from "./calendar";
@@ -344,6 +344,23 @@ describe("a booking made in the admin for a client", () => {
 
     // A customer cannot book the same afternoon online: they have to give a day's notice.
     expect(await world.book({ studioIds: [world.ids.paris], date: TODAY, startMinute: h(14) })).toMatchObject({ ok: false });
+  });
+
+  it("takes the add-ons the client wants, at their price, to be paid at the studio", async () => {
+    const offered = await world.db.select().from(addons);
+    const people = offered.find((addon) => addon.kind === "people" && addon.studioId === null)!;
+    const pet = offered.find((addon) => addon.kind === "pet")!; // for bookings that include Dayglow
+    const made = expectOk(
+      await createAdminBooking(world.db, owner, { ...request, studioIds: [world.ids.dayglow], addons: [{ addonId: people.id, quantity: 1 }, { addonId: pet.id, quantity: 1 }] }, deps),
+    );
+    const booking = await row(made.ref);
+    expect(booking.addonsCents).toBe(people.priceCents + pet.priceCents);
+    expect(booking.totalCents).toBe(15600 + people.priceCents + pet.priceCents);
+    const kinds = (await world.db.select().from(bookingAddons).where(eq(bookingAddons.bookingId, booking.id))).map((line) => line.kind).sort();
+    expect(kinds).toEqual(["people", "pet"]);
+    expect((await world.emails("booking_confirmation")).at(-1)!.body).toContain(`To pay at the studio: $${(15600 + people.priceCents + pet.priceCents) / 100}`);
+    // An add-on of another studio is not for this booking.
+    expect(await createAdminBooking(world.db, owner, { ...request, studioIds: [world.ids.paris], startMinute: h(17), durationMinutes: 60, addons: [{ addonId: pet.id, quantity: 1 }] }, deps)).toMatchObject({ ok: false });
   });
 
   it("obeys the same availability rules as a booking made online", async () => {

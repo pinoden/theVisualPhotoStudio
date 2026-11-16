@@ -100,6 +100,8 @@ export async function createAdminBookingAction(formData: FormData): Promise<void
         phone: formText(formData.get("phone")),
       },
       notes: formText(formData.get("notes")),
+      // Each add-on once, as on the booking screen; one that does not apply to the studios is refused by the price.
+      addons: [...new Set(formData.getAll("addon").filter((value): value is string => typeof value === "string"))].map((addonId) => ({ addonId, quantity: 1 })),
       // A reward or credit of the client's, used on their behalf: it is checked and spent as at checkout.
       promoCode: formText(formData.get("code")) || undefined,
     },
