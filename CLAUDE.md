@@ -154,6 +154,57 @@ Record each outcome here, with the date, when it is decided. Change a line's sta
 
 Live reference: the public site is Squarespace, with Acuity Scheduling for bookings. Acuity's full price list and policy text are public at `https://app.acuityscheduling.com/schedule.php?owner=28681884`.
 
+### Questions for the owners (list of 2026-11-16)
+
+Every question still waiting for the owners, in one numbered list, gathered from the sections below on 2026-11-16 and given to the owner the same day, so that they can answer by number. Each says what is built until they answer. When an answer comes, record it where the subject is recorded below (and in the decision log), then remove the question from this list.
+
+**To go live** (nothing can launch without these):
+
+1. **Hosting.** Where the site runs. It also decides the database, where pictures are stored, and what runs the scheduled task (free hours, refund retries, payments not taken yet). The builder's suggestion: Vercel for the site, a managed PostgreSQL (for example Neon), and Vercel's scheduler.
+2. **Web address.** Which domain the new site takes over from Squarespace, and who manages its DNS.
+3. **Email.** Which service sends the site's email (confirmations, sign-in codes, notices). Resend is built in; it needs an address on the studio's domain to send from, and two DNS records. Until then nothing can be emailed in production, sign-in codes included.
+4. **Real card payments.** When to switch Square from test mode to the live keys. The keys are typed into the host's settings by the owner, never sent in a message. The builder's suggestion: one real booking on the live site, refunded, before it opens.
+5. **Weekend prices.** The prices themselves (weekend prices equal weekday prices today), and whether the weekend is Saturday and Sunday only.
+6. **Privacy policy.** Needed before accounts hold receipts. Does the studio have one to reuse, or should the builder draft one for a lawyer to check?
+7. **Sales tax.** Do the prices include sales tax, and should receipts show a tax line, at what rate? A question for the accountant. Receipts show no tax line until then.
+
+**Rules built on the builder's reading** (an "OK" settles each):
+
+8. **Refund window.** A cancellation 14 days or more ahead is refunded, less 5%, for studio rentals as well as photography sessions. The live site says 7 days for rentals.
+9. **Moving a booking.** A customer can move a booking once, until 24 hours before it starts, and the credit code lasts 90 days.
+10. **Terms that change later.** A change of the refund window or fee applies to bookings already made. Or should each booking keep the terms it was made under?
+11. **Pet fee.** Never refunded to a card. It comes back as studio credit when the booking is cancelled in time, or when an owner presses "The pet did not come"; staff cannot do that.
+12. **Free hours.** A "bundle" is two or more studios booked together. On a long booking the free hour takes off the one-hour price. A visit paid even partly with a free hour does not count towards the next one. A free-hour booking that is moved becomes a credit code for its whole value. If loyalty is switched off and on again, customers get what they earned at their next visit.
+13. **Photography.** The photographer's 9 to 5 applies to every day until a day is switched off; 15 minutes between sessions; discount codes and free hours are not for sessions (credits are); the same add-ons as rentals; one price on weekdays and weekends; refunded 14 days or more ahead; booked at least two weeks ahead.
+14. **A booking moved by the studio** keeps the price paid, even onto a day that costs more. Or should the difference be charged or refunded?
+15. **Codes.** A code used on a booking that is cancelled becomes usable again; an owner may restore a redeemed reward, with a reason. Or should either stay cancelled?
+16. **Studio Managers.** What they can do without asking: record payments and send payment links, open customers, block time (on); see prices, refund cards, correct loyalty, change the website (off).
+17. **The website editor.** The design, the menu and the pages wait for Publish; prices, hours and booking rules apply at once. A deleted page stays in the trash 30 days. Videos come only from YouTube and Vimeo. A "seasonal collection" is a named set of pictures with a first and last day.
+18. **Extra people.** $30 for 1 to 2 and $50 for 3 to 5, in every studio. The live site's prices differ by studio: are they the right ones?
+
+**Choices about features** (built as described until answered):
+
+19. **Signing in.** Emailed codes only (built). Add passwords? Google sign-in now, later or never?
+20. **Moving, by request.** Customers move a booking at once with a credit code (built). Should they also be able to ask the studio to move it for them?
+21. **Earlier history.** Import past appointments and payments from Acuity and Square into the customers' accounts, or start from the launch?
+22. **Apple Wallet loyalty.** What is the system, who runs it, and should the site send stamps to it, read them from it, or neither?
+23. **Customer accounts.** May customers change their own email address? Should two accounts of one person be merged? Should the site log who opened a customer's page?
+24. **Memberships.** The memberships page shows Dayglow at $280 and $520 a month, but its buy buttons charge $330 and $600; Paris shows $270 and $500, its products $300 and $550. Which prices are right, and should the new site sell memberships?
+25. **Newsletter.** Keep a sign-up form? Squarespace's saves nothing today. Which service, if any?
+26. **Other money.** Overtime, the cleaning fee or damage, taken at the studio: should the site record it on a booking?
+27. **Photographers.** One today. Will there be a second?
+28. **Studios.** Should an owner be able to rename a studio, or add or remove one, in the admin?
+29. **The door code.** Sent at booking (built, as the live site does), or a day before the visit, so that a booking cancelled early never got it? The text itself is typed under Settings, Getting in.
+30. **Food and drinks.** Not allowed in the studios at all (the live guest information), or only not on furniture (the live terms, and the site today)?
+31. **The lights.** "Amaran 150, Godox and Neewer": is that the right spelling?
+32. **The accent colour.** The tan is too light for links and behind white button words by the accessibility guidelines. Darken it a little, or keep it?
+33. **Emails.** Their wording stays in the code. Should the owners be able to edit it too?
+
+**Testing and the code:**
+
+34. **Testing.** May the builder load Square's sandbox keys into the site on this computer, to try the real card form in a browser? Should the tester agent go over everything again? Testing on the owner's iPhone is planned for later.
+35. **Merging.** When should the `rebuild` branch become the main one (`master`)?
+
 ### Stack
 
 - **Language and framework** — **Decided (2026-11-14):** TypeScript, Next.js (React), PostgreSQL. Alternative considered and rejected: Python with Django.
@@ -313,7 +364,7 @@ The owner answered the questions on the same day. Each answer is recorded here, 
 2. **Email service — decide later.**
 3. **Payments — Square, in test mode for now.** Real keys when the owner says so.
 4. **Scheduled tasks — the hosting service's own scheduler,** once a host is chosen.
-5. **A card charged with no booking — decide later.** Until then the owner checks Square by hand, as now.
+5. **A card charged with no booking — decide later.** Settled since 2026-11-16 without a decision: a booking's card is reserved first and only charged once the booking is confirmed, so it can no longer happen.
 6. **Cancellations — 14 days before the start, with the 5% fee kept.** **Built (2026-11-15).** The question was about cancellations in general, and option c was "14 days, 5% fee": studio rentals now have the same 14 days as photography sessions (`refundWindowHours` 336). Migration `0011_owner_answers` moved a stored 168 to 336. The policies page and the guest information page state it from the setting.
 7. **A moved booking with a discount code — the credit includes the discount** (as built).
 8. **Several studios — 20% for two, 22% for three** (as built).
