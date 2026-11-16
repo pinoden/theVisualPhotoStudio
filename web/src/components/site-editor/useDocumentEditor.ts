@@ -3,7 +3,6 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { discardAction, publishAction, restoreVersionAction, saveDraftAction, type DocumentKind } from "@/app/admin/website/actions";
-import type { EditingState } from "@/server/website";
 
 /** How long after the last change the draft is saved by itself. */
 const AUTOSAVE_MS = 900;
@@ -37,6 +36,44 @@ export interface DocumentEditor<T> {
   restore(versionId: string): Promise<void>;
 }
 
+/** What an editor starts from. The design, the frame and every page give this. */
+export interface DraftStart<T> {
+  content: T;
+  hasDraft: boolean;
+  revision: number;
+  draftAt: string | null;
+  may: { publish: boolean };
+}
+
+type Outcome = { ok: true } | { ok: false; message: string };
+
+export type SaveOutcome =
+  | { ok: true; revision: number; hasDraft: boolean; savedAt: string }
+  | { ok: false; reason: "conflict"; message: string; by: string | null; at: string | null }
+  | { ok: false; reason: "forbidden" | "missing"; message: string };
+
+/** What an editor asks of the server. Each answers with a result and never redirects. */
+export interface DraftActions<T> {
+  save(content: T, basedOn: number, force: boolean): Promise<SaveOutcome>;
+  publish(): Promise<Outcome>;
+  discard(): Promise<Outcome>;
+  restore(versionId: string): Promise<Outcome>;
+}
+
+/** The editor of the design, or of the header, menu and footer. */
+export function useDocumentEditor<T>(kind: DocumentKind, initial: DraftStart<T>, report: (notice: string) => void): DocumentEditor<T> {
+  return useDraftEditor(
+    initial,
+    {
+      save: (content, basedOn, force) => saveDraftAction(kind, content, basedOn, force),
+      publish: () => publishAction(kind),
+      discard: () => discardAction(kind),
+      restore: (versionId) => restoreVersionAction(kind, versionId),
+    },
+    report,
+  );
+}
+
 /**
  * The state of one of the website's editors: the content being edited, the
  * draft on the server, and the four things that can be done with it. Changes
@@ -49,7 +86,7 @@ export interface DocumentEditor<T> {
  * it starts again from what is stored. What went well is therefore told to
  * `report`, which belongs to something that stays: see `EditorFrame`.
  */
-export function useDocumentEditor<T>(kind: DocumentKind, initial: EditingState<T>, report: (notice: string) => void): DocumentEditor<T> {
+export function useDraftEditor<T>(initial: DraftStart<T>, actions: DraftActions<T>, report: (notice: string) => void): DocumentEditor<T> {
   const router = useRouter();
   const [value, setValue] = useState(initial.content);
   const [status, setStatus] = useState<SaveStatus>("clean");
@@ -80,7 +117,7 @@ export function useDocumentEditor<T>(kind: DocumentKind, initial: EditingState<T
     const run = (async () => {
       setStatus("saving");
       try {
-        const result = await saveDraftAction(kind, latest.current, revision.current, force);
+        const result = await actions.save(latest.current, revision.current, force);
         if (result.ok) {
           revision.current = result.revision;
           stored.current = json;
@@ -116,6 +153,8 @@ export function useDocumentEditor<T>(kind: DocumentKind, initial: EditingState<T
   };
 
   const change = (next: T) => {
+    // An editor that reports its content without anything having changed (the page editor does, when it opens) changes nothing.
+    if (JSON.stringify(next) === JSON.stringify(latest.current)) return;
     latest.current = next;
     setValue(next);
     report("");
@@ -141,7 +180,7 @@ export function useDocumentEditor<T>(kind: DocumentKind, initial: EditingState<T
   );
 
   /** Run one of the three big actions: save first, then act, then let the server render the page again. */
-  const act = async (run: () => Promise<{ ok: true } | { ok: false; message: string }>, done: string, saveFirst: boolean) => {
+  const act = async (run: () => Promise<Outcome>, done: string, saveFirst: boolean) => {
     setBusy(true);
     setProblem("");
     report("");
@@ -176,8 +215,8 @@ export function useDocumentEditor<T>(kind: DocumentKind, initial: EditingState<T
     saveNow: () => save(false),
     overwrite: () => save(true),
     reload: () => router.refresh(),
-    publish: () => act(() => publishAction(kind), "Published. Visitors see it now.", true),
-    discard: () => act(() => discardAction(kind), "The changes were discarded.", false),
-    restore: (versionId) => act(() => restoreVersionAction(kind, versionId), "That version is now the draft. Look at it, then publish it or discard it.", false),
+    publish: () => act(actions.publish, "Published. Visitors see it now.", true),
+    discard: () => act(actions.discard, "The changes were discarded.", false),
+    restore: (versionId) => act(() => actions.restore(versionId), "That version is now the draft. Look at it, then publish it or discard it.", false),
   };
 }

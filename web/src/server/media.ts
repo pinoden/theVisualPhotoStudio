@@ -89,9 +89,10 @@ const toPicture = (row: Row): Picture => ({ id: row.id, url: mediaUrl(row), widt
 
 const isUuid = (value: unknown): value is string => typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 
-/** Who may use the library: whoever may change the website. */
+/** Who may use the library: whoever may change the website's design or its pages. */
 async function mayEdit(db: DbLike, viewer: { role: string }): Promise<boolean> {
-  return can(viewer, "editDesign", await loadSettings(db));
+  const settings = await loadSettings(db);
+  return can(viewer, "editDesign", settings) || can(viewer, "editPages", settings);
 }
 
 /** "IMG 0042 (final).JPG" -> "img-0042-final": a name that is safe in an address. The ending is added from what the file really is. */

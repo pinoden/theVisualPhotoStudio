@@ -729,3 +729,17 @@ export const siteFontFiles = pgTable(
   },
   (t) => [uniqueIndex("site_font_files_one_per_style").on(t.fontId, t.weight, t.italic)],
 );
+
+/**
+ * An address that used to lead to a page, and where it leads now. Written
+ * when a published page's address is changed, so that links and search
+ * results that still name the old address keep working, and by the owners for
+ * addresses of the website this one replaced. See src/server/pages.ts.
+ */
+export const siteRedirects = pgTable("site_redirects", {
+  /** The old address, as a path: "/guestinfo". */
+  fromPath: text("from_path").primaryKey(),
+  /** Where it leads: a path of this site, or a whole web address. */
+  toPath: text("to_path").notNull(),
+  createdAt: createdAt(),
+});

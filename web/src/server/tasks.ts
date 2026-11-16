@@ -8,6 +8,7 @@ import { BY_SYSTEM, recordEvent } from "./history";
 import { sendEarnedFreeHours } from "./loyalty";
 import { retryOpenRefunds, type ManageDeps } from "./manage";
 import { checkOpenPayLinks } from "./pay-links";
+import { emptyOldTrash } from "./pages";
 import { loadSettings } from "./settings";
 
 /**
@@ -34,6 +35,8 @@ export interface TaskSummary {
   payLinksClosed: number;
   emailsSent: number;
   emailsFailed: number;
+  /** Pages removed for good from the trash, after the days a deleted page is kept. */
+  pagesRemoved: number;
 }
 
 const DAY = 86_400_000;
@@ -164,6 +167,7 @@ export async function runScheduledTasks(db: Db, deps: TaskDeps): Promise<TaskSum
   const refundRuns = await retryOpenRefunds(db, deps);
   const links = await checkOpenPayLinks(db, deps);
   const mail = await deliverPendingEmails(db, deps.email, deps.now);
+  const pagesRemoved = await emptyOldTrash(db, deps.now);
   return {
     holdsReleased,
     paymentsFlagged,
@@ -175,5 +179,6 @@ export async function runScheduledTasks(db: Db, deps: TaskDeps): Promise<TaskSum
     payLinksClosed: links.closed,
     emailsSent: mail.sent,
     emailsFailed: mail.failed,
+    pagesRemoved,
   };
 }

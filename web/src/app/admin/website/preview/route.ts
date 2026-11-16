@@ -16,7 +16,8 @@ import { websiteAbilities } from "@/server/website";
  */
 export async function GET(request: NextRequest) {
   const user = await getCurrentUser();
-  if (!user || !(await websiteAbilities(await getDb(), user)).editDesign) return new Response("Not found", { status: 404 });
+  const may = user ? await websiteAbilities(await getDb(), user) : null;
+  if (!may || !(may.editDesign || may.editPages)) return new Response("Not found", { status: 404 });
   const to = request.nextUrl.searchParams.get("to");
   // Only ever a page of this site.
   const path = safeNextPath(to ?? "/");

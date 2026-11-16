@@ -55,7 +55,7 @@ async function Fonts({ searchParams }: Pick<PageProps<"/admin/website/fonts">, "
 
   return (
     <AdminFrame active="/admin/website" title="Your fonts" query={await searchParams} viewer={viewer} settings={settings}>
-      <WebsiteTabs active="/admin/website/fonts" />
+      <WebsiteTabs active="/admin/website/fonts" viewer={viewer} />
       {/* So that each font below can be shown in itself. Made from the fonts' ids and file ids only. */}
       <style>{fonts.map(fontFaceCss).join("")}</style>
 

@@ -64,6 +64,8 @@ export interface ChoosablePicture {
   width: number;
   height: number;
   alt: string;
+  /** The words under it in a gallery. */
+  caption: string;
   filename: string;
 }
 
@@ -76,7 +78,7 @@ export async function choosablePicturesAction(q: string): Promise<ChoosablePictu
   const viewer = await getCurrentUser();
   if (!viewer) return null;
   const items = await listMedia(await getDb(), viewer, { q: String(q ?? "") });
-  return items === null ? null : items.map(({ id, url, width, height, alt, filename }) => ({ id, url, width, height, alt, filename }));
+  return items === null ? null : items.map(({ id, url, width, height, alt, caption, filename }) => ({ id, url, width, height, alt, caption, filename }));
 }
 
 // ── Collections ──────────────────────────────────────────────────────────────

@@ -31,6 +31,7 @@ const PATHS = [
   "/admin/website/media",
   "/admin/website/media/collections",
   "/admin/website/fonts",
+  "/admin/website/pages",
   "/dev/outbox",
   "/booking/VS-AAAAAA?t=warm-up-warm-up-warm-up",
   "/api/availability?date=2030-01-09",

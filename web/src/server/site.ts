@@ -1,8 +1,9 @@
 import { cache } from "react";
 import { draftMode } from "next/headers";
 import { getDb } from "@/db/client";
-import { getPublishedDesign, getPublishedFrame, shownFrame, type ShownDesign, type ShownFrame } from "./cached";
+import { getPublishedDesign, getPublishedFrame, getPublishedPage, shownFrame, type ShownDesign, type ShownFrame } from "./cached";
 import { loadCustomFonts } from "./fonts";
+import { loadPagePreview, type ShownPage } from "./pages";
 import { getCurrentUser } from "./session";
 import { DESIGN_DOC, FRAME_DOC, loadDraftOrPublished, websiteAbilities } from "./website";
 
@@ -27,7 +28,8 @@ export const isPreview = cache(async (): Promise<boolean> => {
   if (!isEnabled) return false;
   const user = await getCurrentUser();
   if (!user) return false;
-  return (await websiteAbilities(await getDb(), user)).editDesign;
+  const may = await websiteAbilities(await getDb(), user);
+  return may.editDesign || may.editPages;
 });
 
 export async function siteDesign(): Promise<ShownDesign> {
@@ -40,4 +42,10 @@ export async function siteFrame(): Promise<ShownFrame> {
   if (!(await isPreview())) return getPublishedFrame();
   const db = await getDb();
   return shownFrame(db, await loadDraftOrPublished(db, FRAME_DOC));
+}
+
+/** The page at an address, as this request shows it: what is published, or in a preview its draft. Null when there is none. */
+export async function sitePage(slug: string): Promise<ShownPage | null> {
+  if (!(await isPreview())) return getPublishedPage(slug);
+  return loadPagePreview(await getDb(), slug, new Date());
 }

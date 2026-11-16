@@ -119,9 +119,9 @@ export async function loadDraftOrPublished<T, C>(db: DbLike, spec: DocumentSpec<
 }
 
 /** What the viewer may do with the website, as the owners have set the switches. */
-export async function websiteAbilities(db: DbLike, viewer: { role: string }): Promise<{ editDesign: boolean; publish: boolean }> {
+export async function websiteAbilities(db: DbLike, viewer: { role: string }): Promise<{ editDesign: boolean; editPages: boolean; publish: boolean }> {
   const settings = await loadSettings(db);
-  return { editDesign: can(viewer, "editDesign", settings), publish: can(viewer, "publishWebsite", settings) };
+  return { editDesign: can(viewer, "editDesign", settings), editPages: can(viewer, "editPages", settings), publish: can(viewer, "publishWebsite", settings) };
 }
 
 export interface EditingState<T> {

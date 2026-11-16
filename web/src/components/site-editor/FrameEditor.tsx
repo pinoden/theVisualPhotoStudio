@@ -123,6 +123,8 @@ function LinkRows({
 export interface FrameEditorProps {
   initial: EditingState<SiteFrame>;
   versions: VersionSummary[];
+  /** The pages made in the admin, offered as link suggestions beside the site's own. */
+  pages: { path: string; title: string }[];
   /** The logo's picture as the draft has it, when it has one: the frame itself only holds the picture's id. */
   logoPicture: ChoosablePicture | null;
 }
@@ -138,7 +140,7 @@ export function FrameEditor(props: FrameEditorProps) {
   return <FrameForm key={props.initial.revision} {...props} notice={notice} report={setNotice} />;
 }
 
-function FrameForm({ initial, versions, logoPicture, notice, report }: FrameEditorProps & { notice: string; report: (notice: string) => void }) {
+function FrameForm({ initial, versions, logoPicture, pages: madePages, notice, report }: FrameEditorProps & { notice: string; report: (notice: string) => void }) {
   const editor = useDocumentEditor<SiteFrame>("frame", initial, report);
   const frame = editor.value;
   const pages = useId();
@@ -152,7 +154,7 @@ function FrameForm({ initial, versions, logoPicture, notice, report }: FrameEdit
   return (
     <div className="site-editor">
       <datalist id={pages}>
-        {PAGES.map(([path, name]) => (
+        {[...PAGES, ...madePages.map((page): [string, string] => [page.path, page.title])].map(([path, name]) => (
           <option key={path} value={path}>
             {name}
           </option>

@@ -46,7 +46,7 @@ async function OneCollection({ params, searchParams }: Pick<PageProps<"/admin/we
 
   return (
     <AdminFrame active="/admin/website" title={collection.name} query={await searchParams} viewer={viewer} settings={settings}>
-      <WebsiteTabs active="/admin/website/media/collections" />
+      <WebsiteTabs active="/admin/website/media/collections" viewer={viewer} />
       <p style={{ margin: "-.75rem 0 1.25rem", fontSize: ".85rem" }}>
         <Link href="/admin/website/media/collections">← All collections</Link>
       </p>

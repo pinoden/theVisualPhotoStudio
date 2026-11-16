@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState } from "react";
 import { signInAction, type SignInState } from "@/app/account/actions";
 
@@ -77,7 +78,7 @@ export function SignInForm({ next, devHint }: { next: string; devHint: boolean }
           </form>
           {devHint && (
             <p style={{ fontSize: ".8rem", marginTop: "1rem", textAlign: "center" }}>
-              Development mode: no email is sent. Find the code at <a href="/dev/outbox">/dev/outbox</a>.
+              Development mode: no email is sent. Find the code at <Link href="/dev/outbox">/dev/outbox</Link>.
             </p>
           )}
         </>

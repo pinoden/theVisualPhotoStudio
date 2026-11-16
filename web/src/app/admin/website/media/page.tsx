@@ -53,7 +53,7 @@ async function Library({ searchParams }: Pick<PageProps<"/admin/website/media">,
 
   return (
     <AdminFrame active="/admin/website" title="Pictures" query={query} viewer={viewer} settings={settings}>
-      <WebsiteTabs active="/admin/website/media" />
+      <WebsiteTabs active="/admin/website/media" viewer={viewer} />
 
       <div className="admin-card">
         <h3>Add pictures</h3>

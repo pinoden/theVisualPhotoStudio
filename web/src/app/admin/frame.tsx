@@ -33,7 +33,7 @@ function linksFor(viewer: { role: string }, settings: AbilitySettings): { href: 
     "/admin/customers": can(viewer, "seeCustomers", settings),
     "/admin/hours": can(viewer, "blockTime", settings),
     "/admin/photography": can(viewer, "setPhotographerTimes", settings),
-    "/admin/website": can(viewer, "editDesign", settings),
+    "/admin/website": can(viewer, "editDesign", settings) || can(viewer, "editPages", settings),
   };
   return LINKS.filter((link) => pages[link.href] === true);
 }
@@ -51,6 +51,7 @@ export function AdminFrame({
   query,
   viewer,
   settings,
+  wide = false,
   children,
 }: {
   active: (typeof LINKS)[number]["href"];
@@ -61,13 +62,15 @@ export function AdminFrame({
   viewer?: { role: string };
   /** The settings, which decide the menu of a manager or an attendant. Needed whenever `viewer` is given. */
   settings?: AbilitySettings;
+  /** For the page editor: on a wide screen the menu folds away, to give the editor the whole width. */
+  wide?: boolean;
   children: ReactNode;
 }) {
   const links = viewer && viewer.role !== "owner" && settings ? linksFor(viewer, settings) : viewer && viewer.role !== "owner" ? [] : LINKS;
   const notice = typeof query.notice === "string" ? query.notice : "";
   const error = typeof query.error === "string" ? query.error : "";
   return (
-    <div className="admin-layout">
+    <div className={`admin-layout${wide ? " admin-layout-wide" : ""}`}>
       <aside className="admin-sidebar">
         <div className="admin-sidebar-logo">Studio Admin</div>
         <nav className="admin-nav">
@@ -81,6 +84,11 @@ export function AdminFrame({
       <div className="admin-main">
         <div className="admin-header">
           <h1>{title}</h1>
+          {wide && links.length > 0 && (
+            <Link href={links[0].href} className="admin-wide-menu">
+              Admin menu
+            </Link>
+          )}
         </div>
         {notice && (
           <div className="flash flash-success" role="status">

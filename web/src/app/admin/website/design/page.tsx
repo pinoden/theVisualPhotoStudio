@@ -35,7 +35,7 @@ async function DesignPageBody({ searchParams }: Pick<PageProps<"/admin/website/d
   if (!state || !versions) notFound();
   return (
     <AdminFrame active="/admin/website" title="Design" query={await searchParams} viewer={viewer} settings={settings}>
-      <WebsiteTabs active="/admin/website/design" />
+      <WebsiteTabs active="/admin/website/design" viewer={viewer} />
       <DesignEditor initial={state} versions={versions} fonts={fonts} />
     </AdminFrame>
   );

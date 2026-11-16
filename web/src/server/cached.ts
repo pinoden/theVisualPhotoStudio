@@ -6,6 +6,7 @@ import { announcementShows, type SiteFrame } from "@/lib/site/frame";
 import { loadCatalog, type Catalog } from "./catalog";
 import { loadCustomFonts } from "./fonts";
 import { loadPictures, type Picture } from "./media";
+import { findRedirect, loadPublishedPage, type ShownPage } from "./pages";
 import { localDateOf } from "./tz";
 import { DESIGN_DOC, FRAME_DOC, loadPublished } from "./website";
 
@@ -68,4 +69,23 @@ export async function getPublishedFrame(): Promise<ShownFrame> {
   cacheLife("minutes");
   const db = await getDb();
   return shownFrame(db, await loadPublished(db, FRAME_DOC));
+}
+
+/**
+ * A published page, for the public. Cached with the website, and with the
+ * catalog, because a picture or a collection changes with both.
+ */
+export async function getPublishedPage(slug: string): Promise<ShownPage | null> {
+  "use cache";
+  cacheTag(WEBSITE_TAG, CATALOG_TAG);
+  cacheLife("minutes");
+  return loadPublishedPage(await getDb(), slug, new Date());
+}
+
+/** Where an old address leads now, if anywhere. */
+export async function getRedirect(path: string): Promise<string | null> {
+  "use cache";
+  cacheTag(WEBSITE_TAG);
+  cacheLife("minutes");
+  return findRedirect(await getDb(), path);
 }

@@ -150,6 +150,7 @@ describe("the scheduled run", () => {
       payLinksClosed: 0,
       emailsSent: 2, // the booking confirmation and the free hour
       emailsFailed: 0,
+      pagesRemoved: 0,
     });
     expect(delivered).toContain(`Booking confirmed: ${booked.ref}`);
     expect(delivered).toContain("You have earned a free hour in the studio");

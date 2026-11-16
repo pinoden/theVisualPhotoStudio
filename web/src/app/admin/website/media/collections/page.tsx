@@ -35,7 +35,7 @@ async function Collections({ searchParams }: Pick<PageProps<"/admin/website/medi
 
   return (
     <AdminFrame active="/admin/website" title="Collections" query={await searchParams} viewer={viewer} settings={settings}>
-      <WebsiteTabs active="/admin/website/media/collections" />
+      <WebsiteTabs active="/admin/website/media/collections" viewer={viewer} />
       <div className="admin-card">
         <p style={{ margin: 0, fontSize: ".9rem" }}>
           A collection is a set of pictures from the library, in the order you put them: a season&rsquo;s sets, a

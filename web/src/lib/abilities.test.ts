@@ -15,6 +15,7 @@ const ALL: Ability[] = [
   "refund",
   "blockTime",
   "editDesign",
+  "editPages",
   "publishWebsite",
 ];
 const every = (value: boolean) => Object.fromEntries([...ATTENDANT_SWITCH_KEYS, ...MANAGER_SWITCH_KEYS].map((key) => [key, value])) as AbilitySettings;
@@ -45,6 +46,7 @@ describe("what each level of the admin may do", () => {
     expect(only("managerCorrectsLoyalty")).toEqual(["correctLoyalty"]);
     expect(only("managerBlocksTime")).toEqual(["blockTime"]);
     expect(only("managerEditsDesign")).toEqual(["editDesign"]);
+    expect(only("managerEditsPages")).toEqual(["editPages"]);
     expect(only("managerPublishesWebsite")).toEqual(["publishWebsite"]);
     expect(allowed("manager", every(true))).toEqual(ALL);
   });

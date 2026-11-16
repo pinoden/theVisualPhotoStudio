@@ -487,3 +487,180 @@ test("the owner adds a font of their own and uses it in the design, and gives th
   await page.getByRole("button", { name: "Leave the preview" }).click();
   await expect(page.getByText("This shows changes that are not published yet")).toHaveCount(0);
 });
+
+// ── Pages made of blocks (requirements 22, 23 and 24) ──
+
+// An eighth owner: the sixth and seventh have used their sign-in codes above.
+const PAGES_OWNER = "owner8@studio.test";
+
+const canvasOf = (page: Page) => page.frameLocator("iframe#preview-frame");
+
+/** Drag a block from the editor's list of blocks onto the page drawn in the editor, at the bottom of `onto`. */
+async function dragBlock(page: Page, name: string, onto: Locator) {
+  await page.locator(".page-editor-canvas").scrollIntoViewIfNeeded();
+  const source = page.locator("[data-puck-drawer-item]").filter({ has: page.getByText(name, { exact: true }) }).first();
+  await source.scrollIntoViewIfNeeded();
+  const from = (await source.boundingBox())!;
+  const target = (await onto.boundingBox())!;
+  const to = { x: target.x + target.width / 2, y: target.y + target.height - 2 };
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(from.x + from.width / 2 + 20, from.y + from.height / 2, { steps: 5 });
+  await page.mouse.move(to.x, to.y, { steps: 30 });
+  await page.waitForTimeout(400);
+  await page.mouse.move(to.x, to.y + 3, { steps: 5 });
+  await page.mouse.up();
+}
+
+test("the owner makes a page from blocks, previews it, and visitors see it at its address once it is published", async ({ page, browser }) => {
+  await page.setViewportSize({ width: 1440, height: 1200 });
+  await signIn(page, PAGES_OWNER, "/admin/website/pages");
+  await expect(page.getByRole("heading", { name: "Pages", level: 1 })).toBeVisible();
+  await expect(byText(page, "No pages made yet.")).toBeVisible();
+  // The old addresses of the live site are already sent on.
+  await expect(onScreen(page.locator(".trash-list"))).toContainText("/guestinfo → /faq");
+
+  await byLabel(page, "Name of a new page").fill("Gift Cards");
+  await page.getByRole("button", { name: "Make the page" }).click();
+  await expect(byText(page, "Page made. It is a draft: visitors see it once you publish it.")).toBeVisible();
+  await expect(page.locator(".page-editor-where")).toContainText("/gift-cards · Draft: not on the website");
+  const canvas = canvasOf(page);
+  await expect(canvas.locator("h1")).toHaveText("Gift Cards");
+
+  // Words are changed in the panel of the block that is pressed, and the page in the editor follows.
+  await canvas.locator("h1").click();
+  await page.getByRole("textbox", { name: "Heading" }).fill("Gift cards for every occasion");
+  await expect(canvas.locator("h1")).toHaveText("Gift cards for every occasion");
+  // A block is dragged onto the page from the list.
+  await dragBlock(page, "Buttons", canvas.locator(".blk-text"));
+  await expect(canvas.locator(".blk-buttons")).toContainText("Book a Studio");
+  await expect(byText(page, /Draft saved at .+ Visitors do not see it yet\./)).toBeVisible();
+  await shot(page, "48-admin-page-editor");
+
+  // Not on the website yet.
+  const guest = await visitor(browser);
+  expect((await guest.goto("/gift-cards"))?.status()).toBe(404);
+
+  // The preview shows the draft, on the website itself, to the owner alone.
+  const opened = page.waitForEvent("popup");
+  await page.getByRole("button", { name: "Preview" }).click();
+  const preview = await opened;
+  await preview.waitForURL(/\/gift-cards$/);
+  await expect(preview.getByRole("heading", { name: "Gift cards for every occasion", level: 1 })).toBeVisible();
+  await expect(preview.getByText("This shows changes that are not published yet. Visitors do not see them.")).toBeVisible();
+  await preview.getByRole("button", { name: "Leave the preview" }).click();
+  // Out of the preview, the draft is not there.
+  await expect(byText(preview, /could not be found/i)).toBeVisible();
+  await preview.close();
+
+  await page.getByRole("button", { name: "Publish", exact: true }).click();
+  await expect(byText(page, "Published. Visitors see it now.")).toBeVisible();
+  await expect(page.locator(".page-editor-where")).toContainText("/gift-cards · On the website");
+
+  // A visitor finds it at its address, with the studio's name after the page's on the tab.
+  expect((await guest.goto("/gift-cards"))?.status()).toBe(200);
+  await expect(guest.getByRole("heading", { name: "Gift cards for every occasion", level: 1 })).toBeVisible();
+  await expect(guest.locator(".blk-buttons").getByRole("link", { name: "Book a Studio" })).toHaveAttribute("href", "/book");
+  expect(await guest.title()).toBe("Gift Cards | The Visuals Photo Studio");
+  await shot(guest, "49-website-made-page");
+  // Search engines are told about it, and an address that is no page answers "not found".
+  expect(await (await guest.request.get("/sitemap.xml")).text()).toContain("/gift-cards</loc>");
+  expect((await guest.request.get("/no-such-page")).status()).toBe(404);
+  // An old address of the live site leads to its page here.
+  const old = await guest.request.get("/guestinfo", { maxRedirects: 0 });
+  expect(old.status()).toBe(308);
+  expect(old.headers()["location"]).toBe("/faq");
+  await guest.context().close();
+});
+
+test("a page shows a picture shaped differently on a phone, and its address can change without breaking old links", async ({ page, browser }) => {
+  await page.setViewportSize({ width: 1440, height: 1200 });
+  await signIn(page, PAGES_OWNER, "/admin/website/pages");
+  await page.getByRole("link", { name: "Edit Gift Cards" }).click();
+  const canvas = canvasOf(page);
+  await expect(canvas.locator("h1")).toHaveText("Gift cards for every occasion");
+
+  // A picture from the library, square on a phone and as it is on a computer.
+  await dragBlock(page, "Picture", canvas.locator(".blk-buttons"));
+  await expect(canvas.locator(".blk-note")).toContainText("Picture: choose one in the panel.");
+  await page.getByRole("button", { name: "Choose a picture" }).click();
+  const chooser = page.getByRole("dialog", { name: "Choose from the media library" });
+  await chooser.getByRole("button", { name: /white cyclorama wall/ }).click();
+  await chooser.getByRole("button", { name: "Use this picture" }).click();
+  await expect(canvas.locator(".blk-picture img")).toHaveAttribute("alt", "Studio Blanche: the white cyclorama wall");
+  await page.getByRole("combobox", { name: "Shape, on a phone" }).selectOption({ label: "Square" });
+  await expect(byText(page, /Draft saved at/)).toBeVisible();
+  await page.getByRole("button", { name: "Publish", exact: true }).click();
+  await expect(byText(page, "Published. Visitors see it now.")).toBeVisible();
+
+  const guest = await visitor(browser);
+  await guest.goto("/gift-cards");
+  const picture = guest.locator(".blk-picture img");
+  await drawn(picture);
+  const ratio = () => picture.evaluate((image) => image.getBoundingClientRect().width / image.getBoundingClientRect().height);
+  expect(await ratio()).toBeCloseTo(1.6, 1);
+  await guest.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(ratio).toBeCloseTo(1, 1);
+  await shot(guest, "50-website-page-phone");
+
+  // A new address: the old one is sent on to it.
+  await byLabel(page, "Address").fill("gift-vouchers");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(byText(page, "Saved. The page's address is /gift-vouchers.")).toBeVisible();
+  const moved = await guest.request.get("/gift-cards", { maxRedirects: 0 });
+  expect(moved.status()).toBe(308);
+  expect(moved.headers()["location"]).toBe("/gift-vouchers");
+  await guest.goto("/gift-cards");
+  await guest.waitForURL(/\/gift-vouchers$/);
+  await expect(guest.getByRole("heading", { name: "Gift cards for every occasion", level: 1 })).toBeVisible();
+
+  // A copy is a draft at an address of its own.
+  await page.goto("/admin/website/pages");
+  await page.getByRole("button", { name: "Copy Gift Cards" }).click();
+  await expect(byText(page, "Copied. The copy is a draft, at an address of its own.")).toBeVisible();
+  await expect(page.locator(".page-editor-where")).toContainText("/gift-vouchers-copy · Draft: not on the website");
+  expect((await guest.request.get("/gift-vouchers-copy")).status()).toBe(404);
+
+  // Taken off the website, then deleted and brought back: a draft again, with everything on it.
+  await page.goto("/admin/website/pages");
+  await page.getByRole("link", { name: "Edit Gift Cards" }).click();
+  await page.getByRole("button", { name: "Take Gift Cards off the website" }).click();
+  await expect(byText(page, "Taken off the website. It is kept here as a draft.")).toBeVisible();
+  expect((await guest.request.get("/gift-vouchers")).status()).toBe(404);
+  await page.locator("summary", { hasText: "Delete this page" }).click();
+  await page.getByRole("button", { name: "Yes, delete Gift Cards" }).click();
+  await expect(byText(page, "The page is in the trash, below. It can be brought back for 30 days.")).toBeVisible();
+  await page.getByRole("button", { name: "Bring back Gift Cards" }).click();
+  await expect(byText(page, "Brought back as a draft, at /gift-vouchers.")).toBeVisible();
+  await page.getByRole("link", { name: "Edit Gift Cards" }).click();
+  await expect(canvasOf(page).locator(".blk-picture img")).toBeVisible();
+  await guest.context().close();
+});
+
+test("a manager who may edit pages prepares one as a draft, and an owner publishes it", async ({ page, browser }) => {
+  await signIn(page, PAGES_OWNER, "/admin/staff");
+  await page.getByRole("checkbox", { name: /Add and edit the website's pages/ }).check();
+  await page.getByRole("button", { name: "Save what managers can do" }).click();
+  await expect(byText(page, "Saved. It applies to every Studio Manager from now on.")).toBeVisible();
+
+  const wes = await visitor(browser);
+  await wes.setViewportSize({ width: 1440, height: 1200 });
+  await signIn(wes, MANAGER, "/admin/website/pages");
+  await byLabel(wes, "Name of a new page").fill("Winter Offer");
+  await wes.getByRole("button", { name: "Make the page" }).click();
+  await expect(canvasOf(wes).locator("h1")).toHaveText("Winter Offer");
+  await expect(byText(wes, "You can prepare changes as a draft. An owner publishes them.")).toBeVisible();
+  await expect(wes.getByRole("button", { name: "Publish", exact: true })).toHaveCount(0);
+  await wes.context().close();
+
+  await page.goto("/admin/website/pages");
+  await expect(onScreen(page.locator(".page-list"))).toContainText(`Last changed`);
+  await page.getByRole("link", { name: "Edit Winter Offer" }).click();
+  await expect(canvasOf(page).locator("h1")).toHaveText("Winter Offer");
+  await page.getByRole("button", { name: "Publish", exact: true }).click();
+  await expect(byText(page, "Published. Visitors see it now.")).toBeVisible();
+  const guest = await visitor(browser);
+  await guest.goto("/winter-offer");
+  await expect(guest.getByRole("heading", { name: "Winter Offer", level: 1 })).toBeVisible();
+  await guest.context().close();
+});

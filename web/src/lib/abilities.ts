@@ -14,7 +14,9 @@
  *
  * The website is the owners' too, unless they give a manager part of it:
  * one switch lets managers change the design and the header, menu and footer
- * as a draft, and another lets them publish. An attendant never can.
+ * as a draft, one lets them edit pages as a draft, and one lets them publish.
+ * Either of the first two opens the library of pictures. An attendant never
+ * can.
  */
 
 /** The switches for attendants. Each is a setting of the same name. */
@@ -38,7 +40,8 @@ export const MANAGER_SWITCHES = {
   managerCorrectsLoyalty: "Add or take away loyalty stamps, and cancel a reward or give it back",
   managerBlocksTime: "Block time in a studio",
   managerEditsDesign: "Change the website's design, header, menu and footer. What they change stays a draft until it is published",
-  managerPublishesWebsite: "Publish changes to the website, and bring an earlier version back",
+  managerEditsPages: "Add and edit the website's pages. What they change stays a draft until it is published",
+  managerPublishesWebsite: "Publish changes to the website, take a page offline, and bring an earlier version back",
 } as const;
 
 export type AttendantSwitch = keyof typeof ATTENDANT_SWITCHES;
@@ -61,6 +64,7 @@ export type Ability =
   | "refund"
   | "blockTime"
   | "editDesign"
+  | "editPages"
   | "publishWebsite";
 
 /** For an attendant: the switch that allows it, or false when no switch does. */
@@ -78,6 +82,7 @@ const ATTENDANT_RULE: Record<Ability, AttendantSwitch | false> = {
   refund: false,
   blockTime: false,
   editDesign: false,
+  editPages: false,
   publishWebsite: false,
 };
 
@@ -96,6 +101,7 @@ const MANAGER_RULE: Record<Ability, ManagerSwitch | true> = {
   refund: "managerRefunds",
   blockTime: "managerBlocksTime",
   editDesign: "managerEditsDesign",
+  editPages: "managerEditsPages",
   publishWebsite: "managerPublishesWebsite",
 };
 

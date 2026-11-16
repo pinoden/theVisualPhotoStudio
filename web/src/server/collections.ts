@@ -62,7 +62,8 @@ export function showsInWords(collection: { startsOn: string | null; endsOn: stri
 }
 
 async function mayEdit(db: DbLike, viewer: { role: string }): Promise<boolean> {
-  return can(viewer, "editDesign", await loadSettings(db));
+  const settings = await loadSettings(db);
+  return can(viewer, "editDesign", settings) || can(viewer, "editPages", settings);
 }
 
 async function picturesOf(db: DbLike, collectionId: string): Promise<Picture[]> {

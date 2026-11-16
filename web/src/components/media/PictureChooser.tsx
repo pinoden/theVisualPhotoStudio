@@ -68,14 +68,8 @@ export function PictureChooser({
             Close
           </button>
         </div>
-        <form
-          className="picture-chooser-search"
-          onSubmit={(event) => {
-            event.preventDefault();
-            setPictures(null);
-            load(search);
-          }}
-        >
+        {/* Not a form: the chooser is also opened from inside the page editor's own form, and forms cannot nest. */}
+        <div className="picture-chooser-search" role="search">
           <input
             className="form-control"
             type="search"
@@ -83,8 +77,21 @@ export function PictureChooser({
             placeholder="Search by name or description"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter") return;
+              event.preventDefault();
+              setPictures(null);
+              load(search);
+            }}
           />
-          <button type="submit" className="btn btn-outline btn-small">
+          <button
+            type="button"
+            className="btn btn-outline btn-small"
+            onClick={() => {
+              setPictures(null);
+              load(search);
+            }}
+          >
             Search
           </button>
           <MediaUploader
@@ -96,7 +103,7 @@ export function PictureChooser({
               load("");
             }}
           />
-        </form>
+        </div>
         {problem && (
           <div className="flash flash-error" role="alert">
             {problem}

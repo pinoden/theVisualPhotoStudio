@@ -82,6 +82,8 @@ export interface Settings {
   managerBlocksTime: boolean;
   /** Whether managers can change the website's design and its header, menu and footer, as a draft. */
   managerEditsDesign: boolean;
+  /** Whether managers can add and edit the website's pages, as a draft. */
+  managerEditsPages: boolean;
   /** Whether managers can publish changes to the website and restore an earlier version. */
   managerPublishesWebsite: boolean;
 }
@@ -125,6 +127,7 @@ export const DEFAULT_SETTINGS: Settings = {
   managerBlocksTime: true,
   // The website is the owners' until they give a manager part of it.
   managerEditsDesign: false,
+  managerEditsPages: false,
   managerPublishesWebsite: false,
 };
 
@@ -176,6 +179,7 @@ const VALIDATORS: { [K in Exclude<keyof Settings, "multiStudioPercent">]: (v: un
   managerCorrectsLoyalty: bool,
   managerBlocksTime: bool,
   managerEditsDesign: bool,
+  managerEditsPages: bool,
   managerPublishesWebsite: bool,
 };
 

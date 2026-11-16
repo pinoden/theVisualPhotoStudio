@@ -245,7 +245,7 @@ describe("two people editing at once", () => {
 describe("who may change the website", () => {
   it("is the owners, until they let a manager in; an attendant and a customer never", async () => {
     for (const viewer of [mia, sam, jane]) {
-      expect(await websiteAbilities(world.db, viewer)).toEqual({ editDesign: false, publish: false });
+      expect(await websiteAbilities(world.db, viewer)).toEqual({ editDesign: false, editPages: false, publish: false });
       expect(await loadForEditing(world.db, viewer, DESIGN_DOC)).toBeNull();
       expect(await listVersions(world.db, viewer, DESIGN_DOC)).toBeNull();
       expect(await saveDraft(world.db, viewer, DESIGN_DOC, design("#123456"), { basedOn: 0, now: NOW })).toMatchObject({ ok: false, reason: "forbidden" });
@@ -259,7 +259,7 @@ describe("who may change the website", () => {
     await allow("managerEditsDesign");
     await allow("managerPublishesWebsite");
     for (const viewer of [sam, jane]) {
-      expect(await websiteAbilities(world.db, viewer)).toEqual({ editDesign: false, publish: false });
+      expect(await websiteAbilities(world.db, viewer)).toEqual({ editDesign: false, editPages: false, publish: false });
       expect(await saveDraft(world.db, viewer, FRAME_DOC, DEFAULT_FRAME, { basedOn: 0, now: NOW })).toMatchObject({ ok: false, reason: "forbidden" });
     }
   });
