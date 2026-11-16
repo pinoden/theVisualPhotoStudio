@@ -141,7 +141,7 @@ describe("refunding through Square", () => {
 
   it("sends the payment, the amount and the idempotency key, and accepts a refund Square is still completing", async () => {
     const fetchMock = stubSquare(json(200, { refund: { id: "PAY1_R1", status: "PENDING" } }));
-    expect(await square().refund(REFUND)).toEqual({ ok: true, refundId: "PAY1_R1" });
+    expect(await square().refund(REFUND)).toEqual({ ok: true, refundId: "PAY1_R1", settled: false });
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("https://connect.squareupsandbox.com/v2/refunds");
     expect(JSON.parse(String(init?.body))).toEqual({
@@ -150,6 +150,32 @@ describe("refunding through Square", () => {
       amount_money: { amount: 4400, currency: "USD" },
       reason: "Cancelled by customer",
     });
+  });
+
+  it("says when Square completed the refund at once", async () => {
+    stubSquare(json(200, { refund: { id: "PAY1_R1", status: "COMPLETED" } }));
+    expect(await square().refund(REFUND)).toEqual({ ok: true, refundId: "PAY1_R1", settled: true });
+  });
+
+  it("asks Square again about a refund it accepted, and reads what became of it", async () => {
+    const fetchMock = stubSquare(json(200, { refund: { id: "PAY1_R1", status: "PENDING" } }));
+    expect(await square().refundState("PAY1_R1")).toEqual({ state: "pending" });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://connect.squareupsandbox.com/v2/refunds/PAY1_R1");
+    expect(init?.method).toBe("GET");
+    stubSquare(json(200, { refund: { id: "PAY1_R1", status: "COMPLETED" } }));
+    expect(await square().refundState("PAY1_R1")).toEqual({ state: "completed" });
+    stubSquare(json(200, { refund: { id: "PAY1_R1", status: "REJECTED" } }));
+    expect(await square().refundState("PAY1_R1")).toEqual({ state: "rejected", message: "Square marked the refund REJECTED" });
+    stubSquare(json(200, { refund: { id: "PAY1_R1", status: "FAILED" } }));
+    expect(await square().refundState("PAY1_R1")).toEqual({ state: "rejected", message: "Square marked the refund FAILED" });
+  });
+
+  it("concludes nothing about a refund when Square does not answer, or cannot find it", async () => {
+    stubSquare("down", "down", "down");
+    expect(await square().refundState("PAY1_R1")).toEqual({ state: "unknown", message: "No answer from Square" });
+    stubSquare(json(404, { errors: [{ code: "NOT_FOUND", detail: "Refund not found." }] }));
+    expect(await square().refundState("PAY1_R1")).toEqual({ state: "unknown", message: "NOT_FOUND: Refund not found." });
   });
 
   it("passes Square's own explanation on, for the owner", async () => {

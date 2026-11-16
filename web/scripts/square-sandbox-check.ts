@@ -112,7 +112,15 @@ async function main() {
 
     const firstKey = randomUUID();
     const half = await refund(4400, firstKey);
-    report(half.ok, "half of the payment is refunded", half.ok ? `refund ${half.refundId}` : half.message);
+    report(half.ok, "half of the payment is refunded", half.ok ? `refund ${half.refundId}, ${half.settled ? "completed at once" : "accepted as pending"}` : half.message);
+
+    // What the scheduled task asks about a refund Square accepted without completing it.
+    if (half.ok) {
+      const state = await square.refundState(half.refundId);
+      report(state.state === "pending" || state.state === "completed", "the refund is read back from Square", JSON.stringify(state));
+    }
+    const nowhere = await square.refundState("no-such-refund");
+    report(nowhere.state === "unknown", "an unknown refund is read as unknown, not as rejected", JSON.stringify(nowhere));
 
     const halfAgain = await refund(4400, firstKey);
     report(

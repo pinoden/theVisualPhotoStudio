@@ -18,6 +18,7 @@ import {
   type PayLinkState,
   type PaymentProvider,
   type RefundRequest,
+  type RefundState,
 } from "./payments";
 
 /** A payment link the test processor was asked to make, and what the test says became of it. */
@@ -52,6 +53,10 @@ export interface TestWorld {
   refundCalls: RefundRequest[];
   /** While set, every refund fails with this message. */
   failRefunds: string | null;
+  /** While true, the processor accepts refunds as pending, as Square mostly does, instead of completing them at once. */
+  pendingRefunds: boolean;
+  /** What the processor says when asked about a refund it accepted. */
+  refundAnswer: RefundState;
   /** Payment links made so far, oldest first. */
   links: TestPayLink[];
   /** While set, the processor refuses to make or cancel a link, with this message. */
@@ -77,6 +82,8 @@ export async function createTestWorld(): Promise<TestWorld> {
     charges: [],
     refundCalls: [],
     failRefunds: null,
+    pendingRefunds: false,
+    refundAnswer: { state: "completed" },
     links: [],
     failLinks: null,
     provider: {
@@ -89,7 +96,11 @@ export async function createTestWorld(): Promise<TestWorld> {
       async refund(request) {
         world.refundCalls.push(request);
         if (world.failRefunds) return { ok: false, message: world.failRefunds };
-        return mockProvider.refund(request);
+        const result = await mockProvider.refund(request);
+        return result.ok ? { ...result, settled: !world.pendingRefunds } : result;
+      },
+      async refundState() {
+        return world.refundAnswer;
       },
       // A processor with a page of its own, as Square has: the test decides when a link is paid.
       async createPayLink(request) {
@@ -125,6 +136,8 @@ export async function createTestWorld(): Promise<TestWorld> {
       world.charges.length = 0;
       world.refundCalls.length = 0;
       world.failRefunds = null;
+      world.pendingRefunds = false;
+      world.refundAnswer = { state: "completed" };
       world.links.length = 0;
       world.failLinks = null;
     },

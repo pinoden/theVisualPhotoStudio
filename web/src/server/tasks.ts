@@ -6,7 +6,7 @@ import { deliverPendingEmails, ownerPaymentUnknownNotice, queueEmail, type Email
 import { labelOf } from "@/lib/domain/labels";
 import { BY_SYSTEM, recordEvent } from "./history";
 import { sendEarnedFreeHours } from "./loyalty";
-import { retryOpenRefunds, type ManageDeps } from "./manage";
+import { checkUnsettledRefunds, retryOpenRefunds, type ManageDeps } from "./manage";
 import { checkOpenPayLinks } from "./pay-links";
 import { emptyOldTrash } from "./pages";
 import { loadSettings } from "./settings";
@@ -29,6 +29,10 @@ export interface TaskSummary {
   loyaltyCodes: number;
   refundsSucceeded: number;
   refundsFailed: number;
+  /** Refunds the processor had accepted as pending, found complete now. */
+  refundsSettled: number;
+  /** Refunds the processor had accepted, found rejected after all: the owner was told. */
+  refundsRejected: number;
   /** Payment links found paid at the processor and recorded as payments. */
   payLinksPaid: number;
   /** Payment links withdrawn because their booking is no longer active. */
@@ -165,6 +169,7 @@ export async function runScheduledTasks(db: Db, deps: TaskDeps): Promise<TaskSum
   const paymentsFlagged = await flagInterruptedPayments(db, deps.ownerEmail);
   const visits = await completeVisits(db, deps.now, deps.baseUrl);
   const refundRuns = await retryOpenRefunds(db, deps);
+  const settling = await checkUnsettledRefunds(db, deps);
   const links = await checkOpenPayLinks(db, deps);
   const mail = await deliverPendingEmails(db, deps.email, deps.now);
   const pagesRemoved = await emptyOldTrash(db, deps.now);
@@ -175,6 +180,8 @@ export async function runScheduledTasks(db: Db, deps: TaskDeps): Promise<TaskSum
     loyaltyCodes: visits.codes,
     refundsSucceeded: refundRuns.succeeded,
     refundsFailed: refundRuns.failed,
+    refundsSettled: settling.settled,
+    refundsRejected: settling.rejected,
     payLinksPaid: links.paid,
     payLinksClosed: links.closed,
     emailsSent: mail.sent,

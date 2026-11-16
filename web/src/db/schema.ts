@@ -530,6 +530,12 @@ export const refunds = pgTable("refunds", {
   /** True when the system refunded by policy without the owner's involvement. */
   automatic: boolean("automatic").notNull().default(false),
   error: text("error"),
+  /**
+   * When the processor said the refund was complete. A refund it accepted as
+   * pending has none until the scheduled task asks again; one it rejects
+   * then becomes failed (`checkUnsettledRefunds` in manage.ts).
+   */
+  settledAt: ts("settled_at"),
   createdAt: createdAt(),
 });
 

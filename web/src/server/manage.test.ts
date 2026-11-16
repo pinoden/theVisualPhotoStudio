@@ -9,6 +9,7 @@ import {
   netCardPaidCents,
   ownerCancelBooking,
   ownerRefund,
+  checkUnsettledRefunds,
   requestRescheduleCode,
   retryOpenRefunds,
   type Actor,
@@ -221,6 +222,56 @@ describe("when a refund cannot be sent", () => {
     expect(await netCardPaidCents(world.db, (await bookingRow(booked.ref)).id)).toBe(880);
 
     expect(await retryOpenRefunds(world.db, world.manageDeps())).toEqual({ succeeded: 1, failed: 0 });
+    expect((await world.db.select().from(refunds))[0].status).toBe("succeeded");
+  });
+});
+
+/** Square accepts most refunds as pending and completes them shortly after; it may still reject one then. */
+describe("a refund the processor accepted without completing it", () => {
+  it("is marked complete once the processor says so, and not asked about again", async () => {
+    const booked = expectOk(await world.book({ date: FAR }));
+    world.pendingRefunds = true;
+    expectOk(await cancelBooking(world.db, booked.ref, byToken(booked.manageToken), world.manageDeps()));
+    expect((await world.db.select().from(refunds))[0]).toMatchObject({ status: "succeeded", settledAt: null });
+
+    world.refundAnswer = { state: "pending" };
+    expect(await checkUnsettledRefunds(world.db, world.manageDeps())).toEqual({ settled: 0, rejected: 0 });
+    world.refundAnswer = { state: "unknown", message: "No answer from Square" };
+    expect(await checkUnsettledRefunds(world.db, world.manageDeps())).toEqual({ settled: 0, rejected: 0 });
+    world.refundAnswer = { state: "completed" };
+    expect(await checkUnsettledRefunds(world.db, world.manageDeps())).toEqual({ settled: 1, rejected: 0 });
+    expect((await world.db.select().from(refunds))[0].settledAt).toEqual(NOW);
+    expect(await checkUnsettledRefunds(world.db, world.manageDeps())).toEqual({ settled: 0, rejected: 0 });
+  });
+
+  it("becomes a failed refund the owner is told about, when the processor rejects it after all", async () => {
+    const booked = expectOk(await world.book({ date: FAR }));
+    world.pendingRefunds = true;
+    expectOk(await cancelBooking(world.db, booked.ref, byToken(booked.manageToken), world.manageDeps()));
+    expect((await world.db.select().from(payments))[0].refundedCents).toBe(16720);
+
+    world.refundAnswer = { state: "rejected", message: "Square marked the refund REJECTED" };
+    expect(await checkUnsettledRefunds(world.db, world.manageDeps())).toEqual({ settled: 0, rejected: 1 });
+    expect((await world.db.select().from(refunds))[0]).toMatchObject({ status: "failed", error: "Square marked the refund REJECTED" });
+    // The money did not go back: the card's payment counts it as not refunded again.
+    expect((await world.db.select().from(payments))[0].refundedCents).toBe(0);
+    const [alert] = await world.emails("owner_refund_failed");
+    expect(alert.subject).toBe(`ACTION NEEDED: refund failed for ${booked.ref}`);
+    expect(alert.body).toContain("Square accepted the refund, then did not make it (Square marked the refund REJECTED).");
+    // Asked again, nothing more happens: it is a failed refund now, retried with the others.
+    expect(await checkUnsettledRefunds(world.db, world.manageDeps())).toEqual({ settled: 0, rejected: 0 });
+    world.pendingRefunds = false;
+    expect(await retryOpenRefunds(world.db, world.manageDeps())).toEqual({ succeeded: 1, failed: 0 });
+    expect((await world.db.select().from(payments))[0].refundedCents).toBe(16720);
+  });
+
+  it("is never asked about when the processor completed it at once, or when there is no processor", async () => {
+    const booked = expectOk(await world.book({ date: FAR }));
+    expectOk(await cancelBooking(world.db, booked.ref, byToken(booked.manageToken), world.manageDeps()));
+    expect((await world.db.select().from(refunds))[0].settledAt).toEqual(NOW);
+    world.refundAnswer = { state: "rejected", message: "Square marked the refund REJECTED" };
+    expect(await checkUnsettledRefunds(world.db, world.manageDeps())).toEqual({ settled: 0, rejected: 0 });
+    expect(await checkUnsettledRefunds(world.db, world.manageDeps({ payments: null }))).toEqual({ settled: 0, rejected: 0 });
     expect((await world.db.select().from(refunds))[0].status).toBe("succeeded");
   });
 });

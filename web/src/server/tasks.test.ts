@@ -146,6 +146,8 @@ describe("the scheduled run", () => {
       loyaltyCodes: 1,
       refundsSucceeded: 0,
       refundsFailed: 0,
+      refundsSettled: 0,
+      refundsRejected: 0,
       payLinksPaid: 0,
       payLinksClosed: 0,
       emailsSent: 2, // the booking confirmation and the free hour

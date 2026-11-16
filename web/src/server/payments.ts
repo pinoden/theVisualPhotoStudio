@@ -35,7 +35,21 @@ export interface RefundRequest {
   reason: string;
 }
 
-export type RefundResult = { ok: true; refundId: string } | { ok: false; message: string };
+/**
+ * A refund the processor accepted. `settled` says it has also completed: the
+ * money is on its way back to the card. Square accepts most refunds as
+ * pending and completes them shortly after, and may still reject one then:
+ * `refundState` asks again (`checkUnsettledRefunds` in manage.ts).
+ */
+export type RefundResult = { ok: true; refundId: string; settled: boolean } | { ok: false; message: string };
+
+export type RefundState =
+  | { state: "pending" }
+  | { state: "completed" }
+  /** Accepted, then not made after all: the money did not go back. */
+  | { state: "rejected"; message: string }
+  /** No answer, or one that says neither: nothing is known to have changed. */
+  | { state: "unknown"; message: string };
 
 /**
  * A payment link: a page of the processor where a client pays an amount by
@@ -67,6 +81,8 @@ export interface PaymentProvider {
   name: "square" | "mock";
   charge(request: ChargeRequest): Promise<ChargeResult>;
   refund(request: RefundRequest): Promise<RefundResult>;
+  /** What became of a refund the processor accepted: still pending, completed, or rejected after all. */
+  refundState(refundId: string): Promise<RefundState>;
   createPayLink(request: PayLinkRequest): Promise<PayLinkResult>;
   /** Whether the link was paid, is still open, or was cancelled. */
   payLinkState(link: { linkId: string; orderId: string }): Promise<PayLinkState>;
@@ -87,7 +103,10 @@ export const mockProvider: PaymentProvider = {
   },
   async refund(request) {
     if (!request.paymentId.startsWith("mock_")) return { ok: false, message: "Unknown payment." };
-    return { ok: true, refundId: `mock_refund_${request.idempotencyKey}` };
+    return { ok: true, refundId: `mock_refund_${request.idempotencyKey}`, settled: true };
+  },
+  async refundState() {
+    return { state: "completed" };
   },
   // The pretend processor has no page of its own: the client's page on this site offers a pretend
   // payment instead (`pretendToPay`), which is why a pretend link is never found paid here.
@@ -259,10 +278,23 @@ export function squareProvider(config: SquareConfig): PaymentProvider {
       const { refund, errors = [] } = answer.data;
       // Square accepts a refund as PENDING and completes it shortly after.
       const accepted = ["PENDING", "COMPLETED", "APPROVED"].includes(refund?.status ?? "");
-      if (answer.ok && refund?.id && accepted) return { ok: true, refundId: refund.id };
+      if (answer.ok && refund?.id && accepted) return { ok: true, refundId: refund.id, settled: refund.status === "COMPLETED" };
       // Refund problems are read by the owner, so Square's own words are the useful ones.
       const detail = errors.map((error) => error.detail ?? error.code).filter(Boolean).join("; ");
       return { ok: false, message: detail || `Refund was not accepted (${refund?.status ?? `HTTP ${answer.status}`}).` };
+    },
+
+    async refundState(refundId) {
+      const answer = await send("GET", `/v2/refunds/${encodeURIComponent(refundId)}`);
+      if (!answer) return { state: "unknown", message: "No answer from Square" };
+      const status = answer.data.refund?.status;
+      if (!answer.ok || !status) {
+        return { state: "unknown", message: inSquaresWords(answer.data.errors ?? []) || `Square answered HTTP ${answer.status}` };
+      }
+      if (status === "COMPLETED") return { state: "completed" };
+      if (status === "PENDING" || status === "APPROVED") return { state: "pending" };
+      if (status === "REJECTED" || status === "FAILED") return { state: "rejected", message: `Square marked the refund ${status}` };
+      return { state: "unknown", message: `Square gave the refund the status ${status}` };
     },
 
     // Square's Checkout API. The shapes below are what Square's sandbox returned on 2026-11-15:

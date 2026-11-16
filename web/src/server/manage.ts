@@ -1,4 +1,4 @@
-import { and, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { bookings, payments, promoCodes, refunds } from "@/db/schema";
 import type { Db, DbLike } from "@/db/client";
 import { labelOf } from "@/lib/domain/labels";
@@ -243,7 +243,7 @@ export async function processRefund(db: Db, refundId: string, deps: ManageDeps):
     await db.transaction(async (tx) => {
       const updated = await tx
         .update(refunds)
-        .set({ status: "succeeded", providerRefundId: result.refundId, error: null })
+        .set({ status: "succeeded", providerRefundId: result.refundId, error: null, settledAt: result.settled ? deps.now : null })
         .where(and(eq(refunds.id, refundId), inArray(refunds.status, ["pending", "failed"])))
         .returning({ id: refunds.id });
       if (updated.length === 0) return; // another worker finished it first
@@ -301,6 +301,62 @@ export async function retryOpenRefunds(db: Db, deps: ManageDeps): Promise<{ succ
     else if (status === "failed") failed++;
   }
   return { succeeded, failed };
+}
+
+/**
+ * Ask the processor about the refunds it accepted without completing them.
+ * One that completed is marked so. One it rejected after all becomes failed:
+ * the money did not go back, so the payment's refunded amount is taken down
+ * again and the owner is told, as when a refund fails at once; it is then
+ * retried with the others (`retryOpenRefunds`). Run from the scheduled task.
+ */
+export async function checkUnsettledRefunds(db: Db, deps: ManageDeps): Promise<{ settled: number; rejected: number }> {
+  if (!deps.payments) return { settled: 0, rejected: 0 };
+  const open = await db
+    .select({ refund: refunds, paymentId: payments.id, ref: bookings.ref, customer: bookings.customerName })
+    .from(refunds)
+    .innerJoin(payments, eq(payments.id, refunds.paymentId))
+    .innerJoin(bookings, eq(bookings.id, payments.bookingId))
+    .where(and(eq(refunds.status, "succeeded"), isNull(refunds.settledAt), isNotNull(refunds.providerRefundId)))
+    .limit(50);
+  let settled = 0;
+  let rejected = 0;
+  for (const row of open) {
+    const answer = await deps.payments.refundState(row.refund.providerRefundId!);
+    if (answer.state === "completed") {
+      await db.update(refunds).set({ settledAt: deps.now }).where(and(eq(refunds.id, row.refund.id), isNull(refunds.settledAt)));
+      settled++;
+    } else if (answer.state === "rejected") {
+      const done = await db.transaction(async (tx) => {
+        const updated = await tx
+          .update(refunds)
+          .set({ status: "failed", error: answer.message })
+          .where(and(eq(refunds.id, row.refund.id), eq(refunds.status, "succeeded")))
+          .returning({ id: refunds.id });
+        if (updated.length === 0) return false; // another worker got there first
+        await tx
+          .update(payments)
+          .set({ refundedCents: sql`${payments.refundedCents} - ${row.refund.amountCents}` })
+          .where(eq(payments.id, row.paymentId));
+        if (deps.ownerEmail) {
+          await queueEmail(
+            tx,
+            ownerRefundNotice({
+              to: deps.ownerEmail,
+              ref: row.ref,
+              customer: row.customer,
+              amountCents: row.refund.amountCents,
+              automatic: row.refund.automatic,
+              failedReason: `Square accepted the refund, then did not make it (${answer.message}).`,
+            }),
+          );
+        }
+        return true;
+      });
+      if (done) rejected++;
+    }
+  }
+  return { settled, rejected };
 }
 
 /** Record refunds of `totalCents` against a booking's payments, newest payment first. */
