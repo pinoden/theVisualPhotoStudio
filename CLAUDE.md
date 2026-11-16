@@ -539,6 +539,7 @@ Known weaknesses:
 - The framework keeps the resized copies of a picture for as long as the picture's address is valid, and there is no way to clear them. A replaced picture gets a new address, so this never shows an old picture; the old copies only take room until the host clears its cache.
 - The browser tests run against the development server with the mock processor, not a production build.
 - Mobile was checked in Chromium set to phone sizes. Safari on an iPhone lays some things out differently (date and time fields above all), and nothing was tried on a real phone, a real foldable or with a screen reader.
+- No accessibility check runs, by hand or automated. An automated scan of the public pages and the booking steps with axe-core (its Playwright package, `@axe-core/playwright`, as a test-only dependency) was proposed on 2026-11-16; installing a new dependency needs the owner's approval, which it does not have yet. Colour contrast would be left out of such a scan: the tan accent is known to fall short as link text and under white words, and changing the brand's colours is the owners' choice (the design editor's readability list advises on it).
 
 ### Decision log
 
