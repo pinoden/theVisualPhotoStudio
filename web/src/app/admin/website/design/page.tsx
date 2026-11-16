@@ -1,14 +1,15 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { Suspense } from "react";
 import { DesignEditor } from "@/components/site-editor/DesignEditor";
 import { getDb } from "@/db/client";
+import { loadCustomFonts } from "@/server/fonts";
 import { requireManager } from "@/server/session";
 import { loadSettings } from "@/server/settings";
 import { DESIGN_DOC, listVersions, loadForEditing } from "@/server/website";
 import { AdminFrame, AdminLoading } from "../../frame";
+import { WebsiteTabs } from "../tabs";
 
 export const metadata: Metadata = { title: "Website design", robots: { index: false } };
 
@@ -25,14 +26,17 @@ async function DesignPageBody({ searchParams }: Pick<PageProps<"/admin/website/d
   await connection();
   const viewer = await requireManager("/admin/website/design");
   const db = await getDb();
-  const [state, versions, settings] = await Promise.all([loadForEditing(db, viewer, DESIGN_DOC), listVersions(db, viewer, DESIGN_DOC), loadSettings(db)]);
+  const [state, versions, settings, fonts] = await Promise.all([
+    loadForEditing(db, viewer, DESIGN_DOC),
+    listVersions(db, viewer, DESIGN_DOC),
+    loadSettings(db),
+    loadCustomFonts(db),
+  ]);
   if (!state || !versions) notFound();
   return (
     <AdminFrame active="/admin/website" title="Design" query={await searchParams} viewer={viewer} settings={settings}>
-      <p style={{ margin: "-1rem 0 1.5rem", fontSize: ".85rem" }}>
-        <Link href="/admin/website">← Website</Link>
-      </p>
-      <DesignEditor initial={state} versions={versions} />
+      <WebsiteTabs active="/admin/website/design" />
+      <DesignEditor initial={state} versions={versions} fonts={fonts} />
     </AdminFrame>
   );
 }

@@ -1,14 +1,21 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import { connection } from "next/server";
 import { Suspense } from "react";
+import { ChoosePictures } from "@/components/media/PictureChooser";
 import { getDb } from "@/db/client";
 import { ADDON_KINDS } from "@/lib/addon-kinds";
 import { centsToInput, MONEY_FIELD } from "@/lib/parse";
 import { listAddons, type AdminAddon } from "@/server/admin";
 import { loadCatalog, type CatalogStudio } from "@/server/catalog";
 import { requireOwner } from "@/server/session";
+import { STUDIO_PHOTO_LIMIT } from "@/server/studio-photos";
 import {
+  addStudioPhotosAction,
+  moveStudioPhotoEarlierAction,
+  moveStudioPhotoLaterAction,
   offerAddonAgainAction,
+  removeStudioPhotoAction,
   saveAddonAction,
   saveStudioDetailsAction,
   stopOfferingAddonAction,
@@ -100,6 +107,56 @@ function AddonFields({ id, addon, studios }: { id: string; addon?: AdminAddon; s
   );
 }
 
+/** A studio's photos: pictures of the media library in the owners' order, with the buttons to reorder and remove them. */
+function StudioPhotos({ studio }: { studio: CatalogStudio }) {
+  const last = studio.photos.length - 1;
+  return (
+    <div className="studio-photos">
+      <h4 className="editor-subtitle">Photos of {studio.name}</h4>
+      <p style={HELP}>
+        From the media library. The first is the one on the studio&rsquo;s card; all of them are on the studios page.
+        A change shows to customers at once. Up to {STUDIO_PHOTO_LIMIT}.
+      </p>
+      {studio.photos.length > 0 && (
+        <ol className="media-ordered">
+          {studio.photos.map((photo, index) => (
+            <li key={photo.id}>
+              <Image src={photo.url} width={photo.width} height={photo.height} alt={photo.alt} sizes="160px" />
+              <span className="media-facts">{photo.alt}</span>
+              <span className="editor-row-buttons">
+                <form action={moveStudioPhotoEarlierAction}>
+                  <input type="hidden" name="studioId" value={studio.id} />
+                  <input type="hidden" name="mediaId" value={photo.id} />
+                  <button type="submit" className="btn btn-outline btn-small" disabled={index === 0} aria-label={`Move photo ${index + 1} of ${studio.name} earlier`}>
+                    ↑
+                  </button>
+                </form>
+                <form action={moveStudioPhotoLaterAction}>
+                  <input type="hidden" name="studioId" value={studio.id} />
+                  <input type="hidden" name="mediaId" value={photo.id} />
+                  <button type="submit" className="btn btn-outline btn-small" disabled={index === last} aria-label={`Move photo ${index + 1} of ${studio.name} later`}>
+                    ↓
+                  </button>
+                </form>
+                <form action={removeStudioPhotoAction}>
+                  <input type="hidden" name="studioId" value={studio.id} />
+                  <input type="hidden" name="mediaId" value={photo.id} />
+                  <button type="submit" className="btn btn-outline btn-small" aria-label={`Take photo ${index + 1} off ${studio.name}`}>
+                    Take off
+                  </button>
+                </form>
+              </span>
+            </li>
+          ))}
+        </ol>
+      )}
+      {studio.photos.length < STUDIO_PHOTO_LIMIT && (
+        <ChoosePictures label={`Add photos of ${studio.name}`} action={addStudioPhotosAction} fields={{ studioId: studio.id }} />
+      )}
+    </div>
+  );
+}
+
 async function StudiosAndAddons({ searchParams }: Pick<PageProps<"/admin/studios">, "searchParams">) {
   await connection();
   await requireOwner("/admin/studios");
@@ -109,77 +166,80 @@ async function StudiosAndAddons({ searchParams }: Pick<PageProps<"/admin/studios
   return (
     <AdminFrame active="/admin/studios" title="Studios & add-ons" query={await searchParams}>
       {catalog.studios.map((studio) => (
-        <form action={saveStudioDetailsAction} className="admin-card" key={studio.id}>
-          <h3>{studio.name}</h3>
-          <input type="hidden" name="studioId" value={studio.id} />
-          <div className="form-group">
-            <label className="form-label" htmlFor={`studio-${studio.slug}-tagline`}>
-              Tagline
-            </label>
-            <input
-              id={`studio-${studio.slug}-tagline`}
-              name="tagline"
-              className="form-control"
-              maxLength={200}
-              defaultValue={studio.tagline}
-            />
-          </div>
-          <div className="form-group">
-            <label className="form-label" htmlFor={`studio-${studio.slug}-description`}>
-              Description
-            </label>
-            <textarea
-              id={`studio-${studio.slug}-description`}
-              name="description"
-              className="form-control"
-              rows={3}
-              maxLength={2000}
-              defaultValue={studio.description}
-            />
-          </div>
-          <div className="admin-form-row">
+        <div className="admin-card" key={studio.id}>
+          <form action={saveStudioDetailsAction}>
+            <h3>{studio.name}</h3>
+            <input type="hidden" name="studioId" value={studio.id} />
             <div className="form-group">
-              <label className="form-label" htmlFor={`studio-${studio.slug}-guests`}>
-                Guests included in the price
+              <label className="form-label" htmlFor={`studio-${studio.slug}-tagline`}>
+                Tagline
               </label>
               <input
-                id={`studio-${studio.slug}-guests`}
-                name="includedGuests"
-                className="form-control price-input"
-                type="number"
-                min={1}
-                max={100}
-                step={1}
-                defaultValue={studio.includedGuests}
-                required
+                id={`studio-${studio.slug}-tagline`}
+                name="tagline"
+                className="form-control"
+                maxLength={200}
+                defaultValue={studio.tagline}
               />
             </div>
             <div className="form-group">
-              <label className="form-label" htmlFor={`studio-${studio.slug}-buffer`}>
-                Kept free after a booking (minutes)
+              <label className="form-label" htmlFor={`studio-${studio.slug}-description`}>
+                Description
               </label>
-              <input
-                id={`studio-${studio.slug}-buffer`}
-                name="bufferMinutes"
-                className="form-control price-input"
-                type="number"
-                min={0}
-                max={240}
-                step={1}
-                defaultValue={studio.bufferMinutes}
-                required
+              <textarea
+                id={`studio-${studio.slug}-description`}
+                name="description"
+                className="form-control"
+                rows={3}
+                maxLength={2000}
+                defaultValue={studio.description}
               />
             </div>
-            <button type="submit" className="btn btn-dark btn-small">
-              Save {studio.name}
-            </button>
-          </div>
-          <div style={HELP}>
-            The guest number is shown to customers and is not enforced. The time kept free after a booking is the
-            least gap between two appointments: 15 is 7 minutes before and 7 after each, as the calendar draws them. A
-            new value applies to bookings made from now on.
-          </div>
-        </form>
+            <div className="admin-form-row">
+              <div className="form-group">
+                <label className="form-label" htmlFor={`studio-${studio.slug}-guests`}>
+                  Guests included in the price
+                </label>
+                <input
+                  id={`studio-${studio.slug}-guests`}
+                  name="includedGuests"
+                  className="form-control price-input"
+                  type="number"
+                  min={1}
+                  max={100}
+                  step={1}
+                  defaultValue={studio.includedGuests}
+                  required
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label" htmlFor={`studio-${studio.slug}-buffer`}>
+                  Kept free after a booking (minutes)
+                </label>
+                <input
+                  id={`studio-${studio.slug}-buffer`}
+                  name="bufferMinutes"
+                  className="form-control price-input"
+                  type="number"
+                  min={0}
+                  max={240}
+                  step={1}
+                  defaultValue={studio.bufferMinutes}
+                  required
+                />
+              </div>
+              <button type="submit" className="btn btn-dark btn-small">
+                Save {studio.name}
+              </button>
+            </div>
+            <div style={HELP}>
+              The guest number is shown to customers and is not enforced. The time kept free after a booking is the
+              least gap between two appointments: 15 is 7 minutes before and 7 after each, as the calendar draws them. A
+              new value applies to bookings made from now on.
+            </div>
+          </form>
+          <StudioPhotos studio={studio} />
+        </div>
       ))}
 
       <div className="admin-card">

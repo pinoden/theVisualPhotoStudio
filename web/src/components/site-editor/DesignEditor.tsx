@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import {
   DESIGN_LIMITS,
@@ -10,7 +11,7 @@ import {
   type Design,
   type HeadingStyle,
 } from "@/lib/site/design";
-import { findFont, FONT_LIBRARY, fontStack, type FontGroup } from "@/lib/site/fonts";
+import { findFont, FONT_LIBRARY, fontFaceCss, fontStack, type CustomFont, type FontGroup } from "@/lib/site/fonts";
 import type { EditingState, VersionSummary } from "@/server/website";
 import { CheckField, ColorField, EditorBar, Group, History, PreviewPane, RangeField, SelectField } from "./parts";
 import { useDocumentEditor } from "./useDocumentEditor";
@@ -35,7 +36,7 @@ const FONT_ROLES: { key: keyof Design["fonts"]; label: string; help: string; sam
 ];
 
 const GROUP_NAMES: Record<FontGroup, string> = { serif: "Serif", sans: "Sans serif", display: "Display, for headings", script: "Script, for a few words" };
-const FONT_OPTIONS = FONT_LIBRARY.map((font) => ({ value: font.id, label: font.name, group: GROUP_NAMES[font.group] }));
+const LIBRARY_OPTIONS = FONT_LIBRARY.map((font) => ({ value: font.id, label: font.name, group: GROUP_NAMES[font.group] }));
 
 const WEIGHT_NAMES: Record<number, string> = {
   100: "Thin",
@@ -48,8 +49,8 @@ const WEIGHT_NAMES: Record<number, string> = {
   800: "Extra bold",
   900: "Black",
 };
-const weightOptions = (fontId: string) =>
-  (findFont(fontId)?.weights ?? [400]).map((weight) => ({ value: weight, label: `${WEIGHT_NAMES[weight] ?? weight} (${weight})` }));
+const weightOptions = (fontId: string, custom: CustomFont[]) =>
+  (findFont(fontId, custom)?.weights ?? [400]).map((weight) => ({ value: weight, label: `${WEIGHT_NAMES[weight] ?? weight} (${weight})` }));
 
 const HEADINGS: { key: keyof Design["headings"]; title: string; font: keyof Design["fonts"] }[] = [
   { key: "h1", title: "Main headings: the title of a page", font: "heading" },
@@ -65,6 +66,8 @@ const times = (value: number) => `${value.toFixed(2)}×`;
 export interface DesignEditorProps {
   initial: EditingState<Design>;
   versions: VersionSummary[];
+  /** The owners' own fonts, which can be chosen beside the library's. */
+  fonts: CustomFont[];
 }
 
 /**
@@ -78,11 +81,13 @@ export function DesignEditor(props: DesignEditorProps) {
   return <DesignForm key={props.initial.revision} {...props} notice={notice} report={setNotice} />;
 }
 
-function DesignForm({ initial, versions, notice, report }: DesignEditorProps & { notice: string; report: (notice: string) => void }) {
+function DesignForm({ initial, versions, fonts, notice, report }: DesignEditorProps & { notice: string; report: (notice: string) => void }) {
   const editor = useDocumentEditor<Design>("design", initial, report);
   const design = editor.value;
   // Every change goes through parseDesign: it keeps numbers in range and moves a weight the newly chosen font lacks to the nearest it has.
-  const update = (next: Design) => editor.change(parseDesign(next));
+  const update = (next: Design) => editor.change(parseDesign(next, fonts));
+  const usable = fonts.filter((font) => font.weights.length > 0);
+  const fontOptions = [...usable.map((font) => ({ value: font.id, label: font.name, group: "Your own fonts" })), ...LIBRARY_OPTIONS];
   const setHeading = (level: keyof Design["headings"], patch: Partial<HeadingStyle>) =>
     update({ ...design, headings: { ...design.headings, [level]: { ...design.headings[level], ...patch } } });
   const setBody = (patch: Partial<Design["body"]>) => update({ ...design, body: { ...design.body, ...patch } });
@@ -90,10 +95,12 @@ function DesignForm({ initial, versions, notice, report }: DesignEditorProps & {
   const setSpacing = (patch: Partial<Design["spacing"]>) => update({ ...design, spacing: { ...design.spacing, ...patch } });
 
   const checks = readabilityChecks(design);
-  const notes = fontNotes(design);
+  const notes = fontNotes(design, fonts);
 
   return (
     <div className="site-editor">
+      {/* So that a font of the owners' own can be shown in itself below. Made from ids only: see fontFaceCss. */}
+      {usable.length > 0 && <style>{usable.map(fontFaceCss).join("")}</style>}
       <EditorBar editor={editor} notice={notice} previewPath="/" />
       <div className="editor-grid">
         <div className="editor-form">
@@ -133,14 +140,14 @@ function DesignForm({ initial, versions, notice, report }: DesignEditorProps & {
 
           <Group title="Fonts">
             {FONT_ROLES.map((role) => {
-              const font = findFont(design.fonts[role.key]);
+              const font = findFont(design.fonts[role.key], fonts);
               return (
                 <div key={role.key} className="editor-font">
                   <SelectField
                     label={role.label}
                     help={role.help}
                     value={design.fonts[role.key]}
-                    options={FONT_OPTIONS}
+                    options={fontOptions}
                     onChange={(value) => update({ ...design, fonts: { ...design.fonts, [role.key]: value } })}
                   />
                   {font && (
@@ -152,8 +159,8 @@ function DesignForm({ initial, versions, notice, report }: DesignEditorProps & {
               );
             })}
             <p className="editor-hint">
-              The fonts are served by this website itself. A font of your own, such as Horizon, can be added once you
-              have its web font files and a licence that covers a website.
+              The fonts are served by this website itself. A font of your own, such as a brand font, is added under{" "}
+              <Link href="/admin/website/fonts">Your fonts</Link> and can then be chosen here.
             </p>
           </Group>
 
@@ -163,7 +170,7 @@ function DesignForm({ initial, versions, notice, report }: DesignEditorProps & {
               <Group title={heading.title} key={heading.key}>
                 <RangeField label="Size on a computer" value={style.scale} limit={DESIGN_LIMITS.headingScale} show={percent} onChange={(scale) => setHeading(heading.key, { scale })} />
                 <RangeField label="Size on a phone" value={style.scaleMobile} limit={DESIGN_LIMITS.headingScale} show={percent} onChange={(scaleMobile) => setHeading(heading.key, { scaleMobile })} />
-                <SelectField label="Weight" value={style.weight} options={weightOptions(design.fonts[heading.font])} onChange={(weight) => setHeading(heading.key, { weight })} />
+                <SelectField label="Weight" value={style.weight} options={weightOptions(design.fonts[heading.font], fonts)} onChange={(weight) => setHeading(heading.key, { weight })} />
                 <RangeField label="Space between letters" value={style.letterSpacing} limit={DESIGN_LIMITS.headingLetterSpacing} show={ems} onChange={(letterSpacing) => setHeading(heading.key, { letterSpacing })} />
                 <RangeField label="Line height" value={style.lineHeight} limit={DESIGN_LIMITS.headingLineHeight} show={times} onChange={(lineHeight) => setHeading(heading.key, { lineHeight })} />
                 <CheckField label="All capital letters" checked={style.uppercase} onChange={(uppercase) => setHeading(heading.key, { uppercase })} />
@@ -175,14 +182,14 @@ function DesignForm({ initial, versions, notice, report }: DesignEditorProps & {
           <Group title="Running text">
             <RangeField label="Size on a computer" value={design.body.size} limit={DESIGN_LIMITS.bodySize} show={pixels} onChange={(size) => setBody({ size })} />
             <RangeField label="Size on a phone" value={design.body.sizeMobile} limit={DESIGN_LIMITS.bodySize} show={pixels} onChange={(sizeMobile) => setBody({ sizeMobile })} />
-            <SelectField label="Weight" value={design.body.weight} options={weightOptions(design.fonts.body)} onChange={(weight) => setBody({ weight })} />
+            <SelectField label="Weight" value={design.body.weight} options={weightOptions(design.fonts.body, fonts)} onChange={(weight) => setBody({ weight })} />
             <RangeField label="Line height" value={design.body.lineHeight} limit={DESIGN_LIMITS.bodyLineHeight} show={times} onChange={(lineHeight) => setBody({ lineHeight })} />
             <RangeField label="Space between letters" value={design.body.letterSpacing} limit={DESIGN_LIMITS.bodyLetterSpacing} show={ems} onChange={(letterSpacing) => setBody({ letterSpacing })} />
           </Group>
 
           <Group title="Buttons">
             <RangeField label="Text size" value={design.buttons.size} limit={DESIGN_LIMITS.buttonSize} show={pixels} onChange={(size) => setButtons({ size })} />
-            <SelectField label="Weight" value={design.buttons.weight} options={weightOptions(design.fonts.button)} onChange={(weight) => setButtons({ weight })} />
+            <SelectField label="Weight" value={design.buttons.weight} options={weightOptions(design.fonts.button, fonts)} onChange={(weight) => setButtons({ weight })} />
             <RangeField label="Space between letters" value={design.buttons.letterSpacing} limit={DESIGN_LIMITS.buttonLetterSpacing} show={ems} onChange={(letterSpacing) => setButtons({ letterSpacing })} />
             <CheckField label="All capital letters" checked={design.buttons.uppercase} onChange={(uppercase) => setButtons({ uppercase })} />
             <RangeField label="Rounded corners" value={design.buttons.radius} limit={DESIGN_LIMITS.buttonRadius} show={(value) => (value === 0 ? "square" : pixels(value))} onChange={(radius) => setButtons({ radius })} />
@@ -198,7 +205,7 @@ function DesignForm({ initial, versions, notice, report }: DesignEditorProps & {
 
           <History editor={editor} versions={versions} onOriginal={() => update(initial.original)} />
         </div>
-        <PreviewPane path="/" css={designCss(design)} reload={0} />
+        <PreviewPane path="/" css={designCss(design, fonts)} reload={0} />
       </div>
     </div>
   );

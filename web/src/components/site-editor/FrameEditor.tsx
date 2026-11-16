@@ -1,6 +1,9 @@
 "use client";
 
+import Image from "next/image";
 import { useId, useState } from "react";
+import type { ChoosablePicture } from "@/app/admin/website/media/actions";
+import { PictureChooser } from "@/components/media/PictureChooser";
 import {
   ANNOUNCEMENT_STYLES,
   BOOK_BUTTON_STYLES,
@@ -120,6 +123,8 @@ function LinkRows({
 export interface FrameEditorProps {
   initial: EditingState<SiteFrame>;
   versions: VersionSummary[];
+  /** The logo's picture as the draft has it, when it has one: the frame itself only holds the picture's id. */
+  logoPicture: ChoosablePicture | null;
 }
 
 /**
@@ -133,10 +138,13 @@ export function FrameEditor(props: FrameEditorProps) {
   return <FrameForm key={props.initial.revision} {...props} notice={notice} report={setNotice} />;
 }
 
-function FrameForm({ initial, versions, notice, report }: FrameEditorProps & { notice: string; report: (notice: string) => void }) {
+function FrameForm({ initial, versions, logoPicture, notice, report }: FrameEditorProps & { notice: string; report: (notice: string) => void }) {
   const editor = useDocumentEditor<SiteFrame>("frame", initial, report);
   const frame = editor.value;
   const pages = useId();
+  // The pictures this editor has seen, to show the one the frame names by its id.
+  const [seen, setSeen] = useState<ChoosablePicture[]>(logoPicture ? [logoPicture] : []);
+  const logoShown = seen.find((picture) => picture.id === frame.logo.image);
   const set = <K extends keyof SiteFrame>(key: K, value: SiteFrame[K]) => editor.change({ ...frame, [key]: value });
   const { business, logo, menu, bookButton, footer, social, announcement, search } = frame;
   const setMenuItem = (index: number, item: MenuItem) => set("menu", replaced(menu, index, item));
@@ -176,6 +184,34 @@ function FrameForm({ initial, versions, notice, report }: FrameEditorProps & { n
           <Group title="Logo">
             <TextField label="Logo text" value={logo.text} maxLength={FRAME_LIMITS.label} onChange={(text) => set("logo", { ...logo, text })} />
             <TextField label="Second part, in the accent colour" value={logo.accent} maxLength={FRAME_LIMITS.label} help="Leave it empty for a logo in one colour." onChange={(accent) => set("logo", { ...logo, accent })} />
+            <h4 className="editor-subtitle">A logo that is a picture</h4>
+            <p className="editor-hint">
+              With a picture, the header shows it in place of the text above, which stays in the footer. A PNG with a
+              see-through background sits best on the header.
+            </p>
+            {logo.image !== "" && (
+              <p className="editor-logo">
+                {logoShown ? (
+                  <Image src={logoShown.url} width={logoShown.width} height={logoShown.height} alt={logoShown.alt || logoShown.filename} sizes="240px" />
+                ) : (
+                  <span className="editor-hint">A picture is chosen.</span>
+                )}
+              </p>
+            )}
+            <div className="editor-row-buttons">
+              <PictureChooser
+                label={logo.image === "" ? "Choose a picture for the logo" : "Choose another picture"}
+                onChoose={([picture]) => {
+                  setSeen((current) => [...current.filter((entry) => entry.id !== picture.id), picture]);
+                  set("logo", { ...logo, image: picture.id });
+                }}
+              />
+              {logo.image !== "" && (
+                <button type="button" className="btn btn-outline btn-small" onClick={() => set("logo", { ...logo, image: "" })}>
+                  Go back to the text logo
+                </button>
+              )}
+            </div>
           </Group>
 
           <Group title="Menu" open>

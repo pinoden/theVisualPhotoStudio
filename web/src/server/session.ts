@@ -53,6 +53,23 @@ export const requireStaff = (next: string) => requireRole(["staff", "manager", "
 /** A manager or an owner. For the pages a manager can be given: the page asks `can` which, and answers "not found" otherwise. */
 export const requireManager = (next: string) => requireRole(["manager", "owner"], next);
 
+/**
+ * True when a request that changes something came from this site's own pages.
+ * A form on another site may not post here in a signed-in person's name.
+ * Browsers name the sending site in `Origin`; a request without one (an old
+ * browser, a script) is let through to the checks that follow.
+ */
+export function sameSiteRequest(request: Request): boolean {
+  const origin = request.headers.get("origin");
+  const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host");
+  if (!origin || !host) return true;
+  try {
+    return new URL(origin).host === host;
+  } catch {
+    return false;
+  }
+}
+
 export async function openSession(token: string, expiresAt: Date): Promise<void> {
   (await cookies()).set(SESSION_COOKIE, token, {
     httpOnly: true,

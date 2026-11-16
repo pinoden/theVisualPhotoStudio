@@ -1,14 +1,17 @@
-import { expect, test, type Browser, type Page } from "@playwright/test";
+import { expect, test, type Browser, type Locator, type Page } from "@playwright/test";
+import sharp from "sharp";
 import { byLabel, byText, onScreen, shot, signIn } from "./helpers";
 
 /**
- * The website's editor (the owner's requirements 21, 25 and 27, and the
+ * The website's editor (the owner's requirements 21, 25, 26 and 27, and the
  * website part of 28): the design and the header, menu and footer are changed
- * as a draft, previewed, published, and brought back from the history.
+ * as a draft, previewed, published, and brought back from the history; and
+ * the media library takes pictures and fonts.
  *
  * Runs after site.spec.ts and before z-mobile.spec.ts, on the same database.
- * It ends with the website as it was built, so the phone tests that follow
- * measure the site's own design.
+ * It ends with the design, the menu and the footer as the site was built, so
+ * the phone tests that follow measure the site's own design. The two photos
+ * it gives Studio Blanche stay, so those tests also measure pages with photos.
  */
 test.describe.configure({ mode: "serial" });
 
@@ -258,6 +261,228 @@ test("a manager cannot open the website until the owners let them, and then prep
   await expect(byLabel(page, "Accent, as a colour code")).toHaveValue("#c8a882");
 
   // Leaving the preview the editor switched on, so that this browser ends on the published website.
+  await page.goto("/");
+  await page.getByRole("button", { name: "Leave the preview" }).click();
+  await expect(page.getByText("This shows changes that are not published yet")).toHaveCount(0);
+});
+
+// ── The media library and the owners' own fonts (requirement 26, and the rest of 21) ──
+
+// A seventh owner: the sixth has used its three sign-in codes above.
+const PICTURES_OWNER = "owner7@studio.test";
+
+/** A picture of one colour, made here, as a browser would send it. */
+async function pictureFile(name: string, width: number, height: number, colour: string) {
+  const png = name.endsWith(".png");
+  const made = sharp({ create: { width, height, channels: 3, background: colour } });
+  return { name, mimeType: png ? "image/png" : "image/jpeg", buffer: await (png ? made.png() : made.jpeg()).toBuffer() };
+}
+
+/** True once the picture has arrived and the browser could draw it. */
+const drawn = (image: Locator) => expect.poll(() => image.evaluate((element: HTMLImageElement) => element.complete && element.naturalWidth > 0)).toBe(true);
+
+test("the owner adds pictures, describes them, puts them on a studio, replaces one in place, and cannot delete one that is shown", async ({ page, browser }) => {
+  await signIn(page, PICTURES_OWNER, "/admin/website/media");
+  await expect(page.getByRole("heading", { name: "Pictures", level: 1 })).toBeVisible();
+  await expect(byText(page, "No pictures yet. Add the first with the button above.")).toBeVisible();
+
+  // Two pictures at once. A file that is not a picture is refused with the reason, and the others still arrive.
+  await page.getByLabel("Add pictures", { exact: true }).setInputFiles([
+    await pictureFile("Blanche Wide (final).JPG", 1600, 1000, "#d9d2c5"),
+    { name: "notes.jpg", mimeType: "image/jpeg", buffer: Buffer.from("these are words, not a picture") },
+    await pictureFile("blanche-window.png", 900, 1200, "#c9b8a3"),
+  ]);
+  const sent = onScreen(page.locator(".media-sent"));
+  await expect(sent.locator("li.added")).toHaveCount(2);
+  await expect(sent.locator("li.refused")).toContainText("notes.jpg");
+  await expect(sent.locator("li.refused")).toContainText("could not be read as a picture");
+  const cards = onScreen(page.locator(".media-card"));
+  await expect(cards).toHaveCount(2);
+  await expect(byText(page, "Needs a description before it can be shown.")).toHaveCount(2);
+  const wide = cards.filter({ hasText: "blanche-wide-final.jpg" });
+  await expect(wide).toContainText("1600 × 1000");
+  await expect(wide).toContainText("Not shown anywhere yet.");
+  await drawn(wide.locator(".media-thumb img"));
+  const address = (await wide.locator("a.media-thumb").getAttribute("href"))!;
+  expect(address).toMatch(/^\/media\/[0-9a-f-]{36}\/1\/blanche-wide-final\.jpg$/);
+  await shot(page, "45-admin-media");
+
+  // One gets its description.
+  await wide.getByLabel("What the picture shows").fill("Studio Blanche: the white cyclorama wall");
+  await wide.getByRole("button", { name: "Save" }).click();
+  await expect(byText(page, "Saved.")).toBeVisible();
+  await expect(byText(page, "Needs a description before it can be shown.")).toHaveCount(1);
+
+  // A studio's photos come from the library. A picture that says nothing about itself is not taken.
+  await page.goto("/admin/studios");
+  await page.getByRole("button", { name: "Add photos of Studio Blanche" }).click();
+  const chooser = page.getByRole("dialog", { name: "Choose from the media library" });
+  await chooser.getByRole("button", { name: /white cyclorama wall/ }).click();
+  await chooser.getByRole("button", { name: /blanche-window\.png/ }).click();
+  await chooser.getByRole("button", { name: "Use these 2 pictures" }).click();
+  await expect(byText(page, "Say what the picture blanche-window.png shows first, in the media library. Then add it here.")).toBeVisible();
+
+  await page.goto("/admin/website/media?show=undescribed");
+  await expect(onScreen(page.locator(".media-card"))).toHaveCount(1);
+  await byLabel(page, "What the picture shows").fill("Studio Blanche: the window side");
+  await byLabel(page, "Words under it in a gallery").fill("Morning light");
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(byText(page, "Saved.")).toBeVisible();
+  await expect(byText(page, /No picture matches\./)).toBeVisible();
+
+  await page.goto("/admin/studios");
+  await page.getByRole("button", { name: "Add photos of Studio Blanche" }).click();
+  await chooser.getByRole("button", { name: /white cyclorama wall/ }).click();
+  await chooser.getByRole("button", { name: /the window side/ }).click();
+  await chooser.getByRole("button", { name: "Use these 2 pictures" }).click();
+  await expect(byText(page, "Photos added. Customers see them now.")).toBeVisible();
+  const blanche = onScreen(page.locator(".admin-card", { hasText: "Photos of Studio Blanche" }));
+  await expect(blanche.locator(".media-ordered li")).toHaveCount(2);
+  await expect(blanche.locator(".media-ordered li").first()).toContainText("the white cyclorama wall");
+  // The second becomes the first: the one on the studio's card.
+  await page.getByRole("button", { name: "Move photo 2 of Studio Blanche earlier" }).click();
+  await expect(blanche.locator(".media-ordered li").first()).toContainText("the window side");
+  await shot(page, "46-admin-studio-photos");
+
+  // Customers see the photo in place of the tinted box, at a size made for their screen.
+  const guest = await visitor(browser);
+  // A picture's own address serves it as it is stored, to be kept for a year; an address that names an
+  // older file of it is kept only for a minute. Nobody who is not signed in can add a picture.
+  const stored = await guest.request.get(address);
+  expect(stored.status()).toBe(200);
+  expect(stored.headers()["content-type"]).toBe("image/jpeg");
+  expect(stored.headers()["cache-control"]).toBe("public, max-age=31536000, immutable");
+  expect((await guest.request.get(address.replace("/1/", "/9/"))).headers()["cache-control"]).toBe("public, max-age=60");
+  expect((await guest.request.get("/media/00000000-0000-4000-8000-000000000000/1/none.jpg")).status()).toBe(404);
+  const uninvited = await guest.request.post("/admin/website/media/upload", { multipart: { file: await pictureFile("x.jpg", 10, 10, "#000000") } });
+  expect(uninvited.status()).toBe(401);
+  await guest.goto("/");
+  const card = onScreen(guest.locator(".studio-card", { hasText: "Studio Blanche" }));
+  const photo = card.locator("img.studio-photo");
+  await expect(photo).toHaveAttribute("alt", "Studio Blanche: the window side");
+  await drawn(photo);
+  expect(await photo.evaluate((element: HTMLImageElement) => element.currentSrc)).toMatch(/\/_next\/image\?url=%2Fmedia%2F[0-9a-f-]{36}%2F1%2Fblanche-window\.png/);
+  await expect(card.locator(".studio-placeholder-text")).toHaveCount(0);
+  await expect(onScreen(guest.locator(".studio-card", { hasText: "Studio Paris" })).locator(".studio-placeholder-text")).toBeVisible();
+  await guest.goto("/studios");
+  await drawn(guest.locator("#blanche img.studio-photo"));
+  await expect(guest.locator("#blanche .studio-photo-strip img")).toHaveAttribute("alt", "Studio Blanche: the white cyclorama wall");
+  await shot(guest, "47-studios-with-photos");
+
+  // A new file in a picture's place: nobody edits a page, and the page shows the new file.
+  await page.goto("/admin/website/media");
+  const shown = onScreen(page.locator(".media-card")).filter({ hasText: "blanche-window.png" });
+  await expect(shown).toContainText("Shown in the studio Studio Blanche.");
+  await shown.getByLabel(/^Replace the file of/).setInputFiles(await pictureFile("window-retouched.jpg", 1000, 1000, "#8fa3b8"));
+  const replaced = onScreen(page.locator(".media-card")).filter({ hasText: "window-retouched.jpg" });
+  await expect(replaced).toContainText("1000 × 1000");
+  await expect(replaced.getByLabel("What the picture shows")).toHaveValue("Studio Blanche: the window side");
+  await guest.goto("/");
+  await drawn(photo);
+  expect(await photo.evaluate((element: HTMLImageElement) => element.currentSrc)).toMatch(/%2F2%2Fwindow-retouched\.jpg/);
+
+  // A picture that is shown cannot be deleted, and the library says where it is shown.
+  await replaced.locator("summary", { hasText: "Delete this picture" }).click();
+  await expect(replaced).toContainText("It is shown in the studio Studio Blanche. Take it out there first.");
+  await expect(replaced.getByRole("button", { name: "Yes, delete it" })).toHaveCount(0);
+
+  // A collection with dates in the past: it holds its picture and shows nothing now.
+  await page.goto("/admin/website/media/collections");
+  await byLabel(page, "Name of a new collection").fill("Christmas sets");
+  await page.getByRole("button", { name: "Make the collection" }).click();
+  await expect(page.getByRole("heading", { name: "Christmas sets", level: 1 })).toBeVisible();
+  await page.getByRole("button", { name: "Add pictures from the library" }).click();
+  await chooser.getByRole("button", { name: /white cyclorama wall/ }).click();
+  await chooser.getByRole("button", { name: "Use this picture" }).click();
+  await expect(byText(page, "Added.")).toBeVisible();
+  await expect(onScreen(page.locator(".media-ordered li"))).toHaveCount(1);
+  await byLabel(page, "First day it shows").fill("2020-12-01");
+  await byLabel(page, "Last day it shows").fill("2020-12-26");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(byText(page, "Saved.")).toBeVisible();
+  await expect(byText(page, /Shown from Dec 1, 2020 to Dec 26, 2020: not showing now\./)).toBeVisible();
+  await page.goto("/admin/website");
+  await expect(onScreen(page.locator(".website-cards"))).toContainText("2 pictures. 1 collection.");
+  await guest.context().close();
+});
+
+test("the owner adds a font of their own and uses it in the design, and gives the header a logo that is a picture", async ({ page, browser }) => {
+  await signIn(page, PICTURES_OWNER, "/admin/website/fonts");
+  await expect(page.getByRole("heading", { name: "Your fonts", level: 1 })).toBeVisible();
+
+  // A font needs the owners' word on its licence.
+  await byLabel(page, "Name of the font").fill("Horizon Test");
+  await byLabel(page, "The licence you hold for it").fill("Web licence from the maker, bought in 2025");
+  await page.getByRole("checkbox", { name: "I hold a licence that allows this font on a website" }).check();
+  await page.getByRole("button", { name: "Add the font" }).click();
+  await expect(byText(page, "Font added. Now add its files: one for each weight you use.")).toBeVisible();
+  await expect(byText(page, "It has no file yet, so the design cannot use it. Add one below.")).toBeVisible();
+
+  // Its file: a real font that comes with the framework. A file that is not a font is refused.
+  await byLabel(page, "Add a file of Horizon Test").setInputFiles({ name: "horizon.woff2", mimeType: "font/woff2", buffer: Buffer.from("not a font at all, just words") });
+  await page.getByRole("button", { name: "Add the file" }).click();
+  await expect(byText(page, /That is not a font file\./)).toBeVisible();
+  await byLabel(page, "Add a file of Horizon Test").setInputFiles("node_modules/next/dist/compiled/@vercel/og/Geist-Regular.ttf");
+  await page.getByRole("button", { name: "Add the file" }).click();
+  await expect(byText(page, "File added. The font can now be chosen in the design.")).toBeVisible();
+  await expect(onScreen(page.locator(".data-table"))).toContainText("Regular (400)");
+  await shot(page, "48-admin-fonts");
+
+  // The design offers it beside the library, the preview shows it at once, and visitors get it once it is published.
+  await page.goto("/admin/website/design");
+  await group(page, "Fonts").locator("summary").click();
+  await byLabel(page, "Headings").selectOption({ label: "Horizon Test" });
+  await expect.poll(() => preview(page).locator("h1").first().evaluate((h1) => getComputedStyle(h1).fontFamily)).toMatch(/^"?uf-[0-9a-f]{12}/);
+  await saved(page);
+  await page.getByRole("button", { name: "Publish", exact: true }).click();
+  await expect(byText(page, "Published. Visitors see it now.")).toBeVisible();
+  const guest = await visitor(browser);
+  await guest.goto("/");
+  expect(await guest.locator("h1").first().evaluate((h1) => getComputedStyle(h1).fontFamily)).toMatch(/^"?uf-[0-9a-f]{12}/);
+  // The font's file arrives from this website and the browser accepts it as a font.
+  await expect.poll(() => guest.evaluate(() => [...document.fonts].some((face) => face.family.includes("uf-") && face.status === "loaded"))).toBe(true);
+
+  // While the design uses it, it cannot be deleted.
+  await page.goto("/admin/website/fonts");
+  await expect(byText(page, /The design uses this font\./)).toBeVisible();
+  await page.locator("summary", { hasText: "Delete Horizon Test" }).click();
+  await expect(byText(page, "The design uses it, in what is published or in a draft. Choose another font there first.")).toBeVisible();
+
+  // Back to the site as it was built, so the tests that follow measure its own design. Then the font can go.
+  await page.goto("/admin/website/design");
+  await page.getByRole("button", { name: "Start again from the site as it was built" }).click();
+  await saved(page);
+  await page.getByRole("button", { name: "Publish", exact: true }).click();
+  await expect(byText(page, "Published. Visitors see it now.")).toBeVisible();
+  await page.goto("/admin/website/fonts");
+  await page.locator("summary", { hasText: "Delete Horizon Test" }).click();
+  await page.getByRole("button", { name: "Yes, delete Horizon Test" }).click();
+  await expect(byText(page, "The font was deleted.")).toBeVisible();
+  await guest.goto("/");
+  expect(await guest.locator("h1").first().evaluate((h1) => getComputedStyle(h1).fontFamily)).toMatch(/Cormorant/i);
+  await guest.context().close();
+
+  // A logo that is a picture, chosen from the library: seen in the preview, then put back.
+  await page.goto("/admin/website/navigation");
+  await group(page, "Logo").locator("summary").click();
+  await page.getByRole("button", { name: "Choose a picture for the logo" }).click();
+  const chooser = page.getByRole("dialog", { name: "Choose from the media library" });
+  await chooser.getByRole("button", { name: /white cyclorama wall/ }).click();
+  await chooser.getByRole("button", { name: "Use this picture" }).click();
+  await saved(page);
+  const logo = preview(page).locator(".site-nav img.site-logo-picture");
+  await expect(logo).toHaveAttribute("alt", "The Visuals Photo Studio");
+  await drawn(logo);
+  await expect(page.getByRole("button", { name: "Go back to the text logo" })).toBeVisible();
+  // The library knows the header shows it, although only in a draft.
+  await page.goto("/admin/website/media?q=cyclorama");
+  await expect(onScreen(page.locator(".media-card"))).toContainText("the header");
+  await page.goto("/admin/website/navigation");
+  await page.getByRole("button", { name: "Discard changes" }).click();
+  await page.getByRole("button", { name: "Yes, discard them" }).click();
+  await expect(byText(page, "The changes were discarded.")).toBeVisible();
+  await expect(preview(page).locator(".site-nav .site-logo")).toContainText("The Visuals");
+
   await page.goto("/");
   await page.getByRole("button", { name: "Leave the preview" }).click();
   await expect(page.getByText("This shows changes that are not published yet")).toHaveCount(0);

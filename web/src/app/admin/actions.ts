@@ -31,6 +31,7 @@ import { notFound } from "next/navigation";
 import { can, type Ability } from "@/lib/abilities";
 import { requireManager, requireOwner } from "@/server/session";
 import { ACCESS_INSTRUCTIONS_MAX, loadSettings, saveAccessInstructions, saveSetting } from "@/server/settings";
+import { addStudioPhotos, moveStudioPhoto, removeStudioPhoto } from "@/server/studio-photos";
 
 /**
  * Everything the owners can change. Every action starts with `requireOwner`:
@@ -374,6 +375,39 @@ export async function saveStudioDetailsAction(formData: FormData): Promise<void>
   if (!saved) failed("/admin/studios", "Not saved: the tagline or the description is too long.");
   updateTag(CATALOG_TAG);
   done("/admin/studios", "Studio saved.");
+}
+
+/** Add pictures of the media library to a studio's photos. `mediaIds` is their ids with commas between, as the chooser sends them. */
+export async function addStudioPhotosAction(formData: FormData): Promise<void> {
+  const viewer = await requireOwner("/admin/studios");
+  const result = await addStudioPhotos(await getDb(), viewer, text(formData, "studioId"), text(formData, "mediaIds").split(","));
+  if (!result.ok) failed("/admin/studios", result.message);
+  updateTag(CATALOG_TAG);
+  done("/admin/studios", "Photos added. Customers see them now.");
+}
+
+export async function removeStudioPhotoAction(formData: FormData): Promise<void> {
+  const viewer = await requireOwner("/admin/studios");
+  const result = await removeStudioPhoto(await getDb(), viewer, text(formData, "studioId"), text(formData, "mediaId"));
+  if (!result.ok) failed("/admin/studios", result.message);
+  updateTag(CATALOG_TAG);
+  done("/admin/studios", "The photo was taken off the studio. It is still in the media library.");
+}
+
+async function moveStudioPhotoBy(formData: FormData, by: -1 | 1): Promise<void> {
+  const viewer = await requireOwner("/admin/studios");
+  const result = await moveStudioPhoto(await getDb(), viewer, text(formData, "studioId"), text(formData, "mediaId"), by);
+  if (!result.ok) failed("/admin/studios", result.message);
+  updateTag(CATALOG_TAG);
+  redirect("/admin/studios");
+}
+
+export async function moveStudioPhotoEarlierAction(formData: FormData): Promise<void> {
+  await moveStudioPhotoBy(formData, -1);
+}
+
+export async function moveStudioPhotoLaterAction(formData: FormData): Promise<void> {
+  await moveStudioPhotoBy(formData, 1);
 }
 
 export async function saveAddonAction(formData: FormData): Promise<void> {

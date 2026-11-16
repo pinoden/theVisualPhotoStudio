@@ -590,3 +590,142 @@ export const siteVersions = pgTable(
   },
   (t) => [uniqueIndex("site_versions_document_number").on(t.documentId, t.number)],
 );
+
+// ── Files, pictures and fonts ────────────────────────────────────────────────
+
+/** Bytes in a column. node-postgres gives a Buffer back and PGlite a Uint8Array: both come out as a Uint8Array. */
+export const bytea = customType<{ data: Uint8Array; driverData: Uint8Array }>({
+  dataType() {
+    return "bytea";
+  },
+  toDriver(value) {
+    return Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+  },
+  fromDriver(value) {
+    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  },
+});
+
+/**
+ * The files the owners upload: pictures and fonts. They are kept in the
+ * database until a host is chosen, behind `FileStore` (src/server/files.ts),
+ * so that moving them to a host's own file storage changes one function.
+ */
+export const siteFiles = pgTable("site_files", {
+  key: text("key").primaryKey(),
+  contentType: text("content_type").notNull(),
+  bytes: bytea("bytes").notNull(),
+  size: integer("size").notNull(),
+  createdAt: createdAt(),
+});
+
+/**
+ * A picture of the media library. Whatever shows a picture names it by its
+ * `id`, never by its address, so replacing the file (`fileKey`, `version`)
+ * changes it everywhere it is shown. See src/server/media.ts.
+ */
+export const media = pgTable(
+  "media",
+  {
+    id: id(),
+    fileKey: text("file_key").notNull(),
+    /** Counts the files this picture has had. Part of its address, so a replaced picture is never served from a cache. */
+    version: integer("version").notNull().default(1),
+    /** The name it was uploaded with, made safe for an address: "studio-blanche.jpg". */
+    filename: text("filename").notNull(),
+    contentType: text("content_type").notNull(),
+    size: integer("size").notNull(),
+    width: integer("width").notNull(),
+    height: integer("height").notNull(),
+    /** What the picture shows, for someone who cannot see it. */
+    alt: text("alt").notNull().default(""),
+    /** Shown under the picture in a gallery. */
+    caption: text("caption").notNull().default(""),
+    uploadedBy: text("uploaded_by").notNull(),
+    createdAt: createdAt(),
+    updatedAt: ts("updated_at").notNull().defaultNow(),
+  },
+  (t) => [index("media_created_idx").on(t.createdAt)],
+);
+
+/**
+ * A named set of pictures, in an order: a season's sets, a studio's decor.
+ * With dates it is shown only from its first day to its last, on the
+ * studio's clock.
+ */
+export const mediaCollections = pgTable("media_collections", {
+  id: id(),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  startsOn: date("starts_on"),
+  endsOn: date("ends_on"),
+  createdAt: createdAt(),
+});
+
+export const mediaCollectionItems = pgTable(
+  "media_collection_items",
+  {
+    collectionId: uuid("collection_id")
+      .notNull()
+      .references(() => mediaCollections.id, { onDelete: "cascade" }),
+    /** A picture that is in a collection cannot be deleted: it is taken out of the collection first. */
+    mediaId: uuid("media_id")
+      .notNull()
+      .references(() => media.id, { onDelete: "restrict" }),
+    position: integer("position").notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.collectionId, t.mediaId] })],
+);
+
+/** The photos of a studio, in the order they are shown. The first is the one on the studio's card. */
+export const studioPhotos = pgTable(
+  "studio_photos",
+  {
+    studioId: uuid("studio_id")
+      .notNull()
+      .references(() => studios.id, { onDelete: "cascade" }),
+    mediaId: uuid("media_id")
+      .notNull()
+      .references(() => media.id, { onDelete: "restrict" }),
+    position: integer("position").notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.studioId, t.mediaId] })],
+);
+
+/**
+ * A font of the owners' own, uploaded as files: the brand font that no
+ * library has. The design can use it like a font of the library
+ * (src/lib/site/fonts.ts). See src/server/fonts.ts.
+ */
+export const siteFonts = pgTable("site_fonts", {
+  id: id(),
+  /** The name the owners know it by: "Horizon". */
+  name: text("name").notNull(),
+  /** What kind of font it is, which decides what a browser shows until it has loaded. */
+  kind: text("kind", { enum: ["serif", "sans", "display", "script"] }).notNull().default("display"),
+  /** The owners' own words on the licence they hold for using it on a website. */
+  licence: text("licence").notNull(),
+  uploadedBy: text("uploaded_by").notNull(),
+  createdAt: createdAt(),
+});
+
+/** One file of an uploaded font: one weight, upright or italic. A variable font is one file for a range of weights. */
+export const siteFontFiles = pgTable(
+  "site_font_files",
+  {
+    id: id(),
+    fontId: uuid("font_id")
+      .notNull()
+      .references(() => siteFonts.id, { onDelete: "cascade" }),
+    fileKey: text("file_key").notNull(),
+    format: text("format", { enum: ["woff2", "woff", "truetype", "opentype"] }).notNull(),
+    /** 400 is regular, 700 bold. */
+    weight: integer("weight").notNull().default(400),
+    /** For a variable font: the heaviest weight the file holds. Null for a file of one weight. */
+    weightMax: integer("weight_max"),
+    italic: boolean("italic").notNull().default(false),
+    size: integer("size").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("site_font_files_one_per_style").on(t.fontId, t.weight, t.italic)],
+);

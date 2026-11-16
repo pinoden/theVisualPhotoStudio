@@ -1,11 +1,18 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { BOOK_PATH, isInternalHref, type SiteFrame, type SiteLink } from "@/lib/site/frame";
 
 /** What the header needs of the frame (src/lib/site/frame.ts). */
-export type SiteNavProps = Pick<SiteFrame, "logo" | "menu" | "bookButton"> & { menuPosition: SiteFrame["header"]["menuPosition"] };
+export type SiteNavProps = Pick<SiteFrame, "logo" | "menu" | "bookButton"> & {
+  menuPosition: SiteFrame["header"]["menuPosition"];
+  /** The logo's picture, when the owners chose one. It is shown in place of the logo's text. */
+  logoPicture: { url: string; width: number; height: number } | null;
+  /** What the logo's picture stands for, for someone who cannot see it. */
+  studioName: string;
+};
 
 /** A link of the menu: a page of this site through the router, anything else as an ordinary link. */
 function MenuLink({ link, onChoose, className }: { link: SiteLink; onChoose: () => void; className?: string }) {
@@ -30,7 +37,7 @@ function MenuLink({ link, onChoose, className }: { link: SiteLink; onChoose: () 
  * any screen where the logo and the links do not fit side by side, it folds
  * the same way.
  */
-export function SiteNav({ logo, menu, bookButton, menuPosition }: SiteNavProps) {
+export function SiteNav({ logo, logoPicture, studioName, menu, bookButton, menuPosition }: SiteNavProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   /** Which dropdown is open: the position of its item in the menu. */
   const [openItem, setOpenItem] = useState<number | null>(null);
@@ -80,7 +87,7 @@ export function SiteNav({ logo, menu, bookButton, menuPosition }: SiteNavProps) 
     observer.observe(nav);
     observer.observe(list);
     return () => observer.disconnect();
-  }, [menu, logo, bookButton.label]);
+  }, [menu, logo, logoPicture, bookButton.label]);
 
   const close = () => {
     setMenuOpen(false);
@@ -96,11 +103,25 @@ export function SiteNav({ logo, menu, bookButton, menuPosition }: SiteNavProps) 
       data-folded={folded ? "" : undefined}
     >
       <Link href="/" className="site-logo" onClick={close} ref={logoRef}>
-        {logo.text}
-        {logo.accent && (
+        {logoPicture ? (
+          <Image
+            className="site-logo-picture"
+            src={logoPicture.url}
+            width={logoPicture.width}
+            height={logoPicture.height}
+            alt={studioName}
+            sizes="240px"
+            loading="eager"
+          />
+        ) : (
           <>
-            {" "}
-            <span>{logo.accent}</span>
+            {logo.text}
+            {logo.accent && (
+              <>
+                {" "}
+                <span>{logo.accent}</span>
+              </>
+            )}
           </>
         )}
       </Link>

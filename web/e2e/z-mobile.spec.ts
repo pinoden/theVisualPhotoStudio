@@ -415,6 +415,9 @@ test("the admin fits a phone: the calendar in its three views, an appointment, a
     "/admin/website",
     "/admin/website/design",
     "/admin/website/navigation",
+    "/admin/website/media",
+    "/admin/website/media/collections",
+    "/admin/website/fonts",
     "/account",
   ]) {
     await page.goto(path);

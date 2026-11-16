@@ -24,15 +24,22 @@ export async function generateMetadata(): Promise<Metadata> {
  * shown in their place, with a bar that says so.
  */
 export default async function RootLayout({ children }: LayoutProps<"/">) {
-  const [design, { frame, announcement }, preview] = await Promise.all([siteDesign(), siteFrame(), isPreview()]);
+  const [{ design, fonts }, { frame, announcement, logo }, preview] = await Promise.all([siteDesign(), siteFrame(), isPreview()]);
   return (
     <html lang="en" data-scroll-behavior="smooth" className={FONT_CLASSES}>
       <head>
-        {/* Only colours, numbers and fonts of the library reach this text: see parseDesign. */}
-        <style id="site-design" dangerouslySetInnerHTML={{ __html: designCss(design) }} />
+        {/* Only colours, numbers and known fonts reach this text: see parseDesign and fontFaceCss. */}
+        <style id="site-design" dangerouslySetInnerHTML={{ __html: designCss(design, fonts) }} />
       </head>
       <body>
-        <SiteNav logo={frame.logo} menu={frame.menu} bookButton={frame.bookButton} menuPosition={frame.header.menuPosition} />
+        <SiteNav
+          logo={frame.logo}
+          logoPicture={logo}
+          studioName={frame.business.name}
+          menu={frame.menu}
+          bookButton={frame.bookButton}
+          menuPosition={frame.header.menuPosition}
+        />
         <main className="page-content">
           {announcement && (
             // The bar reads the address of the page, which a page with a changing address only knows when it is asked for.

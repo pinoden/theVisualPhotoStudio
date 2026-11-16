@@ -107,7 +107,7 @@ describe("reading a frame that was stored or sent", () => {
     expect(cleanLine("abcdefgh", 5)).toBe("abcde");
     expect(cleanLine(12, 5)).toBe("");
     const frame = parseFrame({ logo: { text: "x".repeat(500), accent: "" }, footer: { tagline: "y".repeat(5000) } });
-    expect(frame.logo).toEqual({ text: "x".repeat(FRAME_LIMITS.label), accent: "" });
+    expect(frame.logo).toEqual({ text: "x".repeat(FRAME_LIMITS.label), accent: "", image: "" });
     expect(frame.footer.tagline).toHaveLength(FRAME_LIMITS.tagline);
   });
 
@@ -189,5 +189,16 @@ describe("the link that dials the studio", () => {
     expect(telHref("1-407-663-6109")).toBe("tel:+14076636109");
     expect(telHref("+44 20 7946 0000")).toBe("tel:+442079460000");
     expect(telHref("663-6109")).toBe("tel:6636109");
+  });
+});
+
+describe("a logo that is a picture", () => {
+  it("is named by the picture's id, and by nothing else", () => {
+    const id = "0F8FAD5B-D9CB-469F-A165-70867728950E";
+    expect(parseFrame({ logo: { text: "The Visuals", accent: "", image: id } }).logo).toEqual({ text: "The Visuals", accent: "", image: id.toLowerCase() });
+    for (const bad of ["/media/x.png", "https://evil.example/logo.png", "javascript:alert(1)", 7, null, "0f8fad5b"]) {
+      expect(parseFrame({ logo: { image: bad } }).logo.image, String(bad)).toBe("");
+    }
+    expect(DEFAULT_FRAME.logo.image).toBe("");
   });
 });

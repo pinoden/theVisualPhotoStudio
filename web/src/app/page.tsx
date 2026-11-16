@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 import { hourlyFromCents, hoursLines } from "@/lib/catalog-view";
 import { formatCents } from "@/lib/domain/pricing";
@@ -53,7 +54,19 @@ export default async function HomePage() {
               return (
                 <div className="studio-card" key={studio.id}>
                   <div className={`studio-card-img ${studio.slug}-bg`}>
-                    <span className="studio-placeholder-text">{studio.name}</span>
+                    {studio.photos[0] ? (
+                      <Image
+                        className="studio-photo"
+                        src={studio.photos[0].url}
+                        width={studio.photos[0].width}
+                        height={studio.photos[0].height}
+                        alt={studio.photos[0].alt}
+                        sizes="(max-width: 700px) 100vw, (max-width: 1100px) 50vw, 400px"
+                        quality={85}
+                      />
+                    ) : (
+                      <span className="studio-placeholder-text">{studio.name}</span>
+                    )}
                   </div>
                   <div className="studio-card-body">
                     <h3>{studio.name}</h3>

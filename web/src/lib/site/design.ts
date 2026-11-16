@@ -1,4 +1,4 @@
-import { findFont, fontStack, nearestWeight, type LibraryFont } from "./fonts";
+import { findFont, fontFaceCss, fontStack, isCustomFont, nearestWeight, type AnyFont, type CustomFont } from "./fonts";
 
 /**
  * The website's design: the colours, fonts, text styles and buttons that the
@@ -50,7 +50,7 @@ export interface Design {
     /** Lines and borders. */
     border: string;
   };
-  /** Each is the id of a font of the library (src/lib/site/fonts.ts). */
+  /** Each is the id of a font: one of the library, or one the owners uploaded (src/lib/site/fonts.ts). */
   fonts: { heading: string; subheading: string; body: string; button: string };
   /** `h1` and `h2` are set in the heading font; `h3` is every smaller heading, in the subheading font. */
   headings: { h1: HeadingStyle; h2: HeadingStyle; h3: HeadingStyle };
@@ -141,7 +141,7 @@ function inRange(value: unknown, limit: Limit, fallback: number): number {
   return Math.min(limit.max, Number(stepped.toFixed(4)));
 }
 
-function parseHeading(value: unknown, fallback: HeadingStyle, font: LibraryFont): HeadingStyle {
+function parseHeading(value: unknown, fallback: HeadingStyle, font: AnyFont): HeadingStyle {
   const raw = isRecord(value) ? value : {};
   return {
     scale: inRange(raw.scale, DESIGN_LIMITS.headingScale, fallback.scale),
@@ -156,9 +156,11 @@ function parseHeading(value: unknown, fallback: HeadingStyle, font: LibraryFont)
 /**
  * A complete, valid design from whatever was stored or sent. A value that is
  * missing or not acceptable takes the default; a weight the chosen font does
- * not come in becomes the nearest one it has.
+ * not come in becomes the nearest one it has. `custom` is the owners' own
+ * fonts: without it only the library's fonts are known, and a design that
+ * names an uploaded font gets the default font in its place.
  */
-export function parseDesign(input: unknown): Design {
+export function parseDesign(input: unknown, custom: readonly CustomFont[] = []): Design {
   const raw = isRecord(input) ? input : {};
   const d = DEFAULT_DESIGN;
 
@@ -168,8 +170,8 @@ export function parseDesign(input: unknown): Design {
 
   const rawFonts = isRecord(raw.fonts) ? raw.fonts : {};
   const fonts = { ...d.fonts };
-  for (const key of Object.keys(fonts) as (keyof Design["fonts"])[]) fonts[key] = findFont(rawFonts[key])?.id ?? d.fonts[key];
-  const font = (role: keyof Design["fonts"]) => findFont(fonts[role])!;
+  for (const key of Object.keys(fonts) as (keyof Design["fonts"])[]) fonts[key] = findFont(rawFonts[key], custom)?.id ?? d.fonts[key];
+  const font = (role: keyof Design["fonts"]) => findFont(fonts[role], custom)!;
 
   const rawHeadings = isRecord(raw.headings) ? raw.headings : {};
   const rawBody = isRecord(raw.body) ? raw.body : {};
@@ -227,9 +229,9 @@ export const DESIGN_PHONE_WIDTH = 640;
  * and the ones a phone replaces. The names are the ones globals.css reads; its
  * own `:root` block holds the same defaults, and a test keeps the two equal.
  */
-export function designVariables(design: Design): { all: Record<string, string>; phone: Record<string, string> } {
+export function designVariables(design: Design, custom: readonly CustomFont[] = []): { all: Record<string, string>; phone: Record<string, string> } {
   const { colors, fonts, headings, body, buttons, spacing } = design;
-  const stack = (id: string) => fontStack(findFont(id) ?? findFont(DEFAULT_DESIGN.fonts.body)!);
+  const stack = (id: string) => fontStack(findFont(id, custom) ?? findFont(DEFAULT_DESIGN.fonts.body)!);
   const all: Record<string, string> = {
     "--color-rose": colors.accent,
     "--color-rose-dark": colors.accentHover,
@@ -275,15 +277,22 @@ export function designVariables(design: Design): { all: Record<string, string>; 
  * The design as a piece of stylesheet, for the `<style>` element of every
  * page. The selector is `html:root`, which outweighs the plain `:root` of
  * globals.css, so these values win wherever the browser places the two.
+ * When the design uses fonts of the owners' own, the rules that say where
+ * their files are come first.
  */
-export function designCss(design: Design): string {
-  const { all, phone } = designVariables(design);
+export function designCss(design: Design, custom: readonly CustomFont[] = []): string {
+  const { all, phone } = designVariables(design, custom);
+  const inUse = new Set(Object.values(design.fonts));
+  const faces = custom
+    .filter((font) => inUse.has(font.id))
+    .map(fontFaceCss)
+    .join("");
   const block = (values: Record<string, string>) =>
     Object.entries(values)
       .map(([name, value]) => `${name}:${value}`)
       .join(";");
   const phoneBlock = Object.keys(phone).length > 0 ? `@media (max-width:${DESIGN_PHONE_WIDTH}px){html:root{${block(phone)}}}` : "";
-  return `html:root{${block(all)}}${phoneBlock}`;
+  return `${faces}html:root{${block(all)}}${phoneBlock}`;
 }
 
 // ── Can it be read? ──────────────────────────────────────────────────────────
@@ -336,10 +345,10 @@ export function readabilityChecks(design: Design): ReadabilityCheck[] {
 }
 
 /** Things about the chosen fonts that an owner would want to know before publishing. */
-export function fontNotes(design: Design): string[] {
+export function fontNotes(design: Design, custom: readonly CustomFont[] = []): string[] {
   const notes: string[] = [];
-  const body = findFont(design.fonts.body);
-  if (body?.capsOnly) notes.push(`${body.name} has capital letters only, so running text set in it is hard to read.`);
+  const body = findFont(design.fonts.body, custom);
+  if (body && !isCustomFont(body) && body.capsOnly) notes.push(`${body.name} has capital letters only, so running text set in it is hard to read.`);
   if (body?.group === "script") notes.push(`${body.name} is a handwriting font: fine for a few words, tiring as running text.`);
   return notes;
 }

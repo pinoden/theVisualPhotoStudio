@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "next/link";
 import { hourlyFromCents, hoursLines } from "@/lib/catalog-view";
 import { formatCents } from "@/lib/domain/pricing";
@@ -27,8 +28,35 @@ export default async function StudiosPage() {
           >
             <div className="container">
               <div className="two-col">
-                <div className={`studio-card-img ${studio.slug}-bg`} style={{ height: 340 }}>
-                  <span className="studio-placeholder-text">{studio.name}</span>
+                <div>
+                  <div className={`studio-card-img ${studio.slug}-bg`} style={{ height: 340 }}>
+                    {studio.photos[0] ? (
+                      <Image
+                        className="studio-photo"
+                        src={studio.photos[0].url}
+                        width={studio.photos[0].width}
+                        height={studio.photos[0].height}
+                        alt={studio.photos[0].alt}
+                        sizes="(max-width: 768px) 100vw, 560px"
+                        quality={85}
+                        // The first studio's photo is on screen when the page opens.
+                        loading={index === 0 ? "eager" : "lazy"}
+                      />
+                    ) : (
+                      <span className="studio-placeholder-text">{studio.name}</span>
+                    )}
+                  </div>
+                  {studio.photos.length > 1 && (
+                    <ul className="studio-photo-strip" aria-label={`More photos of ${studio.name}`}>
+                      {studio.photos.slice(1).map((photo) => (
+                        <li key={photo.id}>
+                          <a href={photo.url} target="_blank" rel="noopener">
+                            <Image src={photo.url} width={photo.width} height={photo.height} alt={photo.alt} sizes="120px" />
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
                 <div>
                   <p className="section-eyebrow">{studio.tagline}</p>

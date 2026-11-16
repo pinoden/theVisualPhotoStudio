@@ -4,7 +4,9 @@ import type { DbLike } from "@/db/client";
 import type { AddonKind } from "@/lib/addon-kinds";
 import type { AddonDef, PriceRule } from "@/lib/domain/pricing";
 import { defaultDayType, type DayType, type IsoDate } from "@/lib/domain/time";
+import type { Picture } from "./media";
 import { loadAccessInstructions, loadSettings, type Settings } from "./settings";
+import { loadStudioPhotos } from "./studio-photos";
 
 export interface CatalogStudio {
   id: string;
@@ -18,6 +20,8 @@ export interface CatalogStudio {
   color: string;
   /** weekday (1-7) -> opening hours; a missing weekday means closed. */
   hours: Record<number, { openMinute: number; closeMinute: number }>;
+  /** Its photos from the media library, in the owners' order. Empty until they add some: a tinted box stands in. */
+  photos: Picture[];
 }
 
 export interface CatalogAddon extends AddonDef {
@@ -55,7 +59,7 @@ export interface Catalog {
 }
 
 export async function loadCatalog(db: DbLike): Promise<Catalog> {
-  const [studioRows, hourRows, ruleRows, addonRows, specialRows, settings, access, packageRows, photographerRows] = await Promise.all([
+  const [studioRows, hourRows, ruleRows, addonRows, specialRows, settings, access, packageRows, photographerRows, photos] = await Promise.all([
     db.select().from(studios).where(eq(studios.active, true)).orderBy(asc(studios.sortOrder), asc(studios.name)),
     db.select().from(studioHours),
     db.select().from(priceRules),
@@ -65,6 +69,7 @@ export async function loadCatalog(db: DbLike): Promise<Catalog> {
     loadAccessInstructions(db),
     db.select().from(photoPackages).where(eq(photoPackages.active, true)).orderBy(asc(photoPackages.durationMinutes)),
     db.select({ id: photographers.id }).from(photographers).where(eq(photographers.active, true)).limit(1),
+    loadStudioPhotos(db),
   ]);
 
   const activeIds = new Set(studioRows.map((s) => s.id));
@@ -83,6 +88,7 @@ export async function loadCatalog(db: DbLike): Promise<Catalog> {
           .filter((h) => h.studioId === s.id)
           .map((h) => [h.weekday, { openMinute: h.openMinute, closeMinute: h.closeMinute }]),
       ),
+      photos: photos.get(s.id) ?? [],
     })),
     rules: ruleRows
       .filter((r) => activeIds.has(r.studioId))

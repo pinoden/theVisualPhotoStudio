@@ -44,9 +44,9 @@ function rulesFor(studioId: string, weekday: Record<number, number>, weekend: Re
 
 const catalog: Catalog = {
   studios: [
-    { id: B, slug: "blanche", name: "Studio Blanche", tagline: "All white.", description: "", includedGuests: 6, bufferMinutes: 10, color: "#4f7cac", hours },
-    { id: D, slug: "dayglow", name: "Studio Dayglow", tagline: "Boho.", description: "", includedGuests: 6, bufferMinutes: 10, color: "#c9851a", hours },
-    { id: P, slug: "paris", name: "Studio Paris", tagline: "Vintage.", description: "", includedGuests: 4, bufferMinutes: 10, color: "#b4517b", hours },
+    { id: B, slug: "blanche", name: "Studio Blanche", tagline: "All white.", description: "", includedGuests: 6, bufferMinutes: 10, color: "#4f7cac", hours, photos: [] },
+    { id: D, slug: "dayglow", name: "Studio Dayglow", tagline: "Boho.", description: "", includedGuests: 6, bufferMinutes: 10, color: "#c9851a", hours, photos: [] },
+    { id: P, slug: "paris", name: "Studio Paris", tagline: "Vintage.", description: "", includedGuests: 4, bufferMinutes: 10, color: "#b4517b", hours, photos: [] },
   ],
   rules: [
     ...rulesFor(B, { 60: 88, 120: 176, 600: 720 }, { 60: 110, 120: 200, 600: 800 }),

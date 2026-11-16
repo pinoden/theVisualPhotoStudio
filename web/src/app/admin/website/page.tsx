@@ -4,11 +4,16 @@ import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { Suspense } from "react";
 import { getDb } from "@/db/client";
+import { count } from "@/lib/words";
+import { listCollections } from "@/server/collections";
+import { listFonts } from "@/server/fonts";
+import { listMedia } from "@/server/media";
 import { requireManager } from "@/server/session";
 import { loadSettings } from "@/server/settings";
 import { formatInstant } from "@/server/tz";
 import { DESIGN_DOC, FRAME_DOC, loadForEditing, type EditingState } from "@/server/website";
 import { AdminFrame, AdminLoading } from "../frame";
+import { WebsiteTabs } from "./tabs";
 
 export const metadata: Metadata = { title: "Website", robots: { index: false } };
 
@@ -52,16 +57,21 @@ async function Website({ searchParams }: Pick<PageProps<"/admin/website">, "sear
   await connection();
   const viewer = await requireManager("/admin/website");
   const db = await getDb();
-  const [design, frame, settings] = await Promise.all([
+  const [design, frame, settings, pictures, collections, fonts] = await Promise.all([
     loadForEditing(db, viewer, DESIGN_DOC),
     loadForEditing(db, viewer, FRAME_DOC),
     loadSettings(db),
+    listMedia(db, viewer),
+    listCollections(db, viewer),
+    listFonts(db, viewer),
   ]);
-  if (!design || !frame) notFound();
+  if (!design || !frame || !pictures || !collections || !fonts) notFound();
   const anyDraft = design.hasDraft || frame.hasDraft;
+  const undescribed = pictures.filter((picture) => picture.alt === "").length;
 
   return (
     <AdminFrame active="/admin/website" title="Website" query={await searchParams} viewer={viewer} settings={settings}>
+      <WebsiteTabs active="/admin/website" />
       <div className="admin-card">
         <p style={{ margin: 0, fontSize: ".9rem" }}>
           What you change here is saved as a draft that only the admin sees. It reaches visitors when you press
@@ -96,6 +106,30 @@ async function Website({ searchParams }: Pick<PageProps<"/admin/website">, "sear
           <State state={frame} />
           <Link href="/admin/website/navigation" className="btn btn-dark btn-small">
             Edit the header, menu &amp; footer
+          </Link>
+        </section>
+        <section className="admin-card" aria-labelledby="website-pictures">
+          <h3 id="website-pictures">Pictures</h3>
+          <p>The media library: every picture the website can show, each described once. Collections put pictures in sets, with dates if they are seasonal.</p>
+          <p className="website-state">
+            {count(pictures.length, "picture")}
+            {undescribed > 0 && (
+              <>
+                , <strong>{undescribed} without a description</strong>
+              </>
+            )}
+            . {count(collections.length, "collection")}. A change here shows at once: the library has no drafts.
+          </p>
+          <Link href="/admin/website/media" className="btn btn-dark btn-small">
+            Open the pictures
+          </Link>
+        </section>
+        <section className="admin-card" aria-labelledby="website-fonts">
+          <h3 id="website-fonts">Your fonts</h3>
+          <p>A font of your own, such as a brand font, added as files. The design can then use it like a font of the library.</p>
+          <p className="website-state">{fonts.length === 0 ? "None added yet." : `${count(fonts.length, "font")}: ${fonts.map((font) => font.name).join(", ")}.`}</p>
+          <Link href="/admin/website/fonts" className="btn btn-dark btn-small">
+            Open your fonts
           </Link>
         </section>
       </div>

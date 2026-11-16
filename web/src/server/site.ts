@@ -1,11 +1,9 @@
 import { cache } from "react";
 import { draftMode } from "next/headers";
 import { getDb } from "@/db/client";
-import type { Design } from "@/lib/site/design";
-import { announcementShows } from "@/lib/site/frame";
-import { getPublishedDesign, getPublishedFrame, type ShownFrame } from "./cached";
+import { getPublishedDesign, getPublishedFrame, shownFrame, type ShownDesign, type ShownFrame } from "./cached";
+import { loadCustomFonts } from "./fonts";
 import { getCurrentUser } from "./session";
-import { localDateOf } from "./tz";
 import { DESIGN_DOC, FRAME_DOC, loadDraftOrPublished, websiteAbilities } from "./website";
 
 /**
@@ -32,13 +30,14 @@ export const isPreview = cache(async (): Promise<boolean> => {
   return (await websiteAbilities(await getDb(), user)).editDesign;
 });
 
-export async function siteDesign(): Promise<Design> {
+export async function siteDesign(): Promise<ShownDesign> {
   if (!(await isPreview())) return getPublishedDesign();
-  return loadDraftOrPublished(await getDb(), DESIGN_DOC);
+  const db = await getDb();
+  return { design: await loadDraftOrPublished(db, DESIGN_DOC), fonts: await loadCustomFonts(db) };
 }
 
 export async function siteFrame(): Promise<ShownFrame> {
   if (!(await isPreview())) return getPublishedFrame();
-  const frame = await loadDraftOrPublished(await getDb(), FRAME_DOC);
-  return { frame, announcement: announcementShows(frame, localDateOf(new Date())) };
+  const db = await getDb();
+  return shownFrame(db, await loadDraftOrPublished(db, FRAME_DOC));
 }

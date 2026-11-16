@@ -59,8 +59,12 @@ export interface SiteFrame {
    * its own. Every other page's title is its own name, then the studio's.
    */
   search: { title: string; description: string };
-  /** The logo is two pieces of text; the second is in the accent colour. */
-  logo: { text: string; accent: string };
+  /**
+   * The logo is two pieces of text; the second is in the accent colour. With
+   * `image` (the id of a picture of the media library) the header shows that
+   * picture and the text is what is read out for it.
+   */
+  logo: { text: string; accent: string; image: string };
   header: { menuPosition: MenuPosition };
   menu: MenuItem[];
   /** The button at the end of the menu. It always leads to the booking page: only its words and look change. */
@@ -122,7 +126,7 @@ export const DEFAULT_FRAME: SiteFrame = {
     description:
       "Natural-light photography studios for rent in Winter Park, FL. Studio Blanche, Dayglow and Paris, bookable by the hour.",
   },
-  logo: { text: "The Visuals", accent: "Photo Studio" },
+  logo: { text: "The Visuals", accent: "Photo Studio", image: "" },
   header: { menuPosition: "right" },
   menu: [
     { label: "Our Studios", href: "/studios", children: [] },
@@ -293,6 +297,7 @@ export function parseFrame(input: unknown): SiteFrame {
     logo: {
       text: line(logo.text, FRAME_LIMITS.label, d.logo.text),
       accent: optional(logo.accent, FRAME_LIMITS.label, d.logo.accent),
+      image: typeof logo.image === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(logo.image) ? logo.image.toLowerCase() : "",
     },
     header: { menuPosition: oneOf(header.menuPosition, MENU_POSITIONS, d.header.menuPosition) },
     menu: parseMenu(raw.menu) ?? d.menu,

@@ -3,8 +3,10 @@ import { siteDocuments, siteVersions } from "@/db/schema";
 import type { Db, DbLike } from "@/db/client";
 import { can, type Ability } from "@/lib/abilities";
 import { DEFAULT_DESIGN, parseDesign, type Design } from "@/lib/site/design";
+import type { CustomFont } from "@/lib/site/fonts";
 import { DEFAULT_FRAME, parseFrame, type Business, type SiteFrame } from "@/lib/site/frame";
 import type { AuthUser } from "./auth";
+import { loadCustomFonts } from "./fonts";
 import { loadSettings } from "./settings";
 
 /**
@@ -35,21 +37,27 @@ import { loadSettings } from "./settings";
  * publish the caller refreshes the cached pages (`updateTag(WEBSITE_TAG)`).
  */
 
-export interface DocumentSpec<T> {
+export interface DocumentSpec<T, C = undefined> {
   kind: "design" | "frame";
   /** What it is called in a sentence: "the design". */
   name: string;
+  /**
+   * What reading the document depends on besides its own content, loaded once
+   * for each call: for the design, the fonts the owners uploaded.
+   */
+  context?: (db: DbLike) => Promise<C>;
   /** A complete, valid value from whatever was stored or sent. */
-  parse(input: unknown): T;
+  parse(input: unknown, context: C): T;
   /** What the site shows while nothing was ever published: the site as it was built. */
   original: T;
   /** What someone needs to be allowed to change it. Publishing needs `publishWebsite` as well. */
   ability: Ability;
 }
 
-export const DESIGN_DOC: DocumentSpec<Design> = {
+export const DESIGN_DOC: DocumentSpec<Design, CustomFont[]> = {
   kind: "design",
   name: "the design",
+  context: loadCustomFonts,
   parse: parseDesign,
   original: DEFAULT_DESIGN,
   ability: "editDesign",
@@ -63,11 +71,14 @@ export const FRAME_DOC: DocumentSpec<SiteFrame> = {
   ability: "editDesign",
 };
 
+/** What a document's `parse` needs besides the content. */
+const contextOf = async <T, C>(db: DbLike, spec: DocumentSpec<T, C>): Promise<C> => (spec.context ? spec.context(db) : (undefined as C));
+
 type Row = typeof siteDocuments.$inferSelect;
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
-async function rowOf(db: DbLike, spec: DocumentSpec<unknown>): Promise<Row | null> {
+async function rowOf<T, C>(db: DbLike, spec: DocumentSpec<T, C>): Promise<Row | null> {
   const [row] = await db
     .select()
     .from(siteDocuments)
@@ -77,7 +88,7 @@ async function rowOf(db: DbLike, spec: DocumentSpec<unknown>): Promise<Row | nul
 }
 
 /** The document's row, made if it was never saved, and locked until the transaction ends. */
-async function rowForUpdate(tx: DbLike, spec: DocumentSpec<unknown>): Promise<Row> {
+async function rowForUpdate<T, C>(tx: DbLike, spec: DocumentSpec<T, C>): Promise<Row> {
   await tx.insert(siteDocuments).values({ kind: spec.kind, slug: "" }).onConflictDoNothing();
   const [row] = await tx
     .select()
@@ -88,11 +99,12 @@ async function rowForUpdate(tx: DbLike, spec: DocumentSpec<unknown>): Promise<Ro
   return row;
 }
 
-const publishedOf = <T>(row: Row | null, spec: DocumentSpec<T>): T => (row?.published != null ? spec.parse(row.published) : spec.original);
+const publishedOf = <T, C>(row: Row | null, spec: DocumentSpec<T, C>, context: C): T =>
+  row?.published != null ? spec.parse(row.published, context) : spec.original;
 
 /** What the public sees. */
-export async function loadPublished<T>(db: DbLike, spec: DocumentSpec<T>): Promise<T> {
-  return publishedOf(await rowOf(db, spec), spec);
+export async function loadPublished<T, C>(db: DbLike, spec: DocumentSpec<T, C>): Promise<T> {
+  return publishedOf(await rowOf(db, spec), spec, await contextOf(db, spec));
 }
 
 /** The studio's published name and contact details, for what is not a page: an email, a receipt, a PDF file. */
@@ -101,9 +113,9 @@ export async function loadBusiness(db: DbLike): Promise<Business> {
 }
 
 /** What a preview shows: the draft when there is one, otherwise what is published. */
-export async function loadDraftOrPublished<T>(db: DbLike, spec: DocumentSpec<T>): Promise<T> {
-  const row = await rowOf(db, spec);
-  return row?.draft != null ? spec.parse(row.draft) : publishedOf(row, spec);
+export async function loadDraftOrPublished<T, C>(db: DbLike, spec: DocumentSpec<T, C>): Promise<T> {
+  const [row, context] = [await rowOf(db, spec), await contextOf(db, spec)];
+  return row?.draft != null ? spec.parse(row.draft, context) : publishedOf(row, spec, context);
 }
 
 /** What the viewer may do with the website, as the owners have set the switches. */
@@ -131,13 +143,13 @@ export interface EditingState<T> {
 }
 
 /** A document as its editor needs it. Null for someone who may not change it. */
-export async function loadForEditing<T>(db: DbLike, viewer: AuthUser, spec: DocumentSpec<T>): Promise<EditingState<T> | null> {
+export async function loadForEditing<T, C>(db: DbLike, viewer: AuthUser, spec: DocumentSpec<T, C>): Promise<EditingState<T> | null> {
   const settings = await loadSettings(db);
   if (!can(viewer, spec.ability, settings)) return null;
-  const row = await rowOf(db, spec);
-  const published = publishedOf(row, spec);
+  const [row, context] = [await rowOf(db, spec), await contextOf(db, spec)];
+  const published = publishedOf(row, spec, context);
   return {
-    content: row?.draft != null ? spec.parse(row.draft) : published,
+    content: row?.draft != null ? spec.parse(row.draft, context) : published,
     published,
     original: spec.original,
     hasDraft: row?.draft != null,
@@ -162,17 +174,18 @@ export type SaveDraftResult<T> =
  * that nobody's work is overwritten without their knowing. `force` stores it
  * anyway.
  */
-export async function saveDraft<T>(
+export async function saveDraft<T, C>(
   db: Db,
   viewer: AuthUser,
-  spec: DocumentSpec<T>,
+  spec: DocumentSpec<T, C>,
   input: unknown,
   options: { basedOn: number; force?: boolean; now: Date },
 ): Promise<SaveDraftResult<T>> {
   if (!can(viewer, spec.ability, await loadSettings(db))) {
     return { ok: false, reason: "forbidden", message: `You cannot change ${spec.name}.` };
   }
-  const content = spec.parse(input);
+  const context = await contextOf(db, spec);
+  const content = spec.parse(input, context);
   return db.transaction(async (tx): Promise<SaveDraftResult<T>> => {
     const row = await rowForUpdate(tx, spec);
     if (!options.force && row.draftRevision !== options.basedOn) {
@@ -184,9 +197,9 @@ export async function saveDraft<T>(
         at: (row.draftAt ?? row.publishedAt)?.toISOString() ?? null,
       };
     }
-    const hasDraft = !same(content, publishedOf(row, spec));
+    const hasDraft = !same(content, publishedOf(row, spec, context));
     // Saving what is already stored changes nothing, so it does not count as someone else's change.
-    if (hasDraft ? row.draft != null && same(content, spec.parse(row.draft)) : row.draft == null) {
+    if (hasDraft ? row.draft != null && same(content, spec.parse(row.draft, context)) : row.draft == null) {
       return { ok: true, revision: row.draftRevision, hasDraft, content, savedAt: (row.draftAt ?? options.now).toISOString() };
     }
     const revision = row.draftRevision + 1;
@@ -206,15 +219,16 @@ export async function saveDraft<T>(
 export type PublishResult = { ok: true; version: number } | { ok: false; message: string };
 
 /** Make the draft public, and keep a copy of it as a version. */
-export async function publishDraft<T>(db: Db, viewer: AuthUser, spec: DocumentSpec<T>, now: Date): Promise<PublishResult> {
+export async function publishDraft<T, C>(db: Db, viewer: AuthUser, spec: DocumentSpec<T, C>, now: Date): Promise<PublishResult> {
   const settings = await loadSettings(db);
   if (!can(viewer, spec.ability, settings) || !can(viewer, "publishWebsite", settings)) {
     return { ok: false, message: "You cannot publish changes to the website. An owner can." };
   }
+  const context = await contextOf(db, spec);
   return db.transaction(async (tx): Promise<PublishResult> => {
     const row = await rowForUpdate(tx, spec);
     if (row.draft == null) return { ok: false, message: "There is nothing to publish: the website already shows this." };
-    const content = spec.parse(row.draft);
+    const content = spec.parse(row.draft, context);
     const [last] = await tx.select({ number: max(siteVersions.number) }).from(siteVersions).where(eq(siteVersions.documentId, row.id));
     const version = (last?.number ?? 0) + 1;
     await tx.insert(siteVersions).values({ documentId: row.id, number: version, content, publishedBy: viewer.email, createdAt: now });
@@ -235,7 +249,7 @@ export async function publishDraft<T>(db: Db, viewer: AuthUser, spec: DocumentSp
 }
 
 /** Throw the draft away. The website and its history are not touched. */
-export async function discardDraft<T>(db: Db, viewer: AuthUser, spec: DocumentSpec<T>): Promise<{ ok: true } | { ok: false; message: string }> {
+export async function discardDraft<T, C>(db: Db, viewer: AuthUser, spec: DocumentSpec<T, C>): Promise<{ ok: true } | { ok: false; message: string }> {
   if (!can(viewer, spec.ability, await loadSettings(db))) return { ok: false, message: `You cannot change ${spec.name}.` };
   return db.transaction(async (tx) => {
     const row = await rowForUpdate(tx, spec);
@@ -259,9 +273,9 @@ export interface VersionSummary {
 }
 
 /** The versions that were published, newest first. Null for someone who may not change the document. */
-export async function listVersions<T>(db: DbLike, viewer: AuthUser, spec: DocumentSpec<T>, limit = 30): Promise<VersionSummary[] | null> {
+export async function listVersions<T, C>(db: DbLike, viewer: AuthUser, spec: DocumentSpec<T, C>, limit = 30): Promise<VersionSummary[] | null> {
   if (!can(viewer, spec.ability, await loadSettings(db))) return null;
-  const row = await rowOf(db, spec);
+  const [row, context] = [await rowOf(db, spec), await contextOf(db, spec)];
   if (!row) return [];
   const versions = await db
     .select()
@@ -270,8 +284,8 @@ export async function listVersions<T>(db: DbLike, viewer: AuthUser, spec: Docume
     .orderBy(desc(siteVersions.number))
     .limit(Math.min(Math.max(limit, 1), 200));
   // The newest version whose content is what is published: an older one that happens to be equal is not "current".
-  const published = publishedOf(row, spec);
-  const currentId = row.published != null ? versions.find((version) => same(spec.parse(version.content), published))?.id : undefined;
+  const published = publishedOf(row, spec, context);
+  const currentId = row.published != null ? versions.find((version) => same(spec.parse(version.content, context), published))?.id : undefined;
   return versions.map((version) => ({
     id: version.id,
     number: version.number,
@@ -287,9 +301,10 @@ export type RestoreResult = { ok: true; number: number; hasDraft: boolean } | { 
  * Bring an earlier version back as the draft. The public still sees what is
  * published until the draft is published; a draft that was there is replaced.
  */
-export async function restoreVersion<T>(db: Db, viewer: AuthUser, spec: DocumentSpec<T>, versionId: string, now: Date): Promise<RestoreResult> {
+export async function restoreVersion<T, C>(db: Db, viewer: AuthUser, spec: DocumentSpec<T, C>, versionId: string, now: Date): Promise<RestoreResult> {
   if (!can(viewer, spec.ability, await loadSettings(db))) return { ok: false, message: `You cannot change ${spec.name}.` };
   if (!/^[0-9a-f-]{36}$/i.test(versionId)) return { ok: false, message: "That version was not found." };
+  const context = await contextOf(db, spec);
   return db.transaction(async (tx): Promise<RestoreResult> => {
     const row = await rowForUpdate(tx, spec);
     const [version] = await tx
@@ -298,8 +313,8 @@ export async function restoreVersion<T>(db: Db, viewer: AuthUser, spec: Document
       .where(and(eq(siteVersions.id, versionId), eq(siteVersions.documentId, row.id)))
       .limit(1);
     if (!version) return { ok: false, message: "That version was not found." };
-    const content = spec.parse(version.content);
-    const hasDraft = !same(content, publishedOf(row, spec));
+    const content = spec.parse(version.content, context);
+    const hasDraft = !same(content, publishedOf(row, spec, context));
     await tx
       .update(siteDocuments)
       .set({
