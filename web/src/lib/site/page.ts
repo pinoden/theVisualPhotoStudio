@@ -1,7 +1,7 @@
 import { blockSpec } from "./blocks/registry";
 import { parseProps, referencedIds } from "./blocks/check";
-import type { StoredBlock } from "./blocks/fields";
-import { cleanLine } from "./frame";
+import type { Fields, StoredBlock } from "./blocks/fields";
+import { cleanLine, leadsTo } from "./frame";
 
 /**
  * A page of the website as it is stored: what search engines are told about
@@ -107,6 +107,27 @@ export function pageReferences(content: PageContent): { pictures: string[]; coll
     if (spec) referencedIds(spec.fields, block.props, into);
   });
   return { pictures: [...into.pictures], collections: [...into.collections] };
+}
+
+/** Whether a block's own values link to `path`: a link field, a link in formatted text, or either inside a list. */
+function valuesLinkTo(fields: Fields, props: Record<string, unknown>, path: string): boolean {
+  for (const [name, field] of Object.entries(fields)) {
+    const value = props[name];
+    if (field.kind === "link" && typeof value === "string" && leadsTo(value, path)) return true;
+    if (field.kind === "rich" && typeof value === "string" && [...value.matchAll(/href="([^"]*)"/g)].some((match) => leadsTo(match[1], path))) return true;
+    if (field.kind === "list" && Array.isArray(value) && value.some((item) => valuesLinkTo(field.of, item as Record<string, unknown>, path))) return true;
+  }
+  return false;
+}
+
+/** Whether any block of a page, wherever it sits, links to the page at `path`. */
+export function pageLinksTo(content: PageContent, path: string): boolean {
+  let found = false;
+  eachBlock(content.blocks, (block) => {
+    const spec = blockSpec(block.type);
+    if (!found && spec) found = valuesLinkTo(spec.fields, block.props, path);
+  });
+  return found;
 }
 
 // ── Addresses ────────────────────────────────────────────────────────────────

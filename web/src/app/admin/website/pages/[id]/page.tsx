@@ -7,8 +7,9 @@ import { PageEditorLoader } from "@/components/site-editor/PageEditorLoader";
 import { getDb } from "@/db/client";
 import { CONDITIONS, type ConditionName } from "@/lib/site/conditions";
 import { liveValues } from "@/lib/site/live-values";
+import { listInWords } from "@/lib/words";
 import { PAGE_LIMITS } from "@/lib/site/page";
-import { linkablePages, listPageVersions, loadPageForEditing, pageEditorContext, TRASH_DAYS } from "@/server/pages";
+import { linkablePages, linksToPage, listPageVersions, loadPageForEditing, pageEditorContext, TRASH_DAYS } from "@/server/pages";
 import { requireManager } from "@/server/session";
 import { loadSettings } from "@/server/settings";
 import { FONT_CLASSES } from "../../../../fonts";
@@ -37,6 +38,14 @@ async function EditPage({ params, searchParams }: Pick<PageProps<"/admin/website
   if (!state) notFound();
   const [versions, context, links, settings] = await Promise.all([listPageVersions(db, viewer, id), pageEditorContext(db, state.content, now), linkablePages(db), loadSettings(db)]);
   const liveValueList = context.site.catalog && context.site.business ? liveValues(context.site.catalog, context.site.business) : [];
+  // Where the website links here: those links answer "not found" once the page is off the website.
+  const leadingHere = state.home || !state.isLive ? [] : await linksToPage(db, state.id);
+  const linksWarning = leadingHere.length > 0 && (
+    <p className="notice notice-warning">
+      Links lead here from {listInWords(leadingHere)}. Once this page is off the website they answer &ldquo;not found&rdquo;:
+      change them as well.
+    </p>
+  );
 
   return (
     <AdminFrame active="/admin/website" title={state.title} query={await searchParams} viewer={viewer} settings={settings} wide>
@@ -153,6 +162,7 @@ async function EditPage({ params, searchParams }: Pick<PageProps<"/admin/website
           <p className="editor-hint" style={{ margin: "0 0 1rem" }}>
             Visitors can no longer open it. It stays here as a draft, with everything on it, to publish again later.
           </p>
+          {linksWarning}
           <button type="submit" className="btn btn-outline btn-small">
             Take {state.title} off the website
           </button>
@@ -169,6 +179,7 @@ async function EditPage({ params, searchParams }: Pick<PageProps<"/admin/website
                 ? "It goes to the trash, under Pages, and can be brought back from there at any time: a page the website was built with is never removed from it."
                 : `It goes to the trash, under Pages, and can be brought back for ${TRASH_DAYS} days.`}
             </p>
+            {linksWarning}
             <button type="submit" className="btn btn-outline btn-small">
               Yes, delete {state.title}
             </button>

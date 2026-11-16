@@ -94,6 +94,29 @@ export interface SiteFrame {
 /** The studio's name and contact details: on the website, in every email and on every receipt. */
 export type Business = SiteFrame["business"];
 
+/** Whether a link leads to the page at `path`: "/faq", "/faq#pets" and "/faq?from=menu" all lead to "/faq". */
+export function leadsTo(href: string, path: string): boolean {
+  return href === path || href.startsWith(`${path}#`) || href.startsWith(`${path}?`);
+}
+
+/**
+ * Where the header, the menu and the footer link to the page at `path`, in
+ * words: "the menu (Info, Guest Information)". For a warning before a page
+ * leaves the website. A menu item with a dropdown has no link of its own.
+ */
+export function frameLinksTo(frame: SiteFrame, path: string): string[] {
+  const found: string[] = [];
+  for (const item of frame.menu) {
+    if (item.children.length === 0 && leadsTo(item.href, path)) found.push(`the menu (${item.label})`);
+    for (const child of item.children) if (leadsTo(child.href, path)) found.push(`the menu (${item.label}, ${child.label})`);
+  }
+  for (const column of frame.footer.columns) {
+    for (const link of column.links) if (leadsTo(link.href, path)) found.push(`the footer (${link.label})`);
+  }
+  if (frame.announcement.linkHref !== "" && leadsTo(frame.announcement.linkHref, path)) found.push("the announcement bar");
+  return found;
+}
+
 export const FRAME_LIMITS = {
   menuItems: 8,
   menuChildren: 8,

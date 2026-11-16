@@ -3,9 +3,9 @@ import { media, mediaCollections, siteDocuments, siteRedirects, siteVersions } f
 import type { Db, DbLike } from "@/db/client";
 import { can } from "@/lib/abilities";
 import type { SiteContext } from "@/lib/site/blocks/block";
-import { cleanLine, parseHref } from "@/lib/site/frame";
+import { cleanLine, frameLinksTo, parseHref } from "@/lib/site/frame";
 import { liveValues } from "@/lib/site/live-values";
-import { PAGE_LIMITS, pagePath, pageReferences, parsePage, parseSlug, RESERVED_SEGMENTS, slugFromTitle, type PageContent } from "@/lib/site/page";
+import { PAGE_LIMITS, pageLinksTo, pagePath, pageReferences, parsePage, parseSlug, RESERVED_SEGMENTS, slugFromTitle, type PageContent } from "@/lib/site/page";
 import { builtInPage, builtInPages } from "@/lib/site/built-in-pages";
 import { conditionsOf } from "@/lib/site/conditions";
 import { paragraphs } from "@/lib/site/rich-text";
@@ -15,7 +15,7 @@ import { collectionShows, loadCollection } from "./collections";
 import { loadPictures } from "./media";
 import { loadSettings } from "./settings";
 import { localDateOf } from "./tz";
-import { loadBusiness, type VersionSummary } from "./website";
+import { FRAME_DOC, loadBusiness, loadDraftOrPublished, loadPublished, type VersionSummary } from "./website";
 
 /**
  * The website's pages: the ones the owners make and edit, each a list of
@@ -640,6 +640,24 @@ export async function ensureBuiltInPages(db: Db, now: Date): Promise<number> {
     if (done) added++;
   }
   return added;
+}
+
+/**
+ * Where the website links to a page, in words, for a warning before the page
+ * leaves it: the header, menu and footer, as published and as their draft has
+ * them, and the other pages, published or not. Empty when nothing does.
+ */
+export async function linksToPage(db: DbLike, id: string): Promise<string[]> {
+  const row = await pageRow(db, id);
+  if (!row) return [];
+  const path = pagePath(row.slug);
+  const [published, drafted] = await Promise.all([loadPublished(db, FRAME_DOC), loadDraftOrPublished(db, FRAME_DOC)]);
+  const found = new Set([...frameLinksTo(published, path), ...frameLinksTo(drafted, path)]);
+  const others = await db.select().from(siteDocuments).where(and(isPage, notDeleted, ne(siteDocuments.id, row.id))).orderBy(asc(siteDocuments.title));
+  for (const other of others) {
+    if ([other.published, other.draft].some((content) => content != null && pageLinksTo(parsePage(content), path))) found.add(`the page \u201c${other.title}\u201d`);
+  }
+  return [...found];
 }
 
 // ── Old addresses ────────────────────────────────────────────────────────────

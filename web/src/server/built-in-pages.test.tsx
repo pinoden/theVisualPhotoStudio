@@ -17,6 +17,7 @@ import {
   duplicatePage,
   emptyOldTrash,
   ensureBuiltInPages,
+  linksToPage,
   listPages,
   listPageVersions,
   loadPageForEditing,
@@ -208,6 +209,14 @@ describe("the pages the website was built with", () => {
     expect(await world.db.select().from(siteDocuments).where(eq(siteDocuments.id, faq))).toHaveLength(1);
     // Brought back while the address is taken, it gets one of its own.
     expect(await restorePage(world.db, owner, faq)).toMatchObject({ ok: true, path: "/faq-2" });
+  });
+
+  it("say where the website links to one, before it leaves the website", async () => {
+    expect(await linksToPage(world.db, await idOf("faq"))).toEqual(["the menu (Info, Guest Information)", "the footer (Guest Information)", "the page \u201cContact\u201d"]);
+    expect(await linksToPage(world.db, await idOf("policies"))).toEqual(["the menu (Info, Policies)", "the footer (Policies)", "the page \u201cGuest Information\u201d"]);
+    // A page nothing links to.
+    const made = expectOk(await createPage(world.db, owner, { title: "Gift Cards" }, NOW)).id;
+    expect(await linksToPage(world.db, made)).toEqual([]);
   });
 
   it("start again from how they were built", async () => {
