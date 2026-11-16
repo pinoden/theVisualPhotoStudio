@@ -1,15 +1,21 @@
 import Link from "next/link";
 import { hourlyFromCents, hoursLines } from "@/lib/catalog-view";
 import { formatCents } from "@/lib/domain/pricing";
-import { SITE } from "@/lib/site";
+import { telHref } from "@/lib/site/frame";
 import { getCatalog } from "@/server/cached";
+import { siteFrame } from "@/server/site";
+import type { CSSProperties } from "react";
+
+/** The size a heading has in its place, which the design's scale then multiplies (see ".site-page" in globals.css). */
+const headingBase = (level: 2 | 4, size: string) => ({ [`--h${level}-base`]: size }) as CSSProperties;
 
 export default async function HomePage() {
-  const catalog = await getCatalog();
+  const [catalog, { frame }] = await Promise.all([getCatalog(), siteFrame()]);
+  const { business } = frame;
   const first = catalog.studios[0];
 
   return (
-    <>
+    <div className="site-page">
       <section className="hero">
         <div className="hero-content">
           <p className="hero-eyebrow">Winter Park, Florida</p>
@@ -87,17 +93,17 @@ export default async function HomePage() {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(240px,1fr))", gap: "2rem" }}>
             <div style={{ textAlign: "center", padding: "1.5rem" }}>
               <div style={{ fontSize: "2rem", marginBottom: "1rem" }}>✦</div>
-              <h4 style={{ fontSize: "1.2rem", marginBottom: ".5rem" }}>Know the studio?</h4>
+              <h4 style={{ ...headingBase(4, "1.2rem"), marginBottom: ".5rem" }}>Know the studio?</h4>
               <p style={{ fontSize: ".875rem" }}>Pick one or more studios and see every time they are free together.</p>
             </div>
             <div style={{ textAlign: "center", padding: "1.5rem" }}>
               <div style={{ fontSize: "2rem", marginBottom: "1rem" }}>✦</div>
-              <h4 style={{ fontSize: "1.2rem", marginBottom: ".5rem" }}>Know the time?</h4>
+              <h4 style={{ ...headingBase(4, "1.2rem"), marginBottom: ".5rem" }}>Know the time?</h4>
               <p style={{ fontSize: ".875rem" }}>Pick a date and time and see which studios are free then.</p>
             </div>
             <div style={{ textAlign: "center", padding: "1.5rem" }}>
               <div style={{ fontSize: "2rem", marginBottom: "1rem" }}>✦</div>
-              <h4 style={{ fontSize: "1.2rem", marginBottom: ".5rem" }}>Need more space?</h4>
+              <h4 style={{ ...headingBase(4, "1.2rem"), marginBottom: ".5rem" }}>Need more space?</h4>
               <p style={{ fontSize: ".875rem" }}>
                 Add any other studio to the same booking. The multi-studio discount applies automatically.
               </p>
@@ -118,9 +124,9 @@ export default async function HomePage() {
                 <div>
                   <strong style={{ color: "var(--color-dark)" }}>Address</strong>
                   <br />
-                  {SITE.addressLine1}
+                  {business.addressLine1}
                   <br />
-                  {SITE.addressLine2}
+                  {business.addressLine2}
                 </div>
               </div>
               <div className="contact-detail">
@@ -128,7 +134,7 @@ export default async function HomePage() {
                 <div>
                   <strong style={{ color: "var(--color-dark)" }}>Phone</strong>
                   <br />
-                  <a href={SITE.phoneHref}>{SITE.phoneDisplay}</a>
+                  <a href={telHref(business.phone)}>{business.phone}</a>
                 </div>
               </div>
               {first && (
@@ -143,7 +149,7 @@ export default async function HomePage() {
                         <br />
                       </span>
                     ))}
-                    <em style={{ fontSize: ".8rem" }}>By appointment only</em>
+                    {business.note && <em style={{ fontSize: ".8rem" }}>{business.note}</em>}
                   </div>
                 </div>
               )}
@@ -161,12 +167,12 @@ export default async function HomePage() {
               <div style={{ textAlign: "center" }}>
                 <div style={{ fontSize: "2.5rem", marginBottom: ".75rem" }}>📍</div>
                 <p style={{ fontSize: ".9rem" }}>
-                  {SITE.addressLine1}
+                  {business.addressLine1}
                   <br />
-                  {SITE.addressLine2}
+                  {business.addressLine2}
                 </p>
                 <a
-                  href={SITE.mapsUrl}
+                  href={business.mapsUrl}
                   target="_blank"
                   rel="noopener"
                   className="btn btn-primary mt-2"
@@ -183,7 +189,7 @@ export default async function HomePage() {
       <section className="section section-ivory" style={{ textAlign: "center" }}>
         <div className="container-sm">
           <p className="section-eyebrow">Ready to Create?</p>
-          <h2 style={{ fontSize: "clamp(2rem,4vw,3.5rem)" }}>Book Your Session Today</h2>
+          <h2 style={headingBase(2, "clamp(2rem,4vw,3.5rem)")}>Book Your Session Today</h2>
           <div className="divider" />
           <p style={{ maxWidth: 480, margin: "0 auto 2rem" }}>
             Choose your space, pick a time and get instant confirmation.
@@ -193,6 +199,6 @@ export default async function HomePage() {
           </Link>
         </div>
       </section>
-    </>
+    </div>
   );
 }

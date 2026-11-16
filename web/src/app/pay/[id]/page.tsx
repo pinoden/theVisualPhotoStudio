@@ -5,9 +5,10 @@ import { connection } from "next/server";
 import { Suspense } from "react";
 import { getDb } from "@/db/client";
 import { formatCents } from "@/lib/domain/pricing";
-import { SITE } from "@/lib/site";
+import { telHref } from "@/lib/site/frame";
 import { getPayPage } from "@/server/pay-links";
 import { flushEmailsSoon, payLinkDeps } from "@/server/runtime";
+import { siteFrame } from "@/server/site";
 import { pretendPayAction } from "./actions";
 
 export const metadata: Metadata = {
@@ -47,6 +48,7 @@ async function Pay({ params }: Pick<PageProps<"/pay/[id]">, "params">) {
   if (!page) notFound();
   // A payment found on this visit queued its confirmation email.
   flushEmailsSoon();
+  const { business } = (await siteFrame()).frame;
   const amount = formatCents(page.amountCents);
 
   const details = (
@@ -90,7 +92,7 @@ async function Pay({ params }: Pick<PageProps<"/pay/[id]">, "params">) {
       {page.status === "cancelled" && (
         <p>
           This payment link was cancelled, so nothing can be paid here. If you still need to pay for booking {page.ref},
-          please call us at <a href={SITE.phoneHref}>{SITE.phoneDisplay}</a> or pay at the studio.
+          please call us at <a href={telHref(business.phone)}>{business.phone}</a> or pay at the studio.
         </p>
       )}
 

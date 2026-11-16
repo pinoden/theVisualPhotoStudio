@@ -3,9 +3,9 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { multiStudioOffer, petPolicy } from "@/lib/catalog-view";
 import { formatCents } from "@/lib/domain/pricing";
-import { SITE } from "@/lib/site";
 import { count, hoursWithDays as span, listInWords as list } from "@/lib/words";
 import { getCatalog } from "@/server/cached";
+import { siteFrame } from "@/server/site";
 
 export const metadata: Metadata = { title: "Guest Information" };
 
@@ -25,7 +25,8 @@ interface Question {
  * are written by hand here and on the policies page: change both together.
  */
 export default async function FaqPage() {
-  const catalog = await getCatalog();
+  const [catalog, { frame }] = await Promise.all([getCatalog(), siteFrame()]);
+  const { business } = frame;
   const s = catalog.settings;
   const offer = multiStudioOffer(catalog);
 
@@ -38,8 +39,8 @@ export default async function FaqPage() {
       q: "Where are you located?",
       a: (
         <p>
-          We are at {SITE.addressLine1}, {SITE.addressLine2}. The studios are on the 3rd floor.{" "}
-          <a href={SITE.mapsUrl} target="_blank" rel="noreferrer">
+          We are at {business.addressLine1}, {business.addressLine2}. The studios are on the 3rd floor.{" "}
+          <a href={business.mapsUrl} target="_blank" rel="noreferrer">
             Open in Maps
           </a>
         </p>
@@ -354,7 +355,7 @@ export default async function FaqPage() {
   ];
 
   return (
-    <>
+    <div className="site-page">
       <div className="page-banner">
         <p className="section-eyebrow">Common Questions</p>
         <h1>Guest Information</h1>
@@ -397,6 +398,6 @@ export default async function FaqPage() {
           </div>
         </div>
       </section>
-    </>
+    </div>
   );
 }

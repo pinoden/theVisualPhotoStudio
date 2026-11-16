@@ -5,10 +5,11 @@ import { Suspense } from "react";
 import { BookingSummary } from "@/components/BookingSummary";
 import { ManageBooking } from "@/components/ManageBooking";
 import { getDb } from "@/db/client";
-import { SITE } from "@/lib/site";
+import { telHref } from "@/lib/site/frame";
 import { getBookingByToken, isUpcomingVisit } from "@/server/bookings";
 import { getManageChoices } from "@/server/manage";
 import { loadAccessInstructions } from "@/server/settings";
+import { siteFrame } from "@/server/site";
 
 export const metadata: Metadata = {
   title: "Your Booking",
@@ -49,6 +50,7 @@ async function BookingDetails({ params, searchParams }: Pick<PageProps<"/booking
   const token = typeof query.t === "string" ? query.t : "";
   const db = await getDb();
   const booking = await getBookingByToken(db, ref, token);
+  const { business } = (await siteFrame()).frame;
 
   if (!booking) {
     return (
@@ -57,7 +59,7 @@ async function BookingDetails({ params, searchParams }: Pick<PageProps<"/booking
         <div className="divider" />
         <p>
           This link is not valid. Please use the link in your confirmation email, <Link href="/account">sign in</Link>{" "}
-          to see your bookings, or call us at <a href={SITE.phoneHref}>{SITE.phoneDisplay}</a>.
+          to see your bookings, or call us at <a href={telHref(business.phone)}>{business.phone}</a>.
         </p>
         <Link href="/book" className="btn btn-dark mt-3">
           Book a Studio
@@ -100,7 +102,7 @@ async function BookingDetails({ params, searchParams }: Pick<PageProps<"/booking
             A confirmation email has been sent to <strong>{booking.customerEmail}</strong>. Times are Eastern Time.
           </p>
           <p style={{ fontSize: ".9rem" }}>
-            {SITE.addressLine1}, {SITE.addressLine2}. Your booking begins at the scheduled start time; please
+            {business.addressLine1}, {business.addressLine2}. Your booking begins at the scheduled start time; please
             arrive no more than five minutes early.
           </p>
           {access && (

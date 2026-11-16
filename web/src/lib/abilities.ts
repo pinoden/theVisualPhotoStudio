@@ -11,6 +11,10 @@
  * The switches are settings that the owners set on the Staff page, so a
  * change applies at the next request, with nothing redeployed. Prices,
  * settings, staff and codes stay with the owners: no switch opens them.
+ *
+ * The website is the owners' too, unless they give a manager part of it:
+ * one switch lets managers change the design and the header, menu and footer
+ * as a draft, and another lets them publish. An attendant never can.
  */
 
 /** The switches for attendants. Each is a setting of the same name. */
@@ -33,6 +37,8 @@ export const MANAGER_SWITCHES = {
   managerSeesCustomers: "Open the list of customers, and each customer's appointments, stamps and rewards",
   managerCorrectsLoyalty: "Add or take away loyalty stamps, and cancel a reward or give it back",
   managerBlocksTime: "Block time in a studio",
+  managerEditsDesign: "Change the website's design, header, menu and footer. What they change stays a draft until it is published",
+  managerPublishesWebsite: "Publish changes to the website, and bring an earlier version back",
 } as const;
 
 export type AttendantSwitch = keyof typeof ATTENDANT_SWITCHES;
@@ -53,7 +59,9 @@ export type Ability =
   | "seeCustomers"
   | "correctLoyalty"
   | "refund"
-  | "blockTime";
+  | "blockTime"
+  | "editDesign"
+  | "publishWebsite";
 
 /** For an attendant: the switch that allows it, or false when no switch does. */
 const ATTENDANT_RULE: Record<Ability, AttendantSwitch | false> = {
@@ -69,6 +77,8 @@ const ATTENDANT_RULE: Record<Ability, AttendantSwitch | false> = {
   correctLoyalty: false,
   refund: false,
   blockTime: false,
+  editDesign: false,
+  publishWebsite: false,
 };
 
 /** For a manager: true when every manager may, otherwise the switch that allows it. */
@@ -85,6 +95,8 @@ const MANAGER_RULE: Record<Ability, ManagerSwitch | true> = {
   correctLoyalty: "managerCorrectsLoyalty",
   refund: "managerRefunds",
   blockTime: "managerBlocksTime",
+  editDesign: "managerEditsDesign",
+  publishWebsite: "managerPublishesWebsite",
 };
 
 export type AbilitySettings = Record<AttendantSwitch | ManagerSwitch, boolean>;

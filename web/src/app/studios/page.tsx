@@ -9,7 +9,7 @@ export const metadata: Metadata = { title: "Our Studios" };
 export default async function StudiosPage() {
   const catalog = await getCatalog();
   return (
-    <>
+    <div className="site-page">
       <div className="page-banner">
         <p className="section-eyebrow">Our Spaces</p>
         <h1>The Studios</h1>
@@ -52,6 +52,6 @@ export default async function StudiosPage() {
           </section>
         );
       })}
-    </>
+    </div>
   );
 }

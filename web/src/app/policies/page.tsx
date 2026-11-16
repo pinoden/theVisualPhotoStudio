@@ -4,6 +4,7 @@ import { petPolicy } from "@/lib/catalog-view";
 import { formatCents } from "@/lib/domain/pricing";
 import { hoursInWords, hoursWithDays, listInWords as list } from "@/lib/words";
 import { getCatalog } from "@/server/cached";
+import { siteFrame } from "@/server/site";
 
 export const metadata: Metadata = { title: "Studio Policies" };
 
@@ -16,13 +17,14 @@ export const metadata: Metadata = { title: "Studio Policies" };
  * and on the guest information page: change both together.
  */
 export default async function PoliciesPage() {
-  const catalog = await getCatalog();
+  const [catalog, { frame }] = await Promise.all([getCatalog(), siteFrame()]);
+  const { business } = frame;
   const s = catalog.settings;
   const pets = petPolicy(catalog);
   const fee = s.refundFeePercent > 0 ? `, excluding the non-refundable payment processing fee (${s.refundFeePercent}%)` : "";
   const sessionNotice = noticeHours(s, true);
   return (
-    <>
+    <div className="site-page">
       <div className="page-banner">
         <p className="section-eyebrow">Good to Know</p>
         <h1>Studio Policies</h1>
@@ -146,13 +148,13 @@ export default async function PoliciesPage() {
 
           <h2>Conduct &amp; Liability</h2>
           <p>
-            The person who books the studio is responsible for their guests. The Visuals reserves the right to end
-            a session without a refund for unsafe, illegal, disruptive or prohibited activity. Use of the studio,
-            furniture, props and equipment is at the client&rsquo;s own risk. The Visuals Photo Studio is not
+            The person who books the studio is responsible for their guests. {business.name} reserves the right to
+            end a session without a refund for unsafe, illegal, disruptive or prohibited activity. Use of the studio,
+            furniture, props and equipment is at the client&rsquo;s own risk. {business.name} is not
             responsible for injury, loss, theft or damage to clients, guests or their belongings.
           </p>
         </div>
       </section>
-    </>
+    </div>
   );
 }

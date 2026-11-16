@@ -133,7 +133,7 @@ test("guest information answers with the current rules and prices", async ({ pag
 
   // The menu leads here.
   await page.goto("/");
-  await page.getByRole("link", { name: "Info ▾" }).click();
+  await page.getByRole("button", { name: "Info" }).click();
   await page.getByRole("link", { name: "Guest Information" }).first().click();
   await expect(page).toHaveURL(/\/faq$/);
 });

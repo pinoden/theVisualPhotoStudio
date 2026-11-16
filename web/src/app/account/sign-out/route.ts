@@ -1,3 +1,4 @@
+import { draftMode } from "next/headers";
 import { closeSession } from "@/server/session";
 
 /**
@@ -10,6 +11,8 @@ import { closeSession } from "@/server/session";
 export async function POST(request: Request): Promise<Response> {
   if (!sameSite(request)) return new Response(null, { status: 403 });
   await closeSession();
+  // A preview of unpublished website changes ends with the session (src/server/site.ts).
+  (await draftMode()).disable();
   return new Response(null, { status: 303, headers: { Location: "/", "Cache-Control": "no-store" } });
 }
 

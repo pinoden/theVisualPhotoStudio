@@ -1,6 +1,6 @@
 import { PDFDocument, rgb, StandardFonts, type PDFFont, type PDFPage } from "@cantoo/pdf-lib";
 import { durationLabel } from "@/lib/domain/time";
-import { SITE } from "@/lib/site";
+import type { Business } from "@/lib/site/frame";
 import { RECEIPT_STATUS_TEXT, type Receipt, type YearStatement } from "./receipts";
 import { formatDay, formatInstant, formatRange } from "./tz";
 
@@ -147,18 +147,18 @@ class Sheet {
   }
 }
 
-function letterhead(sheet: Sheet, title: string): void {
-  sheet.ends(SITE.name, title, { size: 16, bold: true });
-  sheet.text(`${SITE.addressLine1}, ${SITE.addressLine2}`, { soft: true });
-  sheet.text(SITE.phoneDisplay, { soft: true });
+function letterhead(sheet: Sheet, title: string, business: Business): void {
+  sheet.ends(business.name, title, { size: 16, bold: true });
+  sheet.text(`${business.addressLine1}, ${business.addressLine2}`, { soft: true });
+  sheet.text(business.phone, { soft: true });
   sheet.space(10);
   sheet.rule();
   sheet.space(4);
 }
 
-function drawReceipt(sheet: Sheet, receipt: Receipt): void {
+function drawReceipt(sheet: Sheet, receipt: Receipt, business: Business): void {
   const when = formatRange(new Date(receipt.visitStart), new Date(receipt.visitEnd));
-  letterhead(sheet, "RECEIPT");
+  letterhead(sheet, "RECEIPT", business);
   sheet.ends(`Receipt for booking ${receipt.ref}`, `Paid ${formatDay(new Date(receipt.paidAt))}`, { size: 12, bold: true });
   sheet.space(6);
   sheet.text(`Customer: ${receipt.customerName}, ${receipt.customerEmail}`);
@@ -201,8 +201,8 @@ function drawReceipt(sheet: Sheet, receipt: Receipt): void {
   );
 }
 
-function drawStatement(sheet: Sheet, statement: YearStatement, customer: { name: string; email: string }): void {
-  letterhead(sheet, "PAYMENT SUMMARY");
+function drawStatement(sheet: Sheet, statement: YearStatement, customer: { name: string; email: string }, business: Business): void {
+  letterhead(sheet, "PAYMENT SUMMARY", business);
   sheet.text(`Payments in ${statement.year}`, { size: 12, bold: true });
   sheet.space(6);
   sheet.text(`Customer: ${customer.name ? `${customer.name}, ` : ""}${customer.email}`);
@@ -231,29 +231,33 @@ function drawStatement(sheet: Sheet, statement: YearStatement, customer: { name:
   );
 }
 
-async function build(draw: (sheet: Sheet) => void, title: string): Promise<Uint8Array> {
+async function build(draw: (sheet: Sheet) => void, title: string, business: Business): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   doc.setTitle(pdfSafe(title));
-  doc.setAuthor(SITE.name);
-  doc.setCreator(SITE.name);
+  doc.setAuthor(pdfSafe(business.name));
+  doc.setCreator(pdfSafe(business.name));
   const regular = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
   draw(new Sheet(doc, regular, bold));
   return doc.save();
 }
 
-/** One receipt as a PDF file. */
-export function receiptPdf(receipt: Receipt): Promise<Uint8Array> {
-  return build((sheet) => drawReceipt(sheet, receipt), `Receipt ${receipt.ref}`);
+/** One receipt as a PDF file. `business` is the studio's name and address for the top of the page. */
+export function receiptPdf(receipt: Receipt, business: Business): Promise<Uint8Array> {
+  return build((sheet) => drawReceipt(sheet, receipt, business), `Receipt ${receipt.ref}`, business);
 }
 
 /** A year's summary, then each of that year's receipts on a page of its own. */
-export function yearPdf(statement: YearStatement, customer: { name: string; email: string }): Promise<Uint8Array> {
-  return build((sheet) => {
-    drawStatement(sheet, statement, customer);
-    for (const receipt of statement.receipts) {
-      sheet.newPage();
-      drawReceipt(sheet, receipt);
-    }
-  }, `Payments ${statement.year}`);
+export function yearPdf(statement: YearStatement, customer: { name: string; email: string }, business: Business): Promise<Uint8Array> {
+  return build(
+    (sheet) => {
+      drawStatement(sheet, statement, customer, business);
+      for (const receipt of statement.receipts) {
+        sheet.newPage();
+        drawReceipt(sheet, receipt, business);
+      }
+    },
+    `Payments ${statement.year}`,
+    business,
+  );
 }

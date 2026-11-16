@@ -14,6 +14,7 @@ const LINKS = [
   { href: "/admin/hours", label: "Hours & blocks" },
   { href: "/admin/photography", label: "Photography" },
   { href: "/admin/codes", label: "Codes" },
+  { href: "/admin/website", label: "Website" },
   { href: "/admin/settings", label: "Settings" },
 ] as const;
 
@@ -32,6 +33,7 @@ function linksFor(viewer: { role: string }, settings: AbilitySettings): { href: 
     "/admin/customers": can(viewer, "seeCustomers", settings),
     "/admin/hours": can(viewer, "blockTime", settings),
     "/admin/photography": can(viewer, "setPhotographerTimes", settings),
+    "/admin/website": can(viewer, "editDesign", settings),
   };
   return LINKS.filter((link) => pages[link.href] === true);
 }

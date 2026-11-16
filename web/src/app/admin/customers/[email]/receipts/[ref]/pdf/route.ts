@@ -4,6 +4,7 @@ import { receiptPdf } from "@/server/receipt-pdf";
 import { getReceipt } from "@/server/receipts";
 import { getCurrentUser } from "@/server/session";
 import { loadSettings } from "@/server/settings";
+import { loadBusiness } from "@/server/website";
 import { can } from "@/lib/abilities";
 
 /** A customer's receipts are for the owners, and for a manager who may see both customers and money. */
@@ -22,9 +23,10 @@ export async function GET(_request: Request, context: RouteContext<"/admin/custo
   const user = await getCurrentUser();
   const email = normalizeEmail(decodeURIComponent(segment));
   if (!user || !(await maySeeReceipts(user)) || !email) return new Response("Not found", { status: 404 });
-  const receipt = await getReceipt(await getDb(), email, ref);
+  const db = await getDb();
+  const receipt = await getReceipt(db, email, ref);
   if (!receipt) return new Response("Not found", { status: 404 });
-  return new Response(Buffer.from(await receiptPdf(receipt)), {
+  return new Response(Buffer.from(await receiptPdf(receipt, await loadBusiness(db))), {
     headers: {
       "Content-Type": "application/pdf",
       "Content-Disposition": `inline; filename="receipt-${receipt.ref}.pdf"`,

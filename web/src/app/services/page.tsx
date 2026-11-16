@@ -27,7 +27,7 @@ export default async function ServicesPage() {
   /** How far ahead a session has to be booked: the owner's setting, so this page follows the admin. */
   const notice = noticeHours(catalog.settings, true);
   return (
-    <>
+    <div className="site-page">
       <div className="page-banner">
         <p className="section-eyebrow">Services</p>
         <h1>Professional Photography</h1>
@@ -118,6 +118,6 @@ export default async function ServicesPage() {
           </p>
         </div>
       </section>
-    </>
+    </div>
   );
 }

@@ -2,9 +2,10 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { ContactForm } from "@/components/ContactForm";
 import { hoursLines } from "@/lib/catalog-view";
-import { SITE } from "@/lib/site";
+import { telHref } from "@/lib/site/frame";
 import type { Catalog } from "@/server/catalog";
 import { getCatalog } from "@/server/cached";
+import { siteFrame } from "@/server/site";
 
 export const metadata: Metadata = { title: "Contact" };
 
@@ -24,10 +25,12 @@ function openingHours(catalog: Catalog): { studios: string; lines: string[] }[] 
 }
 
 export default async function ContactPage() {
-  const hours = openingHours(await getCatalog());
+  const [catalog, { frame }] = await Promise.all([getCatalog(), siteFrame()]);
+  const { business } = frame;
+  const hours = openingHours(catalog);
 
   return (
-    <>
+    <div className="site-page">
       <div className="page-banner">
         <p className="section-eyebrow">Get in Touch</p>
         <h1>Contact Us</h1>
@@ -44,11 +47,11 @@ export default async function ContactPage() {
                 <div>
                   <strong>Address</strong>
                   <br />
-                  {SITE.addressLine1}
+                  {business.addressLine1}
                   <br />
-                  {SITE.addressLine2}
+                  {business.addressLine2}
                   <br />
-                  <a href={SITE.mapsUrl} target="_blank" rel="noreferrer">
+                  <a href={business.mapsUrl} target="_blank" rel="noreferrer">
                     Open in Maps
                   </a>
                 </div>
@@ -58,7 +61,7 @@ export default async function ContactPage() {
                 <div>
                   <strong>Phone</strong>
                   <br />
-                  <a href={SITE.phoneHref}>{SITE.phoneDisplay}</a>
+                  <a href={telHref(business.phone)}>{business.phone}</a>
                 </div>
               </div>
 
@@ -73,7 +76,7 @@ export default async function ContactPage() {
                       ))}
                     </div>
                   ))}
-                  <em style={{ fontSize: ".85rem", color: "var(--color-muted)" }}>By appointment only</em>
+                  {business.note && <em style={{ fontSize: ".85rem", color: "var(--color-muted)" }}>{business.note}</em>}
                 </div>
               </div>
 
@@ -91,6 +94,6 @@ export default async function ContactPage() {
           </div>
         </div>
       </section>
-    </>
+    </div>
   );
 }

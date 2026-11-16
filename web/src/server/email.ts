@@ -1,11 +1,18 @@
 import { and, asc, eq, isNull, lt, sql } from "drizzle-orm";
 import { emailOutbox } from "@/db/schema";
 import type { DbLike } from "@/db/client";
+import { loadBusiness } from "./website";
 
 /**
  * Email is always queued in the database first, in the same step as the
  * change it reports, and delivered afterwards. A mail outage therefore never
  * blocks a booking, and nothing is lost: undelivered rows are retried.
+ *
+ * The studio's name and address are not written into the messages below.
+ * Their texts carry two marks, `{{studio}}` and `{{address}}`, and
+ * `queueEmail` puts the published contact details in their place (Admin,
+ * Website, "Header, menu & footer"), so every email follows a change made
+ * there.
  */
 export interface QueuedEmail {
   to: string;
@@ -17,12 +24,19 @@ export interface QueuedEmail {
   replyTo?: string;
 }
 
+/** Where `queueEmail` writes the studio's name, and its address on one line. */
+const STUDIO = "{{studio}}";
+const ADDRESS = "{{address}}";
+
 export async function queueEmail(db: DbLike, message: QueuedEmail): Promise<void> {
+  const business = await loadBusiness(db);
+  const fill = (text: string) =>
+    text.replaceAll(STUDIO, () => business.name).replaceAll(ADDRESS, () => `${business.addressLine1}, ${business.addressLine2}`);
   await db.insert(emailOutbox).values({
     toEmail: message.to.trim().toLowerCase(),
     replyTo: message.replyTo?.trim().toLowerCase() || null,
-    subject: message.subject,
-    body: message.body,
+    subject: fill(message.subject),
+    body: fill(message.body),
     kind: message.kind,
   });
 }
@@ -132,7 +146,7 @@ export async function deliverPendingEmails(
 
 // ── Message texts ────────────────────────────────────────────────────────────
 
-const SIGN_OFF = "The Visuals Photo Studio\n7457 Aloma Ave, Suite 301, Winter Park, FL 32792";
+const SIGN_OFF = `${STUDIO}\n${ADDRESS}`;
 
 function money(cents: number): string {
   const dollars = Math.floor(Math.abs(cents) / 100).toLocaleString("en-US");
@@ -146,7 +160,7 @@ export function loginCodeEmail(to: string, code: string, minutes: number): Queue
     kind: "login_code",
     subject: `Your sign-in code: ${code}`,
     body: [
-      `Your sign-in code for The Visuals Photo Studio is ${code}.`,
+      `Your sign-in code for ${STUDIO} is ${code}.`,
       "",
       `It works once and expires in ${minutes} minutes. If you did not ask for it, you can ignore this email.`,
       "",
@@ -185,7 +199,7 @@ export function bookingConfirmationEmail(input: {
     body: [
       `Hi ${input.name},`,
       "",
-      "Your booking at The Visuals Photo Studio is confirmed.",
+      `Your booking at ${STUDIO} is confirmed.`,
       "",
       `Reference: ${input.ref}`,
       `Studio: ${input.studios}`,
@@ -229,7 +243,7 @@ export function bookingMovedEmail(input: {
     body: [
       `Hi ${input.name},`,
       "",
-      `Your booking at The Visuals Photo Studio has been moved.`,
+      `Your booking at ${STUDIO} has been moved.`,
       "",
       `Reference: ${input.ref}`,
       `Studio: ${input.studios}`,

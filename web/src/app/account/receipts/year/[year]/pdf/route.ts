@@ -3,6 +3,7 @@ import { getDb } from "@/db/client";
 import { yearPdf } from "@/server/receipt-pdf";
 import { loadReceipts, yearStatement } from "@/server/receipts";
 import { getCurrentUser } from "@/server/session";
+import { loadBusiness } from "@/server/website";
 
 /**
  * GET /account/receipts/year/<year>/pdf: every receipt of one calendar year
@@ -18,10 +19,12 @@ export async function GET(request: NextRequest, context: RouteContext<"/account/
     return Response.redirect(signIn, 303);
   }
   if (!/^(19|20)\d{2}$/.test(year)) return new Response("Not found", { status: 404 });
-  const { receipts } = await loadReceipts(await getDb(), user.email);
+  const db = await getDb();
+  const { receipts } = await loadReceipts(db, user.email);
   const statement = yearStatement(receipts, Number(year));
   if (statement.transactions.length === 0) return new Response("Not found", { status: 404 });
-  const file = await yearPdf(statement, { name: user.name || statement.receipts[0]?.customerName || "", email: user.email });
+  const customer = { name: user.name || statement.receipts[0]?.customerName || "", email: user.email };
+  const file = await yearPdf(statement, customer, await loadBusiness(db));
   return new Response(Buffer.from(file), {
     headers: {
       "Content-Type": "application/pdf",

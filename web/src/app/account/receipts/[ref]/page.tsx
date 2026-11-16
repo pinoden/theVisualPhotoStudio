@@ -9,6 +9,7 @@ import { ReceiptView } from "@/components/ReceiptView";
 import { getDb } from "@/db/client";
 import { getReceipt } from "@/server/receipts";
 import { requireUser } from "@/server/session";
+import { loadBusiness } from "@/server/website";
 
 export const metadata: Metadata = { title: "Receipt", robots: { index: false } };
 
@@ -29,8 +30,10 @@ async function OneReceipt({ params }: Pick<PageProps<"/account/receipts/[ref]">,
   await connection();
   const { ref } = await params;
   const user = await requireUser(`/account/receipts/${encodeURIComponent(ref)}`);
-  const receipt = await getReceipt(await getDb(), user.email, ref);
+  const db = await getDb();
+  const receipt = await getReceipt(db, user.email, ref);
   if (!receipt) notFound();
+  const business = await loadBusiness(db);
 
   return (
     <AccountFrame user={user} active="/account/receipts">
@@ -43,7 +46,7 @@ async function OneReceipt({ params }: Pick<PageProps<"/account/receipts/[ref]">,
           </a>
         </span>
       </div>
-      <ReceiptView receipt={receipt} />
+      <ReceiptView receipt={receipt} business={business} />
     </AccountFrame>
   );
 }

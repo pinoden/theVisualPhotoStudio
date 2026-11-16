@@ -80,6 +80,10 @@ export interface Settings {
   managerCorrectsLoyalty: boolean;
   /** Whether managers can block time in a studio. */
   managerBlocksTime: boolean;
+  /** Whether managers can change the website's design and its header, menu and footer, as a draft. */
+  managerEditsDesign: boolean;
+  /** Whether managers can publish changes to the website and restore an earlier version. */
+  managerPublishesWebsite: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -119,6 +123,9 @@ export const DEFAULT_SETTINGS: Settings = {
   managerSeesCustomers: true,
   managerCorrectsLoyalty: false,
   managerBlocksTime: true,
+  // The website is the owners' until they give a manager part of it.
+  managerEditsDesign: false,
+  managerPublishesWebsite: false,
 };
 
 const int = (min: number, max: number) => (v: unknown) =>
@@ -168,6 +175,8 @@ const VALIDATORS: { [K in Exclude<keyof Settings, "multiStudioPercent">]: (v: un
   managerSeesCustomers: bool,
   managerCorrectsLoyalty: bool,
   managerBlocksTime: bool,
+  managerEditsDesign: bool,
+  managerPublishesWebsite: bool,
 };
 
 export type SettingKey = keyof Settings;

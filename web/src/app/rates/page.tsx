@@ -13,7 +13,7 @@ export default async function RatesPage() {
   const offer = multiStudioOffer(catalog);
 
   return (
-    <>
+    <div className="site-page">
       <div className="page-banner">
         <p className="section-eyebrow">Transparent Pricing</p>
         <h1>Studio Rates</h1>
@@ -116,6 +116,6 @@ export default async function RatesPage() {
           </div>
         </section>
       )}
-    </>
+    </div>
   );
 }

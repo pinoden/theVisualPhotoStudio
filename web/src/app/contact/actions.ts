@@ -4,10 +4,10 @@ import { headers } from "next/headers";
 import { getDb } from "@/db/client";
 import { CONTACT_LIMITS } from "@/lib/contact";
 import { formText } from "@/lib/parse";
-import { SITE } from "@/lib/site";
 import { sendContactMessage, type ContactField } from "@/server/contact";
 import { RateLimiter } from "@/server/rate-limit";
 import { flushEmailsSoon, ownerNotifyEmail } from "@/server/runtime";
+import { loadBusiness } from "@/server/website";
 
 export interface ContactState {
   status: "idle" | "sent" | "error";
@@ -53,9 +53,10 @@ export async function sendMessageAction(previous: ContactState, formData: FormDa
   if (result.code === "invalid") {
     return { status: "error", error: "Please check the marked fields.", fields: result.fields, values, attempt };
   }
+  const { phone } = await loadBusiness(await getDb());
   const error =
     result.code === "too_many"
-      ? `You have sent several messages in a short time. Please wait a few minutes, or call us at ${SITE.phoneDisplay}.`
-      : `Sorry, messages cannot be sent from this page right now. Please call us at ${SITE.phoneDisplay}.`;
+      ? `You have sent several messages in a short time. Please wait a few minutes, or call us at ${phone}.`
+      : `Sorry, messages cannot be sent from this page right now. Please call us at ${phone}.`;
   return { status: "error", error, fields: {}, values, attempt };
 }

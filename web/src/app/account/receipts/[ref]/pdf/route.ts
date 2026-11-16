@@ -3,6 +3,7 @@ import { getDb } from "@/db/client";
 import { receiptPdf } from "@/server/receipt-pdf";
 import { getReceipt } from "@/server/receipts";
 import { getCurrentUser } from "@/server/session";
+import { loadBusiness } from "@/server/website";
 
 /**
  * GET /account/receipts/<ref>/pdf: one receipt as a PDF file, for the signed-in
@@ -17,9 +18,10 @@ export async function GET(request: NextRequest, context: RouteContext<"/account/
     signIn.searchParams.set("next", "/account/receipts");
     return Response.redirect(signIn, 303);
   }
-  const receipt = await getReceipt(await getDb(), user.email, ref);
+  const db = await getDb();
+  const receipt = await getReceipt(db, user.email, ref);
   if (!receipt) return new Response("Not found", { status: 404 });
-  const file = await receiptPdf(receipt);
+  const file = await receiptPdf(receipt, await loadBusiness(db));
   return new Response(Buffer.from(file), {
     headers: {
       "Content-Type": "application/pdf",

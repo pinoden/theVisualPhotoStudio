@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { PDFDocument } from "@cantoo/pdf-lib";
 import { eq } from "drizzle-orm";
 import { addons, bookings, payments, priceRules, refunds } from "@/db/schema";
+import { DEFAULT_FRAME } from "@/lib/site/frame";
 import { createAdminBooking } from "./appointments";
 import type { AuthUser } from "./auth";
 import { cancelBooking, ownerRefund, requestRescheduleCode } from "./manage";
@@ -220,12 +221,14 @@ describe("payments by year", () => {
 });
 
 describe("receipts as PDF files", () => {
+  /** The studio's name and address at the top of a file: the published contact details. */
+  const STUDIO = DEFAULT_FRAME.business;
   const pagesOf = async (file: Uint8Array) => (await PDFDocument.load(file)).getPageCount();
 
   it("makes one receipt a one-page PDF", async () => {
     const booked = expectOk(await world.book({ date: FAR }));
     expectOk(await ownerRefund(world.db, booked.ref, { amountCents: 2000, reason: "Lights failed" }, world.manageDeps()));
-    const file = await receiptPdf((await getReceipt(world.db, JANE, booked.ref))!);
+    const file = await receiptPdf((await getReceipt(world.db, JANE, booked.ref))!, STUDIO);
     expect(Buffer.from(file.slice(0, 5)).toString("latin1")).toBe("%PDF-");
     expect(await pagesOf(file)).toBe(1);
     expect((await PDFDocument.load(file)).getTitle()).toBe(`Receipt ${booked.ref}`);
@@ -235,7 +238,7 @@ describe("receipts as PDF files", () => {
     expectOk(await world.book({ date: NEAR }));
     expectOk(await world.book({ date: FAR, studioIds: [world.ids.paris], durationMinutes: 60 }));
     const statement = yearStatement(await receiptsOf(), 2026);
-    const file = await yearPdf(statement, { name: "Jane Smith", email: JANE });
+    const file = await yearPdf(statement, { name: "Jane Smith", email: JANE }, STUDIO);
     expect(await pagesOf(file)).toBe(3);
   });
 
@@ -245,13 +248,15 @@ describe("receipts as PDF files", () => {
     const many = Array.from({ length: 60 }, (_, index) => ({ ...receipt, ref: `VS-AAAA${String(index).padStart(2, "0")}` }));
     const statement = yearStatement(many, 2026);
     expect(statement.transactions).toHaveLength(60);
-    expect(await pagesOf(await yearPdf({ ...statement, receipts: [] }, { name: "", email: JANE }))).toBeGreaterThan(1);
+    expect(await pagesOf(await yearPdf({ ...statement, receipts: [] }, { name: "", email: JANE }, STUDIO))).toBeGreaterThan(1);
   });
 
   it("draws a name in any alphabet without failing", async () => {
     expectOk(await world.book({ customer: { name: "Zoë Łukasiewicz-Ñandú 李 Ольга “Bo” O’Neil", email: JANE, phone: "407-555-0100" } }));
     const [receipt] = await receiptsOf();
-    await expect(receiptPdf(receipt)).resolves.toBeInstanceOf(Uint8Array);
+    await expect(receiptPdf(receipt, STUDIO)).resolves.toBeInstanceOf(Uint8Array);
+    // The studio's own name is the owners' to type, so it is made safe for the file as well.
+    await expect(receiptPdf(receipt, { ...STUDIO, name: "Студия 李 Visuals" })).resolves.toBeInstanceOf(Uint8Array);
     // Western European letters are kept, a letter with an unknown mark keeps its letter, and the rest is marked.
     expect(pdfSafe("Zoë Łukasiewicz-Ñandú 李 Ольга “Bo” O’Neil")).toBe("Zoë Lukasiewicz-Ñandú ? ????? “Bo” O’Neil");
     expect(pdfSafe("10:00 AM – 12:00 PM × 2\nnext\tline")).toBe("10:00 AM – 12:00 PM × 2 next line");

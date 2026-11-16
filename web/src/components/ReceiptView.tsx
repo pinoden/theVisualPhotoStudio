@@ -1,5 +1,5 @@
 import { durationLabel } from "@/lib/domain/time";
-import { SITE } from "@/lib/site";
+import type { Business } from "@/lib/site/frame";
 import { money } from "@/server/receipt-pdf";
 import { RECEIPT_STATUS_TEXT, type Receipt } from "@/server/receipts";
 import { formatDay, formatInstant, formatRange } from "@/server/tz";
@@ -9,17 +9,17 @@ import { formatDay, formatInstant, formatRange } from "@/server/tz";
  * booking, what was booked at the prices it was booked at, and every payment
  * and refund. The PDF file is drawn from the same `Receipt`.
  */
-export function ReceiptView({ receipt }: { receipt: Receipt }) {
+export function ReceiptView({ receipt, business }: { receipt: Receipt; business: Business }) {
   const when = formatRange(new Date(receipt.visitStart), new Date(receipt.visitEnd));
   return (
     <article className="receipt">
       <header className="receipt-head">
         <div>
-          <strong className="receipt-studio">{SITE.name}</strong>
+          <strong className="receipt-studio">{business.name}</strong>
           <div>
-            {SITE.addressLine1}, {SITE.addressLine2}
+            {business.addressLine1}, {business.addressLine2}
           </div>
-          <div>{SITE.phoneDisplay}</div>
+          <div>{business.phone}</div>
         </div>
         <div className="receipt-title">Receipt</div>
       </header>

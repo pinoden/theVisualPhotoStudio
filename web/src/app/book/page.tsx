@@ -13,7 +13,7 @@ export default async function BookPage() {
   const catalog = await getCatalog();
   return (
     <>
-      <div className="page-banner">
+      <div className="page-banner site-page">
         <p className="section-eyebrow">Online Booking</p>
         <h1>Reserve Your Studio</h1>
         <p>Start from the studio you want or from the time you want. Instant confirmation.</p>

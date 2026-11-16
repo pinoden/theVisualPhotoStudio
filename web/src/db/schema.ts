@@ -534,3 +534,59 @@ export const emailOutbox = pgTable("email_outbox", {
   error: text("error"),
   createdAt: createdAt(),
 });
+
+// ── The website's content ────────────────────────────────────────────────────
+
+/**
+ * What the owners edit on the public website: the design, the frame around
+ * every page (header, menu, footer, announcement, the studio's contact
+ * details) and each page. A document has the copy the public sees
+ * (`published`) and, while someone is working on it, a copy nobody else sees
+ * (`draft`). Publishing makes the draft public and keeps a copy in
+ * `site_versions`. See src/server/website.ts.
+ */
+export const siteDocuments = pgTable(
+  "site_documents",
+  {
+    id: id(),
+    /** `design` and `frame` exist once each; a `page` once per address. */
+    kind: text("kind", { enum: ["design", "frame", "page"] }).notNull(),
+    /** For a page: its address without the leading slash ("" is the home page). "" for the other two. */
+    slug: text("slug").notNull().default(""),
+    /** For a page: its name in the admin. */
+    title: text("title").notNull().default(""),
+    /** Changes that are not public yet. Null when there are none. */
+    draft: jsonb("draft"),
+    /** Counts every change of the draft, so two people editing at once are noticed. */
+    draftRevision: integer("draft_revision").notNull().default(0),
+    draftBy: text("draft_by"),
+    draftAt: ts("draft_at"),
+    /** What the public sees. Null for something that was never published, or was taken offline. */
+    published: jsonb("published"),
+    publishedBy: text("published_by"),
+    publishedAt: ts("published_at"),
+    /** A deleted page waits in the trash. */
+    deletedAt: ts("deleted_at"),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("site_documents_kind_slug").on(t.kind, t.slug).where(sql`${t.deletedAt} is null`)],
+);
+
+/** A full copy of a document as it was published, kept so that an earlier version can be brought back. */
+export const siteVersions = pgTable(
+  "site_versions",
+  {
+    id: id(),
+    documentId: uuid("document_id")
+      .notNull()
+      .references(() => siteDocuments.id, { onDelete: "cascade" }),
+    /** 1 for the first time a document was published, then 2, 3 and so on. */
+    number: integer("number").notNull(),
+    content: jsonb("content").notNull(),
+    publishedBy: text("published_by").notNull(),
+    /** Set when the publish was not an ordinary one: "Restored from version 3". */
+    note: text("note").notNull().default(""),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("site_versions_document_number").on(t.documentId, t.number)],
+);
