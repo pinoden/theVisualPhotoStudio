@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { getDb } from "@/db/client";
 import { isAddonKind } from "@/lib/addon-kinds";
 import { dollarsToCents, formText, hhmmToMinutes, intInRange } from "@/lib/parse";
-import { STAFF_ABILITY_KEYS } from "@/lib/staff-abilities";
+import { ADMIN_LEVELS, ATTENDANT_SWITCH_KEYS, isAdminLevel, MANAGER_SWITCH_KEYS } from "@/lib/abilities";
 import { formatCents } from "@/lib/domain/pricing";
 import {
   addStaff,
@@ -20,18 +20,23 @@ import {
   setAddonActive,
   setShift,
   setSpecialDate,
+  setStaffLevel,
   voidCode,
 } from "@/server/admin";
 import { CATALOG_TAG } from "@/server/cached";
 import { FREE_HOUR_MINUTES } from "@/server/loyalty";
 import { ownerCancelBooking, ownerRefund } from "@/server/manage";
 import { flushEmailsSoon, manageDeps } from "@/server/runtime";
-import { requireOwner } from "@/server/session";
-import { ACCESS_INSTRUCTIONS_MAX, saveAccessInstructions, saveSetting } from "@/server/settings";
+import { notFound } from "next/navigation";
+import { can, type Ability } from "@/lib/abilities";
+import { requireManager, requireOwner } from "@/server/session";
+import { ACCESS_INSTRUCTIONS_MAX, loadSettings, saveAccessInstructions, saveSetting } from "@/server/settings";
 
 /**
- * Everything the owner can change. Every action starts with `requireOwner`:
- * server actions can be called directly, so the page's own check is not enough.
+ * Everything the owners can change. Every action starts with `requireOwner`:
+ * server actions can be called directly, so the page's own check is not
+ * enough. Four of them (blocking time, cancelling and refunding) start with
+ * `requireAbility` instead, because the owners can give those to managers.
  * Each finishes by redirecting back with a short message in the address.
  */
 function done(path: string, notice: string): never {
@@ -44,6 +49,15 @@ function failed(path: string, error: string): never {
 
 const text = (formData: FormData, name: string) => formText(formData.get(name));
 
+/**
+ * For the few things here that a manager can be given: an owner, or a manager
+ * for whom the owners have switched `ability` on. Anyone else gets "not found".
+ */
+async function requireAbility(ability: Ability, next: string): Promise<void> {
+  const viewer = await requireManager(next);
+  if (!can(viewer, ability, await loadSettings(await getDb()))) notFound();
+}
+
 /** Where to return after a bookings action. Only the bookings list itself is accepted. */
 function bookingsBack(formData: FormData): string {
   const back = text(formData, "back");
@@ -54,20 +68,43 @@ function bookingsBack(formData: FormData): string {
 
 export async function addStaffAction(formData: FormData): Promise<void> {
   await requireOwner("/admin/staff");
-  const result = await addStaff(await getDb(), text(formData, "email"), text(formData, "name"));
+  const level = text(formData, "level") || "staff";
+  if (!isAdminLevel(level)) failed("/admin/staff", "Choose Studio Manager or Studio Attendant.");
+  const result = await addStaff(await getDb(), text(formData, "email"), text(formData, "name"), level);
   if (!result.ok) failed("/admin/staff", result.message);
-  done("/admin/staff", "Staff member added. They sign in with their email address.");
+  done("/admin/staff", `Staff member added as ${ADMIN_LEVELS[level]}. They sign in with their email address.`);
 }
 
-/** The owners' switches for the second level of the admin. A box that is not ticked switches the ability off. */
+/** Make an attendant a manager, or a manager an attendant. It applies at their next request. */
+export async function setStaffLevelAction(formData: FormData): Promise<void> {
+  await requireOwner("/admin/staff");
+  const level = text(formData, "level");
+  if (!isAdminLevel(level) || !(await setStaffLevel(await getDb(), text(formData, "userId"), level))) {
+    failed("/admin/staff", "That could not be changed.");
+  }
+  done("/admin/staff", `Saved: ${ADMIN_LEVELS[level]} from now on.`);
+}
+
+/** The owners' switches for attendants. A box that is not ticked switches the ability off. */
 export async function saveStaffAbilitiesAction(formData: FormData): Promise<void> {
   await requireOwner("/admin/staff");
   const db = await getDb();
-  for (const ability of STAFF_ABILITY_KEYS) {
+  for (const ability of ATTENDANT_SWITCH_KEYS) {
     if (!(await saveSetting(db, ability, formData.get(ability) !== null))) failed("/admin/staff", "That could not be saved.");
   }
   updateTag(CATALOG_TAG); // the settings travel with the catalog
-  done("/admin/staff", "Saved. It applies to every member of staff from now on.");
+  done("/admin/staff", "Saved. It applies to every Studio Attendant from now on.");
+}
+
+/** The owners' switches for managers. A box that is not ticked switches the ability off. */
+export async function saveManagerAbilitiesAction(formData: FormData): Promise<void> {
+  await requireOwner("/admin/staff");
+  const db = await getDb();
+  for (const ability of MANAGER_SWITCH_KEYS) {
+    if (!(await saveSetting(db, ability, formData.get(ability) !== null))) failed("/admin/staff", "That could not be saved.");
+  }
+  updateTag(CATALOG_TAG);
+  done("/admin/staff", "Saved. It applies to every Studio Manager from now on.");
 }
 
 export async function removeStaffAction(formData: FormData): Promise<void> {
@@ -175,7 +212,7 @@ export async function saveHoursAction(formData: FormData): Promise<void> {
 }
 
 export async function createBlockAction(formData: FormData): Promise<void> {
-  await requireOwner("/admin/hours");
+  await requireAbility("blockTime", "/admin/hours");
   const startMinute = hhmmToMinutes(text(formData, "start"));
   const endMinute = hhmmToMinutes(text(formData, "end"));
   if (startMinute === null || endMinute === null) failed("/admin/hours", "Enter a start and an end time.");
@@ -191,7 +228,7 @@ export async function createBlockAction(formData: FormData): Promise<void> {
 }
 
 export async function removeBlockAction(formData: FormData): Promise<void> {
-  await requireOwner("/admin/hours");
+  await requireAbility("blockTime", "/admin/hours");
   await removeBlock(await getDb(), text(formData, "blockId"));
   done("/admin/hours", "Block removed.");
 }
@@ -207,7 +244,7 @@ const refundNote = (refund: "sent" | "pending" | "none", cents: number) =>
 
 export async function ownerCancelAction(formData: FormData): Promise<void> {
   const back = bookingsBack(formData);
-  await requireOwner("/admin/bookings");
+  await requireAbility("refund", "/admin/bookings");
   const refundCents = dollarsToCents(text(formData, "refund") || "0");
   if (refundCents === null) failed(back, "Enter the refund as an amount, for example 88 or 88.50.");
   const result = await ownerCancelBooking(await getDb(), text(formData, "ref"), { refundCents }, await manageDeps());
@@ -218,7 +255,7 @@ export async function ownerCancelAction(formData: FormData): Promise<void> {
 
 export async function ownerRefundAction(formData: FormData): Promise<void> {
   const back = bookingsBack(formData);
-  await requireOwner("/admin/bookings");
+  await requireAbility("refund", "/admin/bookings");
   const amountCents = dollarsToCents(text(formData, "amount"));
   if (amountCents === null) failed(back, "Enter the refund as an amount, for example 25 or 25.50.");
   const result = await ownerRefund(

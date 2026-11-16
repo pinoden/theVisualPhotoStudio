@@ -12,7 +12,7 @@ import {
   type SettableLabel,
 } from "@/lib/domain/labels";
 import { durationLabel, isIsoDate, type IsoDate } from "@/lib/domain/time";
-import { can, type StaffAbility } from "@/lib/staff-abilities";
+import { can, type Ability } from "@/lib/abilities";
 import type { AuthUser } from "./auth";
 import { loadDayAvailability } from "./availability";
 import {
@@ -26,7 +26,7 @@ import {
 } from "./bookings";
 import { loadCatalog } from "./catalog";
 import { bookingMovedEmail, queueEmail } from "./email";
-import { listEvents, recordEvent, type BookingEvent } from "./history";
+import { listEvents, recordEvent, withoutAmounts, type BookingEvent } from "./history";
 import { openPayLinkOf, type PayLinkView } from "./pay-links";
 import { PET_CREDIT_BLOCK_TEXT, petCreditStanding } from "./pet-fee";
 import { loadSettings } from "./settings";
@@ -37,7 +37,7 @@ import { formatInstant, localDateOf, localToUtc } from "./tz";
 /**
  * One appointment as the admin sees it, for both of its levels: the owners,
  * and the staff with whatever the owners have switched on for them
- * (src/lib/staff-abilities.ts). Every function here checks the viewer itself:
+ * (src/lib/abilities.ts). Every function here checks the viewer itself:
  * the role, the ability, and for staff whether the day is one they may see.
  */
 
@@ -59,8 +59,10 @@ export interface Appointment {
   /** The booking with its amounts. Null unless the viewer may see prices. */
   money: BookingView | null;
   /**
-   * What the booking has received and still owes, with each payment. Null
-   * unless the viewer may see prices or may record payments.
+   * What the booking has received and still owes, with each payment. For a
+   * viewer who may see prices; and, while the booking still owes something,
+   * for one who may record payments, because they have to know what to take.
+   * Null otherwise.
    */
   payments: BookingMoney | null;
   /** The payment link that is open for the booking, if one was emailed and not yet paid. Null when `payments` is. */
@@ -75,7 +77,7 @@ export interface Appointment {
   /** Each label that can be set by hand, and whether it can be set right now. */
   labelChoices: { key: SettableLabel; allowed: boolean; why: string }[];
   /** What this viewer may do with the appointment. */
-  may: Record<"setLabels" | "move" | "recordPayment" | "changePayments", boolean>;
+  may: Record<"setLabels" | "move" | "recordPayment" | "changePayments" | "openCustomer" | "refund", boolean>;
 }
 
 /** The viewer may see this booking: owners always, staff on the days they may see. */
@@ -91,11 +93,11 @@ export async function getAppointment(db: DbLike, viewer: AuthUser, ref: string, 
   if (!(await maySee(db, viewer, booking.startAt))) return null;
 
   const settings = await loadSettings(db);
-  const may = (ability: StaffAbility) => can(viewer, ability, settings);
+  const may = (ability: Ability) => can(viewer, ability, settings);
   const [view] = await toBookingViews(db, [booking]);
   const active = ["confirmed", "completed", "no_show"].includes(booking.status);
   const money = await moneyOf(db, booking);
-  const seesPayments = may("staffSeesPrices") || may("staffRecordsPayments");
+  const seesPayments = may("seePrices") || (may("recordPayments") && money.dueCents > 0);
   const pet = viewer.role === "owner" ? await petCreditStanding(db, booking) : null;
 
   return {
@@ -107,11 +109,11 @@ export async function getAppointment(db: DbLike, viewer: AuthUser, ref: string, 
     studios: view.studios.map((studio) => studio.name),
     customerName: booking.customerName,
     photography: view.photography,
-    customerPhone: may("staffSeesContact") ? booking.customerPhone : null,
-    customerEmail: may("staffSeesContact") ? booking.customerEmail : null,
+    customerPhone: may("seeContact") ? booking.customerPhone : null,
+    customerEmail: may("seeContact") ? booking.customerEmail : null,
     notes: booking.notes,
     addons: view.addons.map((addon) => ({ name: addon.name, quantity: addon.quantity })),
-    money: may("staffSeesPrices") ? view : null,
+    money: may("seePrices") ? view : null,
     payments: seesPayments ? money : null,
     payLink: seesPayments ? await openPayLinkOf(db, booking.id) : null,
     petFee:
@@ -123,7 +125,8 @@ export async function getAppointment(db: DbLike, viewer: AuthUser, ref: string, 
             why: pet.block ? PET_CREDIT_BLOCK_TEXT[pet.block] : "",
           }
         : null,
-    history: await listEvents(db, booking.id),
+    // The notes of a refund, a payment or a credit name their amounts: those are for viewers who may see prices.
+    history: (await listEvents(db, booking.id)).map((event) => (may("seePrices") ? event : { ...event, note: withoutAmounts(event.note) })),
     labelChoices: SETTABLE_LABELS.map((key) => {
       const change = labelChange(booking, key, now);
       if (change.ok) return { key, allowed: true, why: "" };
@@ -137,10 +140,12 @@ export async function getAppointment(db: DbLike, viewer: AuthUser, ref: string, 
       return { key, allowed: false, why };
     }),
     may: {
-      setLabels: active && may("staffSetsLabels"),
-      move: booking.status === "confirmed" && now.getTime() < booking.endAt.getTime() && may("staffMovesBookings"),
-      recordPayment: active && money.dueCents > 0 && may("staffRecordsPayments"),
+      setLabels: active && may("setLabels"),
+      move: booking.status === "confirmed" && now.getTime() < booking.endAt.getTime() && may("moveBookings"),
+      recordPayment: active && money.dueCents > 0 && may("recordPayments"),
       changePayments: viewer.role === "owner",
+      openCustomer: may("seeCustomers"),
+      refund: may("refund"),
     },
   };
 }
@@ -156,7 +161,7 @@ export type SetLabelResult =
 export async function setLabel(db: Db, viewer: AuthUser, ref: string, target: SettableLabel, now: Date): Promise<SetLabelResult> {
   if (!isBookingRef(ref)) return { ok: false, reason: "not_found" };
   const settings = await loadSettings(db);
-  if (!can(viewer, "staffSetsLabels", settings)) return { ok: false, reason: "forbidden" };
+  if (!can(viewer, "setLabels", settings)) return { ok: false, reason: "forbidden" };
 
   return db.transaction(async (tx): Promise<SetLabelResult> => {
     // Locked, so two people changing the label at once write two honest history lines.
@@ -231,7 +236,7 @@ export async function moveOptions(
   now: Date,
 ): Promise<{ ok: true; starts: number[] } | { ok: false; message: string }> {
   const settings = await loadSettings(db);
-  if (!isBookingRef(ref) || !can(viewer, "staffMovesBookings", settings)) return { ok: false, message: "Booking not found." };
+  if (!isBookingRef(ref) || !can(viewer, "moveBookings", settings)) return { ok: false, message: "Booking not found." };
   const [booking] = await db.select().from(bookings).where(eq(bookings.ref, ref)).limit(1);
   if (!booking || !(await maySee(db, viewer, booking.startAt))) return { ok: false, message: "Booking not found." };
   return freeStartsFor(
@@ -272,7 +277,7 @@ export async function moveBooking(
   const refuse = (reason: Extract<MoveResult, { ok: false }>["reason"], message: string): MoveResult => ({ ok: false, reason, message });
   const settings = await loadSettings(db);
   if (!isBookingRef(ref)) return refuse("not_found", "Booking not found.");
-  if (!can(viewer, "staffMovesBookings", settings)) return refuse("forbidden", "You cannot move bookings.");
+  if (!can(viewer, "moveBookings", settings)) return refuse("forbidden", "You cannot move bookings.");
 
   const [found] = await db.select().from(bookings).where(eq(bookings.ref, ref)).limit(1);
   if (!found) return viewer.role === "owner" ? refuse("not_found", "Booking not found.") : refuse("forbidden", "You cannot move that booking.");
@@ -389,7 +394,7 @@ export async function createAdminBooking(
   deps: Pick<BookingDeps, "now" | "baseUrl">,
 ): Promise<CreateBookingResult | { ok: false; status: 403; code: "forbidden"; message: string }> {
   const settings = await loadSettings(db);
-  if (!can(viewer, "staffCreatesBookings", settings)) {
+  if (!can(viewer, "createBookings", settings)) {
     return { ok: false, status: 403, code: "forbidden", message: "You cannot make bookings for clients." };
   }
   return createBooking(db, { ...input, acceptTerms: true }, { ...deps, payments: null, madeBy: viewer.email });

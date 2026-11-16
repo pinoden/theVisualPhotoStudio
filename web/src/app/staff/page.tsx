@@ -6,7 +6,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { getDb } from "@/db/client";
 import { LABEL_TEXT, SETTABLE_LABELS } from "@/lib/domain/labels";
 import { isIsoDate, longDateLabel } from "@/lib/domain/time";
-import { can } from "@/lib/staff-abilities";
+import { can } from "@/lib/abilities";
 import { requireStaff } from "@/server/session";
 import { loadSettings } from "@/server/settings";
 import { getDaySheet, listShiftDays } from "@/server/staff";
@@ -42,8 +42,8 @@ async function DaySheet({ searchParams }: Pick<PageProps<"/staff">, "searchParam
   const today = localDateOf(now);
   const settings = await loadSettings(db);
   // The owners open any day. Staff open the days assigned to them, or any day when the owners allow it.
-  const anyDay = viewer.role === "owner" || settings.staffSeesAllDays;
-  const mayLabel = can(viewer, "staffSetsLabels", settings);
+  const anyDay = can(viewer, "seeAllDays", settings);
+  const mayLabel = can(viewer, "setLabels", settings);
 
   const shiftDays = anyDay ? [] : await listShiftDays(db, viewer.id, today);
   const requested = typeof query.date === "string" && isIsoDate(query.date) ? query.date : null;

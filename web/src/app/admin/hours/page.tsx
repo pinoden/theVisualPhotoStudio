@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
 import { connection } from "next/server";
 import { Suspense } from "react";
+import { notFound } from "next/navigation";
 import { getDb } from "@/db/client";
+import { can } from "@/lib/abilities";
 import { minutesToHHMM, weekdayName } from "@/lib/domain/time";
 import { listBlocks } from "@/server/admin";
 import { loadCatalog } from "@/server/catalog";
-import { requireOwner } from "@/server/session";
+import { requireManager } from "@/server/session";
 import { formatRange, localDateOf } from "@/server/tz";
 import { createBlockAction, removeBlockAction, saveHoursAction } from "../actions";
 import { AdminFrame, AdminLoading } from "../frame";
@@ -22,14 +24,17 @@ export default function HoursPage(props: PageProps<"/admin/hours">) {
 
 async function Hours({ searchParams }: Pick<PageProps<"/admin/hours">, "searchParams">) {
   await connection();
-  await requireOwner("/admin/hours");
+  // Blocking time can be a manager's job. Opening hours decide what customers can book, and stay with the owners.
+  const viewer = await requireManager("/admin/hours");
   const db = await getDb();
   const now = new Date();
   const [catalog, blocks] = await Promise.all([loadCatalog(db), listBlocks(db, now)]);
+  if (!can(viewer, "blockTime", catalog.settings)) notFound();
   const today = localDateOf(now);
+  const owner = viewer.role === "owner";
 
   return (
-    <AdminFrame active="/admin/hours" title="Hours & blocks" query={await searchParams}>
+    <AdminFrame active="/admin/hours" title={owner ? "Hours & blocks" : "Blocked time"} query={await searchParams} viewer={viewer} settings={catalog.settings}>
       <div className="admin-card">
         <h3>Block time</h3>
         <p style={{ fontSize: ".875rem" }}>
@@ -114,7 +119,7 @@ async function Hours({ searchParams }: Pick<PageProps<"/admin/hours">, "searchPa
         )}
       </div>
 
-      {catalog.studios.map((studio) => (
+      {(owner ? catalog.studios : []).map((studio) => (
         <div className="admin-card" key={studio.id}>
           <h3>{studio.name}: opening hours</h3>
           <form action={saveHoursAction}>

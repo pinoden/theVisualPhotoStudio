@@ -48,7 +48,10 @@ export async function requireRole(roles: Role[], next: string): Promise<AuthUser
 }
 
 export const requireOwner = (next: string) => requireRole(["owner"], next);
-export const requireStaff = (next: string) => requireRole(["staff", "owner"], next);
+/** Anyone who works in the admin: an attendant, a manager or an owner. The service then says what this one may see. */
+export const requireStaff = (next: string) => requireRole(["staff", "manager", "owner"], next);
+/** A manager or an owner. For the pages a manager can be given: the page asks `can` which, and answers "not found" otherwise. */
+export const requireManager = (next: string) => requireRole(["manager", "owner"], next);
 
 export async function openSession(token: string, expiresAt: Date): Promise<void> {
   (await cookies()).set(SESSION_COOKIE, token, {

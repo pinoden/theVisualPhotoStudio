@@ -19,7 +19,7 @@ import {
 } from "@/lib/domain/calendar";
 import { LABEL_TEXT } from "@/lib/domain/labels";
 import { isIsoDate, isoWeekday, longDateLabel, minutesToLabel, type IsoDate } from "@/lib/domain/time";
-import { can } from "@/lib/staff-abilities";
+import { can } from "@/lib/abilities";
 import { loadCalendar, type CalendarAppointment, type CalendarBlock } from "@/server/calendar";
 import { loadCatalog, type CatalogStudio } from "@/server/catalog";
 import { requireStaff } from "@/server/session";
@@ -83,7 +83,7 @@ async function Calendar({ searchParams }: Pick<PageProps<"/admin/calendar">, "se
     return `/admin/calendar?view=${to.view ?? view}&date=${to.date ?? date}${studio ? `&studio=${studio}` : ""}`;
   };
   const title = view === "month" ? monthLabel(date) : view === "week" ? weekLabel(date) : longDateLabel(date);
-  const mayBook = can(viewer, "staffCreatesBookings", catalog.settings);
+  const mayBook = can(viewer, "createBookings", catalog.settings);
 
   return (
     <AdminFrame active="/admin/calendar" title="Calendar" query={query} viewer={viewer} settings={catalog.settings}>

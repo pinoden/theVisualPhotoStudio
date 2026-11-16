@@ -15,6 +15,7 @@ import { getAppointment, moveOptions } from "@/server/appointments";
 import { BY_CUSTOMER, BY_SYSTEM } from "@/server/history";
 import { resolvePayments } from "@/server/payments";
 import { requireStaff } from "@/server/session";
+import { loadSettings } from "@/server/settings";
 import { formatInstant, formatRange, localDateOf } from "@/server/tz";
 import { AdminFrame, AdminLoading } from "../../frame";
 import {
@@ -42,9 +43,9 @@ export default function AppointmentPage(props: PageProps<"/admin/appointments/[r
 const WHO: Record<string, string> = { [BY_CUSTOMER]: "The customer", [BY_SYSTEM]: "The site" };
 
 /**
- * One appointment, for both levels of the admin. `getAppointment` decides
- * what this viewer sees: a member of staff gets "not found" for a day that is
- * not theirs, and no contact details or prices unless the owners allow them.
+ * One appointment, for every level of the admin. `getAppointment` decides
+ * what this viewer sees: an attendant gets "not found" for a day that is not
+ * theirs, and nobody below an owner sees prices unless the owners allow it.
  */
 async function AppointmentDetails({
   params,
@@ -73,6 +74,7 @@ async function AppointmentDetails({
       title={appointment.customerName}
       query={query}
       viewer={viewer}
+      settings={await loadSettings(db)}
     >
       <div className="admin-card">
         <h3>
@@ -96,7 +98,7 @@ async function AppointmentDetails({
           )}
           <dt>Client</dt>
           <dd>
-            {viewer.role === "owner" && appointment.customerEmail ? (
+            {appointment.may.openCustomer && appointment.customerEmail ? (
               <Link href={`/admin/customers/${encodeURIComponent(appointment.customerEmail)}`}>{appointment.customerName}</Link>
             ) : (
               appointment.customerName
@@ -137,7 +139,7 @@ async function AppointmentDetails({
           <Link href={`/admin/calendar?view=day&date=${day}`}>This day in the calendar</Link>
           {" · "}
           <Link href={`/staff?date=${day}`}>Day sheet</Link>
-          {viewer.role === "owner" && (
+          {appointment.may.refund && (
             <>
               {" · "}
               <Link href="/admin/bookings">Cancel or refund in Bookings</Link>

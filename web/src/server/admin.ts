@@ -16,6 +16,7 @@ import {
   users,
 } from "@/db/schema";
 import { PG_EXCLUSION_VIOLATION, pgErrorCode, queryRows, type Db, type DbLike } from "@/db/client";
+import { isAdminLevel, type AdminLevel } from "@/lib/abilities";
 import { isAddonKind, type AddonKind } from "@/lib/addon-kinds";
 import type { PromoKind } from "@/lib/domain/pricing";
 import { isIsoDate, type DayType, type IsoDate } from "@/lib/domain/time";
@@ -36,12 +37,17 @@ export interface StaffMember {
   id: string;
   email: string;
   name: string;
-  /** Assigned dates from today on. */
+  /** Studio Manager or Studio Attendant. */
+  level: AdminLevel;
+  /** Assigned dates from today on. Only an attendant's matter: a manager sees every day. */
   days: IsoDate[];
 }
 
+/** Everyone who works in the admin below the owners: managers first, then attendants, by email. */
 export async function listStaff(db: DbLike, from: IsoDate): Promise<StaffMember[]> {
-  const people = await db.select().from(users).where(eq(users.role, "staff")).orderBy(asc(users.email));
+  const people = (await db.select().from(users).where(inArray(users.role, ["staff", "manager"])).orderBy(asc(users.email))).sort(
+    (a, b) => Number(b.role === "manager") - Number(a.role === "manager"),
+  );
   if (people.length === 0) return [];
   const shifts = await db
     .select()
@@ -60,34 +66,54 @@ export async function listStaff(db: DbLike, from: IsoDate): Promise<StaffMember[
     id: p.id,
     email: p.email,
     name: p.name,
+    level: p.role === "manager" ? "manager" : "staff",
     days: shifts.filter((s) => s.userId === p.id).map((s) => s.day),
   }));
 }
 
 export type AddStaffResult = { ok: true; id: string } | { ok: false; message: string };
 
-/** Give an email address staff access. The person signs in with a code like anyone else. */
-export async function addStaff(db: DbLike, rawEmail: unknown, rawName: unknown): Promise<AddStaffResult> {
+/**
+ * Give an email address access to the admin, as a Studio Attendant or a
+ * Studio Manager. The person signs in with a code like anyone else.
+ */
+export async function addStaff(db: DbLike, rawEmail: unknown, rawName: unknown, level: AdminLevel = "staff"): Promise<AddStaffResult> {
   const email = normalizeEmail(rawEmail);
   if (!email) return { ok: false, message: "Enter a valid email address." };
+  if (!isAdminLevel(level)) return { ok: false, message: "Choose Studio Manager or Studio Attendant." };
   const name = typeof rawName === "string" ? rawName.trim().slice(0, 120) : "";
   const [existing] = await db.select().from(users).where(eq(users.email, email)).limit(1);
   if (existing?.role === "owner") return { ok: false, message: "That address belongs to an owner." };
   const [row] = await db
     .insert(users)
-    .values({ email, name, role: "staff" })
-    .onConflictDoUpdate({ target: users.email, set: name ? { role: "staff", name } : { role: "staff" } })
+    .values({ email, name, role: level })
+    .onConflictDoUpdate({ target: users.email, set: name ? { role: level, name } : { role: level } })
     .returning({ id: users.id });
   return { ok: true, id: row.id };
 }
 
-/** Take staff access away at once: role, shifts and open sessions. */
+/**
+ * Make an attendant a manager, or a manager an attendant. It applies at their
+ * next request: nobody has to sign in again. The days assigned to them stay
+ * on record, and matter again if a manager becomes an attendant.
+ */
+export async function setStaffLevel(db: DbLike, userId: string, level: unknown): Promise<boolean> {
+  if (!isAdminLevel(level) || !UUID.test(userId)) return false;
+  const changed = await db
+    .update(users)
+    .set({ role: level })
+    .where(and(eq(users.id, userId), inArray(users.role, ["staff", "manager"])))
+    .returning({ id: users.id });
+  return changed.length === 1;
+}
+
+/** Take admin access away at once, from an attendant or a manager: role, shifts and open sessions. */
 export async function removeStaff(db: Db, userId: string): Promise<void> {
   await db.transaction(async (tx) => {
     const changed = await tx
       .update(users)
       .set({ role: "customer" })
-      .where(and(eq(users.id, userId), eq(users.role, "staff")))
+      .where(and(eq(users.id, userId), inArray(users.role, ["staff", "manager"])))
       .returning({ id: users.id });
     if (changed.length === 0) return;
     await tx.delete(staffShifts).where(eq(staffShifts.userId, userId));
@@ -95,7 +121,7 @@ export async function removeStaff(db: Db, userId: string): Promise<void> {
   });
 }
 
-/** Assign or unassign one date for a staff member. */
+/** Assign or unassign one date for an attendant. A manager sees every day, so has none assigned. */
 export async function setShift(db: DbLike, userId: string, day: string, assigned: boolean): Promise<boolean> {
   if (!isIsoDate(day)) return false;
   const [person] = await db.select({ role: users.role }).from(users).where(eq(users.id, userId)).limit(1);

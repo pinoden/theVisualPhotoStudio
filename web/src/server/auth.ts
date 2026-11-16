@@ -9,7 +9,7 @@ import { loginCodeEmail, queueEmail } from "./email";
  * typing a one-time code sent to it. The first sign-in creates the account.
  * Only hashes of codes and session tokens are stored.
  */
-export type Role = "customer" | "staff" | "owner";
+export type Role = "customer" | "staff" | "manager" | "owner";
 
 export interface AuthUser {
   id: string;

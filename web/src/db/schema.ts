@@ -26,7 +26,8 @@ const ts = (name: string) => timestamp(name, { withTimezone: true, mode: "date" 
 const id = () => uuid("id").primaryKey().default(sql`gen_random_uuid()`);
 const createdAt = () => ts("created_at").notNull().defaultNow();
 
-export const userRole = pgEnum("user_role", ["customer", "staff", "owner"]);
+/** `staff` is a Studio Attendant and `manager` a Studio Manager: see src/lib/abilities.ts. Owners are not stored: they are the addresses in OWNER_EMAILS. */
+export const userRole = pgEnum("user_role", ["customer", "staff", "owner", "manager"]);
 export const dayType = pgEnum("day_type", ["weekday", "weekend"]);
 export const bookingStatus = pgEnum("booking_status", [
   "pending_payment", // slot held, card not charged yet

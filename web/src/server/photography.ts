@@ -2,7 +2,7 @@ import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { photoPackages, photographerHolds, photographerHours, photographers, studios } from "@/db/schema";
 import { PG_EXCLUSION_VIOLATION, pgErrorCode, queryRows, type Db, type DbLike } from "@/db/client";
 import { isIsoDate } from "@/lib/domain/time";
-import { can } from "@/lib/staff-abilities";
+import { can } from "@/lib/abilities";
 import type { AuthUser } from "./auth";
 import { loadSettings } from "./settings";
 import { localToUtc } from "./tz";
@@ -63,7 +63,7 @@ export async function loadPhotographer(db: DbLike): Promise<PhotographerView | n
 }
 
 async function maySetTimes(db: DbLike, viewer: AuthUser): Promise<boolean> {
-  return can(viewer, "staffSetsPhotographerTimes", await loadSettings(db));
+  return can(viewer, "setPhotographerTimes", await loadSettings(db));
 }
 
 /** Set the hours the photographer works on one weekday. `null` means they do not work that day. */

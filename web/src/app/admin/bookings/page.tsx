@@ -5,11 +5,14 @@ import { Suspense } from "react";
 import { statusLabel } from "@/components/BookingSummary";
 import { StatusBadge } from "@/components/StatusBadge";
 import { getDb } from "@/db/client";
+import { can } from "@/lib/abilities";
 import { formatCents } from "@/lib/domain/pricing";
 import { addDays, isIsoDate } from "@/lib/domain/time";
 import { centsToInput, MONEY_FIELD } from "@/lib/parse";
+import { notFound } from "next/navigation";
 import { listBookings } from "@/server/admin";
-import { requireOwner } from "@/server/session";
+import { requireManager } from "@/server/session";
+import { loadSettings } from "@/server/settings";
 import { formatRange, localDateOf } from "@/server/tz";
 import { ownerCancelAction, ownerRefundAction } from "../actions";
 import { AdminFrame, AdminLoading } from "../frame";
@@ -26,17 +29,21 @@ export default function BookingsPage(props: PageProps<"/admin/bookings">) {
 
 async function Bookings({ searchParams }: Pick<PageProps<"/admin/bookings">, "searchParams">) {
   await connection();
-  await requireOwner("/admin/bookings");
+  // The list is where a booking is cancelled and a card refunded: for the owners, and for a manager the owners let refund.
+  const viewer = await requireManager("/admin/bookings");
+  const db = await getDb();
+  const settings = await loadSettings(db);
+  if (!can(viewer, "refund", settings)) notFound();
   const query = await searchParams;
   const today = localDateOf(new Date());
   const from = typeof query.from === "string" && isIsoDate(query.from) ? query.from : today;
   const to = typeof query.to === "string" && isIsoDate(query.to) && query.to >= from ? query.to : addDays(from, 14);
   const includeCancelled = query.cancelled === "1";
-  const bookings = await listBookings(await getDb(), { from, to }, { includeCancelled });
+  const bookings = await listBookings(db, { from, to }, { includeCancelled });
   const back = `/admin/bookings?from=${from}&to=${to}${includeCancelled ? "&cancelled=1" : ""}`;
 
   return (
-    <AdminFrame active="/admin/bookings" title="Bookings" query={query}>
+    <AdminFrame active="/admin/bookings" title="Bookings" query={query} viewer={viewer} settings={settings}>
       <form method="get" className="admin-form-row">
         <div className="form-group">
           <label className="form-label" htmlFor="from">

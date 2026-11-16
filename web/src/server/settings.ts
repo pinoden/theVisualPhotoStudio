@@ -49,7 +49,7 @@ export interface Settings {
   /** Hours after a visit ends before it counts as completed. */
   loyaltyDelayHours: number;
 
-  // ── Staff: what the second level of the admin can do (see src/lib/staff-abilities.ts) ──
+  // ── Studio Attendants (the role `staff`): what the owners have switched on for them (see src/lib/abilities.ts) ──
   /** Whether staff see customers' phone number and email. */
   staffSeesContact: boolean;
   /** Whether staff can change the status label of an appointment. */
@@ -66,6 +66,20 @@ export interface Settings {
   staffRecordsPayments: boolean;
   /** Whether staff can set the photographer's working hours and block their time. */
   staffSetsPhotographerTimes: boolean;
+
+  // ── Studio Managers: the switches of their own. What running the calendar needs, a manager can always do. ──
+  /** Whether managers see what bookings cost, and customers' payments and receipts. */
+  managerSeesPrices: boolean;
+  /** Whether managers can record a payment taken at the studio and email a payment link. */
+  managerRecordsPayments: boolean;
+  /** Whether managers can cancel a booking and refund a card payment. */
+  managerRefunds: boolean;
+  /** Whether managers can open the customers list and a customer's page. */
+  managerSeesCustomers: boolean;
+  /** Whether managers can correct loyalty stamps and reward statuses. */
+  managerCorrectsLoyalty: boolean;
+  /** Whether managers can block time in a studio. */
+  managerBlocksTime: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -96,6 +110,15 @@ export const DEFAULT_SETTINGS: Settings = {
   staffCreatesBookings: false,
   staffRecordsPayments: false,
   staffSetsPhotographerTimes: false,
+
+  // A manager runs the day: taking payments, looking a client up and blocking time are on. What moves money
+  // back, changes a client's rewards or shows the studio's income is off until the owners switch it on.
+  managerSeesPrices: false,
+  managerRecordsPayments: true,
+  managerRefunds: false,
+  managerSeesCustomers: true,
+  managerCorrectsLoyalty: false,
+  managerBlocksTime: true,
 };
 
 const int = (min: number, max: number) => (v: unknown) =>
@@ -139,6 +162,12 @@ const VALIDATORS: { [K in Exclude<keyof Settings, "multiStudioPercent">]: (v: un
   staffCreatesBookings: bool,
   staffRecordsPayments: bool,
   staffSetsPhotographerTimes: bool,
+  managerSeesPrices: bool,
+  managerRecordsPayments: bool,
+  managerRefunds: bool,
+  managerSeesCustomers: bool,
+  managerCorrectsLoyalty: bool,
+  managerBlocksTime: bool,
 };
 
 export type SettingKey = keyof Settings;

@@ -6,7 +6,7 @@ import { Suspense } from "react";
 import { getDb } from "@/db/client";
 import { bookableDurations, formatCents, PricingError, quote } from "@/lib/domain/pricing";
 import { durationLabel, isIsoDate, longDateLabel, minutesToLabel } from "@/lib/domain/time";
-import { can } from "@/lib/staff-abilities";
+import { can } from "@/lib/abilities";
 import { freeStartsFor } from "@/server/appointments";
 import { dayTypeFor, loadCatalog } from "@/server/catalog";
 import { requireStaff } from "@/server/session";
@@ -35,7 +35,7 @@ async function NewBooking({ searchParams }: Pick<PageProps<"/admin/calendar/new"
   const viewer = await requireStaff("/admin/calendar/new");
   const db = await getDb();
   const catalog = await loadCatalog(db);
-  if (!can(viewer, "staffCreatesBookings", catalog.settings)) notFound();
+  if (!can(viewer, "createBookings", catalog.settings)) notFound();
 
   const query = await searchParams;
   const now = new Date();
@@ -71,7 +71,7 @@ async function NewBooking({ searchParams }: Pick<PageProps<"/admin/calendar/new"
   }
 
   return (
-    <AdminFrame active="/admin/calendar" title="New booking" query={query} viewer={viewer}>
+    <AdminFrame active="/admin/calendar" title="New booking" query={query} viewer={viewer} settings={catalog.settings}>
       <p>
         <Link href={`/admin/calendar?view=day&date=${date}`}>← Back to the calendar</Link>
       </p>

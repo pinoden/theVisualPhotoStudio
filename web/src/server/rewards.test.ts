@@ -145,7 +145,7 @@ describe("an owner cancels a reward, and gives it back", () => {
     const reward = await handOut();
     expect(await cancelReward(world.db, owner, reward.id, "  ", NOW)).toMatchObject({ ok: false });
     expect(await cancelReward(world.db, owner, reward.id, "x", NOW)).toMatchObject({ ok: false });
-    expect(await cancelReward(world.db, sam, reward.id, "Not mine to cancel", NOW)).toEqual({ ok: false, message: "Only an owner can cancel a reward." });
+    expect(await cancelReward(world.db, sam, reward.id, "Not mine to cancel", NOW)).toEqual({ ok: false, message: "You cannot cancel a reward." });
     expect(await cancelReward(world.db, jane, reward.id, "Not mine to cancel", NOW)).toMatchObject({ ok: false });
     expect(await restoreReward(world.db, sam, reward.id, "Not mine to give back", NOW)).toMatchObject({ ok: false });
     expect((await listRewards(world.db, JANE, NOW))[0].status).toBe("available");
@@ -247,10 +247,28 @@ describe("an owner corrects a customer's stamps", () => {
     expect(await ask(owner, 1.5)).toMatchObject({ ok: false });
     expect(await ask(owner, 51)).toMatchObject({ ok: false });
     expect(await ask(owner, 1, "A good reason", "not an address")).toEqual({ ok: false, message: "That is not a valid email address." });
-    expect(await ask(sam, 1)).toEqual({ ok: false, message: "Only an owner can change stamps." });
+    expect(await ask(sam, 1)).toEqual({ ok: false, message: "You cannot change stamps." });
     expect(await ask(jane, 5)).toMatchObject({ ok: false });
     expect(await world.db.select().from(loyaltyLedger)).toHaveLength(0);
     expect(await standing()).toMatchObject({ stamps: 0 });
+  });
+
+  it("can be a manager's to do once the owners switch it on, never an attendant's, and says who did it", async () => {
+    const mia = await world.addUser("mia@studio.test", "manager", "Mia");
+    const reward = await handOut();
+    const ask = (viewer: AuthUser) => adjustStamps(world.db, viewer, { email: JANE, stamps: 1, reason: "A visit before the site" }, deps());
+    // Off by default for managers: a client's rewards are money's worth.
+    expect(await ask(mia)).toEqual({ ok: false, message: "You cannot change stamps." });
+    expect(await cancelReward(world.db, mia, reward.id, "Not allowed yet", NOW)).toMatchObject({ ok: false });
+
+    await world.db.insert(settings).values({ key: "managerCorrectsLoyalty", value: true });
+    expect((await ask(mia)).ok).toBe(true);
+    expectOk(await cancelReward(world.db, mia, reward.id, "Handed out twice", NOW));
+    expectOk(await restoreReward(world.db, mia, reward.id, "It was right after all", NOW));
+    expect((await listStampChanges(world.db, JANE))[0].actor).toBe("mia@studio.test");
+    expect((await listRewardChanges(world.db, JANE)).map((change) => change.actor)).toEqual(["mia@studio.test", "mia@studio.test"]);
+    // No switch gives this to an attendant.
+    expect(await ask(sam)).toMatchObject({ ok: false });
   });
 
   it("sends nothing while loyalty is switched off", async () => {

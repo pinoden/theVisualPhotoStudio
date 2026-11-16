@@ -34,6 +34,14 @@ export function AccountFrame({
               <Link href="/staff">Staff day sheet</Link>
             </>
           )}
+          {user.role === "manager" && (
+            <>
+              {" · "}
+              <Link href="/admin/calendar">Studio calendar</Link>
+              {" · "}
+              <Link href="/staff">Day sheet</Link>
+            </>
+          )}
           {user.role === "owner" && (
             <>
               {" · "}

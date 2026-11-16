@@ -1,6 +1,7 @@
 import { and, asc, eq, gte, inArray, lt, sql } from "drizzle-orm";
 import { blocks, bookings, staffShifts, studioHolds } from "@/db/schema";
 import { queryRows, type DbLike } from "@/db/client";
+import { can } from "@/lib/abilities";
 import { labelOf, type LabelKey } from "@/lib/domain/labels";
 import { addDays, type IsoDate } from "@/lib/domain/time";
 import type { AuthUser } from "./auth";
@@ -56,8 +57,8 @@ export async function loadCalendar(
 
   let days = all;
   if (viewer.role !== "owner") {
-    if (viewer.role !== "staff") return { appointments: [], blocks: [], days: [] };
-    if (!(await loadSettings(db)).staffSeesAllDays) {
+    if (viewer.role !== "staff" && viewer.role !== "manager") return { appointments: [], blocks: [], days: [] };
+    if (!can(viewer, "seeAllDays", await loadSettings(db))) {
       const shifts = await db
         .select({ day: staffShifts.day })
         .from(staffShifts)

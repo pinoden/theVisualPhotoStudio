@@ -6,7 +6,8 @@ import { Suspense } from "react";
 import { getDb } from "@/db/client";
 import { count } from "@/lib/words";
 import { listCustomers } from "@/server/customers";
-import { requireOwner } from "@/server/session";
+import { requireManager } from "@/server/session";
+import { loadSettings } from "@/server/settings";
 import { formatDay } from "@/server/tz";
 import { AdminFrame, AdminLoading } from "../frame";
 
@@ -20,17 +21,18 @@ export default function CustomersPage(props: PageProps<"/admin/customers">) {
   );
 }
 
-/** Everyone who has booked, newest booking first, with a search by name or email. Owners only. */
+/** Everyone who has booked, newest booking first, with a search by name or email. For the owners, and managers they allow. */
 async function Customers({ searchParams }: Pick<PageProps<"/admin/customers">, "searchParams">) {
   await connection();
-  const owner = await requireOwner("/admin/customers");
+  const viewer = await requireManager("/admin/customers");
   const query = await searchParams;
   const q = typeof query.q === "string" ? query.q.trim().slice(0, 100) : "";
-  const customers = await listCustomers(await getDb(), owner, { q, now: new Date() });
+  const db = await getDb();
+  const customers = await listCustomers(db, viewer, { q, now: new Date() });
   if (!customers) notFound();
 
   return (
-    <AdminFrame active="/admin/customers" title="Customers" query={query}>
+    <AdminFrame active="/admin/customers" title="Customers" query={query} viewer={viewer} settings={await loadSettings(db)}>
       <form method="get" className="admin-form-row">
         <div className="form-group" style={{ flex: "1 1 14rem" }}>
           <label className="form-label" htmlFor="customer-search">

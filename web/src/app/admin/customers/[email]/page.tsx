@@ -13,7 +13,8 @@ import { getCustomer } from "@/server/customers";
 import { money } from "@/server/receipt-pdf";
 import { RECEIPT_STATUS_TEXT, yearsOf, yearStatement } from "@/server/receipts";
 import { MAX_STAMPS_AT_ONCE, REASON_MAX, REASON_MIN, REWARD_STATUS_TEXT } from "@/server/rewards";
-import { requireOwner } from "@/server/session";
+import { requireManager } from "@/server/session";
+import { loadSettings } from "@/server/settings";
 import { formatDay, formatInstant, formatRange } from "@/server/tz";
 import { AdminFrame, AdminLoading } from "../../frame";
 import { adjustStampsAction, cancelRewardAction, restoreRewardAction } from "../actions";
@@ -35,7 +36,7 @@ const SOURCE_TEXT: Record<string, string> = {
   pet_fee: "A pet fee returned",
 };
 
-function Appointments({ bookings }: { bookings: AccountBooking[] }) {
+function Appointments({ bookings, seeMoney }: { bookings: AccountBooking[]; seeMoney: boolean }) {
   return (
     <div className="data-table-wrap">
       <table className="data-table history-table">
@@ -63,8 +64,9 @@ function Appointments({ bookings }: { bookings: AccountBooking[] }) {
                     {booking.studios.map((studio) => studio.name).join(" + ")}
                   </Link>
                   <div style={{ fontSize: ".8rem" }}>
-                    {booking.ref} · {formatCents(booking.totalCents)}
-                    {booking.dueCents > 0 && ` · ${formatCents(booking.dueCents)} still to pay`}
+                    {booking.ref}
+                    {seeMoney && ` · ${formatCents(booking.totalCents)}`}
+                    {seeMoney && booking.dueCents > 0 && ` · ${formatCents(booking.dueCents)} still to pay`}
                   </div>
                   {booking.moves.map((move, index) => (
                     <div key={index} style={{ fontSize: ".8rem" }}>
@@ -85,24 +87,27 @@ function Appointments({ bookings }: { bookings: AccountBooking[] }) {
 }
 
 /**
- * One customer, for the owners: their appointments, what they paid, their
- * stamps and their rewards, with the corrections an owner can make. Staff get
- * "not found": a customer's payments are not theirs to see.
+ * One customer: their appointments, what they paid, their stamps and their
+ * rewards, with the corrections. For the owners, and for a manager as far as
+ * the owners' switches go: `getCustomer` leaves out the money and says
+ * whether this viewer may correct anything. An attendant gets "not found".
  */
 async function Customer({ params, searchParams }: Pick<PageProps<"/admin/customers/[email]">, "params" | "searchParams">) {
   await connection();
   const { email: segment } = await params;
   const address = decodeURIComponent(segment);
-  const owner = await requireOwner(`/admin/customers/${encodeURIComponent(address)}`);
-  const customer = await getCustomer(await getDb(), owner, address, new Date());
+  const viewer = await requireManager(`/admin/customers/${encodeURIComponent(address)}`);
+  const db = await getDb();
+  const customer = await getCustomer(db, viewer, address, new Date());
   if (!customer) notFound();
+  const { seeMoney, correctLoyalty } = customer.may;
   const query = await searchParams;
   const base = `/admin/customers/${encodeURIComponent(customer.email)}`;
   const years = yearsOf(customer.receipts);
   const known = customer.upcoming.length + customer.past.length > 0 || customer.hasAccount || customer.rewards.length > 0 || customer.stampChanges.length > 0;
 
   return (
-    <AdminFrame active="/admin/customers" title={customer.name || customer.email} query={query}>
+    <AdminFrame active="/admin/customers" title={customer.name || customer.email} query={query} viewer={viewer} settings={await loadSettings(db)}>
       <p>
         <Link href="/admin/customers">← All customers</Link>
       </p>
@@ -165,6 +170,7 @@ async function Customer({ params, searchParams }: Pick<PageProps<"/admin/custome
           <p>Loyalty is switched off in Settings, so no stamps are counted.</p>
         )}
 
+        {correctLoyalty && (
         <form action={adjustStampsAction} className="payment-form">
           <input type="hidden" name="email" value={customer.email} />
           <h4>Correct the stamps</h4>
@@ -210,6 +216,7 @@ async function Customer({ params, searchParams }: Pick<PageProps<"/admin/custome
             customer at once.
           </p>
         </form>
+        )}
 
         {customer.stampChanges.length > 0 && (
           <>
@@ -229,9 +236,7 @@ async function Customer({ params, searchParams }: Pick<PageProps<"/admin/custome
       <div className="admin-card" id="rewards">
         <h3>Rewards</h3>
         {customer.rewards.length === 0 ? (
-          <p>
-            No reward yet. A free hour can be handed out under <Link href="/admin/codes">Codes</Link>.
-          </p>
+          <p>No reward yet.{viewer.role === "owner" && " A free hour can be handed out under Codes."}</p>
         ) : (
           <ul className="reward-list">
             {customer.rewards.map((reward) => (
@@ -256,7 +261,7 @@ async function Customer({ params, searchParams }: Pick<PageProps<"/admin/custome
                     .
                   </div>
                 )}
-                {reward.status === "available" && (
+                {correctLoyalty && reward.status === "available" && (
                   <form action={cancelRewardAction} className="reward-fix">
                     <input type="hidden" name="email" value={customer.email} />
                     <input type="hidden" name="codeId" value={reward.id} />
@@ -269,7 +274,7 @@ async function Customer({ params, searchParams }: Pick<PageProps<"/admin/custome
                     </button>
                   </form>
                 )}
-                {reward.status === "cancelled" && (
+                {correctLoyalty && reward.status === "cancelled" && (
                   <form action={restoreRewardAction} className="reward-fix">
                     <input type="hidden" name="email" value={customer.email} />
                     <input type="hidden" name="codeId" value={reward.id} />
@@ -342,17 +347,18 @@ async function Customer({ params, searchParams }: Pick<PageProps<"/admin/custome
         {customer.upcoming.length > 0 && (
           <>
             <h4>Upcoming ({customer.upcoming.length})</h4>
-            <Appointments bookings={customer.upcoming} />
+            <Appointments bookings={customer.upcoming} seeMoney={seeMoney} />
           </>
         )}
         {customer.past.length > 0 && (
           <>
             <h4>Past ({customer.past.length})</h4>
-            <Appointments bookings={customer.past} />
+            <Appointments bookings={customer.past} seeMoney={seeMoney} />
           </>
         )}
       </div>
 
+      {seeMoney && (
       <div className="admin-card" id="payments">
         <h3>Payments and receipts</h3>
         {customer.unpaid.length > 0 && (
@@ -410,6 +416,7 @@ async function Customer({ params, searchParams }: Pick<PageProps<"/admin/custome
           );
         })}
       </div>
+      )}
     </AdminFrame>
   );
 }

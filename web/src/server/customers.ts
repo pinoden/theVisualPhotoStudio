@@ -1,6 +1,7 @@
 import { desc, eq, sql } from "drizzle-orm";
 import { promoCodes, users } from "@/db/schema";
 import { queryRows, type DbLike } from "@/db/client";
+import { can } from "@/lib/abilities";
 import type { LoyaltyStanding } from "@/lib/domain/loyalty";
 import type { PromoKind } from "@/lib/domain/pricing";
 import { loadAppointments, type AccountBooking } from "./account";
@@ -17,9 +18,11 @@ import { loadSettings } from "./settings";
  * paid, their stamps and their rewards.
  *
  * A customer is an email address. Bookings, codes and stamps are all kept by
- * it, and signing in proves it. Only owners may look: every function here
- * checks the viewer and answers null to anyone else, staff included, because
- * a customer's payments are not for staff to see.
+ * it, and signing in proves it. Owners may look, and managers when the
+ * owners have switched it on (`managerSeesCustomers`); every function here
+ * checks the viewer and answers null to anyone else. An attendant never can.
+ * A manager sees money (prices, payments, receipts, credit) only with
+ * `managerSeesPrices`: without it those parts come back empty.
  */
 
 export interface CustomerSummary {
@@ -52,7 +55,7 @@ export async function listCustomers(
   viewer: AuthUser,
   options: { q?: string; now: Date; limit?: number },
 ): Promise<CustomerSummary[] | null> {
-  if (viewer.role !== "owner") return null;
+  if (!can(viewer, "seeCustomers", await loadSettings(db))) return null;
   const term = (options.q ?? "").trim().slice(0, 100);
   const pattern = likePattern(term);
   const rows = await queryRows<{
@@ -124,6 +127,13 @@ export interface CustomerPage {
   codes: CustomerCodeRow[];
   receipts: Receipt[];
   unpaid: Unpaid[];
+  /** What this viewer may see and do on the page. */
+  may: {
+    /** Prices, payments, receipts and credit. When false, those parts are empty and every amount is 0. */
+    seeMoney: boolean;
+    /** Add or take away stamps, and cancel a reward or give it back. */
+    correctLoyalty: boolean;
+  };
 }
 
 /**
@@ -133,12 +143,27 @@ export interface CustomerPage {
  * something that is not an email address.
  */
 export async function getCustomer(db: DbLike, viewer: AuthUser, rawEmail: string, now: Date): Promise<CustomerPage | null> {
-  if (viewer.role !== "owner") return null;
+  const settings = await loadSettings(db);
+  if (!can(viewer, "seeCustomers", settings)) return null;
   const email = normalizeEmail(rawEmail);
   if (!email) return null;
+  const seeMoney = can(viewer, "seePrices", settings);
+  /** A booking without its amounts, for a manager who may not see what things cost. */
+  const withoutMoney = (booking: AccountBooking): AccountBooking => ({
+    ...booking,
+    studios: booking.studios.map((studio) => ({ ...studio, priceCents: 0 })),
+    addons: booking.addons.map((addon) => ({ ...addon, unitCents: 0 })),
+    studiosSubtotalCents: 0,
+    multiStudioDiscountCents: 0,
+    addonsCents: 0,
+    promoDiscountCents: 0,
+    creditAppliedCents: 0,
+    totalCents: 0,
+    receivedCents: 0,
+    dueCents: 0,
+  });
 
-  const [settings, appointments, account, rewards, rewardChanges, stampChanges, money, codeRows] = await Promise.all([
-    loadSettings(db),
+  const [appointments, account, rewards, rewardChanges, stampChanges, money, codeRows] = await Promise.all([
     loadAppointments(db, email, now),
     db.select({ name: users.name, phone: users.phone }).from(users).where(eq(users.email, email)).limit(1),
     listRewards(db, email, now),
@@ -155,14 +180,14 @@ export async function getCustomer(db: DbLike, viewer: AuthUser, rawEmail: string
     name: latest?.customerName || account[0]?.name || "",
     phone: (await latestPhone(db, email)) || account[0]?.phone || "",
     hasAccount: account.length > 0,
-    upcoming: appointments.upcoming,
-    past: appointments.past,
+    upcoming: seeMoney ? appointments.upcoming : appointments.upcoming.map(withoutMoney),
+    past: seeMoney ? appointments.past : appointments.past.map(withoutMoney),
     standing: settings.loyaltyEnabled ? await loyaltyStandingOf(db, email, settings) : null,
     perReward: settings.loyaltyVisits,
     stampChanges,
     rewards,
     rewardChanges,
-    codes: codeRows
+    codes: (seeMoney ? codeRows : [])
       .filter((code) => code.kind !== "free_hour")
       .map((code) => ({
         id: code.id,
@@ -181,8 +206,9 @@ export async function getCustomer(db: DbLike, viewer: AuthUser, rawEmail: string
               : "available",
         note: code.note,
       })),
-    receipts: money.receipts,
-    unpaid: money.unpaid,
+    receipts: seeMoney ? money.receipts : [],
+    unpaid: seeMoney ? money.unpaid : [],
+    may: { seeMoney, correctLoyalty: can(viewer, "correctLoyalty", settings) },
   };
 }
 

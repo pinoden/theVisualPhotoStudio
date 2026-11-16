@@ -1,6 +1,7 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { bookings, loyaltyLedger, promoCodes } from "@/db/schema";
 import type { Db, DbLike } from "@/db/client";
+import { can } from "@/lib/abilities";
 import type { LoyaltyStanding } from "@/lib/domain/loyalty";
 import { normalizeEmail, type AuthUser } from "./auth";
 import { loyaltyStandingOf, sendEarnedFreeHours } from "./loyalty";
@@ -18,9 +19,10 @@ import { loadSettings } from "./settings";
  * otherwise. A reward used on a booking that was then cancelled is Available
  * again, because the cancellation gave the code back.
  *
- * What an owner changes by hand (stamps added or taken away, a reward
- * cancelled or given back) is written to `loyalty_ledger` with who, when and
- * why. Only owners can: every function here checks the viewer.
+ * What is changed by hand (stamps added or taken away, a reward cancelled or
+ * given back) is written to `loyalty_ledger` with who, when and why. Owners
+ * can, and managers once the owners switch it on (`managerCorrectsLoyalty`):
+ * every function here checks the viewer.
  */
 
 export type RewardStatus = "available" | "redeemed" | "expired" | "cancelled";
@@ -159,7 +161,8 @@ export async function adjustStamps(
   input: { email: string; stamps: number; reason: string },
   deps: { now: Date; baseUrl: string },
 ): Promise<AdjustStampsResult> {
-  if (viewer.role !== "owner") return { ok: false, message: "Only an owner can change stamps." };
+  const settings = await loadSettings(db);
+  if (!can(viewer, "correctLoyalty", settings)) return { ok: false, message: "You cannot change stamps." };
   const email = normalizeEmail(input.email);
   if (!email) return { ok: false, message: "That is not a valid email address." };
   if (!Number.isInteger(input.stamps) || input.stamps === 0 || Math.abs(input.stamps) > MAX_STAMPS_AT_ONCE) {
@@ -167,7 +170,6 @@ export async function adjustStamps(
   }
   const reason = cleanReason(input.reason);
   if (!reason) return { ok: false, message: NO_REASON };
-  const settings = await loadSettings(db);
 
   return db.transaction(async (tx): Promise<AdjustStampsResult> => {
     const before = await loyaltyStandingOf(tx, email, settings);
@@ -214,7 +216,7 @@ async function rewardForUpdate(tx: DbLike, codeId: string): Promise<CodeRow | nu
  * already used is not cancelled: the booking it paid for stands.
  */
 export async function cancelReward(db: Db, viewer: AuthUser, codeId: string, reason: string, now: Date): Promise<RewardChangeResult> {
-  if (viewer.role !== "owner") return { ok: false, message: "Only an owner can cancel a reward." };
+  if (!can(viewer, "correctLoyalty", await loadSettings(db))) return { ok: false, message: "You cannot cancel a reward." };
   const why = cleanReason(reason);
   if (!why) return { ok: false, message: NO_REASON };
   return db.transaction(async (tx): Promise<RewardChangeResult> => {
@@ -233,7 +235,7 @@ export async function cancelReward(db: Db, viewer: AuthUser, codeId: string, rea
  * always had. For a reward cancelled by mistake.
  */
 export async function restoreReward(db: Db, viewer: AuthUser, codeId: string, reason: string, now: Date): Promise<RewardChangeResult> {
-  if (viewer.role !== "owner") return { ok: false, message: "Only an owner can give a reward back." };
+  if (!can(viewer, "correctLoyalty", await loadSettings(db))) return { ok: false, message: "You cannot give a reward back." };
   const why = cleanReason(reason);
   if (!why) return { ok: false, message: NO_REASON };
   return db.transaction(async (tx): Promise<RewardChangeResult> => {

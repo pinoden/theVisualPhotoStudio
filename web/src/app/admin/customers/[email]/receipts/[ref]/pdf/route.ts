@@ -3,17 +3,25 @@ import { normalizeEmail } from "@/server/auth";
 import { receiptPdf } from "@/server/receipt-pdf";
 import { getReceipt } from "@/server/receipts";
 import { getCurrentUser } from "@/server/session";
+import { loadSettings } from "@/server/settings";
+import { can } from "@/lib/abilities";
+
+/** A customer's receipts are for the owners, and for a manager who may see both customers and money. */
+async function maySeeReceipts(user: { role: string }): Promise<boolean> {
+  const settings = await loadSettings(await getDb());
+  return can(user, "seeCustomers", settings) && can(user, "seePrices", settings);
+}
 
 /**
  * GET /admin/customers/<email>/receipts/<ref>/pdf: a customer's receipt, for
- * an owner. Anyone else, staff included, gets "not found", as on every page
- * that only the owners may open.
+ * an owner, or a manager who may see customers and money. Anyone else gets
+ * "not found".
  */
 export async function GET(_request: Request, context: RouteContext<"/admin/customers/[email]/receipts/[ref]/pdf">) {
   const { email: segment, ref } = await context.params;
   const user = await getCurrentUser();
   const email = normalizeEmail(decodeURIComponent(segment));
-  if (!user || user.role !== "owner" || !email) return new Response("Not found", { status: 404 });
+  if (!user || !(await maySeeReceipts(user)) || !email) return new Response("Not found", { status: 404 });
   const receipt = await getReceipt(await getDb(), email, ref);
   if (!receipt) return new Response("Not found", { status: 404 });
   return new Response(Buffer.from(await receiptPdf(receipt)), {

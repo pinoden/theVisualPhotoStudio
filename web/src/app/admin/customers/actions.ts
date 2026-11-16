@@ -7,12 +7,13 @@ import { formText, intInRange } from "@/lib/parse";
 import { normalizeEmail } from "@/server/auth";
 import { adjustStamps, cancelReward, MAX_STAMPS_AT_ONCE, restoreReward } from "@/server/rewards";
 import { flushEmailsSoon, siteUrl } from "@/server/runtime";
-import { requireOwner } from "@/server/session";
+import { requireManager } from "@/server/session";
 
 /**
- * What an owner corrects on a customer's page: stamps, and the status of a
- * reward. Every action starts with `requireOwner`, and the service checks the
- * viewer again and writes who made the change, when and why.
+ * What is corrected on a customer's page: stamps, and the status of a reward.
+ * For the owners, and for a manager the owners have allowed. Every action
+ * starts with `requireManager`; the service then checks that this viewer may
+ * correct loyalty, and writes who made the change, when and why.
  */
 
 /** The customer's page, to come back to. Anything that is not an email address goes back to the list. */
@@ -26,7 +27,7 @@ const withMessage = (path: string, kind: "notice" | "error", text: string, ancho
 
 export async function adjustStampsAction(formData: FormData): Promise<void> {
   const page = customerPage(formData);
-  const owner = await requireOwner(page);
+  const owner = await requireManager(page);
   const amount = intInRange(formText(formData.get("stamps")), 1, MAX_STAMPS_AT_ONCE);
   const direction = formText(formData.get("direction"));
   if (amount === null || (direction !== "add" && direction !== "take")) {
@@ -52,7 +53,7 @@ export async function adjustStampsAction(formData: FormData): Promise<void> {
 
 export async function cancelRewardAction(formData: FormData): Promise<void> {
   const page = customerPage(formData);
-  const owner = await requireOwner(page);
+  const owner = await requireManager(page);
   const result = await cancelReward(await getDb(), owner, formText(formData.get("codeId")), formText(formData.get("reason")), new Date());
   if (!result.ok) redirect(withMessage(page, "error", result.message));
   redirect(withMessage(page, "notice", `Reward ${result.code} cancelled. It can no longer be used, and the customer sees it as Canceled.`));
@@ -60,7 +61,7 @@ export async function cancelRewardAction(formData: FormData): Promise<void> {
 
 export async function restoreRewardAction(formData: FormData): Promise<void> {
   const page = customerPage(formData);
-  const owner = await requireOwner(page);
+  const owner = await requireManager(page);
   const result = await restoreReward(await getDb(), owner, formText(formData.get("codeId")), formText(formData.get("reason")), new Date());
   if (!result.ok) redirect(withMessage(page, "error", result.message));
   redirect(withMessage(page, "notice", `Reward ${result.code} given back. It can be used again, until the date it always had.`));

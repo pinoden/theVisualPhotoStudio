@@ -45,6 +45,7 @@ const THIRD_OWNER = "owner3@studio.test";
 // And the third. This one looks customers up.
 const FIFTH_OWNER = "owner5@studio.test";
 const STAFF = "sam.e2e@studio.test";
+const MANAGER = "mia.e2e@studio.test";
 
 let rescheduleCode = "";
 // Three free hours the owner hands Jane: two are used in a later test, the third stays available.
@@ -482,7 +483,7 @@ test("the owner adds a staff member and assigns one day", async ({ page }) => {
   await byLabel(page, "Email").fill(STAFF);
   await byLabel(page, "Name").fill("Sam");
   await page.getByRole("button", { name: "Add", exact: true }).click();
-  await expect(byText(page, "Staff member added.")).toBeVisible();
+  await expect(byText(page, "Staff member added as Studio Attendant.")).toBeVisible();
 
   const sam = onScreen(page.locator(".admin-card", { hasText: STAFF }));
   await expect(byText(sam, "No days assigned: this person sees nothing.")).toBeVisible();
@@ -585,8 +586,8 @@ test("the owners switch on what staff can do, and it applies at once", async ({ 
   await expect(page.getByRole("checkbox", { name: "See customers' phone numbers and email addresses" })).toBeChecked();
   await page.getByRole("checkbox", { name: "See customers' phone numbers and email addresses" }).uncheck();
   await page.getByRole("checkbox", { name: "See what a booking cost" }).check();
-  await page.getByRole("button", { name: "Save what staff can do" }).click();
-  await expect(byText(page, "Saved. It applies to every member of staff from now on.")).toBeVisible();
+  await page.getByRole("button", { name: "Save what attendants can do" }).click();
+  await expect(byText(page, "Saved. It applies to every Studio Attendant from now on.")).toBeVisible();
   await shot(page, "17b-admin-staff-abilities");
 
   // Staff see both the next time they look. Nothing was redeployed.
@@ -1110,6 +1111,61 @@ test("the owners look a customer up, see what they paid, and correct their stamp
   await expect(page.getByRole("heading", { name: "Jane Smith", level: 1 })).toBeVisible();
   await onScreen(page.locator(".detail-list")).getByRole("link", { name: "Jane Smith" }).click();
   await expect(page).toHaveURL(new RegExp(`/admin/customers/${encodeURIComponent(jane.email).replace(/[.]/g, "\\.")}`));
+});
+
+test("a Studio Manager runs the calendar and looks clients up, and sees no prices until the owners say so", async ({ page }) => {
+  // The owners add a manager. (The second sign-in code of the fifth owner.)
+  await signIn(page, FIFTH_OWNER, "/admin/staff");
+  await byLabel(page, "Email").fill(MANAGER);
+  await byLabel(page, "Name").fill("Mia");
+  await onScreen(page.locator("#staff-level")).selectOption({ label: "Studio Manager" });
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await expect(byText(page, "Staff member added as Studio Manager.")).toBeVisible();
+  const mia = onScreen(page.locator(".admin-card", { hasText: MANAGER }));
+  await expect(mia).toContainText("Studio Manager");
+  await expect(mia).toContainText("A manager sees every day: none has to be assigned.");
+  await shot(page, "20c-admin-staff-levels");
+  await page.goto("/account");
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await page.waitForURL((url) => url.pathname === "/");
+
+  // The manager signs in. Her menu is the pages she can open, and no more.
+  await signIn(page, MANAGER);
+  await page.getByRole("link", { name: "Studio calendar" }).click();
+  await expect(page.getByRole("heading", { name: "Calendar", exact: true })).toBeVisible();
+  await expect(onScreen(page.locator(".admin-nav"))).toHaveText("CalendarCustomersDay sheetHours & blocksPhotography");
+
+  // She sees a day nobody assigned to her, with the client's contact details, and no price.
+  await page.goto(`/admin/calendar?view=day&date=${NEAR}`);
+  await page.getByRole("link", { name: /Jane Smith/ }).click();
+  await expect(page.getByRole("heading", { name: "Jane Smith", level: 1 })).toBeVisible();
+  const appointment = onScreen(page.locator(".admin-main"));
+  await expect(appointment).toContainText(jane.email);
+  expect(await appointment.innerText()).not.toContain("$");
+  await expect(page.getByRole("button", { name: "Reschedule Pending", exact: true })).toBeEnabled();
+
+  // The client's name leads to their page: appointments, stamps and rewards, and nothing about money.
+  await onScreen(page.locator(".detail-list")).getByRole("link", { name: "Jane Smith" }).click();
+  await expect(onScreen(page.locator("#appointments"))).toContainText("Released for rescheduling");
+  await expect(onScreen(page.locator("#rewards li.reward"))).toHaveCount(4);
+  await expect(page.locator("#payments")).toHaveCount(0);
+  expect(await onScreen(page.locator(".admin-main")).innerText()).not.toContain("$");
+  await expect(page.getByRole("button", { name: "Change stamps" })).toHaveCount(0); // not switched on for managers
+
+  // She can block time in a studio, and cannot touch opening hours.
+  await page.getByRole("link", { name: "Hours & blocks" }).click();
+  await expect(page.getByRole("heading", { name: "Blocked time", level: 1 })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Block", exact: true })).toBeVisible();
+  await expect(byText(page, /opening hours/)).toHaveCount(0);
+
+  // What the owners keep, and what they have not switched on for managers, cannot be found.
+  for (const path of ["/admin", "/admin/bookings", "/admin/prices", "/admin/studios", "/admin/staff", "/admin/codes", "/admin/settings"]) {
+    await page.goto(path);
+    await expect(byText(page, /could not be found/i)).toBeVisible();
+    await expect(byText(page, "Studio Admin")).toHaveCount(0);
+  }
+  const janesPage = `/admin/customers/${encodeURIComponent(jane.email)}`;
+  expect((await page.request.get(`${janesPage}/receipts/year/${todayInStudio().slice(0, 4)}/pdf`)).status()).toBe(404);
 });
 
 test("a client without a photographer books a session, and the photographer cannot be booked twice", async ({ page }) => {

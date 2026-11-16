@@ -4,7 +4,7 @@ import { bookings, paymentLinks, payments, studioHolds, studios } from "@/db/sch
 import { PG_UNIQUE_VIOLATION, pgErrorCode, type Db, type DbLike } from "@/db/client";
 import { labelOf } from "@/lib/domain/labels";
 import { formatCents } from "@/lib/domain/pricing";
-import { can } from "@/lib/staff-abilities";
+import { can } from "@/lib/abilities";
 import type { AuthUser } from "./auth";
 import { isBookingRef } from "./bookings";
 import { payLinkEmail, paymentReceivedEmail, queueEmail } from "./email";
@@ -104,7 +104,7 @@ const refuse = (reason: SendPayLinkBlock, message: string) => ({ ok: false as co
  */
 export async function sendPayLink(db: Db, viewer: AuthUser, ref: string, deps: PayLinkDeps): Promise<SendPayLinkResult> {
   const settings = await loadSettings(db);
-  if (!can(viewer, "staffRecordsPayments", settings)) return refuse("forbidden", "You cannot send payment links.");
+  if (!can(viewer, "recordPayments", settings)) return refuse("forbidden", "You cannot send payment links.");
   if (!isBookingRef(ref)) return refuse("not_found", "Booking not found.");
   const [booking] = await db.select().from(bookings).where(eq(bookings.ref, ref)).limit(1);
   // Staff are told "forbidden" for an unknown reference too, so they cannot probe for bookings.
@@ -311,7 +311,7 @@ async function withdraw(db: Db, link: LinkRow, deps: PayLinkDeps, actor: string)
 /** An administrator cancels the open link of a booking: to record cash instead, or because the amount changed. */
 export async function cancelPayLink(db: Db, viewer: AuthUser, ref: string, deps: PayLinkDeps): Promise<CancelPayLinkResult> {
   const settings = await loadSettings(db);
-  if (!can(viewer, "staffRecordsPayments", settings) || !isBookingRef(ref)) return { ok: false, message: "Booking not found." };
+  if (!can(viewer, "recordPayments", settings) || !isBookingRef(ref)) return { ok: false, message: "Booking not found." };
   const [booking] = await db.select().from(bookings).where(eq(bookings.ref, ref)).limit(1);
   if (!booking || !(await canViewDay(db, viewer, localDateOf(booking.startAt)))) return { ok: false, message: "Booking not found." };
   const [link] = await db
@@ -331,7 +331,7 @@ export async function checkBookingPayLink(
   deps: PayLinkDeps,
 ): Promise<{ ok: true; status: "open" | "paid" | "cancelled" } | { ok: false; message: string }> {
   const settings = await loadSettings(db);
-  if (!can(viewer, "staffRecordsPayments", settings) || !isBookingRef(ref)) return { ok: false, message: "Booking not found." };
+  if (!can(viewer, "recordPayments", settings) || !isBookingRef(ref)) return { ok: false, message: "Booking not found." };
   const [booking] = await db.select().from(bookings).where(eq(bookings.ref, ref)).limit(1);
   if (!booking || !(await canViewDay(db, viewer, localDateOf(booking.startAt)))) return { ok: false, message: "Booking not found." };
   const open = await openPayLinkOf(db, booking.id);

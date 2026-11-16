@@ -4,7 +4,7 @@ import type { Db, DbLike } from "@/db/client";
 import { labelOf } from "@/lib/domain/labels";
 import { formatCents } from "@/lib/domain/pricing";
 import { isPaymentMethod, MANUAL_PROVIDER, PAYMENT_METHODS, type PaymentMethod } from "@/lib/payment-methods";
-import { can } from "@/lib/staff-abilities";
+import { can } from "@/lib/abilities";
 import type { AuthUser } from "./auth";
 import { isBookingRef } from "./bookings";
 import { paymentReceivedEmail, queueEmail } from "./email";
@@ -128,7 +128,7 @@ export async function recordStudioPayment(
   now: Date,
 ): Promise<StudioPaymentResult> {
   const settings = await loadSettings(db);
-  if (!can(viewer, "staffRecordsPayments", settings)) return refuse("forbidden", "You cannot record payments.");
+  if (!can(viewer, "recordPayments", settings)) return refuse("forbidden", "You cannot record payments.");
   if (!isBookingRef(ref)) return refuse("not_found", "Booking not found.");
   if (!isPaymentMethod(input.method)) return refuse("bad_method", "Choose how it was paid.");
   if (!Number.isInteger(input.amountCents) || input.amountCents <= 0) {

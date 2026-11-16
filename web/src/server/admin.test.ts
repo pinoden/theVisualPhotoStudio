@@ -18,6 +18,7 @@ import {
   saveStudioHours,
   setShift,
   setSpecialDate,
+  setStaffLevel,
   voidCode,
 } from "./admin";
 import { getSessionUser, requestLoginCode, verifyLoginCode } from "./auth";
@@ -55,11 +56,46 @@ describe("staff and shifts", () => {
     expect(await setShift(world.db, added.id, "2026-11-25", true)).toBe(true);
     expect(await setShift(world.db, added.id, "2026-11-01", true)).toBe(true); // already past
     expect(await listStaff(world.db, "2026-11-14")).toEqual([
-      { id: added.id, email: "sam@studio.test", name: "Sam", days: [NEAR, "2026-11-25"] },
+      { id: added.id, email: "sam@studio.test", name: "Sam", level: "staff", days: [NEAR, "2026-11-25"] },
     ]);
 
     expect(await setShift(world.db, added.id, NEAR, false)).toBe(true);
     expect((await listStaff(world.db, "2026-11-14"))[0].days).toEqual(["2026-11-25"]);
+  });
+
+  it("adds a Studio Manager, lists managers first, and changes a person's level without signing them out", async () => {
+    const sam = expectOk(await addStaff(world.db, "sam@studio.test", "Sam"));
+    const mia = expectOk(await addStaff(world.db, "mia@studio.test", "Mia", "manager"));
+    expect((await listStaff(world.db, "2026-11-14")).map((person) => [person.email, person.level])).toEqual([
+      ["mia@studio.test", "manager"],
+      ["sam@studio.test", "staff"],
+    ]);
+    // A manager sees every day, so none can be assigned to one.
+    expect(await setShift(world.db, mia.id, NEAR, true)).toBe(false);
+
+    // Sam is signed in as an attendant when the owners make him a manager: his next request is a manager's.
+    expectOk(await requestLoginCode(world.db, "sam@studio.test", NOW));
+    const code = /code: (\d{6})/.exec((await world.emails("login_code")).at(-1)!.subject)![1];
+    const signedIn = expectOk(await verifyLoginCode(world.db, "sam@studio.test", code, { now: NOW, ownerEmails: [] }));
+    expect(signedIn.user.role).toBe("staff");
+    expect(await setShift(world.db, sam.id, NEAR, true)).toBe(true);
+    expect(await setStaffLevel(world.db, sam.id, "manager")).toBe(true);
+    expect((await getSessionUser(world.db, signedIn.sessionToken, NOW, []))?.role).toBe("manager");
+    // Back to attendant: the day assigned before is still his.
+    expect(await setStaffLevel(world.db, sam.id, "staff")).toBe(true);
+    expect((await listStaff(world.db, "2026-11-14")).find((person) => person.id === sam.id)).toMatchObject({ level: "staff", days: [NEAR] });
+
+    // Only an attendant or a manager has a level, and only those two levels exist.
+    const customer = await world.addUser("jane@example.com", "customer");
+    expect(await setStaffLevel(world.db, customer.id, "manager")).toBe(false);
+    expect(await setStaffLevel(world.db, sam.id, "owner")).toBe(false);
+    expect(await setStaffLevel(world.db, "not-an-id", "manager")).toBe(false);
+    expect(await addStaff(world.db, "eve@studio.test", "Eve", "owner" as never)).toEqual({ ok: false, message: "Choose Studio Manager or Studio Attendant." });
+
+    // Removing access works for a manager as for an attendant, and signs them out.
+    await removeStaff(world.db, mia.id);
+    expect((await world.db.select().from(users).where(eq(users.id, mia.id)))[0].role).toBe("customer");
+    expect((await listStaff(world.db, "2026-11-14")).map((person) => person.email)).toEqual(["sam@studio.test"]);
   });
 
   it("turns an existing customer into staff but never touches an owner", async () => {
