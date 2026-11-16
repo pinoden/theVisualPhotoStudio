@@ -69,6 +69,12 @@ export const bookingInput = z.object({
   paymentToken: z.string().min(1).max(1000).optional(),
   /** The total the customer was shown. A mismatch stops the booking before any charge. */
   expectedTotalCents: z.number().int().nonnegative().optional(),
+  /**
+   * The id the booking screen gave this attempt, a random UUID. The screen
+   * sends it again, unchanged, only when it got no answer; any answer makes
+   * it take a new one. See `requestKey` in the schema.
+   */
+  requestId: z.uuid().optional(),
 });
 
 export type BookingInput = z.input<typeof bookingInput>;
@@ -83,7 +89,9 @@ export type BookingErrorCode =
   | "slot_taken"
   | "payment_required"
   | "payments_unavailable"
-  | "payment_failed";
+  | "payment_failed"
+  | "in_progress"
+  | "attempt_over";
 
 export type CreateBookingResult =
   | { ok: true; ref: string; manageToken: string; totalCents: number }
@@ -129,6 +137,37 @@ function firstIssue(error: z.ZodError): string {
 
 /** Raised inside the booking transaction when the code was spent by another request. */
 class PromoGone extends Error {}
+
+type ParsedInput = z.output<typeof bookingInput>;
+
+/**
+ * An attempt to book sent again, by a screen that got no answer: what became
+ * of it. Null when it is not one the site has seen, and then it is a new
+ * booking. A booking that was made is answered as it was the first time, with
+ * a second link of its own (the first is in the confirmation email, and only
+ * its hash is kept), and nothing is booked or charged again. An attempt still
+ * on its way is asked to wait; one that did not go through, or that was for
+ * something else, is over, and the screen starts a new one.
+ */
+async function answerAgain(db: Db, requestKey: string, input: ParsedInput): Promise<CreateBookingResult | null> {
+  const [earlier] = await db.select().from(bookings).where(eq(bookings.requestKey, requestKey)).limit(1);
+  if (!earlier) return null;
+  const studios = await db.select({ studioId: studioHolds.studioId }).from(studioHolds).where(eq(studioHolds.bookingId, earlier.id));
+  const same =
+    earlier.startAt.getTime() === localToUtc(input.date, input.startMinute).getTime() &&
+    earlier.durationMinutes === input.durationMinutes &&
+    [...new Set(studios.map((row) => row.studioId))].sort().join() === [...input.studioIds].sort().join();
+  if (!same) return fail(409, "attempt_over", "Something went wrong. Please press the button again.");
+  if (earlier.status === "pending_payment") {
+    return fail(409, "in_progress", "Your booking is still being made. Wait a moment, then press the button again: your card is not charged twice.");
+  }
+  if (earlier.status === "confirmed" || earlier.status === "completed") {
+    const manageToken = randomBytes(24).toString("base64url");
+    await db.update(bookings).set({ retryTokenHash: hashToken(manageToken) }).where(eq(bookings.id, earlier.id));
+    return { ok: true, ref: earlier.ref, manageToken, totalCents: earlier.totalCents };
+  }
+  return fail(409, "attempt_over", "That attempt did not go through. If your card was charged for it, contact us and we will refund it. Please try again.");
+}
 
 const NO_SUCH_SESSION = "That photography session is not offered. Please choose a studio and a length from the list.";
 
@@ -222,6 +261,15 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
   }
 
   await releaseExpiredHolds(db, now);
+
+  // The same attempt sent again, by a screen that got no answer: say what became of it, before anything is checked
+  // again (its own booking holds the time now).
+  const requestKey = input.requestId ? hashToken(`request:${input.requestId.toLowerCase()}`) : null;
+  if (requestKey && !deps.madeBy) {
+    const again = await answerAgain(db, requestKey, input);
+    if (again) return again;
+  }
+
   const catalog = await loadCatalog(db);
 
   const chosen = input.studioIds.map((id) => catalog.studios.find((s) => s.id === id));
@@ -355,6 +403,7 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
             // Money that was already moved once stays "moved" on the new booking.
             rescheduledCount: spendsCode && promo!.source === "reschedule" ? promo!.rescheduleGeneration : 0,
             manageTokenHash: hashToken(manageToken),
+            requestKey: deps.madeBy ? null : requestKey,
             photographerId: photographer ? photographer.studioId : null,
             photoIncludes: session ? session.includes : null,
             madeBy: deps.madeBy ?? null,
@@ -410,6 +459,11 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
       const code = pgErrorCode(error);
       if (code === PG_EXCLUSION_VIOLATION || code === PG_DEADLOCK_DETECTED) {
         return fail(409, "slot_taken", "That time was just taken. Please choose another.");
+      }
+      // The same attempt arriving twice at once: the second finds the first on its way.
+      if (code === PG_UNIQUE_VIOLATION && requestKey && !deps.madeBy) {
+        const again = await answerAgain(db, requestKey, input);
+        if (again) return again;
       }
       if (code === PG_UNIQUE_VIOLATION && attempt < 5) continue; // booking reference collision
       throw error;
@@ -618,12 +672,22 @@ export function isUpcomingVisit(booking: Pick<BookingView, "status" | "endAt">, 
   return booking.status === "confirmed" && now.getTime() < new Date(booking.endAt).getTime();
 }
 
-/** True when `token` is the secret from this booking's manage link. */
-export function tokenMatches(booking: Pick<BookingRow, "manageTokenHash">, token: string): boolean {
+/**
+ * True when `token` is the secret from this booking's manage link: the one in
+ * its confirmation email, or the second one given to a screen that asked
+ * again for the booking it had made (`answerAgain`).
+ */
+export function tokenMatches(booking: Pick<BookingRow, "manageTokenHash" | "retryTokenHash">, token: string): boolean {
   if (token.length < 16 || token.length > 200) return false;
-  const expected = Buffer.from(booking.manageTokenHash, "hex");
   const given = Buffer.from(hashToken(token), "hex");
-  return expected.length === given.length && expected.length > 0 && timingSafeEqual(expected, given);
+  const matches = (hash: string | null) => {
+    const expected = Buffer.from(hash ?? "", "hex");
+    return expected.length === given.length && expected.length > 0 && timingSafeEqual(expected, given);
+  };
+  // Both are compared every time, so the time taken does not tell which one matched.
+  const first = matches(booking.manageTokenHash);
+  const second = matches(booking.retryTokenHash);
+  return first || second;
 }
 
 export function isBookingRef(value: string): boolean {

@@ -401,6 +401,63 @@ describe("payment", () => {
   });
 });
 
+/**
+ * A booking whose answer never reached the screen (the connection dropped
+ * after the card was charged): the screen sends the same attempt again, and
+ * is told what became of it. Nothing is booked or charged twice.
+ */
+describe("an attempt to book sent again", () => {
+  const attempt = "6f1c2a7e-3b4d-4e5f-8a9b-0c1d2e3f4a5b";
+
+  it("finds the booking it made, charged once, with a link that opens it", async () => {
+    const first = await book({ requestId: attempt });
+    expect(first.ok).toBe(true);
+    // The screen got no answer, and sends the same attempt again: a new card token, the same id.
+    const again = await book({ requestId: attempt, paymentToken: MOCK_TOKEN_OK });
+    expect(again).toMatchObject({ ok: true, ref: first.ok && first.ref, totalCents: first.ok && first.totalCents });
+    expect(charges).toHaveLength(1);
+    expect(await db.select().from(bookings)).toHaveLength(1);
+    // Both links open the booking: the one of the confirmation email, and the second one the screen was given.
+    expect(await getBookingByToken(db, first.ok ? first.ref : "", first.ok ? first.manageToken : "")).not.toBeNull();
+    expect(await getBookingByToken(db, again.ok ? again.ref : "", again.ok ? again.manageToken : "")).not.toBeNull();
+    expect(again.ok && first.ok && again.manageToken !== first.manageToken).toBe(true);
+    // Only a hash of the attempt's id is kept, never the id itself.
+    const [row] = await db.select().from(bookings);
+    expect(row.requestKey).toBe(hashToken(`request:${attempt}`));
+    expect(JSON.stringify(row)).not.toContain(attempt);
+  });
+
+  it("is over when it did not go through: the next press books anew", async () => {
+    expect(await book({ requestId: attempt, paymentToken: MOCK_TOKEN_DECLINED })).toMatchObject({ ok: false, code: "payment_failed" });
+    expect(await book({ requestId: attempt })).toMatchObject({ ok: false, status: 409, code: "attempt_over" });
+    expect(charges).toHaveLength(0);
+    // A new attempt, with an id of its own, books the time.
+    expect(await book({ requestId: "0b2c4d6e-8f10-4a2b-9c3d-4e5f6a7b8c9d" })).toMatchObject({ ok: true });
+    expect(charges).toHaveLength(1);
+  });
+
+  it("is asked to wait while the first is still on its way", async () => {
+    // The first press is between holding the time and confirming it.
+    const slow: PaymentProvider = { ...countingProvider, charge: () => new Promise(() => {}) };
+    void book({ requestId: attempt }, { payments: slow });
+    await expect.poll(async () => (await db.select().from(bookings)).length).toBe(1);
+    expect(await book({ requestId: attempt })).toMatchObject({ ok: false, status: 409, code: "in_progress" });
+    expect(charges).toHaveLength(0);
+  });
+
+  it("is over when it is sent for something else", async () => {
+    expect((await book({ requestId: attempt })).ok).toBe(true);
+    expect(await book({ requestId: attempt, startMinute: h(14) })).toMatchObject({ ok: false, code: "attempt_over" });
+    expect(await book({ requestId: attempt, studioIds: [ids.paris] })).toMatchObject({ ok: false, code: "attempt_over" });
+    expect(charges).toHaveLength(1);
+  });
+
+  it("does not stand in the way of a booking without one", async () => {
+    expect((await book()).ok).toBe(true);
+    expect((await book({ startMinute: h(14) })).ok).toBe(true);
+  });
+});
+
 describe("bad input is refused", () => {
   const cases: [string, Partial<BookingInput>, string][] = [
     ["negative duration", { durationMinutes: -60 }, "invalid_input"],

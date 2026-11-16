@@ -338,13 +338,27 @@ export const bookings = pgTable(
     cancelReason: cancelReason("cancel_reason"),
     /** Hash of the secret in the customer's manage link. */
     manageTokenHash: text("manage_token_hash").notNull(),
+    /**
+     * The SHA-256 of the id the booking screen gave this attempt to book.
+     * The screen sends the id again when it got no answer, so that a booking
+     * made and paid whose answer was lost is found, not made or charged
+     * twice. Only its hash is kept: the id works like a password for the
+     * booking. Null for a booking made in the admin, and for older ones.
+     */
+    requestKey: text("request_key"),
+    /** Hash of the secret of a second manage link, given to the screen that asked again for a booking it had made. */
+    retryTokenHash: text("retry_token_hash"),
     termsAcceptedAt: ts("terms_accepted_at"),
     /** When this completed visit was counted for loyalty (a free hour may or may not have followed). */
     loyaltyIssuedAt: ts("loyalty_issued_at"),
     cancelledAt: ts("cancelled_at"),
     createdAt: createdAt(),
   },
-  (t) => [index("bookings_email_idx").on(t.customerEmail), index("bookings_start_idx").on(t.startAt)],
+  (t) => [
+    index("bookings_email_idx").on(t.customerEmail),
+    index("bookings_start_idx").on(t.startAt),
+    uniqueIndex("bookings_request_key").on(t.requestKey).where(sql`${t.requestKey} is not null`),
+  ],
 );
 
 /**

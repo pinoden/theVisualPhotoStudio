@@ -51,6 +51,17 @@ const STEP_LABEL: Record<Step, string> = {
 
 const MOCK_TOKEN = "mock-card-ok";
 
+/** A random id for one attempt to book (see `requestId` in src/server/bookings.ts). */
+function newRequestId(): string {
+  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  // An address that is not https (a phone trying the site on the local network) has no randomUUID: the same, by hand.
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 /** A code the server accepted for one email address. */
 interface AppliedCode {
   code: string;
@@ -148,6 +159,13 @@ export function BookingFlow({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const cardRef = useRef<SquareCard | null>(null);
+  /**
+   * The id of the attempt to book on its way. Sent again with a retry that
+   * follows no answer at all (the connection dropped), so that a booking that
+   * was made and paid is found and not made again; any answer, and any step
+   * back, ends the attempt.
+   */
+  const requestIdRef = useRef<string | null>(null);
   const topRef = useRef<HTMLDivElement>(null);
 
   const steps = ORDER[mode];
@@ -348,6 +366,7 @@ export function BookingFlow({
 
   // ── Navigation ─────────────────────────────────────────────────────────────
   function go(index: number, options: { refetch?: boolean } = {}) {
+    requestIdRef.current = null;
     setError("");
     setStepIndex(index);
     // Availability is read fresh whenever the customer reaches a step that shows it.
@@ -467,6 +486,7 @@ export function BookingFlow({
           acceptTerms: true,
           paymentToken,
           expectedTotalCents: price.totalCents,
+          requestId: (requestIdRef.current ??= newRequestId()),
         }),
       });
       const data = (await response.json().catch(() => ({}))) as {
@@ -482,6 +502,8 @@ export function BookingFlow({
         navigate(`/booking/${data.ref}?t=${encodeURIComponent(data.manageToken)}`);
         return;
       }
+      // An answer: this attempt is over, and the next press is a new one. Unless it is still on its way.
+      if (data.code !== "in_progress") requestIdRef.current = null;
       if (data.code === "slot_taken") {
         setStart(null);
         go(steps.indexOf("time"), { refetch: true });
@@ -501,7 +523,10 @@ export function BookingFlow({
           : data.message || "Something went wrong. Please try again.",
       );
     } catch {
-      setError("Network error. Please check your connection and try again. If you are unsure whether the booking went through, check your email before retrying.");
+      // No answer at all: the attempt may have gone through. It keeps its id, so pressing again finds it if it did.
+      setError(
+        "We could not reach the studio's server, so we cannot tell whether your booking went through. Check your connection and press the button again: if it went through, you will see it, and your card is not charged twice.",
+      );
     } finally {
       if (!leaving) setSubmitting(false);
     }

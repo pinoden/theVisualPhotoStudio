@@ -75,6 +75,8 @@ let availabilityAsked: string;
 let photographerBusy: [number, number][];
 let posted: Record<string, unknown>[];
 let bookingReply: { status: number; body: Record<string, unknown> };
+/** How many of the next answers to a booking are lost on the way, as when a phone's connection drops. */
+let lostAnswers: number;
 
 function reply(body: unknown, status = 200) {
   return { ok: status < 400, status, json: async () => body };
@@ -86,6 +88,7 @@ beforeEach(() => {
   availabilityAsked = "";
   photographerBusy = [];
   posted = [];
+  lostAnswers = 0;
   bookingReply = { status: 201, body: { ok: true, ref: "VS-TEST22", manageToken: "secret-token-1234567890" } };
   nav.push.mockReset();
   nav.refresh.mockReset();
@@ -130,6 +133,10 @@ beforeEach(() => {
       if (input === "/api/quote") return reply({ ok: true, promo: { code: "THANKS-FREE-HOUR", kind: "free_hour", value: 60 } });
       if (input === "/api/bookings") {
         posted.push(JSON.parse(init!.body!));
+        if (lostAnswers > 0) {
+          lostAnswers--;
+          throw new TypeError("Failed to fetch");
+        }
         return reply(bookingReply.body, bookingReply.status);
       }
       throw new Error(`unexpected request: ${input}`);
@@ -415,6 +422,58 @@ describe("studio-first flow", () => {
     await user.click(await screen.findByRole("button", { name: "Confirm & pay $124.80" }));
     expect(posted[0]).toMatchObject({ expectedTotalCents: 12480 });
     expect(posted[0].promoCode).toBeUndefined(); // the code is not sent, so it is not spent
+  });
+
+  it("sends the same attempt again after no answer at all, so a booking that was made is found", async () => {
+    render(<BookingFlow catalog={catalog} navigate={nav.push} />);
+    await user.click(studioBox("Studio Paris"));
+    await next();
+    pickDate(WED);
+    await pickDuration("1 hr");
+    await next();
+    await pickTime("9:00 AM");
+    await next();
+    await fillDetails();
+    await next();
+    // The booking is made, and its answer is lost on the way.
+    lostAnswers = 1;
+    await user.click(await screen.findByRole("button", { name: "Confirm & pay $68" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("we cannot tell whether your booking went through");
+    expect(nav.push).not.toHaveBeenCalled();
+    // Pressed again, the same attempt: the server finds the booking, and the customer is taken to it.
+    await user.click(screen.getByRole("button", { name: "Confirm & pay $68" }));
+    await waitFor(() => expect(nav.push).toHaveBeenCalledWith("/booking/VS-TEST22?t=secret-token-1234567890"));
+    expect(posted).toHaveLength(2);
+    expect(posted[0].requestId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(posted[1].requestId).toBe(posted[0].requestId);
+  });
+
+  it("starts a new attempt after an answer, and after a step back", async () => {
+    bookingReply = { status: 402, body: { ok: false, code: "payment_failed", message: "Payment failed: Card declined. Your card was not charged." } };
+    render(<BookingFlow catalog={catalog} navigate={nav.push} />);
+    await user.click(studioBox("Studio Paris"));
+    await next();
+    pickDate(WED);
+    await pickDuration("1 hr");
+    await next();
+    await pickTime("9:00 AM");
+    await next();
+    await fillDetails();
+    await next();
+    await user.click(await screen.findByRole("button", { name: "Confirm & pay $68" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Card declined");
+    await user.click(screen.getByRole("button", { name: "Confirm & pay $68" }));
+    await waitFor(() => expect(posted).toHaveLength(2));
+    expect(posted[1].requestId).not.toBe(posted[0].requestId);
+    // No answer, then a step back and forward again: a new attempt too.
+    lostAnswers = 1;
+    await user.click(screen.getByRole("button", { name: "Confirm & pay $68" }));
+    await waitFor(() => expect(posted).toHaveLength(3));
+    await user.click(screen.getByRole("button", { name: /Back/ }));
+    await next();
+    await user.click(await screen.findByRole("button", { name: "Confirm & pay $68" }));
+    await waitFor(() => expect(posted).toHaveLength(4));
+    expect(posted[3].requestId).not.toBe(posted[2].requestId);
   });
 
   it("shows the server's message when payment fails and stays on the payment step", async () => {

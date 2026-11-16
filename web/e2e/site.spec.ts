@@ -34,6 +34,7 @@ const MOVE_FROM = dateAhead(38); // and for the discounted booking that is moved
 const MOVE_TO = dateAhead(45);
 const FREE_HOUR_DAY = dateAhead(52); // and for the bookings made with a free hour
 const PHOTO_DAY = dateAhead(59); // and for the photography sessions
+const LOST_DAY = dateAhead(66); // and for the booking whose answer is lost on the way
 
 const jane = { name: "Jane Smith", email: "jane.e2e@example.com", phone: "407-555-0100" };
 const bob = { name: "Bob Brown", email: "bob.e2e@example.com", phone: "407-555-0111" };
@@ -779,13 +780,14 @@ test("the owner sets how to get in, and only a customer with a confirmed booking
   await page.getByRole("button", { name: "Save getting-in text" }).click();
   await expect(byText(page, /Saved\. New confirmation emails/)).toBeVisible();
 
-  // Public pages say that the email explains it, and never contain the text itself.
+  // Public pages say that the email explains it, and never contain the text itself. (The code alone, 4821, can
+  // turn up by chance inside one of the random ids a page carries; the text as written cannot.)
   await page.goto("/faq");
   await expect(byText(page, "How do I get into the building?")).toBeVisible();
-  expect(await page.content()).not.toContain("4821");
+  expect(await page.content()).not.toContain("Door code 4821#");
   await page.goto("/book");
   await expect(page.getByRole("heading", { name: "Reserve Your Studio" })).toBeVisible();
-  expect(await page.content()).not.toContain("4821");
+  expect(await page.content()).not.toContain("Door code 4821#");
 
   // A new booking's page and its confirmation email carry it.
   await bookStudioFirstToPayment(page, { studios: ["Studio Paris"], date: DOOR_DAY, duration: "1 hr", time: "3:00 PM", customer: jane });
@@ -1250,4 +1252,30 @@ test("a client without a photographer books a session, and the photographer cann
     await expect(page.getByRole("button", { name: blocked, exact: true })).toHaveCount(0);
   }
   await expect(page.getByRole("button", { name: "4:00 PM", exact: true })).toBeVisible();
+});
+
+test("a booking whose answer is lost on the way is found when the customer presses again, and is charged once", async ({ page }) => {
+  const lena = { name: "Lena Lost", email: "lena.lost@example.com", phone: "407-555-0166" };
+  await bookStudioFirstToPayment(page, { studios: ["Studio Paris"], date: LOST_DAY, duration: "1 hr", time: "10:00 AM", customer: lena });
+  // The booking reaches the server, which makes it and charges the card; its answer never reaches the phone.
+  let lost = false;
+  await page.route("**/api/bookings", async (route) => {
+    if (lost) return route.continue();
+    lost = true;
+    await route.fetch();
+    await route.abort("connectionreset");
+  });
+  await page.getByRole("button", { name: "Confirm & pay $68" }).click();
+  await expect(onScreen(page.locator(".flash-error"))).toContainText("we cannot tell whether your booking went through");
+
+  // Pressed again, the same attempt: the customer is taken to the booking that was made.
+  const ref = await confirmAndGetRef(page, "Confirm & pay $68");
+  await expect(totalRow(page)).toContainText("$68");
+  // One booking, one confirmation, one charge.
+  const outbox = await page.context().newPage();
+  await outbox.goto("/dev/outbox");
+  const confirmations = outbox.locator(".admin-card", { hasText: `To ${lena.email} · booking_confirmation` });
+  await expect(confirmations).toHaveCount(1);
+  await expect(confirmations).toContainText(ref);
+  await outbox.close();
 });
