@@ -45,6 +45,8 @@ export default defineConfig({
     timeout: 180_000,
     env: {
       PGLITE_DATA_NAME: NAME,
+      // The site's own address, as production has it: the addresses in pages' metadata and emails are made with it.
+      SITE_URL: `http://localhost:${PORT}`,
       NEXT_DIST_DIR: `.next-${NAME}`,
       // Eleven owners: sign-in codes are limited to three per address in 15 minutes. The fourth is for
       // z-mobile.spec.ts, the fifth for the customers test of site.spec.ts, the sixth to tenth for website.spec.ts,

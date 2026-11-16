@@ -5,7 +5,7 @@ import { PreviewBar } from "@/components/PreviewBar";
 import { SiteFooter } from "@/components/SiteFooter";
 import { SiteNav } from "@/components/SiteNav";
 import { designCss } from "@/lib/site/design";
-import { isPreview, siteDesign, siteFrame } from "@/server/site";
+import { isPreview, metadataBase, shareMetadata, siteDesign, siteFrame } from "@/server/site";
 import { FONT_CLASSES } from "./fonts";
 import "./globals.css";
 
@@ -13,8 +13,11 @@ import "./globals.css";
 export async function generateMetadata(): Promise<Metadata> {
   const { frame } = await siteFrame();
   return {
+    // The addresses of the sharing picture and of each page are made whole with SITE_URL.
+    metadataBase: metadataBase(),
     title: { default: frame.search.title, template: `%s | ${frame.business.name}` },
     description: frame.search.description,
+    ...(await shareMetadata({ title: frame.search.title, description: frame.search.description })),
   };
 }
 

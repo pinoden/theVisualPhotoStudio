@@ -49,12 +49,20 @@ export interface ShownFrame {
   announcement: boolean;
   /** The logo's picture, when the frame names one that is in the library. */
   logo: Picture | null;
+  /** The picture for sharing, when the frame names one that is in the library. */
+  share: Picture | null;
 }
 
 /** A frame with what showing it needs worked out: today's answer about the announcement, and the logo's picture. */
 export async function shownFrame(db: DbLike, frame: SiteFrame): Promise<ShownFrame> {
-  const logo = frame.logo.image ? ((await loadPictures(db, [frame.logo.image])).get(frame.logo.image) ?? null) : null;
-  return { frame, announcement: announcementShows(frame, localDateOf(new Date())), logo };
+  const wanted = [frame.logo.image, frame.search.image].filter((id) => id !== "");
+  const pictures = wanted.length > 0 ? await loadPictures(db, wanted) : new Map<string, Picture>();
+  return {
+    frame,
+    announcement: announcementShows(frame, localDateOf(new Date())),
+    logo: pictures.get(frame.logo.image) ?? null,
+    share: pictures.get(frame.search.image) ?? null,
+  };
 }
 
 /**

@@ -14,6 +14,15 @@ import type { TaskDeps } from "./tasks";
  */
 
 /** The site's public origin, for links in emails. */
+/**
+ * The website's address as configured (`SITE_URL`), or null. For what is
+ * worked out while a page is prerendered (the addresses in its metadata),
+ * which cannot ask the request the way `siteUrl` does.
+ */
+export function configuredSiteUrl(): string | null {
+  return process.env.SITE_URL ? process.env.SITE_URL.replace(/\/$/, "") : null;
+}
+
 export async function siteUrl(): Promise<string> {
   if (process.env.SITE_URL) return process.env.SITE_URL.replace(/\/$/, "");
   const h = await headers();

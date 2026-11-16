@@ -75,6 +75,13 @@ test("public pages show the studios and the live price list", async ({ page }) =
   await expect(page.getByRole("heading", { name: "Studio Blanche" })).toBeVisible();
   await expect(byText(page, "From $88/hour")).toBeVisible();
   await shot(page, "01-home");
+  // For search engines and shared links: the studio as a business, from the admin's details, and the page's own title.
+  const business = JSON.parse((await page.locator('script[type="application/ld+json"]').first().textContent()) ?? "{}");
+  expect(business).toMatchObject({ "@type": "LocalBusiness", name: "The Visuals Photo Studio", telephone: "(407) 663-6109" });
+  expect(business.address).toMatchObject({ addressLocality: "Winter Park", addressRegion: "FL", postalCode: "32792" });
+  await expect(page.locator('meta[property="og:title"]')).toHaveAttribute("content", "The Visuals Photo Studio | Winter Park, FL");
+  // The website's own address, made whole with SITE_URL.
+  await expect(page.locator('link[rel="canonical"]')).toHaveAttribute("href", /^http:\/\/localhost:\d+\/?$/);
 
   await page.goto("/rates");
   await expect(page.getByRole("heading", { name: "Studio Rates" })).toBeVisible();
@@ -105,6 +112,9 @@ test("public pages show the studios and the live price list", async ({ page }) =
 test("guest information answers with the current rules and prices", async ({ page }) => {
   await page.goto("/faq");
   await expect(page.getByRole("heading", { name: "Guest Information" })).toBeVisible();
+  // A link to it, shared, says what it is.
+  await expect(page.locator('meta[property="og:title"]')).toHaveAttribute("content", "Guest Information");
+  await expect(page.locator('link[rel="canonical"]')).toHaveAttribute("href", /\/faq$/);
 
   // Answers are closed until asked for.
   const refunds = page.locator("details.faq-item", { hasText: "Can I cancel, and do I get a refund?" });

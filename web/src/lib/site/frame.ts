@@ -58,7 +58,16 @@ export interface SiteFrame {
    * title of the home page, and the description of any page that has none of
    * its own. Every other page's title is its own name, then the studio's.
    */
-  search: { title: string; description: string };
+  search: {
+    title: string;
+    description: string;
+    /**
+     * The picture a link to the website shows when it is shared (in a message,
+     * on Facebook): the id of a picture of the media library, or "" for the
+     * first photo of the first studio.
+     */
+    image: string;
+  };
   /**
    * The logo is two pieces of text; the second is in the accent colour. With
    * `image` (the id of a picture of the media library) the header shows that
@@ -93,6 +102,10 @@ export interface SiteFrame {
 
 /** The studio's name and contact details: on the website, in every email and on every receipt. */
 export type Business = SiteFrame["business"];
+
+/** The id of a picture of the media library, from whatever was stored or sent; "" for none. */
+const pictureId = (value: unknown): string =>
+  typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value) ? value.toLowerCase() : "";
 
 /** Whether a link leads to the page at `path`: "/faq", "/faq#pets" and "/faq?from=menu" all lead to "/faq". */
 export function leadsTo(href: string, path: string): boolean {
@@ -145,6 +158,7 @@ export const DEFAULT_FRAME: SiteFrame = {
     note: "By appointment only",
   },
   search: {
+    image: "",
     title: "The Visuals Photo Studio | Winter Park, FL",
     description:
       "Natural-light photography studios for rent in Winter Park, FL. Studio Blanche, Dayglow and Paris, bookable by the hour.",
@@ -316,11 +330,12 @@ export function parseFrame(input: unknown): SiteFrame {
     search: {
       title: line(search.title, FRAME_LIMITS.searchTitle, d.search.title),
       description: line(search.description, FRAME_LIMITS.searchDescription, d.search.description),
+      image: pictureId(search.image),
     },
     logo: {
       text: line(logo.text, FRAME_LIMITS.label, d.logo.text),
       accent: optional(logo.accent, FRAME_LIMITS.label, d.logo.accent),
-      image: typeof logo.image === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(logo.image) ? logo.image.toLowerCase() : "",
+      image: pictureId(logo.image),
     },
     header: { menuPosition: oneOf(header.menuPosition, MENU_POSITIONS, d.header.menuPosition) },
     menu: parseMenu(raw.menu) ?? d.menu,

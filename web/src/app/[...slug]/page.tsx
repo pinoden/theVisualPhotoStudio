@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { notFound, permanentRedirect } from "next/navigation";
 import { PageBlocks } from "@/components/site/PageBlocks";
 import { getRedirect } from "@/server/cached";
-import { sitePage } from "@/server/site";
+import { shareMetadata, siteFrame, sitePage } from "@/server/site";
 
 /**
  * A page of the admin (Admin, Website, Pages), at its own address: the ones
@@ -37,7 +37,8 @@ export const instant = false;
 const pathOf = async (params: PageProps<"/[...slug]">["params"]) => (await params).slug.join("/");
 
 export async function generateMetadata({ params }: PageProps<"/[...slug]">): Promise<Metadata> {
-  const page = await sitePage(await pathOf(params));
+  const path = await pathOf(params);
+  const [page, { frame }] = await Promise.all([sitePage(path), siteFrame()]);
   if (!page) return {};
   const { meta } = page.content;
   return {
@@ -45,6 +46,7 @@ export async function generateMetadata({ params }: PageProps<"/[...slug]">): Pro
     title: meta.title ? { absolute: meta.title } : page.title,
     ...(meta.description ? { description: meta.description } : {}),
     ...(meta.hidden ? { robots: { index: false } } : {}),
+    ...(await shareMetadata({ title: meta.title || page.title, description: meta.description || frame.search.description, path: `/${path}` })),
   };
 }
 

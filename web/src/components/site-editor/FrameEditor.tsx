@@ -118,8 +118,8 @@ export interface FrameEditorProps {
   versions: VersionSummary[];
   /** The pages of the admin, the home page among them, offered as link suggestions beside the site's own screens. */
   pages: { path: string; title: string }[];
-  /** The logo's picture as the draft has it, when it has one: the frame itself only holds the picture's id. */
-  logoPicture: ChoosablePicture | null;
+  /** The pictures the draft names (the logo's, the sharing picture): the frame itself only holds their ids. */
+  pictures: ChoosablePicture[];
 }
 
 /**
@@ -133,13 +133,14 @@ export function FrameEditor(props: FrameEditorProps) {
   return <FrameForm key={props.initial.revision} {...props} notice={notice} report={setNotice} />;
 }
 
-function FrameForm({ initial, versions, logoPicture, pages: madePages, notice, report }: FrameEditorProps & { notice: string; report: (notice: string) => void }) {
+function FrameForm({ initial, versions, pictures, pages: madePages, notice, report }: FrameEditorProps & { notice: string; report: (notice: string) => void }) {
   const editor = useDocumentEditor<SiteFrame>("frame", initial, report);
   const frame = editor.value;
   const pages = useId();
-  // The pictures this editor has seen, to show the one the frame names by its id.
-  const [seen, setSeen] = useState<ChoosablePicture[]>(logoPicture ? [logoPicture] : []);
+  // The pictures this editor has seen, to show the ones the frame names by their ids.
+  const [seen, setSeen] = useState<ChoosablePicture[]>(pictures);
   const logoShown = seen.find((picture) => picture.id === frame.logo.image);
+  const shareShown = seen.find((picture) => picture.id === frame.search.image);
   const set = <K extends keyof SiteFrame>(key: K, value: SiteFrame[K]) => editor.change({ ...frame, [key]: value });
   const { business, logo, menu, bookButton, footer, social, announcement, search } = frame;
   const setMenuItem = (index: number, item: MenuItem) => set("menu", replaced(menu, index, item));
@@ -375,6 +376,34 @@ function FrameForm({ initial, versions, logoPicture, pages: madePages, notice, r
               help="One or two sentences a search engine may show under the title."
               onChange={(description) => set("search", { ...search, description })}
             />
+            <h4 className="editor-subtitle">The picture shown when the website is shared</h4>
+            <p className="editor-hint">
+              A link to the website sent in a message or posted on Facebook shows this picture beside the title and the
+              description. Without one, the first photo of the first studio is shown. A wide photograph suits it best.
+            </p>
+            {search.image !== "" && (
+              <p className="editor-logo">
+                {shareShown ? (
+                  <Image src={shareShown.url} width={shareShown.width} height={shareShown.height} alt={shareShown.alt || shareShown.filename} sizes="240px" />
+                ) : (
+                  <span className="editor-hint">A picture is chosen.</span>
+                )}
+              </p>
+            )}
+            <div className="editor-row-buttons">
+              <PictureChooser
+                label={search.image === "" ? "Choose a picture for sharing" : "Choose another picture"}
+                onChoose={([picture]) => {
+                  setSeen((current) => [...current.filter((entry) => entry.id !== picture.id), picture]);
+                  set("search", { ...search, image: picture.id });
+                }}
+              />
+              {search.image !== "" && (
+                <button type="button" className="btn btn-outline btn-small" onClick={() => set("search", { ...search, image: "" })}>
+                  Use the first studio photo
+                </button>
+              )}
+            </div>
           </Group>
 
           <History editor={editor} versions={versions} onOriginal={() => editor.change(initial.original)} />
