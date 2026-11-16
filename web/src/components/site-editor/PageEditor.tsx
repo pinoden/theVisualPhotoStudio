@@ -77,7 +77,11 @@ function PageEditorBody({ initial, versions, collections, links, fontClasses, no
       discard: () => discardPageDraftAction(initial.id),
       restore: (versionId) => restorePageVersionAction(initial.id, versionId),
       // Requirement 24's guard rails: the draft, as visitors would get it, measured at phone widths before it is published.
-      check: () => checkOnPhones(`/admin/website/pages/${encodeURIComponent(initial.id)}/check`),
+      check: {
+        busy: "Checking the page at the width of a phone…",
+        subject: "this page",
+        run: () => checkOnPhones(`/admin/website/pages/${encodeURIComponent(initial.id)}/check`),
+      },
     }),
     [initial.id],
   );

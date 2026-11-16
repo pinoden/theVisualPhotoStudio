@@ -944,6 +944,33 @@ test("a page that would be wider than a phone is not published, and is once it f
   await guest.context().close();
 });
 
+test("a header that would be wider than a phone is not published: a change that reaches every page is checked on the website first", async ({ page, browser }) => {
+  await page.setViewportSize({ width: 1440, height: 1200 });
+  // The tenth owner's second sign-in code.
+  await signIn(page, GUARD_OWNER, "/admin/website/navigation");
+  // A logo of many words, which the header keeps on one line.
+  await group(page, "Logo").locator("summary").click();
+  await byLabel(page, "Logo text").fill("The Visuals Photography and Portraits");
+  await saved(page);
+  await page.getByRole("button", { name: "Publish", exact: true }).click();
+  const refused = byText(page, /^Not published: on a phone, the website with this header, menu and footer would be hard to use\./);
+  await expect(refused).toBeVisible({ timeout: 60_000 });
+  // It says on which pages, at which width, and what, once for both pages: the header is the same on every page.
+  await expect(refused).toContainText(/At 320px, on the home page and the booking page: "The Visuals Photography and Portraits[^"]*" reaches \d+px; "Menu" reaches \d+px\./);
+  await expect(refused).toContainText(/At 390px, on the home page and the booking page: /);
+  await shot(page, "53a-admin-header-phone-check");
+  // Visitors still have the header as it was.
+  const guest = await visitor(browser);
+  await guest.goto("/");
+  await expect(guest.locator(".site-nav .site-logo")).toHaveText(/^The Visuals\s*Photo Studio$/);
+  await guest.context().close();
+
+  // Given up, the header is as it was built, for the tests that follow.
+  await page.getByRole("button", { name: "Discard changes" }).click();
+  await page.getByRole("button", { name: "Yes, discard them" }).click();
+  await expect(byText(page, "The changes were discarded.")).toBeVisible();
+});
+
 // ── Reviews and logos (ideas taken from another studio's website) ──
 
 /** A logo drawn as a picture: a coloured mark beside a bar, on white. */
@@ -958,7 +985,7 @@ async function logoFile(name: string, colour: string) {
 
 test("a page shows what clients wrote, with their stars, and the logos of brands the studio worked for", async ({ page, browser }) => {
   await page.setViewportSize({ width: 1440, height: 1200 });
-  // The tenth owner's second sign-in code. Two logos first, each described by the brand's name.
+  // The tenth owner's third sign-in code. Two logos first, each described by the brand's name.
   await signIn(page, GUARD_OWNER, "/admin/website/media");
   await expect(page.getByLabel("Add pictures", { exact: true })).toBeEnabled();
   await page.getByLabel("Add pictures", { exact: true }).setInputFiles([await logoFile("logo-north.png", "#1f3b5a"), await logoFile("logo-bloom.png", "#b0526e")]);

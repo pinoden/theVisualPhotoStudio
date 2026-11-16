@@ -21,6 +21,8 @@ export function widerThanScreen(doc: Document = document): string[] {
   const view = doc.defaultView!;
   const limit = doc.documentElement.clientWidth + 1;
   const found: string[] = [];
+  // What sits inside something already named is part of the same problem: only the outermost is named.
+  const named: Element[] = [];
   if (doc.documentElement.scrollWidth > limit) {
     found.push(`the page scrolls sideways (${doc.documentElement.scrollWidth}px wide on a ${limit - 1}px screen)`);
   }
@@ -38,9 +40,13 @@ export function widerThanScreen(doc: Document = document): string[] {
       box = box.parentElement;
     }
     if (scrolls) continue;
-    // Named by its own words when it has some, as a person reads it; otherwise by its tag and classes.
+    if (named.some((outer) => outer.contains(el))) continue;
+    named.push(el);
+    // Named by its own words when it has some, as a person reads it; then by the name it gives a screen reader
+    // (a button of three bars is "Menu"); otherwise by its tag and classes.
     const words = (el.innerText || "").trim().replace(/\s+/g, " ").slice(0, 40);
-    const what = words ? `"${words}"` : `<${el.tagName.toLowerCase()} class="${el.className}">`;
+    const label = (el.getAttribute("aria-label") || "").trim().slice(0, 40);
+    const what = words ? `"${words}"` : label ? `"${label}"` : `<${el.tagName.toLowerCase()} class="${el.className}">`;
     found.push(rect.left < -1 ? `${what} starts ${Math.round(-rect.left)}px left of the screen` : `${what} reaches ${Math.round(rect.right)}px`);
   }
   return [...new Set(found)].slice(0, 6);

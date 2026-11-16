@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { discardAction, publishAction, restoreVersionAction, saveDraftAction, type DocumentKind } from "@/app/admin/website/actions";
+import { checkWebsiteOnPhones } from "./phone-check";
 
 /** How long after the last change the draft is saved by itself. */
 const AUTOSAVE_MS = 900;
@@ -60,11 +61,23 @@ export interface DraftActions<T> {
   restore(versionId: string): Promise<Outcome>;
   /**
    * Run after the draft is saved and before it is published: what would be
-   * wrong with it on the website. Nothing is published while anything is.
-   * The page editor's phone checks (phone-check.ts).
+   * wrong with it on the website, in sentences. Nothing is published while
+   * anything is. The phone checks of phone-check.ts.
    */
-  check?(): Promise<string[]>;
+  check?: {
+    /** What the editor says while the check runs. */
+    busy: string;
+    /** What would be hard to use on a phone: "this page", "the website with this design". */
+    subject: string;
+    run(): Promise<string[]>;
+  };
 }
+
+/** What a change of the design, or of the header, menu and footer, would break: it reaches every page. */
+const WEBSITE_SUBJECT: Record<DocumentKind, string> = {
+  design: "the website with this design",
+  frame: "the website with this header, menu and footer",
+};
 
 /** The editor of the design, or of the header, menu and footer. */
 export function useDocumentEditor<T>(kind: DocumentKind, initial: DraftStart<T>, report: (notice: string) => void): DocumentEditor<T> {
@@ -75,6 +88,7 @@ export function useDocumentEditor<T>(kind: DocumentKind, initial: DraftStart<T>,
       publish: () => publishAction(kind),
       discard: () => discardAction(kind),
       restore: (versionId) => restoreVersionAction(kind, versionId),
+      check: { busy: "Checking the website at the width of a phone…", subject: WEBSITE_SUBJECT[kind], run: checkWebsiteOnPhones },
     },
     report,
   );
@@ -225,17 +239,20 @@ export function useDraftEditor<T>(initial: DraftStart<T>, actions: DraftActions<
       act(
         async () => {
           if (actions.check) {
-            report("Checking the page at the width of a phone…");
+            report(actions.check.busy);
             let problems: string[];
             try {
-              problems = await actions.check();
+              problems = await actions.check.run();
             } catch (error) {
               report("");
-              return { ok: false, message: `Not published: ${error instanceof Error ? error.message : "the page could not be checked."} Try again.` };
+              return { ok: false, message: `Not published: ${error instanceof Error ? error.message : "the change could not be checked."} Try again.` };
             }
             report("");
             if (problems.length > 0) {
-              return { ok: false, message: `Not published: on a phone, this page would be hard to use. ${problems.join(" ")} Change it so it fits, then publish again.` };
+              return {
+                ok: false,
+                message: `Not published: on a phone, ${actions.check.subject} would be hard to use. ${problems.join(" ")} Change it so it fits, then publish again.`,
+              };
             }
           }
           return actions.publish();

@@ -1,13 +1,19 @@
 import { hardToTouch, tooSmallToRead, widerThanScreen } from "@/lib/site/phone-checks";
+import { previewUrl } from "./parts";
 
 /**
- * The page editor's guard rails (requirement 24): before a page is published
- * its draft is drawn as visitors would get it, out of sight, at the width of
- * the smallest phone still in use and of an iPhone, and measured with the
- * same checks the phone tests use (src/lib/site/phone-checks.ts). A page
+ * The website editor's guard rails (requirement 24): before a change is
+ * published it is drawn as visitors would get it, out of sight, at the width
+ * of the smallest phone still in use and of an iPhone, and measured with the
+ * same checks the phone tests use (src/lib/site/phone-checks.ts). A change
  * with a problem is not published; the editor says what the problem is.
  *
- * In the browser only. It is a guard against a page that would break on a
+ * A page is checked by itself (`checkOnPhones`). A change of the design, or
+ * of the header, menu and footer, reaches every page: it is checked on the
+ * home page and the booking page, drawn with the drafts as a preview draws
+ * them (`checkWebsiteOnPhones`).
+ *
+ * In the browser only. It is a guard against a change that would break on a
  * phone, not a lock: the server publishes what an editor sends it.
  */
 
@@ -28,8 +34,27 @@ async function until(ready: () => boolean, ms: number, failure: string): Promise
   }
 }
 
-/** `url` loaded in a frame `width` CSS pixels wide, out of sight; what the checks find in it. */
-async function checkAt(url: string, width: number): Promise<string[]> {
+/** Whether the page in a frame is drawn, by the site's stylesheet, and can be measured. */
+type Drawn = (doc: Document, view: Window) => boolean;
+
+const onScreen = (element: Element | null): element is Element => element !== null && element.getClientRects().length > 0;
+
+/** A page's draft on the page editor's check route: `.blk-root` is a flow-root once the site's stylesheet applies. */
+const draftDrawn: Drawn = (doc, view) => {
+  const page = doc.querySelector("[data-phone-check]");
+  return onScreen(page) && view.getComputedStyle(page).display === "flow-root";
+};
+
+/** A page of the website: its header, which the site's stylesheet fixes to the top, and `content`, on screen. */
+const pageDrawn =
+  (content: string): Drawn =>
+  (doc, view) => {
+    const header = doc.querySelector(".site-nav");
+    return header !== null && view.getComputedStyle(header).position === "fixed" && onScreen(doc.querySelector(content));
+  };
+
+/** `url` loaded in a frame `width` CSS pixels wide, out of sight; what the checks find in it once it is `drawn`. */
+async function checkAt(url: string, width: number, drawn: Drawn): Promise<string[]> {
   const frame = document.createElement("iframe");
   frame.setAttribute("aria-hidden", "true");
   frame.tabIndex = -1;
@@ -56,15 +81,8 @@ async function checkAt(url: string, width: number): Promise<string[]> {
     const view = doc?.defaultView;
     if (!doc || !view) throw new Error("The page could not be drawn for its check.");
     // The page arrives in parts, and a part is shown by a script after the frame has loaded: wait until the page
-    // is on screen, drawn by the site's stylesheet (`.blk-root` is a flow-root there), before measuring it.
-    await until(
-      () => {
-        const page = doc.querySelector("[data-phone-check]");
-        return page !== null && page.getClientRects().length > 0 && view.getComputedStyle(page).display === "flow-root";
-      },
-      LOAD_MS,
-      "The page could not be drawn for its check.",
-    );
+    // is on screen, drawn by the site's stylesheet, before measuring it.
+    await until(() => drawn(doc, view), LOAD_MS, "The page could not be drawn for its check.");
     await doc.fonts.ready;
     await nextFrame();
     return [...widerThanScreen(doc), ...hardToTouch(doc), ...tooSmallToRead(doc)];
@@ -80,9 +98,45 @@ async function checkAt(url: string, width: number): Promise<string[]> {
  */
 export async function checkOnPhones(url: string): Promise<string[]> {
   const sentences: string[] = [];
+  for (const width of CHECK_WIDTHS) sentences.push(...said(`At ${width}px`, await checkAt(url, width, draftDrawn)));
+  return sentences;
+}
+
+/**
+ * The pages a change that reaches every page is checked on. Between them they
+ * show every part of the design that can break a phone (headings, running
+ * text, buttons, fields, cards), and the header and the footer.
+ */
+const WEBSITE_PAGES = [
+  { path: "/", name: "the home page", drawn: pageDrawn(".blk-root") },
+  // The booking screen draws itself in the browser: its first step is there once the choice of how to book is.
+  { path: "/book", name: "the booking page", drawn: pageDrawn(".wizard-container .mode-toggle") },
+] as const;
+
+/**
+ * What would be wrong on a phone with the website as its drafts make it (the
+ * design, the header, menu and footer, and the pages): a sentence for each
+ * page and width with a problem, "At 320px, on the home page: ...".
+ */
+export async function checkWebsiteOnPhones(): Promise<string[]> {
+  const sentences: string[] = [];
   for (const width of CHECK_WIDTHS) {
-    const problems = await checkAt(url, width);
-    if (problems.length > 0) sentences.push(`At ${width}px: ${problems.slice(0, 4).join("; ")}${problems.length > 4 ? `; and ${problems.length - 4} more` : ""}.`);
+    // The header and the footer are on every page: the same problems on both pages are said once, for both.
+    const groups: { problems: string[]; pages: string[] }[] = [];
+    for (const page of WEBSITE_PAGES) {
+      const problems = await checkAt(previewUrl(page.path), width, page.drawn);
+      if (problems.length === 0) continue;
+      const same = groups.find((group) => group.problems.join("\n") === problems.join("\n"));
+      if (same) same.pages.push(page.name);
+      else groups.push({ problems, pages: [page.name] });
+    }
+    for (const group of groups) sentences.push(...said(`At ${width}px, on ${group.pages.join(" and ")}`, group.problems));
   }
   return sentences;
+}
+
+/** The problems found at one place, as one sentence that starts with `where`; nothing when there are none. */
+function said(where: string, problems: string[]): string[] {
+  if (problems.length === 0) return [];
+  return [`${where}: ${problems.slice(0, 4).join("; ")}${problems.length > 4 ? `; and ${problems.length - 4} more` : ""}.`];
 }
