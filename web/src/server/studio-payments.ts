@@ -227,9 +227,12 @@ async function manualPaymentForUpdate(tx: DbLike, paymentId: string) {
  * Not for money that was really paid and then given back: record that as a
  * refund instead.
  */
-export async function voidStudioPayment(db: Db, viewer: AuthUser, paymentId: string, reason: string, now: Date): Promise<RecordChangeResult> {
+/** `owesAgain`: the booking still stands, so it owes the amount again; one that has ended owes nothing (`STANDS`). */
+export type VoidResult = { ok: true; owesAgain: boolean } | { ok: false; message: string };
+
+export async function voidStudioPayment(db: Db, viewer: AuthUser, paymentId: string, reason: string, now: Date): Promise<VoidResult> {
   if (viewer.role !== "owner") return { ok: false, message: "Only an owner can take a payment record back." };
-  return db.transaction(async (tx): Promise<RecordChangeResult> => {
+  return db.transaction(async (tx): Promise<VoidResult> => {
     const found = await manualPaymentForUpdate(tx, paymentId);
     if (!found) return { ok: false, message: "That payment record was not found." };
     const { payment, booking } = found;
@@ -290,7 +293,7 @@ export async function voidStudioPayment(db: Db, viewer: AuthUser, paymentId: str
       at: now,
       note: `Payment record of ${formatCents(payment.amountCents)} taken back${why ? `: ${why}` : ""}`,
     });
-    return { ok: true };
+    return { ok: true, owesAgain: STANDS.includes(booking.status) };
   });
 }
 

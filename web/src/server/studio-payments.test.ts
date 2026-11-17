@@ -7,6 +7,7 @@ import type { AuthUser } from "./auth";
 import { toBookingViews } from "./bookings";
 import { cancelBooking, getManageChoices, ownerRefund, requestRescheduleCode, retryOpenRefunds } from "./manage";
 import { netCardPaidCents, paidAtStudioCents } from "./money";
+import { loadReceipts } from "./receipts";
 import { moneyOf, recordHandRefund, recordStudioPayment, voidStudioPayment } from "./studio-payments";
 import { BASE_URL, createTestWorld, expectOk, FAR, h, minutesAfter, NEAR, NOW, OWNER_EMAIL, type TestWorld } from "./testing";
 
@@ -161,6 +162,20 @@ describe("a booking made in the admin that has ended", () => {
     const standing = await madeInAdmin();
     expectOk(await recordStudioPayment(world.db, owner, standing.ref, cash(4000), NOW));
     expect(await moneyOf(world.db, await row(standing.ref))).toMatchObject({ dueCents: 13600, ended: null });
+
+    // Its receipt says it was paid in part, not in full; and the client, on a page opened before, is told it ended.
+    const { receipts } = await loadReceipts(world.db, "dana@example.com");
+    expect(receipts.find((receipt) => receipt.ref === partPaid.ref)).toMatchObject({ status: "partly_paid", paidCents: 4000, dueCents: 0 });
+    expect(await cancelBooking(world.db, partPaid.ref, dana, world.manageDeps())).toMatchObject({
+      ok: false,
+      code: "not_confirmed",
+      message: "This booking is no longer confirmed: it was cancelled or released meanwhile, so nothing more was done. Reload the page to see it as it is now.",
+    });
+    // A record taken back does not make it owe anything; one of a booking that stands does.
+    const [cashOfEnded] = await world.db.select().from(payments).where(eq(payments.bookingId, partPaid.id));
+    expect(await voidStudioPayment(world.db, owner, cashOfEnded.id, "Typed twice", NOW)).toEqual({ ok: true, owesAgain: false });
+    const [cashOfStanding] = await world.db.select().from(payments).where(eq(payments.bookingId, standing.id));
+    expect(await voidStudioPayment(world.db, owner, cashOfStanding.id, "Typed twice", NOW)).toEqual({ ok: true, owesAgain: true });
   });
 });
 
@@ -227,7 +242,8 @@ describe("a payment record behind a code of studio credit", () => {
     });
     // Cancelled by the owner, unspent: the record can go.
     await world.db.update(promoCodes).set({ voidedAt: NOW }).where(eq(promoCodes.code, moved.code));
-    expect(await voidStudioPayment(world.db, owner, payment.id, "Recorded by mistake", NOW)).toEqual({ ok: true });
+    // Released for its code, the booking has ended: taking the record back makes it owe nothing.
+    expect(await voidStudioPayment(world.db, owner, payment.id, "Recorded by mistake", NOW)).toEqual({ ok: true, owesAgain: false });
   });
 
   it("behind a reschedule code that paid for another booking: never taken back", async () => {
@@ -250,7 +266,7 @@ describe("correcting what was recorded", () => {
     expectOk(await recordStudioPayment(world.db, owner, made.ref, cash(17600), NOW));
     const [payment] = await world.db.select().from(payments);
 
-    expect(await voidStudioPayment(world.db, owner, payment.id, "Wrong booking", minutesAfter(NOW, 2))).toEqual({ ok: true });
+    expect(await voidStudioPayment(world.db, owner, payment.id, "Wrong booking", minutesAfter(NOW, 2))).toEqual({ ok: true, owesAgain: true });
     const money = await moneyOf(world.db, await row(made.ref));
     expect(money).toMatchObject({ receivedCents: 0, dueCents: 17600 });
     expect(money.payments).toHaveLength(1);

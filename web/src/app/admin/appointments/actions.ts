@@ -159,7 +159,15 @@ export async function voidPaymentAction(formData: FormData): Promise<void> {
   const viewer = await requireOwner(page);
   const result = await voidStudioPayment(await getDb(), viewer, formText(formData.get("paymentId")), formText(formData.get("reason")), new Date());
   if (!result.ok) redirect(withMessage(page, "error", result.message));
-  redirect(withMessage(page, "notice", "The payment record was taken back. The booking owes that amount again."));
+  redirect(
+    withMessage(
+      page,
+      "notice",
+      result.owesAgain
+        ? "The payment record was taken back. The booking owes that amount again."
+        : "The payment record was taken back. The booking has ended, so it owes nothing.",
+    ),
+  );
 }
 
 /** Record a refund the studio gave by hand. Owners only. Nothing is sent anywhere. */

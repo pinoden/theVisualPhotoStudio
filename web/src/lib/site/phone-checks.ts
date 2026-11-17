@@ -174,14 +174,34 @@ export function brokenWords(doc: Document = document): string[] {
         if (!table?.parentElement || view.getComputedStyle(table).tableLayout === "fixed") break;
         // In a frame made to scroll sideways the table could have been as wide as its words.
         if (table.closest(".data-table-wrap, .blk-table-wrap, [data-scrolls-sideways]")) return Infinity;
-        const cells = Array.from(box.parentElement!.children);
         const tableStyle = view.getComputedStyle(table);
+        // What the other columns need at the least: the longest word of each, over every row, not this row's alone.
+        const columnOf = (cell: Element) =>
+          cell instanceof view.HTMLTableCellElement ? cell.cellIndex : Array.from(cell.parentElement!.children).indexOf(cell);
+        const rows = table instanceof view.HTMLTableElement ? Array.from(table.rows) : [box.parentElement!];
+        const column = columnOf(box);
+        const needs = new Map<number, number>();
+        let columns = 0;
+        for (const row of rows) {
+          columns = Math.max(columns, row.children.length);
+          for (const cell of Array.from(row.children)) {
+            const index = columnOf(cell);
+            if (index !== column) needs.set(index, Math.max(needs.get(index) ?? 0, leastWidth(cell) + edges(cell)));
+          }
+        }
         own += edges(box);
-        if (tableStyle.borderCollapse === "separate") own += parseFloat(tableStyle.borderSpacing) * (cells.length + 1);
-        for (const cell of cells) if (cell !== box) own += leastWidth(cell) + edges(cell);
+        if (tableStyle.borderCollapse === "separate") own += parseFloat(tableStyle.borderSpacing) * (columns + 1);
+        for (const need of needs.values()) own += need;
+        // The room around the table, past any inline element it sits in.
+        let around: Element = table.parentElement;
+        while (around.parentElement && /^(inline|contents)$/.test(view.getComputedStyle(around).display)) around = around.parentElement;
+        // A table in a flex or grid row could have had the row's room, as any box there: climb on from the table.
+        if (/(flex|grid)/.test(view.getComputedStyle(around).display)) {
+          box = table;
+          continue;
+        }
         // A table narrower than the room around it was given its width (a table as wide as its words breaks none of
         // them): its cells share that width.
-        const around = table.parentElement;
         const aroundStyle = view.getComputedStyle(around);
         const aroundWidth = around.clientWidth - parseFloat(aroundStyle.paddingLeft) - parseFloat(aroundStyle.paddingRight);
         if (table.getBoundingClientRect().width + edges(table) < aroundWidth - 1) {

@@ -274,7 +274,7 @@ describe("cancelling a booking that has a pet fee", () => {
     // Run out unspent: it can no longer be used, so the record can go.
     const expired = await paidInCash(h(9));
     await world.db.update(promoCodes).set({ expiresAt: NOW }).where(eq(promoCodes.code, expired.credit));
-    expect(await voidStudioPayment(world.db, owner, expired.cashId, "", daysAfter(NOW, 1))).toEqual({ ok: true });
+    expect(await voidStudioPayment(world.db, owner, expired.cashId, "", daysAfter(NOW, 1))).toEqual({ ok: true, owesAgain: true });
     // Spent on a booking: never.
     const spent = await paidInCash(h(13));
     expectOk(await world.book({ date: FAR, startMinute: h(16), durationMinutes: 60, promoCode: spent.credit, customer: dana }));

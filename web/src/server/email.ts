@@ -563,7 +563,7 @@ export function ownerUnseenLinkNotice(input: { to: string; ref: string; customer
       `${input.customer}'s booking ${input.ref} was ${input.ended === "released" ? "released for a reschedule code" : "cancelled"} while the card processor could not say whether its payment link for ${money(input.linkCents)} had been paid.`,
       "",
       "If it was paid, the payment is refunded to the card in full once the processor tells the site, and the client was told so. The site keeps asking.",
-      "If the processor never can (a link it no longer knows), look the link up in Square. When it was not paid, close it on the appointment's page with \"Close it by hand\".",
+      "If the processor never can (a link it no longer knows), look the link up in Square. When it was not paid, close it on the appointment's page with \"Close it by hand\". When Square shows it was paid, the site will never see that payment: refund it to the client in Square, as they were promised, then close the link here by hand.",
     ].join("\n"),
   };
 }

@@ -34,9 +34,10 @@ export async function cancelBookingAction(_previous: ManageState, formData: Form
   if (!actor) return SIGNED_OUT;
   const seen = formData.get("seen");
   const result = await cancelBooking(await getDb(), String(formData.get("ref") ?? ""), actor, await manageDeps(), typeof seen === "string" ? seen : undefined);
-  // Refused because something changed since the page was drawn: it is drawn again, with what can be done now.
+  // Refused because something changed since the page was drawn: it is drawn again, with what can be done now. Not
+  // when the booking has ended meanwhile: the page drawn again would have nowhere to say why nothing was done.
   if (!result.ok) {
-    refresh();
+    if (result.code !== "not_confirmed") refresh();
     return { status: "error", message: result.message };
   }
   flushEmailsSoon();
@@ -52,7 +53,7 @@ export async function rescheduleBookingAction(_previous: ManageState, formData: 
   const seen = formData.get("seen");
   const result = await requestRescheduleCode(await getDb(), String(formData.get("ref") ?? ""), actor, await manageDeps(), typeof seen === "string" ? seen : undefined);
   if (!result.ok) {
-    refresh();
+    if (result.code !== "not_confirmed") refresh();
     return { status: "error", message: result.message };
   }
   flushEmailsSoon();

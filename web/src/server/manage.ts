@@ -168,8 +168,11 @@ export async function getManageChoices(db: DbLike, ref: string, actor: Actor, no
   return context ? describeManageOptions(context.options, context.terms) : null;
 }
 
+/** A booking that ended while the client's page was open: their own request did nothing. */
+const ENDED_MEANWHILE = "This booking is no longer confirmed: it was cancelled or released meanwhile, so nothing more was done. Reload the page to see it as it is now.";
+
 export function cancelBlockText(reason: CancelBlock): string {
-  return reason === "already_started" ? "This booking has already started." : "This booking can no longer be changed.";
+  return reason === "already_started" ? "This booking has already started." : ENDED_MEANWHILE;
 }
 
 export function rescheduleBlockText(reason: RescheduleBlock, settings: Pick<Settings, "rescheduleCutoffHours">): string {
@@ -177,7 +180,7 @@ export function rescheduleBlockText(reason: RescheduleBlock, settings: Pick<Sett
     case "already_started":
       return "This booking has already started.";
     case "not_confirmed":
-      return "This booking can no longer be changed.";
+      return ENDED_MEANWHILE;
     case "not_offered":
       return "Bookings cannot be moved online. Please call the studio.";
     case "too_late":
@@ -827,14 +830,16 @@ export async function cancelBooking(db: Db, ref: string, actor: Actor, deps: Man
     return { ok: false, status: 409, code: outcome.reason, message: cancelBlockText(outcome.reason) };
   }
   if (outcome.kind === "changed") return { ok: false, status: 409, code: "changed", message: LOOK_AGAIN };
-  // A payment link still open for the booking is withdrawn, so that nobody pays for it now.
-  await closePayLinkOf(db, outcome.bookingId, deps);
 
+  // The money first: a host that cuts a slow request short leaves the link to the scheduled task, not the refund.
   let refund: "sent" | "pending" | "none" = outcome.refundIds.length === 0 ? "none" : "sent";
   for (const id of outcome.refundIds) {
     if ((await processRefund(db, id, deps)) !== "succeeded") refund = "pending";
   }
   if (refund === "pending") await refundNotSent(db, outcome.emailId, outcome.email);
+  // A payment link still open for the booking is withdrawn, so that nobody pays for it now; not when the processor has
+  // just failed to answer about it, which would only keep the client waiting again: the scheduled task does it.
+  if (!unseen) await closePayLinkOf(db, outcome.bookingId, deps);
   return {
     ok: true,
     refundCents: outcome.decision.refundCents,
@@ -928,10 +933,15 @@ export async function requestRescheduleCode(db: Db, ref: string, actor: Actor, d
 
   if (outcome.kind === "not_found") return { ok: false, status: 404, code: "not_found", message: "Booking not found." };
   if (outcome.kind === "blocked") {
-    return { ok: false, status: 409, code: outcome.reason, message: rescheduleBlockText(outcome.reason, settings) };
+    // Nothing paid that the site knows of: a link the processor could not answer about may have been.
+    const unseenNote =
+      outcome.reason === "nothing_paid" && unseen
+        ? " We could not check just now whether the payment link for this booking was paid. If you paid it, please try again later, or call us."
+        : "";
+    return { ok: false, status: 409, code: outcome.reason, message: `${rescheduleBlockText(outcome.reason, settings)}${unseenNote}` };
   }
   if (outcome.kind === "changed") return { ok: false, status: 409, code: "changed", message: LOOK_AGAIN };
-  await closePayLinkOf(db, outcome.bookingId, deps);
+  if (!unseen) await closePayLinkOf(db, outcome.bookingId, deps);
   return { ok: true, code: outcome.code, valueCents: outcome.valueCents, expiresAt: outcome.expiresAt, unseenLink: outcome.unseenLink };
 }
 
@@ -1074,12 +1084,13 @@ export async function ownerCancelBooking(
       message: `The money on this booking changed after this page was opened: the card now holds ${formatCents(outcome.held)}. Look at it again, then cancel.`,
     };
   }
-  await closePayLinkOf(db, outcome.bookingId, deps);
   let refund: "sent" | "pending" | "none" = outcome.refundIds.length === 0 ? "none" : "sent";
   for (const id of outcome.refundIds) {
     if ((await processRefund(db, id, deps)) !== "succeeded") refund = "pending";
   }
   if (refund === "pending") await refundNotSent(db, outcome.emailId, outcome.email);
+  // After the money, and not while the processor cannot answer about the link (see `cancelBooking`).
+  if (!unseen) await closePayLinkOf(db, outcome.bookingId, deps);
   return {
     ok: true,
     refund,

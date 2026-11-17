@@ -64,7 +64,14 @@ export function ManageBooking({
     );
   }
 
-  if (!choices) return null;
+  // Nothing left to choose (the booking ended meanwhile): what the last press was told still shows.
+  if (!choices) {
+    return error ? (
+      <div className="flash flash-error" role="alert">
+        {error}
+      </div>
+    ) : null;
+  }
 
   const hidden = (
     <>

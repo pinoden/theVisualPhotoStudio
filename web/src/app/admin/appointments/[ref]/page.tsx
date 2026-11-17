@@ -258,7 +258,8 @@ async function AppointmentDetails({
         </div>
       )}
 
-      {appointment.payments && (appointment.payments.payments.length > 0 || appointment.payments.dueCents > 0) && (
+      {/* Also for an open link of a booking that ended with nothing paid: an owner may have to close it by hand. */}
+      {appointment.payments && (appointment.payments.payments.length > 0 || appointment.payments.dueCents > 0 || appointment.payLink) && (
         <div className="admin-card" id="payment">
           <h3>Payment</h3>
           <p>
@@ -356,8 +357,10 @@ async function AppointmentDetails({
               <h4>Payment link</h4>
               <p>
                 A link to pay {formatCents(appointment.payLink.amountCents)} by card was emailed to the client on{" "}
-                {formatInstant(new Date(appointment.payLink.createdAt))} by {appointment.payLink.createdBy}. It has not been
-                paid yet.
+                {formatInstant(new Date(appointment.payLink.createdAt))} by {appointment.payLink.createdBy}.{" "}
+                {appointment.payments.ended
+                  ? "The booking has ended, and the link is still open: it is withdrawn as soon as the card processor says it was not paid. If the processor cannot say, look the link up in Square, then close it here by hand."
+                  : "It has not been paid yet."}
               </p>
               {appointment.may.recordPayment && (
                 <>
