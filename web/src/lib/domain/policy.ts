@@ -56,6 +56,8 @@ export type CancelOutcome =
       creditCents: number;
       /** Money taken at the studio that the terms say is refunded: the studio does that by hand. */
       byHandCents: number;
+      /** The booking's pet fee, when it has one: `creditCents` can be less, when part of it was refunded already. */
+      petFeeCents?: number;
       /** Why the refund is what it is. */
       /** `rescheduled`: made with a reschedule code. `moved`: moved by the studio at the client's request. */
       why: "refund" | "inside_window" | "rescheduled" | "moved" | "nothing_paid" | "paid_at_studio";
@@ -91,11 +93,12 @@ export function cancellationOutcome(booking: BookingFacts, now: Date, settings: 
   const petAtStudio = Math.min(petFeeCents - petOnCard, atStudioCents);
   const creditCents = booking.petCreditGiven ? 0 : petOnCard + petAtStudio;
   const byHandCents = atStudioCents - petAtStudio;
-  if (booking.cardPaidCents <= 0) return { ...nothing("paid_at_studio"), creditCents, byHandCents };
+  const pet = petFeeCents > 0 ? { petFeeCents } : {};
+  if (booking.cardPaidCents <= 0) return { ...nothing("paid_at_studio"), creditCents, byHandCents, ...pet };
 
   const refundable = booking.cardPaidCents - petOnCard;
   const feeCents = Math.round((refundable * settings.refundFeePercent) / 100);
-  return { allowed: true, refundCents: refundable - feeCents, feeCents, creditCents, byHandCents, why: "refund" };
+  return { allowed: true, refundCents: refundable - feeCents, feeCents, creditCents, byHandCents, why: "refund", ...pet };
 }
 
 export type RescheduleBlock =

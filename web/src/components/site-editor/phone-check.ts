@@ -11,9 +11,10 @@ import { previewUrl } from "./parts";
  *
  * A page is checked by itself (`checkOnPhones`). A change of the design, or
  * of the header, menu and footer, reaches every page: it is checked on every
- * page of the sitemap and on the account (`checkWebsiteOnPhones`). Each is
- * drawn as it will be once this one change is published: with its draft, and
- * everything else as published, whatever other drafts are waiting
+ * published page, the booking screens and the account, which the server lists
+ * (`websiteCheckPaths`), with `checkWebsiteOnPhones`. Each is drawn as it
+ * will be once this one change is published: with its draft, and everything
+ * else as published, whatever other drafts are waiting
  * (src/lib/site/website-check.ts).
  *
  * In the browser only. It is a guard against a change that would break on a
@@ -48,16 +49,36 @@ const draftDrawn: Drawn = (doc, view) => {
   return onScreen(page) && view.getComputedStyle(page).display === "flow-root";
 };
 
-/** A page of the website: its header, which the site's stylesheet fixes to the top, and `content`, on screen. */
-const pageDrawn =
-  (content: string): Drawn =>
-  (doc, view) => {
-    const header = doc.querySelector(".site-nav");
-    return header !== null && view.getComputedStyle(header).position === "fixed" && onScreen(doc.querySelector(content));
-  };
+/**
+ * Any page of the website, drawn: its header is fixed to the top by the site's
+ * stylesheet, something of the page is on screen, and nothing is still on its
+ * way (a part still to come shows a `.spinner` in its place: the booking
+ * screens draw themselves in the browser).
+ */
+const pageDrawn: Drawn = (doc, view) => {
+  const header = doc.querySelector(".site-nav");
+  const main = doc.querySelector("main");
+  if (!header || view.getComputedStyle(header).position !== "fixed" || !main) return false;
+  const shown = Array.from(main.children).some((child) => child.getBoundingClientRect().height > 0);
+  const coming = Array.from(main.querySelectorAll(".spinner")).some((spinner) => spinner.getClientRects().length > 0);
+  return shown && !coming;
+};
 
-/** `url` loaded in a frame `width` CSS pixels wide, out of sight; what the checks find in it once it is `drawn`. */
-async function checkAt(url: string, width: number, drawn: Drawn): Promise<string[]> {
+/**
+ * `url` loaded in a frame `width` CSS pixels wide, out of sight; what the
+ * checks find in it once it is `drawn`. A page that does not arrive in time is
+ * asked for once more: a busy server is not a problem of the page. `name`
+ * says which page in a message.
+ */
+async function checkAt(url: string, width: number, drawn: Drawn, name = "The page"): Promise<string[]> {
+  try {
+    return await checkOnce(url, width, drawn, name);
+  } catch {
+    return checkOnce(url, width, drawn, name);
+  }
+}
+
+async function checkOnce(url: string, width: number, drawn: Drawn, name: string): Promise<string[]> {
   const frame = document.createElement("iframe");
   frame.setAttribute("aria-hidden", "true");
   frame.tabIndex = -1;
@@ -67,7 +88,7 @@ async function checkAt(url: string, width: number, drawn: Drawn): Promise<string
   frame.style.cssText = `position:fixed;left:0;top:0;width:${width}px;height:800px;border:0;opacity:0;z-index:-1;pointer-events:none`;
   try {
     const loaded = new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error("The page took too long to load for its check.")), LOAD_MS);
+      const timer = setTimeout(() => reject(new Error(`${name} took too long to load for its check.`)), LOAD_MS);
       frame.addEventListener(
         "load",
         () => {
@@ -82,10 +103,10 @@ async function checkAt(url: string, width: number, drawn: Drawn): Promise<string
     await loaded;
     const doc = frame.contentDocument;
     const view = doc?.defaultView;
-    if (!doc || !view) throw new Error("The page could not be drawn for its check.");
+    if (!doc || !view) throw new Error(`${name} could not be drawn for its check.`);
     // The page arrives in parts, and a part is shown by a script after the frame has loaded: wait until the page
     // is on screen, drawn by the site's stylesheet, before measuring it.
-    await until(() => drawn(doc, view), LOAD_MS, "The page could not be drawn for its check.");
+    await until(() => drawn(doc, view), LOAD_MS, `${name} could not be drawn for its check.`);
     await doc.fonts.ready;
     await nextFrame();
     return [...widerThanScreen(doc), ...hardToTouch(doc), ...tooSmallToRead(doc)];
@@ -117,26 +138,6 @@ const nameOf = (path: string) => PAGE_NAMES[path] ?? path;
 /** The pages checked at an iPhone's width as well: the two with the most on them. Every page is checked at the narrowest. */
 const ALSO_WIDER = new Set(["/", "/book"]);
 
-/** How a page shows it is drawn: the booking screens draw themselves in the browser, the account has its title. */
-function drawnFor(path: string): Drawn {
-  if (path.startsWith("/book")) return pageDrawn(".wizard-container .wizard-progress");
-  if (path.startsWith("/account")) return pageDrawn("main h1");
-  return pageDrawn(".blk-root");
-}
-
-/** The pages a change that reaches every page is checked on: the home page and the booking page, every page of the sitemap, and the account. */
-async function websitePaths(): Promise<string[]> {
-  const paths = new Set(["/", "/book"]);
-  try {
-    const sitemap = await (await fetch("/sitemap.xml", { cache: "no-store" })).text();
-    for (const [, address] of sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)) paths.add(new URL(address, window.location.origin).pathname);
-  } catch {
-    // Without the sitemap the home page and the booking page are still checked.
-  }
-  paths.add("/account");
-  return [...paths];
-}
-
 /** Run `work` on every item, `at` at a time, keeping their order. */
 async function inTurns<T, R>(items: T[], at: number, work: (item: T) => Promise<R>): Promise<R[]> {
   const results: R[] = new Array(items.length);
@@ -158,11 +159,13 @@ async function inTurns<T, R>(items: T[], at: number, work: (item: T) => Promise<
  * page and the booking page: ...". The header and the footer are on every
  * page, so their problems are said once, for every page that has them.
  */
-export async function checkWebsiteOnPhones(scope: "design" | "frame"): Promise<string[]> {
-  const paths = await websitePaths();
+export async function checkWebsiteOnPhones(scope: "design" | "frame", paths: readonly string[]): Promise<string[]> {
   const jobs = CHECK_WIDTHS.flatMap((width) => paths.filter((path) => width === CHECK_WIDTHS[0] || ALSO_WIDER.has(path)).map((path) => ({ width, path })));
   // Three at a time: each is a whole page in a frame of its own.
-  const found = await inTurns(jobs, 3, (job) => checkAt(previewUrl(`${job.path}?${WEBSITE_CHECK_PARAM}=${scope}`), job.width, drawnFor(job.path)));
+  const found = await inTurns(jobs, 3, (job) => {
+    const name = nameOf(job.path);
+    return checkAt(previewUrl(`${job.path}?${WEBSITE_CHECK_PARAM}=${scope}`), job.width, pageDrawn, name.charAt(0).toUpperCase() + name.slice(1));
+  });
   const sentences: string[] = [];
   for (const width of CHECK_WIDTHS) {
     const groups: { problems: string[]; pages: string[] }[] = [];

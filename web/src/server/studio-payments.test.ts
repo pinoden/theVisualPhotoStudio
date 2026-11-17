@@ -270,7 +270,7 @@ describe("money taken at the studio and the site's own refunds", () => {
     const choices = await getManageChoices(world.db, made.ref, { kind: "customer", email: "dana@example.com" }, NOW);
     expect(choices?.cancel).toEqual({
       allowed: true,
-      text: "This booking was paid at the studio, so no refund can be sent online. Please contact the studio about your refund.",
+      text: "Of what you paid at the studio, $176 is refunded, less the 5% processing fee: that cannot be sent back online, so please contact the studio about it.",
     });
 
     const result = expectOk(await cancelBooking(world.db, made.ref, { kind: "customer", email: "dana@example.com" }, world.manageDeps()));
@@ -281,8 +281,7 @@ describe("money taken at the studio and the site's own refunds", () => {
     const [notice] = await world.emails("owner_hand_refund");
     expect(notice.toEmail).toBe(OWNER_EMAIL);
     expect(notice.subject).toBe(`ACTION NEEDED: refund by hand for ${made.ref}`);
-    expect(notice.body).toContain("$176 of it was paid at the studio");
-    expect(notice.body).toContain("refunded less the 5% fee");
+    expect(notice.body).toContain("Of what was paid at the studio, $176 is refunded by the rental terms, less the 5% fee: $167.20.");
   });
 
   it("cancelled too late, or before anything was paid: the owner has nothing to do", async () => {

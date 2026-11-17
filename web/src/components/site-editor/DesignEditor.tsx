@@ -68,6 +68,8 @@ export interface DesignEditorProps {
   versions: VersionSummary[];
   /** The owners' own fonts, which can be chosen beside the library's. */
   fonts: CustomFont[];
+  /** The pages a change is measured on, at a phone's width, before it is published (`websiteCheckPaths`). */
+  checkPaths: string[];
 }
 
 /**
@@ -81,8 +83,8 @@ export function DesignEditor(props: DesignEditorProps) {
   return <DesignForm key={props.initial.revision} {...props} notice={notice} report={setNotice} />;
 }
 
-function DesignForm({ initial, versions, fonts, notice, report }: DesignEditorProps & { notice: string; report: (notice: string) => void }) {
-  const editor = useDocumentEditor<Design>("design", initial, report);
+function DesignForm({ initial, versions, fonts, checkPaths, notice, report }: DesignEditorProps & { notice: string; report: (notice: string) => void }) {
+  const editor = useDocumentEditor<Design>("design", initial, report, checkPaths);
   const design = editor.value;
   // Every change goes through parseDesign: it keeps numbers in range and moves a weight the newly chosen font lacks to the nearest it has.
   const update = (next: Design) => editor.change(parseDesign(next, fonts));

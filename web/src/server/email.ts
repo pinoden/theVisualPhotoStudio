@@ -275,6 +275,8 @@ export function cancellationEmail(input: {
   feeCents: number;
   /** Why no refund is due, when refundCents is 0. */
   note: string;
+  /** With a card refund, the rest of what the cancellation does, a sentence each. */
+  more?: string[];
   /** The pet fee, returned as a code for studio credit and not to the card. */
   petCredit?: { code: string; cents: number; expires: string; bookUrl: string };
 }): QueuedEmail {
@@ -284,6 +286,7 @@ export function cancellationEmail(input: {
           `A refund of ${money(input.refundCents)} is on its way to your card${
             input.feeCents > 0 ? ` (${money(input.feeCents)} processing fee kept)` : ""
           }. Banks usually show it within 5 to 10 business days.`,
+          ...(input.more ?? []),
         ]
       : [input.note];
   const creditLines = input.petCredit
@@ -416,10 +419,12 @@ export function ownerHandRefundNotice(input: { to: string; ref: string; customer
     body: [
       `${input.customer} cancelled booking ${input.ref} early enough to be refunded.`,
       "",
-      `${money(input.paidCents)} of it was paid at the studio, so the site could not send that back.`,
-      input.feePercent > 0
-        ? `By the rental terms it is refunded less the ${input.feePercent}% fee. Refund the customer by hand, then record the refund on the appointment's page.`
-        : "By the rental terms it is refunded in full. Refund the customer by hand, then record the refund on the appointment's page.",
+      `Of what was paid at the studio, ${money(input.paidCents)} is refunded by the rental terms${
+        input.feePercent > 0
+          ? `, less the ${input.feePercent}% fee: ${money(input.paidCents - Math.round((input.paidCents * input.feePercent) / 100))}`
+          : ", in full"
+      }. The site cannot send that back.`,
+      "Refund the customer by hand, then record the refund on the appointment's page.",
     ].join("\n"),
   };
 }

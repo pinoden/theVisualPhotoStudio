@@ -120,6 +120,8 @@ export interface FrameEditorProps {
   pages: { path: string; title: string }[];
   /** The pictures the draft names (the logo's, the sharing picture): the frame itself only holds their ids. */
   pictures: ChoosablePicture[];
+  /** The pages a change is measured on, at a phone's width, before it is published (`websiteCheckPaths`). */
+  checkPaths: string[];
 }
 
 /**
@@ -133,8 +135,8 @@ export function FrameEditor(props: FrameEditorProps) {
   return <FrameForm key={props.initial.revision} {...props} notice={notice} report={setNotice} />;
 }
 
-function FrameForm({ initial, versions, pictures, pages: madePages, notice, report }: FrameEditorProps & { notice: string; report: (notice: string) => void }) {
-  const editor = useDocumentEditor<SiteFrame>("frame", initial, report);
+function FrameForm({ initial, versions, pictures, pages: madePages, checkPaths, notice, report }: FrameEditorProps & { notice: string; report: (notice: string) => void }) {
+  const editor = useDocumentEditor<SiteFrame>("frame", initial, report, checkPaths);
   const frame = editor.value;
   const pages = useId();
   // The pictures this editor has seen, to show the ones the frame names by their ids.

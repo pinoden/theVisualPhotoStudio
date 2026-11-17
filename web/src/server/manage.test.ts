@@ -155,6 +155,10 @@ describe("cancelling", () => {
     expect(result.refundCents).toBe(12600 - 630); // the card payment less the 5% fee
     expect(result.message).toContain("The code you used for this booking can be used again.");
     expect(await left()).toBe(5000);
+    // The email says it too, beside the card refund.
+    const mail = (await world.emails("booking_cancelled")).at(-1)!.body;
+    expect(mail).toContain("A refund of $119.70 is on its way to your card");
+    expect(mail).toContain("The code you used for this booking can be used again.");
   });
 
   it("names the refund window as the owner set it, in days only when it is whole days", () => {

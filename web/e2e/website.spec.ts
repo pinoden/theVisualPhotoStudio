@@ -929,7 +929,7 @@ test("a page that would be wider than a phone is not published, and is once it f
   await expect(byText(page, /Draft saved at/)).toBeVisible();
 
   await page.getByRole("button", { name: "Publish", exact: true }).click();
-  await expect(byText(page, /Not published: on a phone, this page would be hard to use\./)).toBeVisible();
+  await expect(byText(page, /Not published: on a phone, this page would be hard to use\./)).toBeVisible({ timeout: 90_000 });
   await expect(byText(page, /At 320px: .*"BOOK A STUDIO" reaches \d+px/i)).toBeVisible();
   await shot(page, "53-admin-page-phone-check");
   const guest = await visitor(browser);
@@ -963,7 +963,7 @@ test("a header that would be wider than a phone is not published, whatever other
   const refused = byText(page, /^Not published: on a phone, the website with this header, menu and footer would be hard to use\./);
   await expect(refused).toBeVisible({ timeout: 90_000 });
   // Measured with the published design, on every page, and said once for all of them: the header is the same everywhere.
-  await expect(refused).toContainText(/At 320px, on the home page, the booking page, .+ and the account: "The Visuals Atelier[^"]*" reaches \d+px; "Menu" reaches \d+px\./);
+  await expect(refused).toContainText(/At 320px, on the home page, .+, the booking page, .+ and the account: "The Visuals Atelier[^"]*" reaches \d+px; "Menu" reaches \d+px\./);
   await shot(page, "53a-admin-header-phone-check");
   // Visitors still have the header as it was.
   const guest = await visitor(browser);
@@ -971,7 +971,15 @@ test("a header that would be wider than a phone is not published, whatever other
   await expect(guest.locator(".site-nav .site-logo")).toHaveText(/^The Visuals\s*Photo Studio$/);
   await guest.context().close();
 
-  // The design is checked with the header as it is published, not with that draft: it is published.
+  // A page of the owners' at an address that starts like the booking screen's: the check measures it as any other page.
+  await page.goto("/admin/website/pages");
+  await byLabel(page, "Name of a new page").fill("Book a Shoot");
+  await page.getByRole("button", { name: "Make the page" }).click();
+  await expect(canvasOf(page).locator("h1")).toHaveText("Book a Shoot");
+  await page.getByRole("button", { name: "Publish", exact: true }).click();
+  await published(page);
+
+  // The design is checked with the header as it is published, not with that draft, and on that page too: it is published.
   await page.goto("/admin/website/design");
   await page.getByRole("button", { name: "Publish", exact: true }).click();
   await published(page);

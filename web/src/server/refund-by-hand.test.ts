@@ -44,6 +44,12 @@ describe("a refund made by hand in Square", () => {
   it("is recorded by an owner: the site stops trying, counts it as made, and the client's receipt shows it", async () => {
     const { ref, bookingId, problem } = await failedRefund();
     expect(problem).toMatchObject({ ref, amountCents: 5000, status: "failed", error: "The card account is closed" });
+    // The booking's history says what was sent and that it did not go through, so what follows reads in order.
+    const history = (await getAppointment(world.db, owner, ref, NOW))!.history.map((line) => [line.actor, line.note]);
+    expect(history.slice(-2)).toEqual([
+      ["the studio", "Refund $50 to the card: Lights failed for a while"],
+      ["system", "The refund of $50 did not go through (The card account is closed). It is tried again."],
+    ]);
     // Owed already: it counts against what the card holds, so it cannot be refunded a second time.
     expect(await netCardPaidCents(world.db, bookingId)).toBe(12600);
 

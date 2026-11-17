@@ -4,7 +4,7 @@ import { Suspense } from "react";
 import { getDb } from "@/db/client";
 import { priceTable } from "@/lib/catalog-view";
 import { durationLabel, longDateLabel } from "@/lib/domain/time";
-import { centsToInput, MONEY_FIELD } from "@/lib/parse";
+import { centsToInput, PRICE_FIELD } from "@/lib/parse";
 import { loadCatalog } from "@/server/catalog";
 import { requireOwner } from "@/server/session";
 import { localDateOf } from "@/server/tz";
@@ -63,7 +63,7 @@ async function Prices({ searchParams }: Pick<PageProps<"/admin/prices">, "search
                       <input
                         name={`price:weekday:${row.durationMinutes}`}
                         className="price-input"
-                        {...MONEY_FIELD}
+                        {...PRICE_FIELD}
                         aria-label={`${studio.name} ${durationLabel(row.durationMinutes)} weekday price`}
                         defaultValue={row.weekdayCents === null ? "" : centsToInput(row.weekdayCents)}
                       />
@@ -72,7 +72,7 @@ async function Prices({ searchParams }: Pick<PageProps<"/admin/prices">, "search
                       <input
                         name={`price:weekend:${row.durationMinutes}`}
                         className="price-input"
-                        {...MONEY_FIELD}
+                        {...PRICE_FIELD}
                         aria-label={`${studio.name} ${durationLabel(row.durationMinutes)} weekend price`}
                         defaultValue={row.weekendCents === null ? "" : centsToInput(row.weekendCents)}
                       />
@@ -98,13 +98,13 @@ async function Prices({ searchParams }: Pick<PageProps<"/admin/prices">, "search
               <label className="form-label" htmlFor={`weekday-${studio.id}`}>
                 Mon–Fri ($)
               </label>
-              <input id={`weekday-${studio.id}`} name="weekday" className="form-control" {...MONEY_FIELD} required />
+              <input id={`weekday-${studio.id}`} name="weekday" className="form-control" {...PRICE_FIELD} required />
             </div>
             <div className="form-group">
               <label className="form-label" htmlFor={`weekend-${studio.id}`}>
                 Sat–Sun ($)
               </label>
-              <input id={`weekend-${studio.id}`} name="weekend" className="form-control" {...MONEY_FIELD} placeholder="same" />
+              <input id={`weekend-${studio.id}`} name="weekend" className="form-control" {...PRICE_FIELD} placeholder="same" />
             </div>
             <button type="submit" className="btn btn-outline btn-small">
               Add

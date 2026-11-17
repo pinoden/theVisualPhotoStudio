@@ -30,6 +30,7 @@ import {
   restorePageVersion,
   savePageDraft,
   savePageSettings,
+  websiteCheckPaths,
   TRASH_DAYS,
   unpublishPage,
 } from "./pages";
@@ -384,6 +385,19 @@ describe("who may change pages", () => {
   });
 });
 
+describe("the pages a change of the design is measured on", () => {
+  it("are every published page, hidden ones too, the booking screens and the account, and no draft", async () => {
+    const shown = await make("Gift Cards");
+    expectOk(await publishPage(world.db, owner, shown, NOW));
+    const hidden = await make("Private Offer");
+    const content = (await state(hidden)).content;
+    expectOk(await draft(hidden, { ...content, meta: { ...content.meta, hidden: true } }));
+    expectOk(await publishPage(world.db, owner, hidden, NOW));
+    await make("Still a Draft");
+    expect(await websiteCheckPaths(world.db)).toEqual(["/", "/gift-cards", "/private-offer", "/book", "/book/photography", "/account"]);
+  });
+});
+
 describe("old addresses", () => {
   it("are sent on to where the owners say", async () => {
     expect(await addRedirect(world.db, owner, { from: " /Guestinfo/ ", to: "/faq" })).toEqual({ ok: true });
@@ -418,6 +432,8 @@ describe("old addresses", () => {
     // The public route goes by the path alone, and the website takes off a slash at the end: these lead to themselves as well.
     expect(await refused("/old", "/old?from=menu")).toBe("An address cannot lead to itself.");
     expect(await refused("/old", "/old/")).toBe("An address cannot lead to itself.");
+    // Nor through "." and ".." segments or escapes, which a browser and the website read as the same page.
+    for (const to of ["/./old", "/x/../old", "/%2e/old", "/%6Fld"]) expect(await refused("/old", to), to).toBe("An address cannot lead to itself.");
     // So does the website's own full address, with or without "www.".
     const own = "https://thevisuals.example";
     for (const to of ["https://thevisuals.example/old", "http://www.thevisuals.example/old/"]) {
@@ -430,6 +446,10 @@ describe("old addresses", () => {
 
   it("cannot send visitors round in a circle through other old addresses", async () => {
     await make();
+    // In two steps, the second written with a "." segment.
+    expectOk(await addRedirect(world.db, owner, { from: "/two-1", to: "/two-2" }));
+    expect((await addRedirect(world.db, owner, { from: "/two-2", to: "/./two-1" })).ok).toBe(false);
+    expectOk(await removeRedirect(world.db, owner, "/two-1"));
     expectOk(await addRedirect(world.db, owner, { from: "/ring-1", to: "/ring-2" }));
     expectOk(await addRedirect(world.db, owner, { from: "/ring-2", to: "/ring-3#top" }));
     expect(await addRedirect(world.db, owner, { from: "/ring-3", to: "/ring-1" })).toEqual({
@@ -447,6 +467,16 @@ describe("old addresses", () => {
     expectOk(await addRedirect(world.db, owner, { from: "/draft-a", to: "/onward-a" }));
     await make("Draft A", "draft-a"); // not published
     expect(await addRedirect(world.db, owner, { from: "/onward-a", to: "/draft-a" })).toMatchObject({ ok: false, message: expect.stringMatching(/round in a circle/) });
+  });
+
+  it("keep leading on while a draft page moved onto their address is not published", async () => {
+    expectOk(await addRedirect(world.db, owner, { from: "/legacy-z", to: "/faq" }));
+    const id = await make("Legacy", "legacy-draft");
+    expectOk(await savePageSettings(world.db, owner, id, { title: "Legacy", slug: "legacy-z" }));
+    expect(await findRedirect(world.db, "/legacy-z")).toBe("/faq");
+    // Published, the page answers there and the old address is dropped.
+    expectOk(await publishPage(world.db, owner, id, NOW));
+    expect(await findRedirect(world.db, "/legacy-z")).toBeNull();
   });
 
   it("are dropped from a page's own address once it is published, so taking it off leaves no circle", async () => {

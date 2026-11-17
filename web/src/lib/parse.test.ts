@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { centsToInput, dollarsToCents, DOLLARS_PATTERN, formText, hhmmToMinutes, intInRange } from "./parse";
+import { centsToInput, dollarsToCents, DOLLARS_PATTERN, formText, hhmmToMinutes, intInRange, POSITIVE_DOLLARS_PATTERN, PRICE_PATTERN } from "./parse";
 
 describe("money typed into a form", () => {
   it("reads whole and decimal amounts exactly", () => {
@@ -71,5 +71,22 @@ describe("times and numbers typed into a form", () => {
     // What a number field sends for a whole number, written another way.
     expect(intInRange("5.0", 0, 100)).toBe(5);
     expect(intInRange("1e3", 0, 1000)).toBe(1000);
+    expect(intInRange("240e-1", 0, 100)).toBe(24);
+    expect(intInRange("245e-1", 0, 100)).toBeNull();
+  });
+});
+
+describe("the patterns a browser checks a money field with", () => {
+  // As a browser reads a field's pattern: whole, and with the "v" flag.
+  const accepts = (pattern: string, text: string) => new RegExp(`^(?:${pattern})$`, "v").test(text);
+
+  it("take a price up to $100,000 and nothing above", () => {
+    for (const ok of ["0", "88", "88.50", "$1,500", "99,999.99", "100000", "100,000.00"]) expect(accepts(PRICE_PATTERN, ok), ok).toBe(true);
+    for (const bad of ["100000.01", "150000", "1,000,000", "12,50", "-5"]) expect(accepts(PRICE_PATTERN, bad), bad).toBe(false);
+  });
+
+  it("take a credit above zero only", () => {
+    for (const ok of ["40", "0.50", "$1,250.00"]) expect(accepts(POSITIVE_DOLLARS_PATTERN, ok), ok).toBe(true);
+    for (const bad of ["0", "0.00", "$0", " 0 ", "00"]) expect(accepts(POSITIVE_DOLLARS_PATTERN, bad), bad).toBe(false);
   });
 });

@@ -306,10 +306,12 @@ describe("a picture's description", () => {
   it("cannot be taken away while the picture is shown somewhere, where it is read out in its place", async () => {
     const shown = await described("shown.jpg", "The cyclorama wall");
     expectOk(await addStudioPhotos(world.db, owner, world.ids.blanche, [shown.id]));
-    expect(await describeMedia(world.db, owner, shown.id, { alt: "   ", caption: "" }, NOW)).toEqual({
-      ok: false,
-      message: "This picture is shown in the studio Studio Blanche, where its description is read out in its place: it needs one.",
-    });
+    for (const nothing of ["   ", "\u200B", "\u00AD\u200E", "\u3164", "\u2800"]) {
+      expect(await describeMedia(world.db, owner, shown.id, { alt: nothing, caption: "" }, NOW), JSON.stringify(nothing)).toEqual({
+        ok: false,
+        message: "This picture is shown in the studio Studio Blanche, where its description is read out in its place: it needs one.",
+      });
+    }
     expect((await loadPictures(world.db, [shown.id])).get(shown.id)!.alt).toBe("The cyclorama wall");
     // Shown nowhere, it can be left without one again.
     const unused = await described("unused.jpg", "Spare");

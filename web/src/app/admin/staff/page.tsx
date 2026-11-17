@@ -3,6 +3,7 @@ import { connection } from "next/server";
 import { Suspense } from "react";
 import { getDb } from "@/db/client";
 import { longDateLabel } from "@/lib/domain/time";
+import { EMAIL_FIELD } from "@/lib/parse";
 import { ADMIN_LEVELS, ATTENDANT_SWITCH_KEYS, ATTENDANT_SWITCHES, MANAGER_SWITCH_KEYS, MANAGER_SWITCHES } from "@/lib/abilities";
 import { listStaff } from "@/server/admin";
 import { requireOwner } from "@/server/session";
@@ -99,7 +100,7 @@ async function Staff({ searchParams }: Pick<PageProps<"/admin/staff">, "searchPa
             <label className="form-label" htmlFor="staff-email">
               Email
             </label>
-            <input id="staff-email" name="email" type="email" className="form-control" required />
+            <input id="staff-email" name="email" className="form-control" {...EMAIL_FIELD} required />
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="staff-name">

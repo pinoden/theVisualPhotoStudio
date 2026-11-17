@@ -37,6 +37,8 @@ const PATHS = [
   "/admin/website/pages/00000000-0000-4000-8000-000000000000",
   "/admin/website/pages/00000000-0000-4000-8000-000000000000/check",
   "/admin/website/media/collections/00000000-0000-4000-8000-000000000000",
+  // The proxy, which runs only for the phone check's own addresses (src/proxy.ts).
+  "/?website-check=design",
   "/dev/outbox",
   "/booking/VS-AAAAAA?t=warm-up-warm-up-warm-up",
   "/api/availability?date=2030-01-09",

@@ -5,7 +5,7 @@ import { Suspense } from "react";
 import { FrameEditor } from "@/components/site-editor/FrameEditor";
 import { getDb } from "@/db/client";
 import { listMedia } from "@/server/media";
-import { linkablePages } from "@/server/pages";
+import { linkablePages, websiteCheckPaths } from "@/server/pages";
 import { requireManager } from "@/server/session";
 import { loadSettings } from "@/server/settings";
 import { FRAME_DOC, listVersions, loadForEditing } from "@/server/website";
@@ -29,7 +29,7 @@ async function NavigationPageBody({ searchParams }: Pick<PageProps<"/admin/websi
   const db = await getDb();
   const [state, versions, settings] = await Promise.all([loadForEditing(db, viewer, FRAME_DOC), listVersions(db, viewer, FRAME_DOC), loadSettings(db)]);
   if (!state || !versions) notFound();
-  const pages = await linkablePages(db);
+  const [pages, checkPaths] = await Promise.all([linkablePages(db), websiteCheckPaths(db)]);
   // The editor shows the logo's picture and the sharing picture, of which the frame only holds the ids.
   const named = [state.content.logo.image, state.content.search.image].filter((id) => id !== "");
   const library = named.length > 0 ? ((await listMedia(db, viewer)) ?? []) : [];
@@ -44,6 +44,7 @@ async function NavigationPageBody({ searchParams }: Pick<PageProps<"/admin/websi
         versions={versions}
         pictures={choosable}
         pages={pages}
+        checkPaths={checkPaths}
       />
     </AdminFrame>
   );

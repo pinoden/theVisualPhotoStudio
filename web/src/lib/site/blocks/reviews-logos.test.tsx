@@ -30,7 +30,7 @@ describe("the reviews block", () => {
         reviews: [
           { quote: "Beautiful light.\nWe will be back.", name: "Ana R.", source: "Google", stars: "5" },
           { quote: "", name: "Never written", source: "", stars: "4" },
-          { quote: "\u200B\u2060", name: "Invisible", source: "", stars: "5" },
+          { quote: "\u200B\u2060\u200E\u00AD\u3164\u2800", name: "Invisible", source: "", stars: "5" },
           { quote: "A great space for a team shoot.", name: "Marco", source: "", stars: "none" },
         ],
       }),

@@ -35,18 +35,9 @@ export async function cancelBookingAction(_previous: ManageState, formData: Form
   if (!result.ok) return { status: "error", message: result.message };
   flushEmailsSoon();
   if (!formData.get("keepInPlace")) refresh();
-  // The pet fee is never sent back to the card: when a refund is due it comes back as a code for studio credit.
-  const credit =
-    result.creditCents > 0
-      ? ` The pet fee of ${formatCents(result.creditCents)} is returned as studio credit: we have emailed you the code.`
-      : "";
-  return {
-    status: "cancelled",
-    message:
-      result.refund === "none"
-        ? `Your booking is cancelled. ${result.message}`
-        : `Your booking is cancelled. A refund of ${formatCents(result.refundCents)} is on its way to your card.${credit}`,
-  };
+  // The whole outcome, as the client was told it before confirming. A card refund that did not go through is not "on its way".
+  const late = result.refund === "pending" ? " The refund has not reached your card yet: it is tried again by itself, and the studio has been told." : "";
+  return { status: "cancelled", message: `Your booking is cancelled. ${result.message}${late}` };
 }
 
 export async function rescheduleBookingAction(_previous: ManageState, formData: FormData): Promise<ManageState> {

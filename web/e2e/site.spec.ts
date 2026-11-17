@@ -436,7 +436,7 @@ test("cancelling two weeks or more ahead refunds the card automatically", async 
   ).toBeVisible();
   await shot(page, "12-cancel-confirm");
   await page.getByRole("button", { name: "Yes, cancel it" }).click();
-  await expect(byText(page, "Your booking is cancelled. A refund of $64.60 is on its way to your card.")).toBeVisible();
+  await expect(byText(page, "Your booking is cancelled. You will be refunded $64.60 to your card. The 5% processing fee ($3.40) is not refundable.")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Booking Cancelled" })).toBeVisible();
 
   const toOwner = await latestEmail(page, "owner_refund_notice", OWNER);
@@ -467,7 +467,7 @@ test("a pet fee is not refunded to the card: it comes back as studio credit", as
   await expect(
     byText(
       page,
-      "Your booking is cancelled. A refund of $74.10 is on its way to your card. The pet fee of $40 is returned as studio credit: we have emailed you the code.",
+      "Your booking is cancelled. You will be refunded $74.10 to your card. The 5% processing fee ($3.90) is not refundable. The pet fee ($40) is not refunded to your card: it is returned as studio credit, and we email you the code.",
     ),
   ).toBeVisible();
   const mail = await latestEmail(page, "booking_cancelled", bob.email);
@@ -748,12 +748,14 @@ test("the owner sets a weekend price and the booking screen charges it on Saturd
   await expect(byText(page, "Prices saved.")).toBeVisible();
   await expect(byLabel(page, "Studio Blanche 1 hour weekend price")).toHaveValue("120");
   await shot(page, "17-admin-prices");
-  // A price above the most a price can be: the form is refused whole, and the other price changed with it is not saved.
+  // A price above the most a price can be ($100,000): the browser stops the form before it is sent, so nothing is
+  // saved and nothing typed is lost. (The server refuses such a form whole too, naming the price.)
   await byLabel(page, "Studio Blanche 1 hour weekday price").fill("89");
-  await byLabel(page, "Studio Blanche 1.5 hours weekday price").fill("150000");
+  const tooMuch = byLabel(page, "Studio Blanche 1.5 hours weekday price");
+  await tooMuch.fill("150000");
   await page.getByRole("button", { name: "Save Studio Blanche prices" }).click();
-  await expect(byText(page, /Not saved: the price for 1\.5 hours Mon–Fri is more than \$100,000, the most a price can be\. Nothing was changed\./)).toBeVisible();
-  await expect(byLabel(page, "Studio Blanche 1 hour weekday price")).toHaveValue("88");
+  expect(await tooMuch.evaluate((input: HTMLInputElement) => input.validity.valid)).toBe(false);
+  await expect(byLabel(page, "Studio Blanche 1 hour weekday price")).toHaveValue("89");
 
   await page.goto("/book");
   await pickStudio(page, "Studio Blanche");

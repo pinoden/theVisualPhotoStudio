@@ -7,6 +7,7 @@ import { getDb } from "@/db/client";
 import { bookableDurations, formatCents, PricingError, quote } from "@/lib/domain/pricing";
 import { durationLabel, isIsoDate, longDateLabel, minutesToLabel } from "@/lib/domain/time";
 import { can } from "@/lib/abilities";
+import { EMAIL_FIELD } from "@/lib/parse";
 import { freeStartsFor } from "@/server/appointments";
 import { dayTypeFor, loadCatalog } from "@/server/catalog";
 import { requireStaff } from "@/server/session";
@@ -167,7 +168,7 @@ async function NewBooking({ searchParams }: Pick<PageProps<"/admin/calendar/new"
                   <label className="form-label" htmlFor="new-email">
                     Client&rsquo;s email
                   </label>
-                  <input id="new-email" name="email" type="email" className="form-control" maxLength={200} autoComplete="off" required />
+                  <input id="new-email" name="email" className="form-control" {...EMAIL_FIELD} autoComplete="off" required />
                 </div>
                 <div className="form-group" style={{ flex: "1 1 10rem" }}>
                   <label className="form-label" htmlFor="new-phone">

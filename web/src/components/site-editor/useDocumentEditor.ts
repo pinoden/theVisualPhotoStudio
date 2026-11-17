@@ -79,8 +79,17 @@ const WEBSITE_SUBJECT: Record<DocumentKind, string> = {
   frame: "the website with this header, menu and footer",
 };
 
-/** The editor of the design, or of the header, menu and footer. */
-export function useDocumentEditor<T>(kind: DocumentKind, initial: DraftStart<T>, report: (notice: string) => void): DocumentEditor<T> {
+/**
+ * The editor of the design, or of the header, menu and footer. `checkPaths`
+ * are the pages a change is measured on before it is published: the server's
+ * `websiteCheckPaths`.
+ */
+export function useDocumentEditor<T>(
+  kind: DocumentKind,
+  initial: DraftStart<T>,
+  report: (notice: string) => void,
+  checkPaths: readonly string[],
+): DocumentEditor<T> {
   return useDraftEditor(
     initial,
     {
@@ -88,7 +97,7 @@ export function useDocumentEditor<T>(kind: DocumentKind, initial: DraftStart<T>,
       publish: () => publishAction(kind),
       discard: () => discardAction(kind),
       restore: (versionId) => restoreVersionAction(kind, versionId),
-      check: { busy: "Checking the website at the width of a phone…", subject: WEBSITE_SUBJECT[kind], run: () => checkWebsiteOnPhones(kind) },
+      check: { busy: "Checking the website at the width of a phone…", subject: WEBSITE_SUBJECT[kind], run: () => checkWebsiteOnPhones(kind, checkPaths) },
     },
     report,
   );

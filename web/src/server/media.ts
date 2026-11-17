@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import sharp from "sharp";
+import { hasVisibleText } from "@/lib/visible-text";
 import { media, mediaCollectionItems, mediaCollections, siteDocuments, studioPhotos, studios } from "@/db/schema";
 import type { Db, DbLike } from "@/db/client";
 import { can } from "@/lib/abilities";
@@ -218,7 +219,9 @@ const oneLine = (value: string, max: number) => value.replace(/\s+/g, " ").trim(
 export async function describeMedia(db: Db, viewer: AuthUser, id: string, text: { alt: string; caption: string }, now: Date): Promise<MediaResult> {
   if (!(await mayEdit(db, viewer))) return { ok: false, message: "You cannot change the website's pictures." };
   if (!isUuid(id)) return { ok: false, message: "That picture was not found." };
-  const alt = oneLine(text.alt, MEDIA_LIMITS.alt);
+  // Characters that show nothing are no description: kept as none, which the library then says.
+  const typed = oneLine(text.alt, MEDIA_LIMITS.alt);
+  const alt = hasVisibleText(typed) ? typed : "";
   // A picture that is shown somewhere is read out by its description: it cannot lose it there.
   if (alt === "") {
     const uses = (await mediaUses(db, [id])).get(id) ?? [];

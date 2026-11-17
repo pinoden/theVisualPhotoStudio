@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { MONEY_FIELD } from "@/lib/parse";
+import { CREDIT_FIELD } from "@/lib/parse";
 
 type Kind = "percent" | "amount" | "free_hour";
 
@@ -31,7 +31,7 @@ export function CodeKindAndValue() {
           {kind === "percent" ? "Percent off (1 to 100)" : kind === "amount" ? "Amount ($)" : "Value (none for a free hour)"}
         </label>
         {kind === "percent" && <input id="code-value" key="percent" name="value" className="form-control" type="number" min={1} max={100} step={1} required />}
-        {kind === "amount" && <input id="code-value" key="amount" name="value" className="form-control" {...MONEY_FIELD} required />}
+        {kind === "amount" && <input id="code-value" key="amount" name="value" className="form-control" {...CREDIT_FIELD} required />}
         {kind === "free_hour" && <input id="code-value" key="free" className="form-control" disabled placeholder="The price of one hour" />}
       </div>
     </>

@@ -61,6 +61,7 @@ describe("cancelling", () => {
       creditCents: 4000,
       byHandCents: 0,
       why: "refund",
+      petFeeCents: 4000,
     });
     // Inside the window nothing comes back by itself, the pet fee included.
     expect(cancellationOutcome(withPet, hoursBefore(100), settings)).toMatchObject({ refundCents: 0, creditCents: 0, why: "inside_window" });
@@ -148,6 +149,7 @@ describe("cancelling a booking with a pet fee", () => {
       creditCents: 4000,
       byHandCents: 7800,
       why: "paid_at_studio",
+      petFeeCents: 4000,
     });
     // Already returned as credit: it is not returned again, and still not refunded.
     expect(cancellationOutcome({ ...atStudio, petCreditGiven: true }, hoursBefore(400), settings)).toMatchObject({ creditCents: 0, byHandCents: 7800 });

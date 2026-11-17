@@ -28,7 +28,7 @@ export interface ReceiptLine {
 }
 
 export interface ReceiptRefund {
-  /** When it was made; for one not made yet, when it was recorded. */
+  /** When it was sent, or made by hand; for one not made yet, when it was recorded. */
   at: string;
   amountCents: number;
   /**
@@ -189,7 +189,8 @@ export async function loadReceipts(db: DbLike, email: string): Promise<{ receipt
           // Money given back at the studio was made when it was recorded; a card refund once the processor completed it.
           const state = refund.status !== "succeeded" ? "owed" : payment.provider === MANUAL_PROVIDER || refund.settledAt !== null ? "made" : "on_its_way";
           return {
-            at: (state === "made" ? (refund.settledAt ?? refund.createdAt) : refund.createdAt).toISOString(),
+            // When it was sent (or made by hand, see recordRefundMadeInSquare), not when the processor finished it.
+            at: refund.createdAt.toISOString(),
             amountCents: refund.amountCents,
             state,
             reason: refund.reason,
