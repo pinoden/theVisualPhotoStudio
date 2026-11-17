@@ -422,7 +422,7 @@ export async function listRefundProblems(db: DbLike): Promise<RefundProblem[]> {
     .from(refunds)
     .innerJoin(payments, eq(payments.id, refunds.paymentId))
     .innerJoin(bookings, eq(bookings.id, payments.bookingId))
-    // A refund of a payment taken in test mode and retired is moot: nothing was paid, so nothing goes back.
+    // Refunds of payments that were taken: a refund is only ever made of one.
     .where(and(inArray(refunds.status, ["pending", "failed"]), eq(payments.status, "succeeded")))
     .orderBy(desc(refunds.createdAt));
   return rows as RefundProblem[];

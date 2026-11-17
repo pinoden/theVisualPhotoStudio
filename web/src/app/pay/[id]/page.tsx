@@ -107,7 +107,7 @@ async function Pay({ params }: Pick<PageProps<"/pay/[id]">, "params">) {
             {page.late.released ? "was released for a reschedule code" : "was cancelled"},{" "}
             {page.late.made
               ? "so it is refunded to your card in full."
-              : "so it is due back to your card in full. It has not reached your card yet: it is tried again by itself, and the studio has been told."}{" "}
+              : "so it is due back to your card in full. It has not reached your card yet: the studio has been told, and will see that it does."}{" "}
             We have emailed you about it.
           </p>
           {details}

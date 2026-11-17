@@ -11,6 +11,7 @@ import { codeRefundEmail, paymentReceivedEmail, queueEmail } from "./email";
 import { recordEvent } from "./history";
 import { openPayLinkOf } from "./pay-links";
 import { netCardPaidCents, owedCents, paidAtStudioCents, STANDS } from "./money";
+import { RESERVE_HOURS } from "./payments";
 import { petFeeCentsOf, studioRefundableCents } from "./pet-fee";
 import { codeStanding, rescheduleCodeOf, spendable, takeOffRescheduleCode } from "./promos";
 import { loadSettings } from "./settings";
@@ -45,6 +46,8 @@ export interface PaymentLine {
   refundedCents: number;
   /** A record taken back by an owner. It no longer counts. */
   voided: boolean;
+  /** An amount the card holds reserved, not taken yet: it is not money received. */
+  held: boolean;
   recordedBy: string | null;
   note: string;
 }
@@ -59,6 +62,11 @@ export interface BookingMoney {
   ended: "cancelled" | "released" | null;
   /** Made in the admin, and so paid at the studio or through a payment link; else made online, and paid by card then. */
   madeInAdmin: boolean;
+  /**
+   * What the card holds reserved, not taken yet, and when the reservation lapses if it is not taken: taking it did not
+   * go through, and the scheduled task tries again (src/server/reserved.ts). Null when the card holds nothing.
+   */
+  held: { cents: number; until: string } | null;
   payments: PaymentLine[];
 }
 
@@ -68,11 +76,15 @@ export async function moneyOf(
   booking: Pick<BookingRow, "id" | "totalCents" | "madeBy" | "status" | "cancelReason">,
   now: Date = new Date(),
 ): Promise<BookingMoney> {
-  const rows = await db
+  const all = await db
     .select()
     .from(payments)
-    .where(and(eq(payments.bookingId, booking.id), inArray(payments.status, ["succeeded", "voided"])))
+    .where(and(eq(payments.bookingId, booking.id), inArray(payments.status, ["succeeded", "voided", "authorized"])))
     .orderBy(asc(payments.createdAt));
+  // An amount reserved counts while the card holds it: one that lapsed is a payment that failed (`owedCents`).
+  const lapsedBefore = now.getTime() - RESERVE_HOURS * 3_600_000;
+  const rows = all.filter((row) => row.status !== "authorized" || row.createdAt.getTime() > lapsedBefore);
+  const reserved = rows.filter((row) => row.status === "authorized");
   const receivedCents = rows.filter((row) => row.status === "succeeded").reduce((sum, row) => sum + row.amountCents, 0);
   // The card payments that came in through a payment link, to say so beside them.
   const throughLink = new Set(
@@ -89,6 +101,13 @@ export async function moneyOf(
     dueCents: await owedCents(db, booking, now),
     madeInAdmin: booking.madeBy !== null,
     ended: STANDS.includes(booking.status) ? null : booking.cancelReason === "rescheduled" ? "released" : "cancelled",
+    held:
+      reserved.length > 0
+        ? {
+            cents: reserved.reduce((sum, row) => sum + row.amountCents, 0),
+            until: new Date(Math.min(...reserved.map((row) => row.createdAt.getTime())) + RESERVE_HOURS * 3_600_000).toISOString(),
+          }
+        : null,
     payments: rows.map((row) => ({
       id: row.id,
       at: row.createdAt.toISOString(),
@@ -100,10 +119,13 @@ export async function moneyOf(
             : "At the studio"
           : throughLink.has(row.id)
             ? "Card, through the payment link"
-            : "Card, online",
+            : row.status === "authorized"
+              ? "Card, online: held on the card, not taken yet"
+              : "Card, online",
       amountCents: row.amountCents,
       refundedCents: row.refundedCents,
       voided: row.status === "voided",
+      held: row.status === "authorized",
       recordedBy: row.recordedBy,
       note: row.note,
     })),

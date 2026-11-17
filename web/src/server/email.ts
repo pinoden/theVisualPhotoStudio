@@ -294,16 +294,21 @@ export function bookingMovedEmail(input: {
 
 /**
  * Where a card refund stands: `sent` when the processor accepted it, `not_yet`
- * when it did not go through, and is tried again.
+ * when it has not gone through: it failed, and is tried again, or it waits for
+ * the card processor its payment was taken through. Either way the studio was
+ * told, and the client is told no more than that.
  */
 export type RefundState = "sent" | "not_yet";
+
+/** What a client reads of a card refund that has not reached their card: true whatever keeps it back. */
+const REFUND_NOT_YET = "the studio has been told, and will see that it does.";
 
 /** A card refund, in a sentence: what the customer can expect. */
 function refundSentence(refund: { cents: number; feeCents: number; state: RefundState }): string {
   const fee = refund.feeCents > 0 ? ` (${money(refund.feeCents)} processing fee kept)` : "";
   return refund.state === "sent"
     ? `A refund of ${money(refund.cents)} is on its way to your card${fee}. Banks usually show it within 5 to 10 business days.`
-    : `A refund of ${money(refund.cents)} is due to your card${fee}, and has not reached it yet: it is tried again by itself, and the studio has been told.`;
+    : `A refund of ${money(refund.cents)} is due to your card${fee}, and has not reached it yet: ${REFUND_NOT_YET}`;
 }
 
 export function cancellationEmail(input: {
@@ -436,7 +441,6 @@ export function paymentReceivedEmail(input: {
   };
 }
 
-/** A refund of a booking released for a reschedule code: it came off the code, and the client is told what is left on it. */
 /**
  * A refund of a booking released for a reschedule code, which came off that
  * code. What is left on it is named only while the code can be spent. A
@@ -462,7 +466,7 @@ export function codeRefundEmail(input: {
       : input.usable
         ? `, which now has ${money(input.leftCents)} left.`
         : ". That code can no longer be used.";
-  const notYet = !input.byHand && input.state === "not_yet" ? " The refund has not reached your card yet: it is tried again by itself, and the studio has been told." : "";
+  const notYet = !input.byHand && input.state === "not_yet" ? ` The refund has not reached your card yet: ${REFUND_NOT_YET}` : "";
   return {
     to: input.to,
     kind: "reschedule_code_refund",
@@ -481,7 +485,7 @@ export function latePaymentEmail(input: { to: string; name: string; ref: string;
   const back =
     input.state === "sent"
       ? "so it is refunded to your card in full. Banks usually show a refund within 5 to 10 business days."
-      : "so it is due back to your card in full. It has not reached your card yet: it is tried again by itself, and the studio has been told.";
+      : `so it is due back to your card in full. It has not reached your card yet: ${REFUND_NOT_YET}`;
   return {
     to: input.to,
     kind: "late_payment_refunded",
@@ -753,9 +757,10 @@ export function ownerRefundWaitingNotice(input: { to: string; ref: string; custo
 
 /**
  * The amount reserved on a booking's card lapsed before the site could take it:
- * the card was not charged, and the booking, which stands, now owes its price.
+ * the card was not charged, and the booking, which stands, owes `dueCents`.
+ * Sent only while it owes something: the studio may have collected it already.
  */
-export function ownerReservationLapsedNotice(input: { to: string; ref: string; customer: string; amountCents: number }): QueuedEmail {
+export function ownerReservationLapsedNotice(input: { to: string; ref: string; customer: string; amountCents: number; dueCents: number }): QueuedEmail {
   return {
     to: input.to,
     kind: "owner_reservation_lapsed",
@@ -763,7 +768,25 @@ export function ownerReservationLapsedNotice(input: { to: string; ref: string; c
     body: [
       `The ${money(input.amountCents)} reserved on the card for booking ${input.ref} (${input.customer}) lapsed before it could be taken: Square gave it back to the card, and nothing was charged.`,
       "",
-      "The booking still stands, and owes its price. Take the payment at the studio and record it on the appointment's page, or email the client a payment link from there, or cancel the booking.",
+      `The booking still stands, and ${money(input.dueCents)} is still to pay. Take the payment at the studio and record it on the appointment's page, or email the client a payment link from there, or cancel the booking. The client was told that their card was not charged and that the studio will be in touch.`,
+    ].join("\n"),
+  };
+}
+
+/** The client's side of `ownerReservationLapsedNotice`: their card was not charged, and the booking, which stands, is still to pay. */
+export function reservationLapsedEmail(input: { to: string; name: string; ref: string; when: string; dueCents: number }): QueuedEmail {
+  return {
+    to: input.to,
+    kind: "reservation_lapsed",
+    subject: `Booking ${input.ref}: your card was not charged`,
+    body: [
+      `Hi ${input.name},`,
+      "",
+      `The amount reserved on your card for booking ${input.ref} on ${input.when} could not be taken, and has been released: your card was not charged.`,
+      "",
+      `Nothing else about your booking changes, and ${money(input.dueCents)} is still to pay. The studio will be in touch about how to pay it. If you have a question, please reply to this email or call us.`,
+      "",
+      SIGN_OFF,
     ].join("\n"),
   };
 }

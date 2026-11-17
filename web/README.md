@@ -44,7 +44,8 @@ Run only one dev server per folder. If every page starts reloading in a loop, st
 Copy `.env.example` to `.env.local` and fill it in. Each variable is explained there.
 
 - `DATABASE_URL`: a PostgreSQL connection string. Run `npm run db:migrate` and then `npm run db:seed` once against a new database.
-- `SQUARE_APPLICATION_ID`, `SQUARE_ACCESS_TOKEN`, `SQUARE_LOCATION_ID`, `SQUARE_ENVIRONMENT`: without all of them a production server refuses paid bookings.
+- `SQUARE_APPLICATION_ID`, `SQUARE_ACCESS_TOKEN`, `SQUARE_LOCATION_ID`: without all three a production server refuses paid bookings. Which of Square's accounts they are for is read from the application id; `SQUARE_ENVIRONMENT` can be left empty, and when set must agree with it.
+- Going live: a database holds test money or live money, never both. Once the live keys are set, the site refuses to open a database that was used in test mode. `DATABASE_URL=... npm run db:clear-test-mode` lists what it would remove (every booking and what bookings made) and what it keeps (the website, studios, prices, settings, staff, the owners' own codes); add `-- --yes` to remove it. Or start from a new database.
 - `RESEND_API_KEY`, `EMAIL_FROM`: without them no email is sent, so nobody can sign in.
 - `OWNER_EMAILS`: who can open `/admin`. The first address also receives refund notices and messages from the contact page, unless `OWNER_NOTIFY_EMAIL` names another.
 - `CRON_SECRET`: for the scheduler that must call `GET /api/cron/tick` every few minutes.

@@ -23,7 +23,7 @@ import { bookingConfirmationEmail, queueEmail } from "./email";
 import { BY_CUSTOMER, recordEvent } from "./history";
 import { releaseHolds } from "./holds";
 import { giveBackReserved, takeReserved } from "./reserved";
-import { owedCentsByBooking, receivedCentsByBooking } from "./money";
+import { heldCentsByBooking, owedCentsByBooking, receivedCentsByBooking } from "./money";
 import { RESERVE_HOURS, type PaymentProvider } from "./payments";
 import {
   creditName,
@@ -640,10 +640,13 @@ export interface BookingView {
   /** The part of it taken at the studio and recorded by hand; the rest came by card (online, or through a payment link). */
   receivedAtStudioCents: number;
   /**
-   * What is still to pay. Only a booking made in the admin can owe anything:
-   * a booking made online is paid in full when it is made.
+   * What is still to pay (`owedCents` in money.ts): until it is paid for a
+   * booking made in the admin; for one made online, only once the amount its
+   * card held lapsed before it was taken. Nothing for a booking that ended.
    */
   dueCents: number;
+  /** What the card holds reserved for the booking, not taken yet (`heldCentsByBooking` in money.ts). */
+  heldCents: number;
   rescheduledCount: number;
 }
 
@@ -654,7 +657,7 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[], now: Date =
   if (rows.length === 0) return [];
   const ids = rows.map((r) => r.id);
   const codeIds = rows.map((r) => r.promoCodeId).filter((id): id is string => id !== null);
-  const [holdRows, addonRows, codeRows, received, atStudio, owed] = await Promise.all([
+  const [holdRows, addonRows, codeRows, received, atStudio, owed, held] = await Promise.all([
     db
       .select({ bookingId: studioHolds.bookingId, name: studios.name, priceCents: studioHolds.priceCents, sort: studios.sortOrder })
       .from(studioHolds)
@@ -670,6 +673,7 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[], now: Date =
     receivedCentsByBooking(db, ids),
     receivedCentsByBooking(db, ids, "at_studio"),
     owedCentsByBooking(db, rows, now),
+    heldCentsByBooking(db, ids, now),
   ]);
   return rows.map((booking) => ({
     id: booking.id,
@@ -702,6 +706,7 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[], now: Date =
     receivedCents: received.get(booking.id) ?? 0,
     receivedAtStudioCents: atStudio.get(booking.id) ?? 0,
     dueCents: owed.get(booking.id) ?? 0,
+    heldCents: held.get(booking.id) ?? 0,
     rescheduledCount: booking.rescheduledCount,
   }));
 }

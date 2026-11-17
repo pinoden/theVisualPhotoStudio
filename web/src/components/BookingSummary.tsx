@@ -1,6 +1,7 @@
 import { formatCents } from "@/lib/domain/pricing";
 import { durationLabel } from "@/lib/domain/time";
 import type { BookingView } from "@/server/bookings";
+import { STANDS } from "@/server/money";
 import { formatRange } from "@/server/tz";
 
 export const STATUS_LABEL: Record<string, string> = {
@@ -20,7 +21,8 @@ export function statusLabel(booking: Pick<BookingView, "status" | "cancelReason"
 /** When, where and what it cost. Server component: times are shown in studio time. */
 export function BookingSummary({ booking }: { booking: BookingView }) {
   const when = formatRange(new Date(booking.startAt), new Date(booking.endAt));
-  const paidStatus = booking.status === "confirmed" || booking.status === "completed";
+  // A booking that stands, missed ones included, is paid or owes; one that ended shows what it cost.
+  const paidStatus = STANDS.includes(booking.status);
   /** What came by card: online, or through a payment link. */
   const byCard = booking.receivedCents - booking.receivedAtStudioCents;
   return (
@@ -92,14 +94,17 @@ export function BookingSummary({ booking }: { booking: BookingView }) {
       )}
       <div className="price-row total">
         <span>
-          {/* A booking made online owes only when the amount its card held lapsed before it was taken. */}
+          {/* A booking made online owes only when the amount its card held lapsed before it was taken. While the card
+              holds it, it is not charged yet: taking it did not go through, and is tried again. */}
           {!paidStatus || booking.totalCents === 0
             ? "Total"
             : booking.dueCents > 0
               ? booking.madeByAdmin
                 ? "To pay at the studio"
                 : "To pay"
-              : booking.receivedAtStudioCents > 0
+              : booking.heldCents > 0
+                ? "Held on card"
+                : booking.receivedAtStudioCents > 0
                 ? byCard > 0
                   ? "Paid by card and at the studio"
                   : "Paid at the studio"

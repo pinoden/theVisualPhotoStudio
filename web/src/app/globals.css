@@ -2078,7 +2078,9 @@ fieldset { min-inline-size: 0; }
   .site-logo { display: inline-flex; align-items: center; gap: .3em; min-height: 44px; }
   .site-nav { padding: 0 1.25rem; }
   .nav-links { gap: .25rem; padding: 1rem 1.25rem 1.5rem; max-height: calc(100vh - 72px); overflow-y: auto; }
-  .nav-links a, .nav-links button { display: flex; align-items: center; min-height: 44px; }
+  /* As flex boxes, a link or a button keeps no space of its own between its words and a part of them in an element
+     ("Info" and its arrow): the gap puts it back. */
+  .nav-links a, .nav-links button { display: flex; align-items: center; gap: .3em; min-height: 44px; }
 }
 /* The same for a menu folded on a wider screen because it did not fit. */
 .site-nav[data-folded] .nav-toggle {
@@ -2092,12 +2094,13 @@ fieldset { min-inline-size: 0; }
   padding: 0;
 }
 .site-nav[data-folded] .nav-links { gap: .25rem; padding: 1rem 2rem 1.5rem; max-height: calc(100vh - 72px); overflow-y: auto; }
-.site-nav[data-folded] :is(.nav-links a, .nav-links button) { display: flex; align-items: center; min-height: 44px; }
+.site-nav[data-folded] :is(.nav-links a, .nav-links button) { display: flex; align-items: center; gap: .3em; min-height: 44px; }
 
 /* A touch screen wide enough for the whole menu, a tablet held sideways: the logo, the menu's links and the booking
-   button are as easy to press as on a phone. They keep their places in the row; only their height grows. */
+   button are as easy to press as on a phone. They keep their places in the row; only their height grows. The gap is
+   the space between the logo's two parts, and between "Info" and its arrow, which a flex box would drop. */
 @media (pointer: coarse) and (min-width: 1001px) {
-  .site-nav:not([data-folded]) :is(.site-logo, .nav-links a, .nav-more) { display: inline-flex; align-items: center; min-height: 44px; }
+  .site-nav:not([data-folded]) :is(.site-logo, .nav-links a, .nav-more) { display: inline-flex; align-items: center; gap: .3em; min-height: 44px; }
 }
 
 @media (max-width: 760px), (pointer: coarse) {

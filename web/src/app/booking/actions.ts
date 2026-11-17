@@ -42,7 +42,10 @@ export async function cancelBookingAction(_previous: ManageState, formData: Form
   flushEmailsSoon();
   if (!formData.get("keepInPlace")) refresh();
   // The whole outcome, as the client was told it before confirming. A card refund that did not go through is not "on its way".
-  const late = result.refund === "pending" ? " The refund has not reached your card yet: it is tried again by itself, and the studio has been told." : "";
+  const late =
+    result.refund === "pending" || result.refund === "waiting"
+      ? " The refund has not reached your card yet: the studio has been told, and will see that it does."
+      : "";
   return { status: "cancelled", message: `Your booking is cancelled. ${result.message}${late}` };
 }
 

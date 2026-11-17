@@ -309,7 +309,7 @@ function asSentence(words: string): string {
  * Send one recorded refund to the processor. Safe to repeat: the refund's id
  * is the idempotency key, so the money moves at most once.
  */
-export async function processRefund(db: Db, refundId: string, deps: ManageDeps): Promise<"succeeded" | "failed" | "pending"> {
+export async function processRefund(db: Db, refundId: string, deps: ManageDeps): Promise<"succeeded" | "failed" | "waiting"> {
   const [row] = await db
     .select({
       refund: refunds,
@@ -332,9 +332,9 @@ export async function processRefund(db: Db, refundId: string, deps: ManageDeps):
   if (!deps.payments) return waitForProcessor(db, row, "No card processor is set up now, so the refund waits: it is sent once one is.", deps);
 
   // A payment taken through another processor than the one set up now is unknown to this one, which is never asked
-  // about it: its refund waits, untouched, for that processor to be set up again. (What test mode took is retired
-  // when the live processor is set up, and has nothing to refund: src/server/test-mode.ts.) Not failed: an owner told
-  // to refund it by hand could see it refunded a second time once the right processor is back.
+  // about it: its refund waits, untouched, for that processor to be set up again. (A database never holds test mode's
+  // payments beside the live account's: src/server/test-mode.ts.) Not failed: an owner told to refund it by hand could
+  // see it refunded a second time once the right processor is back.
   if (row.provider !== deps.payments.name) {
     return waitForProcessor(
       db,
@@ -467,8 +467,8 @@ async function waitForProcessor(
   row: { refund: { id: string; amountCents: number; error: string | null }; ref: string; customer: string },
   reason: string,
   deps: ManageDeps,
-): Promise<"pending"> {
-  if (row.refund.error === reason) return "pending";
+): Promise<"waiting"> {
+  if (row.refund.error === reason) return "waiting";
   await db.transaction(async (tx) => {
     const marked = await tx
       .update(refunds)
@@ -479,7 +479,28 @@ async function waitForProcessor(
       await queueEmail(tx, ownerRefundWaitingNotice({ to: deps.ownerEmail, ref: row.ref, customer: row.customer, amountCents: row.refund.amountCents, reason }));
     }
   });
-  return "pending";
+  return "waiting";
+}
+
+/**
+ * Where the card refunds of one change stand together: `sent` when the
+ * processor accepted each, `pending` when one did not go through (it is tried
+ * again by the scheduled task), `waiting` when one waits for the card
+ * processor its payment was taken through (it is sent once that one is set
+ * up), `none` when nothing was due to a card.
+ */
+export type RefundsState = "sent" | "pending" | "waiting" | "none";
+
+/** Send the refunds recorded for one change (`processRefund`), and say where they stand together. */
+async function sendRefunds(db: Db, refundIds: string[], deps: ManageDeps): Promise<RefundsState> {
+  if (refundIds.length === 0) return "none";
+  let state: RefundsState = "sent";
+  for (const id of refundIds) {
+    const status = await processRefund(db, id, deps);
+    if (status === "failed") state = "pending";
+    else if (status === "waiting" && state === "sent") state = "waiting";
+  }
+  return state;
 }
 
 /**
@@ -814,8 +835,8 @@ export type CancelResult =
       feeCents: number;
       /** The pet fee returned as studio credit by this cancellation. 0 when there was none to return. */
       creditCents: number;
-      /** sent: the processor accepted it. pending: recorded, will be retried. none: nothing was due. */
-      refund: "sent" | "pending" | "none";
+      /** Where the card refund stands (`RefundsState`). */
+      refund: RefundsState;
       message: string;
     }
   | { ok: false; status: number; code: "not_found" | "changed" | CancelBlock; message: string };
@@ -928,11 +949,8 @@ export async function cancelBooking(db: Db, ref: string, actor: Actor, deps: Man
   if (outcome.kind === "changed") return { ok: false, status: 409, code: "changed", message: LOOK_AGAIN };
 
   // The money first: a host that cuts a slow request short leaves the link to the scheduled task, not the refund.
-  let refund: "sent" | "pending" | "none" = outcome.refundIds.length === 0 ? "none" : "sent";
-  for (const id of outcome.refundIds) {
-    if ((await processRefund(db, id, deps)) !== "succeeded") refund = "pending";
-  }
-  if (refund === "pending") await refundNotSent(db, outcome.emailId, outcome.email);
+  const refund = await sendRefunds(db, outcome.refundIds, deps);
+  if (refund === "pending" || refund === "waiting") await refundNotSent(db, outcome.emailId, outcome.email);
   // A payment link still open for the booking is withdrawn, so that nobody pays for it now; not when the processor has
   // just failed to answer about it, which would only keep the client waiting again: the scheduled task does it.
   if (!unseen) await closePayLinkOf(db, outcome.bookingId, deps);
@@ -1059,7 +1077,7 @@ export async function requestRescheduleCode(db: Db, ref: string, actor: Actor, d
 export type OwnerRefundResult =
   | {
       ok: true;
-      refund: "sent" | "pending" | "none";
+      refund: RefundsState;
       refundCents: number;
       /** Money taken at the studio for a booking the studio cancelled: the studio gives back by hand what it owes of it. */
       atStudioCents?: number;
@@ -1194,11 +1212,8 @@ export async function ownerCancelBooking(
       message: `The money on this booking changed after this page was opened: the card now holds ${formatCents(outcome.held)}. Look at it again, then cancel.`,
     };
   }
-  let refund: "sent" | "pending" | "none" = outcome.refundIds.length === 0 ? "none" : "sent";
-  for (const id of outcome.refundIds) {
-    if ((await processRefund(db, id, deps)) !== "succeeded") refund = "pending";
-  }
-  if (refund === "pending") await refundNotSent(db, outcome.emailId, outcome.email);
+  const refund = await sendRefunds(db, outcome.refundIds, deps);
+  if (refund === "pending" || refund === "waiting") await refundNotSent(db, outcome.emailId, outcome.email);
   // After the money, and not while the processor cannot answer about the link (see `cancelBooking`).
   if (!unseen) await closePayLinkOf(db, outcome.bookingId, deps);
   return {
@@ -1261,11 +1276,8 @@ export async function ownerRefund(
   });
   if (outcome.kind === "not_found") return { ok: false, status: 404, code: "not_found", message: "Booking not found." };
   if (outcome.kind === "bad_amount") return { ok: false, status: 400, code: "bad_amount", message: tooMuchText(outcome) };
-  let refund: "sent" | "pending" | "none" = "sent";
-  for (const id of outcome.refundIds) {
-    if ((await processRefund(db, id, deps)) !== "succeeded") refund = "pending";
-  }
-  if (refund === "pending" && outcome.told && outcome.toldId) {
+  const refund = await sendRefunds(db, outcome.refundIds, deps);
+  if ((refund === "pending" || refund === "waiting") && outcome.told && outcome.toldId) {
     const notYet = codeRefundEmail({ ...outcome.told, state: "not_yet" });
     if (!(await replaceQueuedEmail(db, outcome.toldId, notYet))) await queueEmail(db, notYet);
   }

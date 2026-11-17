@@ -413,6 +413,26 @@ test("a tablet's touch screen gets the touch rules: controls a finger can press,
       await expect(page.locator("main h1, main h2").first()).toBeVisible();
       await touchable(`${path} at ${size.width}px`);
     }
+    // Made taller for a finger, the logo and a menu item that opens more links keep the space inside their words,
+    // which a flex box would drop ("The VisualPhoto Studio", "Info▾"): in the menu folded at 768px, beside it at 1180px.
+    await page.goto("/");
+    if (size.width <= 1000) await page.getByRole("button", { name: "Menu" }).click();
+    await expect(page.locator(".nav-more").first()).toBeVisible();
+    const spaces = await page.evaluate(() => {
+      /** From the end of the box's own words to the start of the part of them in an element. */
+      const spaceBefore = (box: Element | null) => {
+        const part = box?.querySelector("span");
+        const words = [...(box?.childNodes ?? [])].find((node) => node.nodeType === Node.TEXT_NODE && (node.textContent ?? "").trim() !== "");
+        if (!part || !words) return null;
+        const range = document.createRange();
+        range.setStart(words, 0);
+        range.setEnd(words, (words.textContent ?? "").trimEnd().length);
+        return part.getBoundingClientRect().left - range.getBoundingClientRect().right;
+      };
+      return { logo: spaceBefore(document.querySelector(".site-logo")), more: spaceBefore(document.querySelector(".nav-more")) };
+    });
+    expect(spaces.logo, `the space inside the logo at ${size.width}px`).toBeGreaterThan(2);
+    expect(spaces.more, `the space before "Info"'s arrow at ${size.width}px`).toBeGreaterThan(2);
     if (size.width === 768) await signIn(page, IPAD_OWNER, "/admin");
     for (const path of OWNER_PAGES) {
       await page.goto(path);

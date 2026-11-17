@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   customType,
   date,
   index,
@@ -239,6 +240,24 @@ export const settings = pgTable("settings", {
   key: text("key").primaryKey(),
   value: jsonb("value").notNull(),
 });
+
+/**
+ * Which kind of money this database holds, in its one row: `test` once it was
+ * opened in test mode (the pretend processor, or Square's sandbox), `live`
+ * once it was opened with Square's live account. Everything recorded is that
+ * kind of money, the bookings made in the admin and the payments recorded by
+ * hand included. No row: it was never opened with a card processor. See
+ * src/server/test-mode.ts.
+ */
+export const moneyKind = pgTable(
+  "money_kind",
+  {
+    id: integer("id").primaryKey().default(1),
+    kind: text("kind", { enum: ["test", "live"] }).notNull(),
+    setAt: ts("set_at").notNull().defaultNow(),
+  },
+  (t) => [check("money_kind_one_row", sql`${t.id} = 1`), check("money_kind_kind", sql`${t.kind} in ('test', 'live')`)],
+);
 
 // ── Bookings ─────────────────────────────────────────────────────────────────
 

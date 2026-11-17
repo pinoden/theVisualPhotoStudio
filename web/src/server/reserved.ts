@@ -3,9 +3,11 @@ import { bookings, payments, refunds } from "@/db/schema";
 import type { Db } from "@/db/client";
 import { labelOf } from "@/lib/domain/labels";
 import { formatCents } from "@/lib/domain/pricing";
-import { ownerCaptureNotice, ownerReservationLapsedNotice, queueEmail } from "./email";
+import { ownerCaptureNotice, ownerReservationLapsedNotice, queueEmail, reservationLapsedEmail } from "./email";
 import { BY_SYSTEM, recordEvent } from "./history";
+import { owedCents } from "./money";
 import { RESERVE_HOURS, type PaymentProvider } from "./payments";
+import { formatInstant } from "./tz";
 
 /**
  * A booking's card is paid in two steps, so that a card is never charged for a
@@ -149,9 +151,12 @@ export async function settleReservedPayments(db: Db, deps: SettleDeps): Promise<
       createdAt: payments.createdAt,
       ref: bookings.ref,
       customer: bookings.customerName,
+      customerEmail: bookings.customerEmail,
       bookingId: bookings.id,
       bookingStatus: bookings.status,
       bookingLabel: bookings.label,
+      totalCents: bookings.totalCents,
+      startAt: bookings.startAt,
     })
     .from(payments)
     .innerJoin(bookings, eq(bookings.id, payments.bookingId))
@@ -181,13 +186,31 @@ export async function settleReservedPayments(db: Db, deps: SettleDeps): Promise<
   return { taken, released };
 }
 
-/** A reserved amount the processor gave back by itself (`settleReservedPayments`): failed, written into the booking's history, and, while the booking stands, told to the owner. */
+/**
+ * A reserved amount the processor gave back by itself (`settleReservedPayments`): failed, and written into the
+ * booking's history. While the booking stands and still owes something, the owner and the client are told: from the
+ * moment the reservation lapsed the booking owed its price (`owedCents`), and the studio may have collected it before
+ * the scheduled task came by.
+ */
 async function lapse(
   db: Db,
-  row: { id: string; amountCents: number; ref: string; customer: string; bookingId: string; bookingStatus: string; bookingLabel: string | null },
+  row: {
+    id: string;
+    amountCents: number;
+    ref: string;
+    customer: string;
+    customerEmail: string;
+    bookingId: string;
+    bookingStatus: string;
+    bookingLabel: string | null;
+    totalCents: number;
+    startAt: Date;
+  },
   deps: SettleDeps,
 ): Promise<void> {
   await db.transaction(async (tx) => {
+    // Locked, as a payment recorded at the studio locks it: what is owed is read as it stands.
+    await tx.select({ id: bookings.id }).from(bookings).where(eq(bookings.id, row.bookingId)).for("update");
     const lapsed = await tx
       .update(payments)
       .set({ status: "failed", error: "The amount reserved lapsed before it was taken: the card was not charged." })
@@ -203,8 +226,17 @@ async function lapse(
       at: deps.now,
       note: `The ${formatCents(row.amountCents)} reserved on the card lapsed before it was taken: the card was not charged`,
     });
-    if ((STANDING as readonly string[]).includes(row.bookingStatus) && deps.ownerEmail) {
-      await queueEmail(tx, ownerReservationLapsedNotice({ to: deps.ownerEmail, ref: row.ref, customer: row.customer, amountCents: row.amountCents }));
+    const dueCents = await owedCents(tx, { id: row.bookingId, totalCents: row.totalCents, status: row.bookingStatus }, deps.now);
+    if (dueCents <= 0) return;
+    if (deps.ownerEmail) {
+      await queueEmail(
+        tx,
+        ownerReservationLapsedNotice({ to: deps.ownerEmail, ref: row.ref, customer: row.customer, amountCents: row.amountCents, dueCents }),
+      );
     }
+    await queueEmail(
+      tx,
+      reservationLapsedEmail({ to: row.customerEmail, name: row.customer, ref: row.ref, when: formatInstant(row.startAt), dueCents }),
+    );
   });
 }

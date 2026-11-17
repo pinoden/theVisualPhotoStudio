@@ -55,51 +55,90 @@ export async function migratePostgres(url: string): Promise<void> {
   }
 }
 
-const globalForDb = globalThis as unknown as { __studioDb?: Promise<Db> };
+/**
+ * A database opened, then made ready by `ready`: closed again when that fails (a database refused by the check of
+ * src/server/test-mode.ts above all), so that nothing of it stays open while the opening is tried again.
+ */
+export async function readyOrClosed(opened: { db: Db; close: () => Promise<void> }, ready: (db: Db) => Promise<void>): Promise<Db> {
+  try {
+    await ready(opened.db);
+  } catch (error) {
+    await opened.close().catch(() => undefined);
+    throw error;
+  }
+  return opened.db;
+}
+
+/**
+ * One opening, given to every caller. One that failed (a database server out of reach, a database refused) is given
+ * to the callers that come in the next `retryAfterMs` too, then tried again: otherwise every request, and every call
+ * of a request, would open the database anew, and a refused one is opened in full before it is refused.
+ */
+export function openOnce<T>(open: () => Promise<T>, retryAfterMs: number, clock: () => number = Date.now): () => Promise<T> {
+  let opening: Promise<T> | undefined;
+  let retryAt: number | undefined;
+  return () => {
+    if (opening && retryAt !== undefined && clock() >= retryAt) {
+      opening = undefined;
+      retryAt = undefined;
+    }
+    if (!opening) {
+      const attempt = open();
+      opening = attempt;
+      attempt.catch(() => {
+        if (opening === attempt) retryAt = clock() + retryAfterMs;
+      });
+    }
+    return opening;
+  };
+}
+
+/** How long a database that could not be opened, or was refused, is not tried again. */
+export const REOPEN_AFTER_MS = 10_000;
+
+async function openAppDb(): Promise<Db> {
+  const url = process.env.DATABASE_URL;
+  // A database holds test money or live money, never both: one that would mix them with the processor set up now is
+  // refused, with what to do (src/server/test-mode.ts). Imported here, as the pages are below: that module needs this one.
+  const oneKindOfMoney = async (db: Db) => {
+    const [{ assertOneKindOfMoney }, { resolvePayments }] = await Promise.all([import("../server/test-mode"), import("../server/payments")]);
+    await assertOneKindOfMoney(db, resolvePayments().provider?.name ?? null);
+  };
+  if (url) return readyOrClosed(await openPostgres(url), oneKindOfMoney);
+  const { seed } = await import("./seed");
+  // The pages the website was built with, into a database that never had them (src/server/pages.ts).
+  const { ensureBuiltInPages } = await import("../server/pages");
+  if (process.env.NEXT_PHASE === "phase-production-build") {
+    // `next build` without a database server: prerender pages from the
+    // starting catalog held in memory. Build workers run in parallel and
+    // PGlite's data directory can only be opened by one process.
+    const { db } = await openPglite(undefined);
+    await seed(db);
+    await ensureBuiltInPages(db, new Date());
+    return db;
+  }
+  if (process.env.NODE_ENV === "production" && process.env.ALLOW_PGLITE_IN_PRODUCTION !== "1") {
+    throw new Error("DATABASE_URL is required in production.");
+  }
+  // PGLITE_DATA_NAME lets the browser tests use their own throwaway database
+  // (.data/e2e). Always a plain folder name inside .data.
+  const name = /^[a-z0-9-]{1,40}$/.test(process.env.PGLITE_DATA_NAME ?? "") ? process.env.PGLITE_DATA_NAME! : "pglite";
+  const dataDir = path.join(process.cwd(), ".data", name);
+  mkdirSync(dataDir, { recursive: true });
+  return readyOrClosed(await openPglite(dataDir), async (db) => {
+    await seed(db);
+    await ensureBuiltInPages(db, new Date());
+    await oneKindOfMoney(db);
+  });
+}
+
+// On globalThis, so that the development server's reloading of this module keeps the one database it opened.
+const globalForDb = globalThis as unknown as { __studioDbOpen?: () => Promise<Db> };
 
 /** The application database. Opened once per process. */
 export function getDb(): Promise<Db> {
-  if (!globalForDb.__studioDb) {
-    globalForDb.__studioDb = (async () => {
-      const url = process.env.DATABASE_URL;
-      // A database holds test money or live money, never both: one that would mix them with the processor set up now is
-      // refused, with what to do (src/server/test-mode.ts). Imported here, as the pages are below: that module needs this one.
-      const oneKindOfMoney = async (db: Db) => {
-        const [{ assertOneKindOfMoney }, { resolvePayments }] = await Promise.all([import("../server/test-mode"), import("../server/payments")]);
-        await assertOneKindOfMoney(db, resolvePayments().provider?.name ?? null);
-        return db;
-      };
-      if (url) return oneKindOfMoney((await openPostgres(url)).db);
-      const { seed } = await import("./seed");
-      // The pages the website was built with, into a database that never had them (src/server/pages.ts).
-      const { ensureBuiltInPages } = await import("../server/pages");
-      if (process.env.NEXT_PHASE === "phase-production-build") {
-        // `next build` without a database server: prerender pages from the
-        // starting catalog held in memory. Build workers run in parallel and
-        // PGlite's data directory can only be opened by one process.
-        const { db } = await openPglite(undefined);
-        await seed(db);
-        await ensureBuiltInPages(db, new Date());
-        return db;
-      }
-      if (process.env.NODE_ENV === "production" && process.env.ALLOW_PGLITE_IN_PRODUCTION !== "1") {
-        throw new Error("DATABASE_URL is required in production.");
-      }
-      // PGLITE_DATA_NAME lets the browser tests use their own throwaway database
-      // (.data/e2e). Always a plain folder name inside .data.
-      const name = /^[a-z0-9-]{1,40}$/.test(process.env.PGLITE_DATA_NAME ?? "") ? process.env.PGLITE_DATA_NAME! : "pglite";
-      const dataDir = path.join(process.cwd(), ".data", name);
-      mkdirSync(dataDir, { recursive: true });
-      const { db } = await openPglite(dataDir);
-      await seed(db);
-      await ensureBuiltInPages(db, new Date());
-      return oneKindOfMoney(db);
-    })();
-    globalForDb.__studioDb.catch(() => {
-      globalForDb.__studioDb = undefined;
-    });
-  }
-  return globalForDb.__studioDb;
+  globalForDb.__studioDbOpen ??= openOnce(openAppDb, REOPEN_AFTER_MS);
+  return globalForDb.__studioDbOpen();
 }
 
 /** Postgres error code of a failed query, looking through driver wrappers. */

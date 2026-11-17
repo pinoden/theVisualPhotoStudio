@@ -28,7 +28,7 @@ export async function netCardPaidCents(db: DbLike, bookingId: string): Promise<n
     .select({ total: sql<number>`coalesce(sum(${payments.amountCents}), 0)::int` })
     .from(payments)
     .where(and(viaSite, eq(payments.status, "succeeded")));
-  // Refunds of payments that stand: a payment taken in test mode and retired (src/server/test-mode.ts) counts neither way.
+  // Refunds of the payments counted above: an amount only reserved, or a payment that failed, holds nothing to refund.
   const [back] = await db
     .select({ total: sql<number>`coalesce(sum(${refunds.amountCents}), 0)::int` })
     .from(refunds)
@@ -63,22 +63,29 @@ export async function owedCentsByBooking(
   const standing = rows.filter((row) => STANDS.includes(row.status));
   if (standing.length === 0) return new Map(rows.map((row) => [row.id, 0]));
   const ids = standing.map((row) => row.id);
-  const lapsedBefore = new Date(now.getTime() - RESERVE_HOURS * 3_600_000);
-  const [received, reserved] = await Promise.all([
-    receivedCentsByBooking(db, ids),
-    db
-      .select({ bookingId: payments.bookingId, total: sql<number>`coalesce(sum(${payments.amountCents}), 0)::int` })
-      .from(payments)
-      .where(and(inArray(payments.bookingId, ids), eq(payments.status, "authorized"), gt(payments.createdAt, lapsedBefore)))
-      .groupBy(payments.bookingId),
-  ]);
-  const held = new Map(reserved.map((row) => [row.bookingId, row.total]));
+  const [received, held] = await Promise.all([receivedCentsByBooking(db, ids), heldCentsByBooking(db, ids, now)]);
   return new Map(
     rows.map((row) => [
       row.id,
       STANDS.includes(row.status) ? Math.max(0, row.totalCents - (received.get(row.id) ?? 0) - (held.get(row.id) ?? 0)) : 0,
     ]),
   );
+}
+
+/**
+ * For several bookings at once: what a card holds reserved for each, not taken yet. That is a moment after the
+ * booking is made, or longer when taking it did not go through, which the scheduled task tries again; until the
+ * reservation lapses (`RESERVE_HOURS`), when the card holds nothing. A booking whose card holds nothing is not in the map.
+ */
+export async function heldCentsByBooking(db: DbLike, bookingIds: string[], now: Date): Promise<Map<string, number>> {
+  if (bookingIds.length === 0) return new Map();
+  const lapsedBefore = new Date(now.getTime() - RESERVE_HOURS * 3_600_000);
+  const rows = await db
+    .select({ bookingId: payments.bookingId, total: sql<number>`coalesce(sum(${payments.amountCents}), 0)::int` })
+    .from(payments)
+    .where(and(inArray(payments.bookingId, bookingIds), eq(payments.status, "authorized"), gt(payments.createdAt, lapsedBefore)))
+    .groupBy(payments.bookingId);
+  return new Map(rows.map((row) => [row.bookingId, row.total]));
 }
 
 /** What one booking still owes (`owedCentsByBooking`). */

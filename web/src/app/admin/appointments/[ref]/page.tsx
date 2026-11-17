@@ -68,8 +68,10 @@ async function AppointmentDetails({
   const day = localDateOf(new Date(appointment.startAt));
   // A payment link needs a card processor. In test mode the pretend one stands in, and says so to the client.
   const cardProcessor = resolvePayments().client.mode;
-  // A link the processor set up now did not make (one of test mode, left after the real keys went in) cannot be paid.
-  const foreignLink = appointment.payLink !== null && appointment.payLink.provider !== (resolvePayments().provider?.name ?? null);
+  const processorName = resolvePayments().provider?.name ?? null;
+  // A link the processor set up now did not make (one of test mode, left after the real keys went in), or any link
+  // while none is set up: the site can neither ask about it nor withdraw it, and its page offers nothing to pay.
+  const foreignLink = appointment.payLink !== null && appointment.payLink.provider !== processorName;
 
   return (
     <AdminFrame
@@ -270,7 +272,23 @@ async function AppointmentDetails({
                 <strong>{formatCents(appointment.payments.dueCents)} is still to pay.</strong>{" "}
                 {appointment.payments.madeInAdmin
                   ? "This booking was made in the admin, so nothing was charged online."
-                  : "The amount its card held lapsed before it was taken, so the card was not charged: collect the price at the studio, or with a payment link."}
+                  : `The amount its card held lapsed before it was taken, so the card was not charged: collect the price at the studio${cardProcessor !== "disabled" ? ", or with a payment link" : ""}.`}
+              </>
+            ) : appointment.payments.held && appointment.payments.ended ? (
+              <>
+                <strong>
+                  {formatCents(appointment.payments.held.cents)} is still held on the client&rsquo;s card, not taken.
+                </strong>{" "}
+                The booking {appointment.payments.ended === "released" ? "was released for a reschedule code" : "was cancelled"}{" "}
+                first, so it is given back to the card: by the site, or by Square itself on{" "}
+                {formatInstant(new Date(appointment.payments.held.until))} at the latest. Nothing more is to pay.
+              </>
+            ) : appointment.payments.held ? (
+              <>
+                <strong>{formatCents(appointment.payments.held.cents)} is held on the client&rsquo;s card, not taken yet.</strong>{" "}
+                Taking it did not go through, and the site tries again by itself. If it is still not taken by{" "}
+                {formatInstant(new Date(appointment.payments.held.until))}, the card holds nothing, and the booking owes its
+                price: you are emailed then.
               </>
             ) : appointment.payments.ended && appointment.payments.receivedCents < appointment.payments.totalCents ? (
               <>
@@ -303,6 +321,7 @@ async function AppointmentDetails({
                           {formatCents(payment.amountCents)} · {payment.how}
                         </span>
                         {payment.voided && <div style={{ fontSize: ".8rem" }}>Taken back: it does not count.</div>}
+                        {payment.held && <div style={{ fontSize: ".8rem" }}>Not received yet: the card holds it until it is taken.</div>}
                         {payment.refundedCents > 0 && (
                           <div style={{ fontSize: ".8rem" }}>{formatCents(payment.refundedCents)} given back.</div>
                         )}
@@ -362,11 +381,13 @@ async function AppointmentDetails({
               <p>
                 A link to pay {formatCents(appointment.payLink.amountCents)} by card was emailed to the client on{" "}
                 {formatInstant(new Date(appointment.payLink.createdAt))} by {appointment.payLink.createdBy}.{" "}
-                {foreignLink
-                  ? "It was made by another card processor than the one set up now (in test mode, or with Square's other account), so it cannot be paid, and the site cannot ask about it. Look it up there: an owner then closes it here by hand, and a new one can be emailed."
-                  : appointment.payments.ended
-                    ? "The booking has ended, and the link is still open: it is withdrawn as soon as the card processor says it was not paid. If the processor cannot say, look the link up in Square: an owner then closes it here by hand."
-                    : "It has not been paid yet."}
+                {foreignLink && processorName === null
+                  ? "Card payments are not set up on the site now (see the overview), so the site can neither ask Square about this link nor withdraw it, and the page the client was sent to offers nothing to pay. A client who still has Square's page open could pay there. Once card payments are set up again, the site asks about it by itself; or look it up in Square, and an owner closes it here by hand."
+                  : foreignLink
+                    ? "It was made by another card processor than the one set up now (in test mode, or with Square's other account), so the site cannot ask about it, and the page the client was sent to offers nothing to pay. Look it up there: an owner then closes it here by hand, and a new one can be emailed."
+                    : appointment.payments.ended
+                      ? "The booking has ended, and the link is still open: it is withdrawn as soon as the card processor says it was not paid. If the processor cannot say, look the link up in Square: an owner then closes it here by hand."
+                      : "It has not been paid yet."}
               </p>
               {appointment.may.recordPayment && !foreignLink && (
                 <>

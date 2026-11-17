@@ -82,8 +82,10 @@ async function Overview({ searchParams }: Pick<PageProps<"/admin">, "searchParam
         <div className="admin-card">
           <h3>Refunds that need attention</h3>
           <p style={{ fontSize: ".875rem" }}>
-            These are retried automatically. If one keeps failing, refund the payment in Square, then record it here: the
-            site then stops trying, and the client&rsquo;s receipt shows the refund.
+            One that failed, or was never sent, is tried again automatically. One whose reason says it waits for a card
+            processor cannot be sent with the one set up now: it is sent once that processor is set up. If one keeps
+            failing, refund the payment in Square, then record it here: the site then stops trying, and the
+            client&rsquo;s receipt shows the refund.
           </p>
           <div className="data-table-wrap">
           <table className="data-table">
