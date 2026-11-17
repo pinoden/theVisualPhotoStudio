@@ -526,6 +526,8 @@ export const paymentLinks = pgTable(
     paymentId: uuid("payment_id").references(() => payments.id, { onDelete: "set null" }),
     paidAt: ts("paid_at"),
     cancelledAt: ts("cancelled_at"),
+    /** When the processor was last asked about it, whatever it answered: the scheduled task asks about the longest unasked first. */
+    checkedAt: ts("checked_at"),
     createdAt: createdAt(),
   },
   (t) => [index("payment_links_booking_idx").on(t.bookingId)],

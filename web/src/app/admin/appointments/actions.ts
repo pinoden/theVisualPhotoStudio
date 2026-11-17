@@ -7,7 +7,7 @@ import { formatCents } from "@/lib/domain/pricing";
 import { isIsoDate } from "@/lib/domain/time";
 import { dollarsToCents, formText, intInRange } from "@/lib/parse";
 import { createAdminBooking, moveBooking, setLabel } from "@/server/appointments";
-import { cancelPayLink, checkBookingPayLink, sendPayLink } from "@/server/pay-links";
+import { cancelPayLink, checkBookingPayLink, closePayLinkByHand, sendPayLink } from "@/server/pay-links";
 import { givePetFeeCredit } from "@/server/pet-fee";
 import { flushEmailsSoon, payLinkDeps, siteUrl } from "@/server/runtime";
 import { requireOwner, requireStaff } from "@/server/session";
@@ -211,6 +211,25 @@ export async function sendPayLinkAction(formData: FormData): Promise<void> {
   );
 }
 
+/** An owner closes a link the card processor cannot say anything about, once they looked it up in Square. */
+export async function closePayLinkByHandAction(formData: FormData): Promise<void> {
+  const ref = formText(formData.get("ref"));
+  const page = appointmentPage(ref);
+  const owner = await requireOwner(page);
+  const result = await closePayLinkByHand(await getDb(), owner, ref, await payLinkDeps());
+  if (!result.ok) redirect(withMessage(page, "error", result.message));
+  flushEmailsSoon();
+  redirect(
+    withMessage(
+      page,
+      "notice",
+      result.outcome === "was_paid"
+        ? "The card processor answered: the client had paid through the link. The payment is recorded, and nothing was closed."
+        : "The payment link was closed. The site no longer asks about it.",
+    ),
+  );
+}
+
 /** Ask the card processor now whether the link was paid. */
 export async function checkPayLinkAction(formData: FormData): Promise<void> {
   const ref = formText(formData.get("ref"));
@@ -226,8 +245,8 @@ export async function checkPayLinkAction(formData: FormData): Promise<void> {
       result.status === "paid"
         ? result.late
           ? result.late.made
-            ? "The client paid through the link after the booking ended: the payment is refunded to the card in full, and the client is told."
-            : "The client paid through the link after the booking ended. The payment is due back to the card in full, and the refund has not gone through yet: it is tried again by itself, and the client is told."
+            ? "The client's payment through the link was recorded after the booking ended: it is refunded to the card in full, and the client is told."
+            : "The client's payment through the link was recorded after the booking ended. It is due back to the card in full, and the refund has not gone through yet: it is tried again by itself, and the client is told."
           : "The client has paid through the link. The payment is recorded."
         : result.status === "cancelled"
           ? "The link was cancelled at the card processor."

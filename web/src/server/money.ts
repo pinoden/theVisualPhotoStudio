@@ -12,6 +12,9 @@ import { MANUAL_PROVIDER } from "@/lib/payment-methods";
  * of it is the studio's to make, and to record.
  */
 
+/** A booking that stands, and so can owe money: one cancelled, released for a reschedule code or never made owes nothing. */
+export const STANDS: readonly string[] = ["confirmed", "completed", "no_show"];
+
 /**
  * Card money still held for a booking: payments charged through the site,
  * less every refund recorded against them. A refund that failed counts too:

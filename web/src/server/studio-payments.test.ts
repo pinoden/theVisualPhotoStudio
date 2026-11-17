@@ -58,7 +58,7 @@ describe("a booking made in the admin", () => {
   it("owes its whole price until a payment is recorded", async () => {
     const made = await madeInAdmin();
     const booking = await row(made.ref);
-    expect(await moneyOf(world.db, booking)).toEqual({ totalCents: 17600, receivedCents: 0, dueCents: 17600, payments: [] });
+    expect(await moneyOf(world.db, booking)).toEqual({ totalCents: 17600, receivedCents: 0, dueCents: 17600, ended: null, payments: [] });
     expect((await toBookingViews(world.db, [booking]))[0]).toMatchObject({ madeByAdmin: true, receivedCents: 0, dueCents: 17600 });
     const appointment = (await getAppointment(world.db, owner, made.ref, NOW))!;
     expect(appointment.payments).toMatchObject({ dueCents: 17600 });
@@ -138,6 +138,29 @@ describe("a booking made in the admin", () => {
     ]);
     expect(results.filter((result) => result.ok)).toHaveLength(1);
     expect(await paidAtStudioCents(world.db, made.id)).toBe(17600);
+  });
+});
+
+describe("a booking made in the admin that has ended", () => {
+  it("owes nothing, whatever was paid of it, wherever it is shown", async () => {
+    const dana = { kind: "customer", email: "dana@example.com" } as const;
+    // Part paid, then cancelled by the client.
+    const partPaid = await madeInAdmin(FAR, h(9));
+    expectOk(await recordStudioPayment(world.db, owner, partPaid.ref, cash(4000), NOW));
+    expectOk(await cancelBooking(world.db, partPaid.ref, dana, world.manageDeps()));
+    expect(await moneyOf(world.db, await row(partPaid.ref))).toMatchObject({ receivedCents: 4000, dueCents: 0, ended: "cancelled" });
+    // Part paid, then released for a reschedule code.
+    const released = await madeInAdmin(FAR, h(13));
+    expectOk(await recordStudioPayment(world.db, owner, released.ref, cash(5000), NOW));
+    expectOk(await requestRescheduleCode(world.db, released.ref, dana, world.manageDeps()));
+    expect(await moneyOf(world.db, await row(released.ref))).toMatchObject({ receivedCents: 5000, dueCents: 0, ended: "released" });
+    // The customer's page reads the same figures.
+    const views = await toBookingViews(world.db, [await row(partPaid.ref), await row(released.ref)]);
+    expect(views.map((view) => view.dueCents)).toEqual([0, 0]);
+    // One that stands still owes the rest.
+    const standing = await madeInAdmin();
+    expectOk(await recordStudioPayment(world.db, owner, standing.ref, cash(4000), NOW));
+    expect(await moneyOf(world.db, await row(standing.ref))).toMatchObject({ dueCents: 13600, ended: null });
   });
 });
 

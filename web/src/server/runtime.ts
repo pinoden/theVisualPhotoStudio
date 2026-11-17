@@ -69,6 +69,27 @@ export async function taskDeps(): Promise<TaskDeps> {
 }
 
 /** Deliver queued email once the response has been sent, without delaying it. */
+/**
+ * Work a page started and does not wait for to the end (asking the card
+ * processor about a payment link): kept going after the response, which a
+ * serverless host would otherwise freeze part-way, and the mail it queued is
+ * then delivered.
+ */
+export function finishAfterResponse(work: Promise<unknown>): void {
+  after(async () => {
+    try {
+      await work;
+    } catch (error) {
+      console.error("Work left for after the response failed", error);
+    }
+    try {
+      await deliverPendingEmails(await getDb(), resolveEmailTransport(), new Date());
+    } catch (error) {
+      console.error("Email delivery failed", error);
+    }
+  });
+}
+
 export function flushEmailsSoon(): void {
   after(async () => {
     try {

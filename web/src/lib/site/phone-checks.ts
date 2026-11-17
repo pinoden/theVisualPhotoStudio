@@ -159,8 +159,9 @@ export function brokenWords(doc: Document = document): string[] {
     for (let parent = box.parentElement; parent; parent = box.parentElement) {
       const shown = view.getComputedStyle(box).display;
       const outer = view.getComputedStyle(parent).display;
-      // A block in a table's cell, however deep (a summary in a details in the cell), is as wide as the cell lets it be.
-      const inCell = /^(block|list-item|flow-root)$/.test(shown) && parent.closest("td, th") !== null;
+      // A block in a table's cell, however deep (a summary in a details in the cell, a row of buttons), is as wide as the
+      // cell lets it be.
+      const inCell = /^(block|list-item|flow-root|flex|grid)$/.test(shown) && parent.closest("td, th") !== null;
       if (/(flex|grid)/.test(outer) || /^inline-(block|flex|grid)$/.test(shown) || inCell) {
         own += edges(box);
         box = parent;
@@ -175,10 +176,20 @@ export function brokenWords(doc: Document = document): string[] {
         if (table.closest(".data-table-wrap, .blk-table-wrap, [data-scrolls-sideways]")) return Infinity;
         const cells = Array.from(box.parentElement!.children);
         const tableStyle = view.getComputedStyle(table);
-        own += edges(box) + edges(table);
+        own += edges(box);
         if (tableStyle.borderCollapse === "separate") own += parseFloat(tableStyle.borderSpacing) * (cells.length + 1);
         for (const cell of cells) if (cell !== box) own += leastWidth(cell) + edges(cell);
-        box = table.parentElement;
+        // A table narrower than the room around it was given its width (a table as wide as its words breaks none of
+        // them): its cells share that width.
+        const around = table.parentElement;
+        const aroundStyle = view.getComputedStyle(around);
+        const aroundWidth = around.clientWidth - parseFloat(aroundStyle.paddingLeft) - parseFloat(aroundStyle.paddingRight);
+        if (table.getBoundingClientRect().width + edges(table) < aroundWidth - 1) {
+          box = table;
+          break;
+        }
+        own += edges(table);
+        box = around;
         continue;
       }
       break;

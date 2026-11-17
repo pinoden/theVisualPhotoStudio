@@ -8,7 +8,7 @@ import { getDb } from "@/db/client";
 import { telHref } from "@/lib/site/frame";
 import { getBookingByToken, isUpcomingVisit } from "@/server/bookings";
 import { getManageChoices, noticeBookingPayments } from "@/server/manage";
-import { payLinkDeps } from "@/server/runtime";
+import { finishAfterResponse, payLinkDeps } from "@/server/runtime";
 import { loadAccessInstructions } from "@/server/settings";
 import { siteFrame } from "@/server/site";
 
@@ -50,8 +50,9 @@ async function BookingDetails({ params, searchParams }: Pick<PageProps<"/booking
   const [{ ref }, query] = await Promise.all([params, searchParams]);
   const token = typeof query.t === "string" ? query.t : "";
   const db = await getDb();
-  // A payment link paid that the site has not seen yet is recorded first: what the page says counts it.
-  await noticeBookingPayments(db, ref, { kind: "token", token }, await payLinkDeps());
+  // A payment link paid that the site has not seen yet is recorded first: what the page says counts it. A slow
+  // processor is waited for a few seconds at most; its answer is still recorded after the response, with its mail.
+  await noticeBookingPayments(db, ref, { kind: "token", token }, await payLinkDeps(), finishAfterResponse);
   const booking = await getBookingByToken(db, ref, token);
   const { business } = (await siteFrame()).frame;
 

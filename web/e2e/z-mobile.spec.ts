@@ -81,6 +81,31 @@ async function expectFits(page: Page, where: string): Promise<void> {
   expect(await brokenWords(page), `${where}: words broken in two`).toEqual([]);
 }
 
+test("the check for broken words sees a word squeezed in a table, at any depth of its cell, and nothing else", async ({ page }) => {
+  // Made-up layouts. The other column has room to give: its words are short and many, so a word squeezed beside it
+  // would have fitted.
+  const filler = "and some short words that can wrap at their spaces ".repeat(4);
+  const row = (first: string) =>
+    `<table style="border-collapse:collapse"><tr><td style="padding:4px">${first}</td><td style="padding:4px">${filler}</td></tr></table>`;
+  const squeezed = 'style="overflow-wrap:anywhere;white-space:normal;font:inherit"';
+  const layouts: [string, string, boolean][] = [
+    ["a button in a cell", row(`<button ${squeezed}>Refunded it in Square</button>`), true],
+    ["a button in a row of buttons in a cell", row(`<div style="display:flex"><button ${squeezed}>Refunded it in Square</button></div>`), true],
+    ["a summary in a details in a cell", row(`<details><summary ${squeezed}>Refunded it in Square</summary></details>`), true],
+    ["a paragraph in a box in a cell", row(`<div><p ${squeezed}>Refunded it in Square</p></div>`), true],
+    ["words that keep whole", row("<button>Refunded it in Square</button>"), false],
+    [
+      "a table given a width its words cannot fit",
+      `<table style="width:120px;border-collapse:collapse"><tr><td style="padding:4px"><button ${squeezed}>Refunded it in Square</button></td><td style="padding:4px">some words</td></tr></table>`,
+      false,
+    ],
+  ];
+  for (const [name, html, reported] of layouts) {
+    await page.setContent(`<!doctype html><html><body style="margin:0;font:16px/1.4 monospace"><main style="width:340px">${html}</main></body></html>`);
+    expect((await brokenWords(page)).length > 0, name).toBe(reported);
+  }
+});
+
 test("no public page is wider than the screen, and its text can be read, on any phone", async ({ page }) => {
   test.setTimeout(300_000);
   for (const size of SIZES) {

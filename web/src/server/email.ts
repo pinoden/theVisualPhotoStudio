@@ -486,7 +486,14 @@ export function latePaymentEmail(input: { to: string; name: string; ref: string;
     to: input.to,
     kind: "late_payment_refunded",
     subject: input.state === "sent" ? `Your payment for booking ${input.ref} is refunded` : `Your payment for booking ${input.ref} is due back to your card`,
-    body: [`Hi ${input.name},`, "", `Your payment of ${money(input.amountCents)} for booking ${input.ref} reached us after the booking ${ended}, ${back}`, "", SIGN_OFF].join("\n"),
+    // "Recorded": a payment the processor could not tell the site about at the time may have been made before.
+    body: [
+      `Hi ${input.name},`,
+      "",
+      `Your payment of ${money(input.amountCents)} through the payment link for booking ${input.ref} was recorded after the booking ${ended}, ${back}`,
+      "",
+      SIGN_OFF,
+    ].join("\n"),
   };
 }
 
@@ -540,6 +547,27 @@ export function ownerHandRefundNotice(input: { to: string; ref: string; customer
   };
 }
 
+/**
+ * A booking ended while the card processor could not say whether its payment
+ * link had been paid. The client is told the same (`UNSEEN_LINK`).
+ */
+export const UNSEEN_LINK =
+  "We could not check just now whether the payment link for this booking was paid. If it was, that payment is refunded to your card in full once the card processor tells us.";
+
+export function ownerUnseenLinkNotice(input: { to: string; ref: string; customer: string; linkCents: number; ended: "cancelled" | "released" }): QueuedEmail {
+  return {
+    to: input.to,
+    kind: "owner_unseen_link",
+    subject: `CHECK IN SQUARE: the payment link of ${input.ref}`,
+    body: [
+      `${input.customer}'s booking ${input.ref} was ${input.ended === "released" ? "released for a reschedule code" : "cancelled"} while the card processor could not say whether its payment link for ${money(input.linkCents)} had been paid.`,
+      "",
+      "If it was paid, the payment is refunded to the card in full once the processor tells the site, and the client was told so. The site keeps asking.",
+      "If the processor never can (a link it no longer knows), look the link up in Square. When it was not paid, close it on the appointment's page with \"Close it by hand\".",
+    ].join("\n"),
+  };
+}
+
 export function rescheduleCodeEmail(input: {
   to: string;
   name: string;
@@ -550,6 +578,8 @@ export function rescheduleCodeEmail(input: {
   discountCents?: number;
   expires: string;
   bookUrl: string;
+  /** The card processor could not say whether the booking's payment link had been paid (`UNSEEN_LINK`). */
+  unseenLink?: boolean;
 }): QueuedEmail {
   const credit =
     (input.discountCents ?? 0) > 0
@@ -563,6 +593,7 @@ export function rescheduleCodeEmail(input: {
       `Hi ${input.name},`,
       "",
       credit,
+      ...(input.unseenLink ? ["", UNSEEN_LINK] : []),
       "",
       `Reschedule code: ${input.code}`,
       `Valid until: ${input.expires}`,

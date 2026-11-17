@@ -23,7 +23,7 @@ import { bookingConfirmationEmail, queueEmail } from "./email";
 import { BY_CUSTOMER, recordEvent } from "./history";
 import { releaseHolds } from "./holds";
 import { giveBackReserved, takeReserved } from "./reserved";
-import { receivedCentsByBooking } from "./money";
+import { receivedCentsByBooking, STANDS } from "./money";
 import { RESERVE_HOURS, type PaymentProvider } from "./payments";
 import {
   creditName,
@@ -700,7 +700,8 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[]): Promise<Bo
     totalCents: booking.totalCents,
     receivedCents: received.get(booking.id) ?? 0,
     receivedAtStudioCents: atStudio.get(booking.id) ?? 0,
-    dueCents: booking.madeBy !== null ? Math.max(0, booking.totalCents - (received.get(booking.id) ?? 0)) : 0,
+    // Only a booking made in the admin can owe, and only while it stands (`STANDS`).
+    dueCents: booking.madeBy !== null && STANDS.includes(booking.status) ? Math.max(0, booking.totalCents - (received.get(booking.id) ?? 0)) : 0,
     rescheduledCount: booking.rescheduledCount,
   }));
 }

@@ -11,7 +11,7 @@ import { customerStatus, filterPast, loadAppointments, parsePastFilter, PAST_STA
 import { isUpcomingVisit } from "@/server/bookings";
 import { getManageChoices } from "@/server/manage";
 import { noticePaidLinksOf } from "@/server/pay-links";
-import { payLinkDeps } from "@/server/runtime";
+import { finishAfterResponse, payLinkDeps } from "@/server/runtime";
 import { requireUser } from "@/server/session";
 import { loadAccessInstructions } from "@/server/settings";
 import { formatRange } from "@/server/tz";
@@ -65,7 +65,7 @@ async function Appointments({ searchParams }: Pick<PageProps<"/account/appointme
   const query = await searchParams;
   const db = await getDb();
   // Payment links paid that the site has not seen yet are recorded first: what the page says counts them.
-  await noticePaidLinksOf(db, user.email, await payLinkDeps());
+  await noticePaidLinksOf(db, user.email, await payLinkDeps(), finishAfterResponse);
   const now = new Date();
   const { upcoming, past } = await loadAppointments(db, user.email, now);
   const tab = query.tab === "past" ? "past" : "upcoming";

@@ -1,0 +1,1 @@
+ALTER TABLE "payment_links" ADD COLUMN "checked_at" timestamp with time zone;

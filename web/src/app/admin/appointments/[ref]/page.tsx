@@ -21,6 +21,7 @@ import { AdminFrame, AdminLoading } from "../../frame";
 import {
   cancelPayLinkAction,
   checkPayLinkAction,
+  closePayLinkByHandAction,
   handRefundAction,
   moveBookingAction,
   petCreditAction,
@@ -266,6 +267,11 @@ async function AppointmentDetails({
                 <strong>{formatCents(appointment.payments.dueCents)} is still to pay.</strong> This booking was made in the admin,
                 so nothing was charged online.
               </>
+            ) : appointment.payments.ended && appointment.payments.receivedCents < appointment.payments.totalCents ? (
+              <>
+                <strong>Nothing more is to pay:</strong> the booking{" "}
+                {appointment.payments.ended === "released" ? "was released for a reschedule code" : "was cancelled"}.
+              </>
             ) : appointment.payments.totalCents > 0 ? (
               <strong>Paid in full.</strong>
             ) : (
@@ -380,6 +386,22 @@ async function AppointmentDetails({
                     taken at the studio instead, cancel the link first, so that the client cannot pay twice.
                   </p>
                 </>
+              )}
+              {appointment.may.changePayments && (
+                <details style={{ marginTop: ".75rem" }}>
+                  <summary style={{ cursor: "pointer" }}>The card processor cannot say whether it was paid?</summary>
+                  <form action={closePayLinkByHandAction}>
+                    <input type="hidden" name="ref" value={appointment.ref} />
+                    <p style={{ fontSize: ".8rem", margin: ".5rem 0" }}>
+                      Only for a link the processor no longer knows, made with other keys or for another location. Look
+                      it up in Square first; if it was not paid, delete it there, then close it here. The site then
+                      stops asking about it, and a payment can be recorded by hand.
+                    </p>
+                    <button type="submit" className="btn btn-outline btn-small">
+                      Close it by hand
+                    </button>
+                  </form>
+                </details>
               )}
             </div>
           )}

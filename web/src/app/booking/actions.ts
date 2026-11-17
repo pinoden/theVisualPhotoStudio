@@ -3,6 +3,7 @@
 import { refresh } from "next/cache";
 import { getDb } from "@/db/client";
 import { formatCents } from "@/lib/domain/pricing";
+import { UNSEEN_LINK } from "@/server/email";
 import { cancelBooking, requestRescheduleCode, type Actor } from "@/server/manage";
 import { flushEmailsSoon, manageDeps } from "@/server/runtime";
 import { getCurrentUser } from "@/server/session";
@@ -33,9 +34,11 @@ export async function cancelBookingAction(_previous: ManageState, formData: Form
   if (!actor) return SIGNED_OUT;
   const seen = formData.get("seen");
   const result = await cancelBooking(await getDb(), String(formData.get("ref") ?? ""), actor, await manageDeps(), typeof seen === "string" ? seen : undefined);
-  // Changed since the page was drawn: it is drawn again, with what cancelling does now.
-  if (!result.ok && result.code === "changed") refresh();
-  if (!result.ok) return { status: "error", message: result.message };
+  // Refused because something changed since the page was drawn: it is drawn again, with what can be done now.
+  if (!result.ok) {
+    refresh();
+    return { status: "error", message: result.message };
+  }
   flushEmailsSoon();
   if (!formData.get("keepInPlace")) refresh();
   // The whole outcome, as the client was told it before confirming. A card refund that did not go through is not "on its way".
@@ -48,13 +51,17 @@ export async function rescheduleBookingAction(_previous: ManageState, formData: 
   if (!actor) return SIGNED_OUT;
   const seen = formData.get("seen");
   const result = await requestRescheduleCode(await getDb(), String(formData.get("ref") ?? ""), actor, await manageDeps(), typeof seen === "string" ? seen : undefined);
-  if (!result.ok && result.code === "changed") refresh();
-  if (!result.ok) return { status: "error", message: result.message };
+  if (!result.ok) {
+    refresh();
+    return { status: "error", message: result.message };
+  }
   flushEmailsSoon();
   if (!formData.get("keepInPlace")) refresh();
   return {
     status: "rescheduled",
     code: result.code,
-    message: `Your booking was released. Your code is worth ${formatCents(result.valueCents)} and is valid until ${formatInstant(result.expiresAt)}. We also emailed it to you.`,
+    message: `Your booking was released. Your code is worth ${formatCents(result.valueCents)} and is valid until ${formatInstant(result.expiresAt)}. We also emailed it to you.${
+      result.unseenLink ? ` ${UNSEEN_LINK}` : ""
+    }`,
   };
 }

@@ -11,8 +11,9 @@ import { flushEmailsSoon, payLinkDeps } from "@/server/runtime";
 import { siteFrame } from "@/server/site";
 import { pretendPayAction } from "./actions";
 
+// A name for every state of the page: to pay, paid, refunded, or nothing to pay.
 export const metadata: Metadata = {
-  title: "Pay for Your Booking",
+  title: "Payment for Your Booking",
   // The address is known only to the client it was emailed to.
   robots: { index: false, follow: false },
   referrer: "no-referrer",
@@ -102,7 +103,7 @@ async function Pay({ params }: Pick<PageProps<"/pay/[id]">, "params">) {
       {page.late && (
         <>
           <p>
-            Your payment of {amount} reached us after booking {page.ref}{" "}
+            Your payment of {amount} was recorded after booking {page.ref}{" "}
             {page.late.released ? "was released for a reschedule code" : "was cancelled"},{" "}
             {page.late.made
               ? "so it is refunded to your card in full."

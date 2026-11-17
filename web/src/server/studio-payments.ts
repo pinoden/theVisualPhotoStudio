@@ -10,7 +10,7 @@ import { isBookingRef } from "./bookings";
 import { codeRefundEmail, paymentReceivedEmail, queueEmail } from "./email";
 import { recordEvent } from "./history";
 import { openPayLinkOf } from "./pay-links";
-import { netCardPaidCents, paidAtStudioCents } from "./money";
+import { netCardPaidCents, paidAtStudioCents, STANDS } from "./money";
 import { petFeeCentsOf, studioRefundableCents } from "./pet-fee";
 import { codeStanding, rescheduleCodeOf, spendable, takeOffRescheduleCode } from "./promos";
 import { loadSettings } from "./settings";
@@ -53,13 +53,18 @@ export interface BookingMoney {
   totalCents: number;
   /** Every payment that succeeded, before refunds. */
   receivedCents: number;
-  /** What is still to pay. */
+  /** What is still to pay: nothing once the booking has ended. */
   dueCents: number;
+  /** How the booking ended, if it has: then nothing more is to pay, whatever was received. */
+  ended: "cancelled" | "released" | null;
   payments: PaymentLine[];
 }
 
 /** What a booking has received and still owes, with each payment. Failed and abandoned card attempts are left out. */
-export async function moneyOf(db: DbLike, booking: Pick<BookingRow, "id" | "totalCents" | "madeBy">): Promise<BookingMoney> {
+export async function moneyOf(
+  db: DbLike,
+  booking: Pick<BookingRow, "id" | "totalCents" | "madeBy" | "status" | "cancelReason">,
+): Promise<BookingMoney> {
   const rows = await db
     .select()
     .from(payments)
@@ -78,8 +83,10 @@ export async function moneyOf(db: DbLike, booking: Pick<BookingRow, "id" | "tota
   return {
     totalCents: booking.totalCents,
     receivedCents,
-    // A booking made online is paid in full when it is made, so only one made in the admin can owe anything.
-    dueCents: booking.madeBy !== null ? Math.max(0, booking.totalCents - receivedCents) : 0,
+    // A booking made online is paid in full when it is made, so only one made in the admin can owe anything, and only
+    // while it stands: a cancelled one, or one released for a reschedule code, owes nothing.
+    dueCents: booking.madeBy !== null && STANDS.includes(booking.status) ? Math.max(0, booking.totalCents - receivedCents) : 0,
+    ended: STANDS.includes(booking.status) ? null : booking.cancelReason === "rescheduled" ? "released" : "cancelled",
     payments: rows.map((row) => ({
       id: row.id,
       at: row.createdAt.toISOString(),

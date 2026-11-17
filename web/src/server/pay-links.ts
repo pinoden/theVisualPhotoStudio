@@ -318,18 +318,18 @@ async function giveBackLate(db: Db, late: LateRefund | undefined, deps: PayLinkD
  * that were paid and not seen yet, before the account says what cancelling or
  * moving would do (`noticePaidLink`).
  */
-export async function noticePaidLinksOf(db: Db, email: string, deps: PayLinkDeps): Promise<void> {
+export async function noticePaidLinksOf(db: Db, email: string, deps: PayLinkDeps, afterward?: (work: Promise<unknown>) => void): Promise<void> {
   const open = await db
     .select({ id: bookings.id, status: bookings.status })
     .from(paymentLinks)
     .innerJoin(bookings, eq(bookings.id, paymentLinks.bookingId))
     .where(and(eq(paymentLinks.status, "open"), eq(bookings.customerEmail, email.trim().toLowerCase())));
-  await withinSeconds(
-    PAGE_WAIT_SECONDS,
-    (async () => {
-      for (const booking of open) await lookAtPayLink(db, booking, deps);
-    })(),
-  );
+  // `lookAtPayLink` never throws, so the work can go on by itself once the page stops waiting for it.
+  const work = (async () => {
+    for (const booking of open) await lookAtPayLink(db, booking, deps);
+  })();
+  afterward?.(work);
+  await withinSeconds(PAGE_WAIT_SECONDS, work);
 }
 
 /** What became of a booking's open payment link when the processor was asked: `none` when it had none. */
@@ -417,6 +417,7 @@ export async function checkPayLink(db: Db, linkId: string, deps: PayLinkDeps): P
   if (!deps.payments || deps.payments.name !== link.provider) return "open";
 
   const state = await deps.payments.payLinkState({ linkId: link.providerLinkId, orderId: link.providerOrderId });
+  await db.update(paymentLinks).set({ checkedAt: deps.now }).where(eq(paymentLinks.id, link.id));
   if (state.state === "paid") {
     const { late } = await settle(db, link, state, deps.now);
     await giveBackLate(db, late, deps);
@@ -448,7 +449,11 @@ async function withdraw(db: Db, link: LinkRow, deps: PayLinkDeps, actor: string)
   // Withdrawn only once the processor has said it was not paid: one it could not answer about may have been, and
   // its payment would be lost with it. The scheduled task asks again.
   if (seen === "unanswered") {
-    return { ok: false, message: "The card processor could not say whether the link was paid, so it was not withdrawn. Try again in a moment." };
+    return {
+      ok: false,
+      message:
+        "The card processor could not say whether the link was paid, so it was not withdrawn. Try again in a moment. If it goes on, look the link up in Square: an owner can then close it here by hand.",
+    };
   }
   const gone = await deps.payments.cancelPayLink(link.providerLinkId);
   if (!gone.ok) return { ok: false, message: `The link could not be cancelled: ${gone.message}` };
@@ -487,6 +492,54 @@ export async function cancelPayLink(db: Db, viewer: AuthUser, ref: string, deps:
     .limit(1);
   if (!link) return { ok: false, message: "This booking has no open payment link." };
   return withdraw(db, link, deps, viewer.email);
+}
+
+/**
+ * An owner closes an open link that the processor cannot say anything about
+ * (a link it no longer knows: made with other keys, or for another location),
+ * once they have looked it up in Square and found it unpaid. The site then
+ * stops asking about it, and a payment can be recorded by hand. A link the
+ * processor can answer about is withdrawn the usual way, or recorded as paid.
+ * The owner's decision, written into the booking's history: a link is
+ * otherwise never marked cancelled unless the processor confirmed it.
+ */
+export async function closePayLinkByHand(db: Db, viewer: AuthUser, ref: string, deps: PayLinkDeps): Promise<CancelPayLinkResult> {
+  if (viewer.role !== "owner" || !isBookingRef(ref)) return { ok: false, message: "Booking not found." };
+  const [booking] = await db.select().from(bookings).where(eq(bookings.ref, ref)).limit(1);
+  if (!booking) return { ok: false, message: "Booking not found." };
+  const [link] = await db
+    .select()
+    .from(paymentLinks)
+    .where(and(eq(paymentLinks.bookingId, booking.id), eq(paymentLinks.status, "open")))
+    .limit(1);
+  if (!link) return { ok: false, message: "This booking has no open payment link." };
+  const seen = await checkPayLink(db, link.id, deps);
+  if (seen === "paid") return { ok: true, outcome: "was_paid" };
+  if (seen !== "unanswered") return withdraw(db, link, deps, viewer.email);
+  // Tried at the processor too, for what it is worth: the link is closed here whatever it answers.
+  try {
+    await deps.payments?.cancelPayLink(link.providerLinkId);
+  } catch (error) {
+    console.error("Could not withdraw the payment link of booking", booking.ref, "at the processor", error);
+  }
+  await db.transaction(async (tx) => {
+    const closed = await tx
+      .update(paymentLinks)
+      .set({ status: "cancelled", cancelledAt: deps.now })
+      .where(and(eq(paymentLinks.id, link.id), eq(paymentLinks.status, "open")))
+      .returning({ id: paymentLinks.id });
+    if (closed.length === 0) return;
+    const label = labelOf(booking);
+    await recordEvent(tx, {
+      bookingId: booking.id,
+      from: label,
+      to: label,
+      actor: viewer.email,
+      at: deps.now,
+      note: `Payment link for ${formatCents(link.amountCents)} closed by hand: the card processor could not say whether it was paid, and the owner looked it up in Square`,
+    });
+  });
+  return { ok: true, outcome: "cancelled" };
 }
 
 /** An administrator asks, for a booking's open link, whether it has been paid. A paid link is recorded at once. */
@@ -535,14 +588,15 @@ export async function closePayLinkOf(db: Db, bookingId: string, deps: PayLinkDep
  * The scheduled look at every open link: record the ones that were paid, and
  * withdraw the ones whose booking is no longer active. Safe to run twice.
  */
-export async function checkOpenPayLinks(db: Db, deps: PayLinkDeps): Promise<{ paid: number; closed: number }> {
+export async function checkOpenPayLinks(db: Db, deps: PayLinkDeps, limit = 50): Promise<{ paid: number; closed: number }> {
   const open = await db
     .select({ link: paymentLinks, status: bookings.status })
     .from(paymentLinks)
     .innerJoin(bookings, eq(bookings.id, paymentLinks.bookingId))
     .where(eq(paymentLinks.status, "open"))
-    .orderBy(asc(paymentLinks.createdAt))
-    .limit(50);
+    // The longest unasked first: links the processor cannot answer about never keep the others waiting.
+    .orderBy(sql`${paymentLinks.checkedAt} asc nulls first`, asc(paymentLinks.createdAt))
+    .limit(limit);
   let paid = 0;
   let closed = 0;
   for (const { link, status } of open) {
