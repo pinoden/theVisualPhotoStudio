@@ -358,28 +358,29 @@ export async function processRefund(db: Db, refundId: string, deps: ManageDeps):
 
   // Tell the owner the first time a refund fails, not on every retry: only the attempt that turns it from waiting to
   // failed does, so two attempts at once (the scheduled task beside the cancellation) tell once. Only a refund still
-  // open becomes failed: one an owner recorded as made in Square while the processor was answering stays made.
-  const marked = await db
-    .update(refunds)
-    .set({ status: "failed", error: result.message })
-    .where(and(eq(refunds.id, refundId), eq(refunds.status, "pending")))
-    .returning({ id: refunds.id });
-  const firstFailure = marked.length > 0;
-  if (!firstFailure) {
-    const still = await db
+  // open becomes failed: one an owner recorded as made in Square while the processor was answering stays made. One
+  // transaction: an attempt that goes through meanwhile waits for it, and its own line then comes after this one.
+  return db.transaction(async (tx): Promise<"succeeded" | "failed"> => {
+    const marked = await tx
       .update(refunds)
-      .set({ error: result.message })
-      .where(and(eq(refunds.id, refundId), eq(refunds.status, "failed")))
+      .set({ status: "failed", error: result.message })
+      .where(and(eq(refunds.id, refundId), eq(refunds.status, "pending")))
       .returning({ id: refunds.id });
-    // Made meanwhile, by another attempt or by hand in Square: it is not a failure.
-    if (still.length === 0) {
-      const [now] = await db.select({ status: refunds.status }).from(refunds).where(eq(refunds.id, refundId)).limit(1);
-      if (now?.status === "succeeded") return "succeeded";
+    if (marked.length === 0) {
+      const still = await tx
+        .update(refunds)
+        .set({ error: result.message })
+        .where(and(eq(refunds.id, refundId), eq(refunds.status, "failed")))
+        .returning({ id: refunds.id });
+      // Made meanwhile, by another attempt or by hand in Square: it is not a failure.
+      if (still.length === 0) {
+        const [now] = await tx.select({ status: refunds.status }).from(refunds).where(eq(refunds.id, refundId)).limit(1);
+        if (now?.status === "succeeded") return "succeeded";
+      }
+      return "failed";
     }
-  }
-  if (firstFailure) {
     // The booking's history says so, the first time: whatever happens to the refund later then reads in order.
-    await recordEvent(db, {
+    await recordEvent(tx, {
       bookingId: row.bookingId,
       from: label,
       to: label,
@@ -387,21 +388,21 @@ export async function processRefund(db: Db, refundId: string, deps: ManageDeps):
       at: deps.now,
       note: `The refund of ${formatCents(row.refund.amountCents)} did not go through, and is tried again. The processor's answer: ${asSentence(result.message)}`,
     });
-  }
-  if (firstFailure && deps.ownerEmail) {
-    await queueEmail(
-      db,
-      ownerRefundNotice({
-        to: deps.ownerEmail,
-        ref: row.ref,
-        customer: row.customer,
-        amountCents: row.refund.amountCents,
-        automatic: row.refund.automatic,
-        failedReason: result.message,
-      }),
-    );
-  }
-  return "failed";
+    if (deps.ownerEmail) {
+      await queueEmail(
+        tx,
+        ownerRefundNotice({
+          to: deps.ownerEmail,
+          ref: row.ref,
+          customer: row.customer,
+          amountCents: row.refund.amountCents,
+          automatic: row.refund.automatic,
+          failedReason: result.message,
+        }),
+      );
+    }
+    return "failed";
+  });
 }
 
 /** Retry refunds that have not gone through. Run from the scheduled task. */
@@ -864,9 +865,14 @@ async function ownerRefundable(
 }
 
 function tooMuchText(outcome: { available: number; returned: number; petFee: number; code: { code: string; valueCents: number } | null }): string {
+  // The part of the pet fee that came out of what the card paid: the credit may have been only part of the fee.
   const why = [
     ...(outcome.returned > 0
-      ? [`its pet fee (${formatCents(outcome.petFee)}) was already returned as studio credit${outcome.returned < outcome.petFee ? `, ${formatCents(outcome.returned)} of it from what the card paid` : ""}`]
+      ? [
+          outcome.returned < outcome.petFee
+            ? `its pet fee was already returned as studio credit, ${formatCents(outcome.returned)} of it from what the card paid`
+            : `its pet fee (${formatCents(outcome.petFee)}) was already returned as studio credit`,
+        ]
       : []),
     ...(outcome.code ? [`what was paid is on its reschedule code ${outcome.code.code}, which has ${formatCents(outcome.code.valueCents)} left`] : []),
   ];

@@ -59,7 +59,7 @@ type Outcome = { ok: true } | { ok: false; message: string };
 
 export type SaveOutcome =
   | { ok: true; revision: number; hasDraft: boolean; savedAt: string }
-  | { ok: false; reason: "conflict"; message: string; by: string | null; at: string | null }
+  | { ok: false; reason: "conflict"; message: string; by: string | null; at: string | null; waiting: boolean }
   | { ok: false; reason: "forbidden" | "missing"; message: string };
 
 /** What an editor asks of the server. Each answers with a result and never redirects. */
@@ -202,7 +202,11 @@ export function useDraftEditor<T>(initial: DraftStart<T>, actions: DraftActions<
             const who = `${result.by ? ` by ${result.by}` : ""}${result.at ? ` at ${clock.format(new Date(result.at))}` : ""}`;
             shownTheirs.current = true;
             startRefresh(() => {
-              report(`Not published: this was changed somewhere else${who} since you opened it. It is shown here now: look at it, then publish.`);
+              report(
+                result.waiting
+                  ? `Not published: this was changed somewhere else${who} since you opened it. It is shown here now: look at it, then publish.`
+                  : "This was published or discarded somewhere else since you opened it. It is shown here as it is now.",
+              );
               router.refresh();
             });
             return false;
@@ -402,7 +406,7 @@ export function useDraftEditor<T>(initial: DraftStart<T>, actions: DraftActions<
         () =>
           already.current.length === 0
             ? "Published. Visitors see it now."
-            : `Published. Visitors see it now. Not because of this change, these pages do not fit a phone as visitors have them: ${already.current.join(" ")} Change them so they fit.`,
+            : `Published. Visitors see it now. These pages did not fit a phone before this change, and still do not: ${already.current.join(" ")} Change them so they fit.`,
         true,
       ),
     discard: () => act(actions.discard, "Discarding the changes…", "The changes were discarded.", false),

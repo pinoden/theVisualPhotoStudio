@@ -192,6 +192,35 @@ describe("a booking that owes nothing", () => {
   });
 });
 
+describe("a payment record behind a code of studio credit", () => {
+  it("behind a reschedule code: not taken back while the code can be spent, nor once it paid for a booking", async () => {
+    const made = await madeInAdmin(FAR);
+    expectOk(await recordStudioPayment(world.db, owner, made.ref, cash(17600), NOW));
+    const [payment] = await world.db.select().from(payments);
+    const moved = expectOk(await requestRescheduleCode(world.db, made.ref, { kind: "customer", email: "dana@example.com" }, world.manageDeps()));
+    expect(await voidStudioPayment(world.db, owner, payment.id, "", NOW)).toEqual({
+      ok: false,
+      message: `This booking's money went into its reschedule code ${moved.code} ($176 left). Cancel that code under Codes first, then take this record back.`,
+    });
+    // Cancelled by the owner, unspent: the record can go.
+    await world.db.update(promoCodes).set({ voidedAt: NOW }).where(eq(promoCodes.code, moved.code));
+    expect(await voidStudioPayment(world.db, owner, payment.id, "Recorded by mistake", NOW)).toEqual({ ok: true });
+  });
+
+  it("behind a reschedule code that paid for another booking: never taken back", async () => {
+    const made = await madeInAdmin(FAR);
+    expectOk(await recordStudioPayment(world.db, owner, made.ref, cash(17600), NOW));
+    const [payment] = await world.db.select().from(payments);
+    const moved = expectOk(await requestRescheduleCode(world.db, made.ref, { kind: "customer", email: "dana@example.com" }, world.manageDeps()));
+    expectOk(await world.book({ date: FAR, startMinute: h(16), durationMinutes: 60, promoCode: moved.code, paymentToken: undefined, customer: { name: "Dana Diaz", email: "dana@example.com", phone: "407-555-0133" } }));
+    await world.db.update(promoCodes).set({ voidedAt: NOW }).where(eq(promoCodes.code, moved.code));
+    expect(await voidStudioPayment(world.db, owner, payment.id, "", NOW)).toEqual({
+      ok: false,
+      message: `This booking's money went into its reschedule code ${moved.code}, and $88 of it paid for another booking: this record cannot be taken back.`,
+    });
+  });
+});
+
 describe("correcting what was recorded", () => {
   it("takes back a payment recorded by mistake: the record stays, struck out, and the booking owes it again", async () => {
     const made = await madeInAdmin();

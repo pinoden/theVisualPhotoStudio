@@ -50,7 +50,8 @@ describe("what a change brings to a page that did not fit a phone before it", ()
   it("is nothing when the page has the same problems, moved or reworded, and is no wider", () => {
     // Capitals switched off: the same button, narrower.
     const after = ['"Book a Studio" reaches 330px', "the page scrolls sideways (330px wide on a 320px screen)"];
-    expect(broughtBy(after, before)).toEqual({ brought: [], had: before });
+    // What is said is what visitors have once the change is published.
+    expect(broughtBy(after, before)).toEqual({ brought: [], had: after });
   });
 
   it("is all of it when the page is wider than it was", () => {
@@ -72,6 +73,12 @@ describe("what a change brings to a page that did not fit a phone before it", ()
     expect(broughtBy(['<div class="x"> starts 300px left of the screen', '<div class="y"> starts 10px left of the screen'], ['<div class="y"> starts 10px left of the screen']).brought).toHaveLength(2);
     // A field that makes an iPhone zoom, beside one that did.
     expect(broughtBy(['"Name" has 14px text: an iPhone zooms in on it', '"Email" has 14px text: an iPhone zooms in on it'], ['"Name" has 14px text: an iPhone zooms in on it']).brought).toHaveLength(2);
+  });
+
+  it("reads a size by how the sentence ends, whatever numbers the element's words or tag hold", () => {
+    expect(broughtBy(['"Book "2 hours" today" reaches 900px'], ['"Book "2 hours" today" reaches 380px']).brought).toHaveLength(1);
+    expect(broughtBy(['<h2 class="blk-heading"> reaches 700px'], ['<h2 class="blk-heading"> reaches 340px']).brought).toHaveLength(1);
+    expect(broughtBy(['<h2 class="blk-heading"> reaches 338px'], ['<h2 class="blk-heading"> reaches 340px']).brought).toEqual([]);
   });
 
   it("is all of it on a page that was fine, and nothing on a page that still is", () => {

@@ -436,6 +436,22 @@ export function paymentReceivedEmail(input: {
   };
 }
 
+/** A payment through a link that arrived after its booking was cancelled: it is given back. */
+export function latePaymentEmail(input: { to: string; name: string; ref: string; amountCents: number }): QueuedEmail {
+  return {
+    to: input.to,
+    kind: "late_payment_refunded",
+    subject: `Your payment for booking ${input.ref} is refunded`,
+    body: [
+      `Hi ${input.name},`,
+      "",
+      `Your payment of ${money(input.amountCents)} for booking ${input.ref} arrived after the booking was cancelled, so it is refunded to your card in full. Banks usually show a refund within 5 to 10 business days.`,
+      "",
+      SIGN_OFF,
+    ].join("\n"),
+  };
+}
+
 /** The link an administrator sends so that a client can pay by card what their booking still owes. */
 export function payLinkEmail(input: {
   to: string;

@@ -12,7 +12,7 @@ import { recordEvent } from "./history";
 import { openPayLinkOf } from "./pay-links";
 import { netCardPaidCents, paidAtStudioCents } from "./money";
 import { petFeeCentsOf, studioRefundableCents } from "./pet-fee";
-import { takeOffRescheduleCode } from "./promos";
+import { codeStanding, rescheduleCodeOf, takeOffRescheduleCode } from "./promos";
 import { loadSettings } from "./settings";
 import { canViewDay } from "./staff";
 import { formatInstant, localDateOf } from "./tz";
@@ -230,18 +230,39 @@ export async function voidStudioPayment(db: Db, viewer: AuthUser, paymentId: str
     if (payment.refundedCents > 0) {
       return { ok: false, message: "A refund is recorded against that payment, so it was really paid and cannot be taken back." };
     }
-    // A pet fee returned as studio credit was returned for money paid: that money is not taken back while the credit stands.
+    // Money that came back as a code of studio credit, the pet fee's or a reschedule code's, is not taken back while the
+    // code can be spent, nor once it paid for a booking: the record goes only once the code is cancelled, or ran out unspent.
     const [credit] = await tx
-      .select({ code: promoCodes.code, voidedAt: promoCodes.voidedAt })
+      .select({ id: promoCodes.id })
       .from(promoCodes)
       .where(and(eq(promoCodes.originBookingId, booking.id), eq(promoCodes.source, "pet_fee")))
       .limit(1);
-    if (credit && !credit.voidedAt) {
-      const held = (await netCardPaidCents(tx, booking.id)) + (await paidAtStudioCents(tx, booking.id)) + booking.creditAppliedCents - payment.amountCents;
-      if (held < (await petFeeCentsOf(tx, booking.id))) {
+    const held = (await netCardPaidCents(tx, booking.id)) + (await paidAtStudioCents(tx, booking.id)) + booking.creditAppliedCents - payment.amountCents;
+    if (credit && held < (await petFeeCentsOf(tx, booking.id))) {
+      const standing = await codeStanding(tx, credit.id, now);
+      if (standing.spentCents > 0) {
+        return { ok: false, message: `The pet fee of this booking came back as studio credit (code ${standing.code}), which paid for a booking: this record cannot be taken back.` };
+      }
+      if (standing.usable) {
         return {
           ok: false,
-          message: `The pet fee of this booking was returned as studio credit (code ${credit.code}) for what was paid. Cancel that code under Codes first, then take this record back.`,
+          message: `The pet fee of this booking was returned as studio credit (code ${standing.code}) for what was paid. Cancel that code under Codes first, then take this record back.`,
+        };
+      }
+    }
+    const moved = await rescheduleCodeOf(tx, booking.id);
+    if (moved) {
+      const standing = await codeStanding(tx, moved.id, now);
+      if (standing.spentCents > 0) {
+        return {
+          ok: false,
+          message: `This booking's money went into its reschedule code ${moved.code}, and ${formatCents(standing.spentCents)} of it paid for another booking: this record cannot be taken back.`,
+        };
+      }
+      if (standing.usable) {
+        return {
+          ok: false,
+          message: `This booking's money went into its reschedule code ${moved.code} (${formatCents(moved.valueCents)} left). Cancel that code under Codes first, then take this record back.`,
         };
       }
     }
@@ -290,10 +311,13 @@ export async function recordHandRefund(
     // A pet fee already returned as studio credit is not given back in cash as well, nor what is on a reschedule code.
     const back = await studioRefundableCents(tx, booking.id);
     const tooMuch = () => {
+      // The part of the pet fee that came out of what was paid at the studio: the credit may have been only part of the fee.
       const why = [
         ...(back.petReturnedCents > 0
           ? [
-              `its pet fee (${formatCents(back.petFeeCents)}) was already returned as studio credit${back.petReturnedCents < back.petFeeCents ? `, ${formatCents(back.petReturnedCents)} of it from what was paid at the studio` : ""}`,
+              back.petReturnedCents < back.petFeeCents
+                ? `its pet fee was already returned as studio credit, ${formatCents(back.petReturnedCents)} of it from what was paid at the studio`
+                : `its pet fee (${formatCents(back.petFeeCents)}) was already returned as studio credit`,
             ]
           : []),
         ...(back.code ? [`what was paid is on its reschedule code ${back.code.code}, which has ${formatCents(back.code.valueCents)} left`] : []),

@@ -18,7 +18,11 @@
  * `brokenWords` is run by the phone tests only, not yet by the page editor.
  */
 
-/** What is wider than the screen. A box that scrolls sideways on purpose (a wide table inside its own frame) is allowed; the page itself is not. */
+/**
+ * What is wider than the screen. A box that scrolls sideways on purpose (a
+ * wide table inside its own frame: `.data-table-wrap`, `.blk-table-wrap`, or
+ * anything marked `data-scrolls-sideways`) is allowed; the page itself is not.
+ */
 export function widerThanScreen(doc: Document = document): string[] {
   const view = doc.defaultView!;
   const limit = doc.documentElement.clientWidth + 1;
@@ -35,10 +39,14 @@ export function widerThanScreen(doc: Document = document): string[] {
     if (rect.right <= limit && rect.left >= -1) continue;
     const style = view.getComputedStyle(el);
     if (style.position === "fixed" || style.clipPath !== "none") continue; // overlays, and text kept for screen readers only
+    // Inside a box that clips it, nothing of it shows past the box. Inside one that scrolls, only a box made to
+    // scroll sideways excuses it, a wide table in its own frame: a column that scrolls up and down (the admin's) scrolls
+    // sideways too, by the rules of CSS, and would hide anything too wide in it.
     let box = el.parentElement;
     let scrolls = false;
     while (box && !scrolls) {
-      scrolls = /(auto|scroll|hidden)/.test(view.getComputedStyle(box).overflowX);
+      const overflow = view.getComputedStyle(box).overflowX;
+      scrolls = /(hidden|clip)/.test(overflow) || (/(auto|scroll)/.test(overflow) && box.matches(".data-table-wrap, .blk-table-wrap, [data-scrolls-sideways]"));
       box = box.parentElement;
     }
     if (scrolls) continue;

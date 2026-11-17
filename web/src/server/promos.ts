@@ -1,6 +1,6 @@
 import { randomInt } from "node:crypto";
-import { and, eq, gt, gte, isNull, lt, or, sql } from "drizzle-orm";
-import { promoCodes } from "@/db/schema";
+import { and, eq, gt, gte, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { bookings, promoCodes } from "@/db/schema";
 import type { DbLike } from "@/db/client";
 import type { PromoDef, PromoKind } from "@/lib/domain/pricing";
 
@@ -235,16 +235,34 @@ export async function issuePromo(tx: DbLike, given: IssuePromoInput): Promise<{ 
 
 /**
  * The reschedule code a booking's money went into when its customer released
- * it (`requestRescheduleCode`), while the owner has not cancelled it: what is
- * left on it is that money still. Null for a booking never released so.
+ * it (`requestRescheduleCode`): what is left on it is that money still,
+ * whether the code can be spent or the owner cancelled it, and what was spent
+ * of it cannot come back. Null for a booking never released so.
  */
-export async function rescheduleCodeOf(db: DbLike, bookingId: string): Promise<{ id: string; code: string; valueCents: number } | null> {
+export async function rescheduleCodeOf(
+  db: DbLike,
+  bookingId: string,
+): Promise<{ id: string; code: string; valueCents: number; voided: boolean; expiresAt: Date | null } | null> {
   const [code] = await db
-    .select({ id: promoCodes.id, code: promoCodes.code, valueCents: promoCodes.value })
+    .select({ id: promoCodes.id, code: promoCodes.code, valueCents: promoCodes.value, voidedAt: promoCodes.voidedAt, expiresAt: promoCodes.expiresAt })
     .from(promoCodes)
-    .where(and(eq(promoCodes.originBookingId, bookingId), eq(promoCodes.source, "reschedule"), isNull(promoCodes.voidedAt)))
+    .where(and(eq(promoCodes.originBookingId, bookingId), eq(promoCodes.source, "reschedule")))
     .limit(1);
-  return code ?? null;
+  return code ? { id: code.id, code: code.code, valueCents: code.valueCents, voided: code.voidedAt !== null, expiresAt: code.expiresAt } : null;
+}
+
+/**
+ * What became of a code of studio credit: how much of it pays for bookings
+ * that stand (`spentCents`), and whether what is left can still be spent.
+ */
+export async function codeStanding(db: DbLike, codeId: string, now: Date): Promise<{ code: string; spentCents: number; usable: boolean }> {
+  const [code] = await db.select().from(promoCodes).where(eq(promoCodes.id, codeId)).limit(1);
+  const [spent] = await db
+    .select({ cents: sql<number>`coalesce(sum(${bookings.creditAppliedCents}), 0)::int` })
+    .from(bookings)
+    .where(and(eq(bookings.promoCodeId, codeId), inArray(bookings.status, ["pending_payment", "confirmed", "completed", "no_show"])));
+  const usable = !!code && code.voidedAt === null && code.value > 0 && (code.expiresAt === null || code.expiresAt.getTime() > now.getTime());
+  return { code: code?.code ?? "", spentCents: spent?.cents ?? 0, usable };
 }
 
 /**

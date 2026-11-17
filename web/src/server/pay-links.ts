@@ -1,13 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { and, asc, eq } from "drizzle-orm";
-import { bookings, paymentLinks, payments, studioHolds, studios } from "@/db/schema";
+import { bookings, paymentLinks, payments, refunds, studioHolds, studios } from "@/db/schema";
 import { PG_UNIQUE_VIOLATION, pgErrorCode, type Db, type DbLike } from "@/db/client";
 import { labelOf } from "@/lib/domain/labels";
 import { formatCents } from "@/lib/domain/pricing";
 import { can } from "@/lib/abilities";
 import type { AuthUser } from "./auth";
 import { isBookingRef } from "./bookings";
-import { payLinkEmail, paymentReceivedEmail, queueEmail } from "./email";
+import { latePaymentEmail, payLinkEmail, paymentReceivedEmail, queueEmail } from "./email";
 import { BY_CUSTOMER, BY_SYSTEM, recordEvent } from "./history";
 import { receivedCentsByBooking } from "./money";
 import type { PaymentProvider } from "./payments";
@@ -44,7 +44,12 @@ export interface PayLinkDeps {
   baseUrl: string;
   /** null when no processor is configured: no link can be made. */
   payments: PaymentProvider | null;
+  /** Where the notice of a refund goes: a payment that arrives for a booking no longer active is refunded. */
+  ownerEmail?: string | null;
 }
+
+/** A booking that can still be paid for: money that arrives for any other is given back. */
+const ACTIVE = ["confirmed", "completed", "no_show"];
 
 export interface PayLinkView {
   id: string;
@@ -192,14 +197,21 @@ export async function sendPayLink(db: Db, viewer: AuthUser, ref: string, deps: P
  * from two places at once: the link is claimed first, and only the caller
  * that claims it writes the payment. Returns whether this call did.
  */
-async function settle(db: Db, link: LinkRow, paid: { paymentId: string; amountCents: number }, now: Date): Promise<boolean> {
+/**
+ * Record a link's payment on its booking. One that arrives for a booking that
+ * is no longer active (cancelled, or released for a reschedule code, while
+ * the client was paying) is refunded to the card in full at once: the
+ * cancellation, or the code, was worked out without it. Answers whether it
+ * was recorded, and the refund to send when it is given back.
+ */
+async function settle(db: Db, link: LinkRow, paid: { paymentId: string; amountCents: number }, now: Date): Promise<{ settled: boolean; refundId?: string }> {
   return db.transaction(async (tx) => {
     const claimed = await tx
       .update(paymentLinks)
       .set({ status: "paid", paidAt: now })
       .where(and(eq(paymentLinks.id, link.id), eq(paymentLinks.status, "open")))
       .returning({ id: paymentLinks.id });
-    if (claimed.length === 0) return false;
+    if (claimed.length === 0) return { settled: false };
 
     const [booking] = await tx.select().from(bookings).where(eq(bookings.id, link.bookingId)).for("update").limit(1);
     const [payment] = await tx
@@ -216,8 +228,28 @@ async function settle(db: Db, link: LinkRow, paid: { paymentId: string; amountCe
       .returning({ id: payments.id });
     await tx.update(paymentLinks).set({ paymentId: payment.id }).where(eq(paymentLinks.id, link.id));
 
-    const dueCents = await dueCentsOf(tx, booking);
     const label = labelOf(booking);
+    if (!ACTIVE.includes(booking.status)) {
+      const [refund] = await tx
+        .insert(refunds)
+        .values({ paymentId: payment.id, amountCents: paid.amountCents, reason: `Paid after ${booking.ref} was cancelled`, automatic: true, status: "pending" })
+        .returning({ id: refunds.id });
+      await recordEvent(tx, {
+        bookingId: booking.id,
+        from: label,
+        to: label,
+        actor: BY_SYSTEM,
+        at: now,
+        note: `Payment of ${formatCents(paid.amountCents)} received through the payment link after the booking was cancelled; it is refunded to the card in full`,
+      });
+      await queueEmail(
+        tx,
+        latePaymentEmail({ to: booking.customerEmail, name: booking.customerName, ref: booking.ref, amountCents: paid.amountCents }),
+      );
+      return { settled: true, refundId: refund.id };
+    }
+
+    const dueCents = await dueCentsOf(tx, booking);
     await recordEvent(tx, {
       bookingId: booking.id,
       from: label,
@@ -241,8 +273,16 @@ async function settle(db: Db, link: LinkRow, paid: { paymentId: string; amountCe
         online: true,
       }),
     );
-    return true;
+    return { settled: true };
   });
+}
+
+/** Send the refund of a payment that arrived too late (`settle`). Left waiting, it is sent by the scheduled task. */
+async function giveBackLate(db: Db, refundId: string | undefined, deps: PayLinkDeps): Promise<void> {
+  if (!refundId) return;
+  // Imported here: manage.ts withdraws a booking's link through this module.
+  const { processRefund } = await import("./manage");
+  await processRefund(db, refundId, { now: deps.now, payments: deps.payments, ownerEmail: deps.ownerEmail ?? null, baseUrl: deps.baseUrl });
 }
 
 /**
@@ -259,7 +299,8 @@ export async function checkPayLink(db: Db, linkId: string, deps: PayLinkDeps): P
 
   const state = await deps.payments.payLinkState({ linkId: link.providerLinkId, orderId: link.providerOrderId });
   if (state.state === "paid") {
-    await settle(db, link, state, deps.now);
+    const { refundId } = await settle(db, link, state, deps.now);
+    await giveBackLate(db, refundId, deps);
     return "paid";
   }
   if (state.state === "cancelled") {
@@ -439,5 +480,6 @@ export async function pretendToPay(db: Db, linkId: string, now: Date): Promise<b
   if (!/^[0-9a-f-]{36}$/i.test(linkId)) return false;
   const [link] = await db.select().from(paymentLinks).where(eq(paymentLinks.id, linkId)).limit(1);
   if (!link || link.provider !== "mock" || link.status !== "open") return false;
-  return settle(db, link, { paymentId: `mock_link_${link.id}`, amountCents: link.amountCents }, now);
+  // A late payment's refund waits for the scheduled task here: there is no processor to send it in this call.
+  return (await settle(db, link, { paymentId: `mock_link_${link.id}`, amountCents: link.amountCents }, now)).settled;
 }

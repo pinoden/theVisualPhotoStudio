@@ -60,8 +60,8 @@ export async function manageDeps(): Promise<ManageDeps> {
 }
 
 /** What the payment-link service needs: the processor, and where this site lives. */
-export async function payLinkDeps(): Promise<Pick<ManageDeps, "now" | "payments" | "baseUrl">> {
-  return { now: new Date(), payments: resolvePayments().provider, baseUrl: await siteUrl() };
+export async function payLinkDeps(): Promise<Pick<ManageDeps, "now" | "payments" | "baseUrl" | "ownerEmail">> {
+  return { now: new Date(), payments: resolvePayments().provider, baseUrl: await siteUrl(), ownerEmail: ownerNotifyEmail() };
 }
 
 export async function taskDeps(): Promise<TaskDeps> {

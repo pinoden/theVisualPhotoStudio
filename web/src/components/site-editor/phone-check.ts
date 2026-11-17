@@ -135,51 +135,63 @@ async function checkOnce(url: string, width: number, drawn: Drawn, name: string)
 }
 
 /**
- * A problem as a kind and a size: its words without what it quotes (the words
- * of an element, which a change of capitals or wording changes) and without
- * its numbers; and its first number outside the quotes, how far a thing
- * reaches or how small it is.
+ * The sentences the phone checks write (src/lib/site/phone-checks.ts), each
+ * read by its own ending: what kind of problem it is, and its size. The words
+ * of the element it names come first and are left alone, numbers and quotes
+ * in them included. For the first three a larger size is worse (it reaches
+ * further); for the others a smaller one (it is smaller to touch or to read).
  */
-function measured(problem: string): { kind: string; size: number } {
-  const bare = problem.replace(/"[^"]*"/g, '"…"');
-  const size = /\d+(\.\d+)?/.exec(bare);
-  return { kind: bare.replace(/\d+(\.\d+)?/g, "#").toLowerCase(), size: size ? Number(size[0]) : 0 };
-}
+const SENTENCES: { kind: string; ending: RegExp; further: boolean }[] = [
+  { kind: "sideways", ending: /^the page scrolls sideways \((\d+(?:\.\d+)?)px wide on a \d+px screen\)$/, further: true },
+  { kind: "reaches", ending: / reaches (\d+(?:\.\d+)?)px$/, further: true },
+  { kind: "starts", ending: / starts (\d+(?:\.\d+)?)px left of the screen$/, further: true },
+  { kind: "tall", ending: / is (\d+(?:\.\d+)?)px tall$/, further: false },
+  { kind: "zooms", ending: / has (\d+(?:\.\d+)?)px text: an iPhone zooms in on it$/, further: false },
+  { kind: "small", ending: / is (\d+(?:\.\d+)?)px$/, further: false },
+  { kind: "broken", ending: / is broken in two$/, further: false },
+];
 
-/** For these kinds a larger number is worse (it reaches further); for the others a smaller one (it is smaller to read or to touch). */
-const furtherIsWorse = (kind: string) => /reaches|starts|scrolls sideways/.test(kind);
+/** A problem as a kind and a size. A sentence of no known kind is a kind of its own. */
+function measured(problem: string): { kind: string; size: number; further: boolean } {
+  for (const sentence of SENTENCES) {
+    const found = sentence.ending.exec(problem);
+    if (found) return { kind: sentence.kind, size: Number(found[1] ?? 0), further: sentence.further };
+  }
+  return { kind: problem, size: 0, further: false };
+}
 
 /**
  * What of the problems a page will have (`found`) a change brings, against
  * the problems it has as visitors have it now (`before`). A page that has no
  * more problems of each kind than before, none of them worse (reaching
- * further, or smaller), is not made worse by the change: what visitors have
- * is said (`had`), in their numbers. One with another problem, or a worse
- * one, is the change's doing: all of it is said (`brought`).
+ * further, or smaller), is not made worse by the change: what it will have
+ * once the change is published is said (`had`). One with another problem, or
+ * a worse one, is the change's doing: all of it is said (`brought`).
  */
 export function broughtBy(found: string[], before: string[]): { brought: string[]; had: string[] } {
   if (found.length === 0) return { brought: [], had: [] };
   if (before.length === 0) return { brought: found, had: [] };
   const byKind = (problems: string[]) => {
-    const kinds = new Map<string, number[]>();
+    const kinds = new Map<string, { further: boolean; sizes: number[] }>();
     for (const problem of problems) {
-      const { kind, size } = measured(problem);
-      kinds.set(kind, [...(kinds.get(kind) ?? []), size]);
+      const { kind, size, further } = measured(problem);
+      const known = kinds.get(kind) ?? { further, sizes: [] };
+      known.sizes.push(size);
+      kinds.set(kind, known);
     }
     return kinds;
   };
   const was = byKind(before);
-  for (const [kind, sizes] of byKind(found)) {
-    const old = was.get(kind) ?? [];
+  for (const [kind, { further, sizes }] of byKind(found)) {
+    const old = was.get(kind)?.sizes ?? [];
     if (sizes.length > old.length) return { brought: found, had: [] };
     // Worst first, side by side with the worst it had: any one worse than its match is a change for the worse.
-    const further = furtherIsWorse(kind);
     const order = (a: number, b: number) => (further ? b - a : a - b);
     const now = [...sizes].sort(order);
     const then = [...old].sort(order);
     if (now.some((size, at) => (further ? size > then[at] + 2 : size < then[at] - 0.5))) return { brought: found, had: [] };
   }
-  return { brought: [], had: before };
+  return { brought: [], had: found };
 }
 
 /**

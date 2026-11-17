@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { BookingSummary } from "@/components/BookingSummary";
-import { bookings, paymentLinks, payments, settings, staffShifts } from "@/db/schema";
+import { bookings, paymentLinks, payments, promoCodes, refunds, settings, staffShifts } from "@/db/schema";
 import { createAdminBooking, getAppointment } from "./appointments";
 import type { AuthUser } from "./auth";
 import { cancelBooking, ownerCancelBooking, requestRescheduleCode } from "./manage";
@@ -372,15 +372,32 @@ describe("a booking that stops being active", () => {
     expect(await checkOpenPayLinks(world.db, deps())).toEqual({ paid: 0, closed: 0 });
   });
 
-  it("still records a payment the client made just before the booking was cancelled", async () => {
+  it("records a payment the client made just before the booking was cancelled, and gives it back in full", async () => {
     const made = await madeInAdmin();
     expectOk(await sendPayLink(world.db, owner, made.ref, deps()));
     clientPays();
-    // Cancelled before anyone asked the processor: withdrawing the link finds it paid, and records the payment,
-    // so that the money shows on the cancelled booking for the owner to refund.
-    expectOk(await ownerCancelBooking(world.db, made.ref, { refundCents: 0 }, world.manageDeps({ payments: square })));
+    // Cancelled before anyone asked the processor: withdrawing the link finds it paid and records the payment, which
+    // the cancellation was worked out without: it is refunded to the card in full, and the client is told.
+    expectOk(await cancelBooking(world.db, made.ref, dana, world.manageDeps({ payments: square })));
     expect((await links())[0].status).toBe("paid");
-    expect(await netCardPaidCents(world.db, made.id)).toBe(17600);
+    expect(await world.db.select().from(refunds)).toMatchObject([{ amountCents: 17600, automatic: true, status: "succeeded" }]);
+    expect(await netCardPaidCents(world.db, made.id)).toBe(0);
+    const [late] = await world.emails("late_payment_refunded");
+    expect(late.body).toContain(`Your payment of $176 for booking ${made.ref} arrived after the booking was cancelled, so it is refunded to your card in full.`);
+    expect(await world.emails("payment_received")).toHaveLength(0);
+  });
+
+  it("gives back in full a payment that arrives after the booking was released for a reschedule code, which keeps what it was", async () => {
+    const made = await madeInAdmin(FAR, h(9));
+    expectOk(await recordStudioPayment(world.db, owner, made.ref, { amountCents: 7600, method: "cash", note: "" }, NOW));
+    expectOk(await sendPayLink(world.db, owner, made.ref, deps()));
+    // Paid on the processor's page, and not seen yet when the client releases the booking: the code is the cash.
+    clientPays();
+    const moved = expectOk(await requestRescheduleCode(world.db, made.ref, dana, world.manageDeps({ payments: square })));
+    expect(moved.valueCents).toBe(7600);
+    expect(await world.db.select().from(refunds)).toMatchObject([{ amountCents: 10000, status: "succeeded" }]);
+    expect(await netCardPaidCents(world.db, made.id)).toBe(0);
+    expect((await world.db.select().from(promoCodes).where(eq(promoCodes.code, moved.code)))[0].value).toBe(7600);
   });
 });
 

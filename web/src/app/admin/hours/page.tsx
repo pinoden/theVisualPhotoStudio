@@ -84,6 +84,7 @@ async function Hours({ searchParams }: Pick<PageProps<"/admin/hours">, "searchPa
         </form>
 
         {blocks.length > 0 && (
+          <div className="data-table-wrap">
           <table className="data-table">
             <thead>
               <tr>
@@ -116,6 +117,7 @@ async function Hours({ searchParams }: Pick<PageProps<"/admin/hours">, "searchPa
               })}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 
@@ -124,6 +126,7 @@ async function Hours({ searchParams }: Pick<PageProps<"/admin/hours">, "searchPa
           <h3>{studio.name}: opening hours</h3>
           <form action={saveHoursAction}>
             <input type="hidden" name="studioId" value={studio.id} />
+            <div className="data-table-wrap">
             <table className="data-table" style={{ maxWidth: 560 }}>
               <thead>
                 <tr>
@@ -170,6 +173,7 @@ async function Hours({ searchParams }: Pick<PageProps<"/admin/hours">, "searchPa
                 })}
               </tbody>
             </table>
+            </div>
             <button type="submit" className="btn btn-dark btn-small" style={{ marginTop: "1rem" }}>
               Save {studio.name} hours
             </button>

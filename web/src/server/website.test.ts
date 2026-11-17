@@ -243,11 +243,20 @@ describe("two people editing at once", () => {
   it("names who saved a draft that waits, and nobody when none does", async () => {
     const opened = expectOk(await draft("#aaaaaa")).revision;
     expectOk(await draft("#bbbbbb"));
-    expect(await saveDraft(world.db, owner, DESIGN_DOC, design("#cccccc"), { basedOn: opened, now: NOW })).toMatchObject({ reason: "conflict", by: owner.email });
+    expect(await saveDraft(world.db, owner, DESIGN_DOC, design("#cccccc"), { basedOn: opened, now: NOW })).toMatchObject({
+      reason: "conflict",
+      by: owner.email,
+      waiting: true,
+    });
     // Discarded somewhere else: who did it is not known, and the last publisher is not named for them.
     const again = (await loadForEditing(world.db, owner, DESIGN_DOC))!.revision;
     expectOk(await discardDraft(world.db, owner, DESIGN_DOC));
-    expect(await saveDraft(world.db, owner, DESIGN_DOC, design("#dddddd"), { basedOn: again, now: NOW })).toMatchObject({ reason: "conflict", by: null, at: null });
+    expect(await saveDraft(world.db, owner, DESIGN_DOC, design("#dddddd"), { basedOn: again, now: NOW })).toMatchObject({
+      reason: "conflict",
+      by: null,
+      at: null,
+      waiting: false,
+    });
   });
 
   it("notices a publish and a discard made in the meantime as well", async () => {

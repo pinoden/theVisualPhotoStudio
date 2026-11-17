@@ -242,16 +242,45 @@ describe("cancelling a booking that has a pet fee", () => {
     const [cash] = await world.db.select().from(payments).where(and(eq(payments.bookingId, bookingId), eq(payments.provider, "manual")));
     expect(await recordHandRefund(world.db, owner, cash.id, { amountCents: 8800, note: "" }, NOW)).toEqual({
       ok: false,
-      message: "At most $78 can be refunded by hand for this booking: its pet fee ($40) was already returned as studio credit, $10 of it from what was paid at the studio.",
+      message: "At most $78 can be refunded by hand for this booking: its pet fee was already returned as studio credit, $10 of it from what was paid at the studio.",
     });
     expect(await ownerRefund(world.db, made.ref, { amountCents: 3000, reason: "" }, world.manageDeps())).toMatchObject({
       ok: false,
-      message: "At most $0 can be refunded to the card for this booking: its pet fee ($40) was already returned as studio credit, $30 of it from what the card paid.",
+      message: "At most $0 can be refunded to the card for this booking: its pet fee was already returned as studio credit, $30 of it from what the card paid.",
     });
     // Taking back the cash record would leave the credit standing for money nobody paid: not while it stands.
     expect(await voidStudioPayment(world.db, owner, cash.id, "", NOW)).toMatchObject({
       ok: false,
       message: expect.stringMatching(/^The pet fee of this booking was returned as studio credit \(code PET-[0-9A-Z-]+\) for what was paid\. Cancel that code under Codes first/),
+    });
+  });
+
+  it("lets the record behind a pet credit go once the credit ran out unspent, and never once it paid for a booking", async () => {
+    const dana = { name: "Dana Diaz", email: "dana@example.com", phone: "407-555-0133" };
+    const paidInCash = async (startMinute: number) => {
+      const made = expectOk(
+        await createAdminBooking(
+          world.db,
+          owner,
+          { studioIds: [world.ids.dayglow], date: FAR, startMinute, durationMinutes: 60, addons: [{ addonId: petFeeId, quantity: 1 }], customer: dana },
+          { now: NOW, baseUrl: BASE_URL },
+        ),
+      );
+      expectOk(await recordStudioPayment(world.db, owner, made.ref, { amountCents: 11800, method: "cash", note: "" }, NOW));
+      const credit = expectOk(await givePetFeeCredit(world.db, owner, made.ref, deps()));
+      const [cash] = await world.db.select().from(payments).where(and(eq(payments.bookingId, (await row(made.ref)).id), eq(payments.provider, "manual")));
+      return { ...made, credit: credit.code, cashId: cash.id };
+    };
+    // Run out unspent: it can no longer be used, so the record can go.
+    const expired = await paidInCash(h(9));
+    await world.db.update(promoCodes).set({ expiresAt: NOW }).where(eq(promoCodes.code, expired.credit));
+    expect(await voidStudioPayment(world.db, owner, expired.cashId, "", daysAfter(NOW, 1))).toEqual({ ok: true });
+    // Spent on a booking: never.
+    const spent = await paidInCash(h(13));
+    expectOk(await world.book({ date: FAR, startMinute: h(16), durationMinutes: 60, promoCode: spent.credit, customer: dana }));
+    expect(await voidStudioPayment(world.db, owner, spent.cashId, "", NOW)).toEqual({
+      ok: false,
+      message: `The pet fee of this booking came back as studio credit (code ${spent.credit}), which paid for a booking: this record cannot be taken back.`,
     });
   });
 

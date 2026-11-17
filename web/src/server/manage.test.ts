@@ -589,6 +589,23 @@ describe("a booking released for a reschedule code", () => {
   });
 });
 
+describe("a booking released for a reschedule code that an owner cancelled", () => {
+  it("still refunds only what was left on the code: what was spent of it stays spent", async () => {
+    const booked = expectOk(await world.book({ date: FAR })); // $176 by card
+    const moved = expectOk(await requestRescheduleCode(world.db, booked.ref, byToken(booked.manageToken), world.manageDeps()));
+    expectOk(await world.book({ date: FAR, startMinute: h(15), durationMinutes: 60, promoCode: moved.code, paymentToken: undefined })); // $88 of it
+    const [code] = await world.db.select().from(promoCodes).where(eq(promoCodes.code, moved.code));
+    await world.db.update(promoCodes).set({ voidedAt: NOW }).where(eq(promoCodes.id, code.id));
+    expect(await ownerRefund(world.db, booked.ref, { amountCents: 17600, reason: "" }, world.manageDeps())).toMatchObject({
+      ok: false,
+      message: `At most $88 can be refunded to the card for this booking: what was paid is on its reschedule code ${moved.code}, which has $88 left.`,
+    });
+    expectOk(await ownerRefund(world.db, booked.ref, { amountCents: 8800, reason: "" }, world.manageDeps()));
+    expect((await world.db.select().from(promoCodes).where(eq(promoCodes.id, code.id)))[0].value).toBe(0);
+    expect(await ownerRefund(world.db, booked.ref, { amountCents: 100, reason: "" }, world.manageDeps())).toMatchObject({ ok: false, code: "bad_amount" });
+  });
+});
+
 describe("the owner", () => {
   it("gives the customer's code back when the studio cancels a visit that has not started", async () => {
     // A booking paid with a reschedule credit: the customer could not get that credit back by cancelling.

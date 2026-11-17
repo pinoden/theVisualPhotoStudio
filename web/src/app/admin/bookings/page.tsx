@@ -166,8 +166,9 @@ async function Bookings({ searchParams }: Pick<PageProps<"/admin/bookings">, "se
                             <input type="hidden" name="back" value={back} />
                             {b.rescheduleCode && (
                               <div style={{ fontSize: ".75rem", maxWidth: "12rem", marginBottom: ".4rem" }}>
-                                Its money is on the reschedule code {b.rescheduleCode.code}, which has {formatCents(b.rescheduleCode.valueCents)} left: a
-                                refund comes off the code, up to that.
+                                Its money went into the reschedule code {b.rescheduleCode.code}
+                                {b.rescheduleCode.voided ? " (cancelled)" : ""}, which has {formatCents(b.rescheduleCode.valueCents)} left: a refund
+                                comes off the code, up to that.
                               </div>
                             )}
                             <label style={{ fontSize: ".8rem" }}>

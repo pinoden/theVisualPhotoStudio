@@ -378,7 +378,8 @@ export async function loadPageForEditing(db: DbLike, viewer: AuthUser, id: strin
 export type SavePageResult =
   | { ok: true; revision: number; hasDraft: boolean; savedAt: string }
   | { ok: false; reason: "forbidden" | "missing"; message: string }
-  | { ok: false; reason: "conflict"; message: string; by: string | null; at: string | null };
+  /** `waiting`: a draft waits now; when none does, it was published, discarded or set back somewhere else. */
+  | { ok: false; reason: "conflict"; message: string; by: string | null; at: string | null; waiting: boolean };
 
 /**
  * Store `input` as the page's draft. As for the design (`saveDraft` in
@@ -405,6 +406,7 @@ export async function savePageDraft(
         // Who saved the draft that waits. With none waiting it was published, discarded or set back, by whoever: nobody is named.
         by: row.draft != null ? row.draftBy : null,
         at: row.draft != null ? (row.draftAt?.toISOString() ?? null) : null,
+        waiting: row.draft != null,
       };
     }
     // A page that is not published is all draft. A published one has a draft only while it differs from what is published.

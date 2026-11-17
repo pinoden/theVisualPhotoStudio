@@ -47,6 +47,7 @@ async function Prices({ searchParams }: Pick<PageProps<"/admin/prices">, "search
           <h3>{studio.name}</h3>
           <form action={savePricesAction}>
             <input type="hidden" name="studioId" value={studio.id} />
+            <div className="data-table-wrap">
             <table className="data-table" style={{ maxWidth: 520 }}>
               <thead>
                 <tr>
@@ -81,6 +82,7 @@ async function Prices({ searchParams }: Pick<PageProps<"/admin/prices">, "search
                 ))}
               </tbody>
             </table>
+            </div>
             <button type="submit" className="btn btn-dark btn-small" style={{ marginTop: "1rem" }}>
               Save {studio.name} prices
             </button>

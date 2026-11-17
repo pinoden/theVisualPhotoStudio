@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, lt, ne, sql } from "drizzle-orm";
 import {
   addons,
   blocks,
@@ -305,8 +305,11 @@ export interface AdminBooking extends BookingView {
   refundableCents: number;
   /** Money taken at the studio and not given back: the site cannot send it anywhere, the studio gives it back by hand. */
   studioHeldCents: number;
-  /** For a booking released for a reschedule code: the code its money went into, and what is left on it. A refund comes off it. */
-  rescheduleCode: { code: string; valueCents: number } | null;
+  /**
+   * For a booking released for a reschedule code: the code its money went into, what is left on it, and whether an
+   * owner cancelled it. A refund comes off it; what was spent of it cannot come back.
+   */
+  rescheduleCode: { code: string; valueCents: number; voided: boolean } | null;
   refundProblem: boolean;
 }
 
@@ -351,11 +354,12 @@ export async function listBookings(
     .where(and(inArray(payments.bookingId, ids), ne(payments.provider, MANUAL_PROVIDER)))
     .groupBy(payments.bookingId, refunds.status);
 
-  // The reschedule codes the money of released bookings went into, while the owner has not cancelled them.
+  // The reschedule codes the money of released bookings went into, cancelled by an owner or not: what was spent of
+  // a code cannot come back, and what is left is that money still.
   const codes = await db
-    .select({ bookingId: promoCodes.originBookingId, code: promoCodes.code, valueCents: promoCodes.value })
+    .select({ bookingId: promoCodes.originBookingId, code: promoCodes.code, valueCents: promoCodes.value, voidedAt: promoCodes.voidedAt })
     .from(promoCodes)
-    .where(and(inArray(promoCodes.originBookingId, ids), eq(promoCodes.source, "reschedule"), isNull(promoCodes.voidedAt)));
+    .where(and(inArray(promoCodes.originBookingId, ids), eq(promoCodes.source, "reschedule")));
 
   // Money taken at the studio, less what the studio gave back by hand.
   const atStudio = await db
@@ -396,7 +400,7 @@ export async function listBookings(
         Math.max(0, (atStudio.find((p) => p.bookingId === view.id)?.cents ?? 0) - ((petReturned.find((p) => p.bookingId === view.id)?.cents ?? 0) - asCredit)),
         code?.valueCents ?? Infinity,
       ),
-      rescheduleCode: code ? { code: code.code, valueCents: code.valueCents } : null,
+      rescheduleCode: code ? { code: code.code, valueCents: code.valueCents, voided: code.voidedAt !== null } : null,
       refundProblem: refundRows.some((b) => b.status === "failed"),
     };
   });

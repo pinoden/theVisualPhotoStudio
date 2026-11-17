@@ -165,7 +165,8 @@ export async function loadForEditing<T, C>(db: DbLike, viewer: AuthUser, spec: D
 export type SaveDraftResult<T> =
   | { ok: true; revision: number; hasDraft: boolean; /** The content as it was stored: cut and corrected where needed. */ content: T; savedAt: string }
   | { ok: false; reason: "forbidden"; message: string }
-  | { ok: false; reason: "conflict"; message: string; by: string | null; at: string | null };
+  /** `waiting`: a draft waits now; when none does, it was published, discarded or set back somewhere else. */
+  | { ok: false; reason: "conflict"; message: string; by: string | null; at: string | null; waiting: boolean };
 
 /**
  * Store `content` as the draft. `basedOn` is the revision the editor loaded:
@@ -196,6 +197,7 @@ export async function saveDraft<T, C>(
         // Who saved the draft that waits. With none waiting it was published, discarded or set back, by whoever: nobody is named.
         by: row.draft != null ? row.draftBy : null,
         at: row.draft != null ? (row.draftAt?.toISOString() ?? null) : null,
+        waiting: row.draft != null,
       };
     }
     const hasDraft = !same(content, publishedOf(row, spec, context));
