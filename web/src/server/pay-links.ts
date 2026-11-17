@@ -320,30 +320,85 @@ async function giveBackLate(db: Db, late: LateRefund | undefined, deps: PayLinkD
  */
 export async function noticePaidLinksOf(db: Db, email: string, deps: PayLinkDeps): Promise<void> {
   const open = await db
-    .select({ bookingId: paymentLinks.bookingId })
+    .select({ id: bookings.id, status: bookings.status })
     .from(paymentLinks)
     .innerJoin(bookings, eq(bookings.id, paymentLinks.bookingId))
     .where(and(eq(paymentLinks.status, "open"), eq(bookings.customerEmail, email.trim().toLowerCase())));
-  for (const { bookingId } of open) await noticePaidLink(db, bookingId, deps);
+  await withinSeconds(
+    PAGE_WAIT_SECONDS,
+    (async () => {
+      for (const booking of open) await lookAtPayLink(db, booking, deps);
+    })(),
+  );
+}
+
+/** What became of a booking's open payment link when the processor was asked: `none` when it had none. */
+export type LinkLook = "none" | "open" | "paid" | "cancelled" | "unanswered" | "unknown";
+
+/**
+ * How long a page waits for the processor before it is drawn without its
+ * answer. The processor's own calls wait up to 10 seconds each, and are tried
+ * three times: a client is not kept looking at an empty page meanwhile.
+ */
+export const PAGE_WAIT_SECONDS = 4;
+
+/** Waits for `work` at most `seconds`, and then answers undefined; the work goes on by itself, and must not throw. */
+export async function withinSeconds<T>(seconds: number, work: Promise<T>): Promise<T | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<undefined>((resolve) => {
+    timer = setTimeout(() => resolve(undefined), seconds * 1000);
+  });
+  try {
+    return await Promise.race([work, late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * A booking's open payment link, as a page about the booking or a change to
+ * it finds it: while the booking is active, a payment made on the
+ * processor's page is recorded (`noticePaidLink`); once it is not, the link is
+ * withdrawn, so that nobody pays for it any more (and recorded, should it have
+ * been paid after all). Never throws.
+ */
+export async function lookAtPayLink(db: Db, booking: { id: string; status: string }, deps: PayLinkDeps): Promise<LinkLook> {
+  if (ACTIVE.includes(booking.status)) return noticePaidLink(db, booking.id, deps);
+  try {
+    const [link] = await db
+      .select()
+      .from(paymentLinks)
+      .where(and(eq(paymentLinks.bookingId, booking.id), eq(paymentLinks.status, "open")))
+      .limit(1);
+    if (!link) return "none";
+    const result = await withdraw(db, link, deps, BY_SYSTEM);
+    return result.ok ? (result.outcome === "was_paid" ? "paid" : "cancelled") : "unanswered";
+  } catch (error) {
+    console.error("Could not withdraw the payment link of booking", booking.id, error);
+    return "unanswered";
+  }
 }
 
 /**
  * Before a booking is cancelled or released for a reschedule code: ask the
  * processor whether its open link was paid, and record the payment while the
  * booking is still active, so that what is decided counts it (the terms of a
- * cancellation, a code's value). Changes nothing when the processor cannot be
- * asked: the link is then withdrawn afterwards, as before.
+ * cancellation, a code's value). Answers what the processor said:
+ * `unanswered` when it could not say, so that a client's change waits for
+ * it; the studio's own cancellation goes ahead, and the link is withdrawn
+ * afterwards, as before.
  */
-export async function noticePaidLink(db: Db, bookingId: string, deps: PayLinkDeps): Promise<void> {
+export async function noticePaidLink(db: Db, bookingId: string, deps: PayLinkDeps): Promise<LinkLook> {
   try {
     const [link] = await db
       .select({ id: paymentLinks.id })
       .from(paymentLinks)
       .where(and(eq(paymentLinks.bookingId, bookingId), eq(paymentLinks.status, "open")))
       .limit(1);
-    if (link) await checkPayLink(db, link.id, deps);
+    return link ? await checkPayLink(db, link.id, deps) : "none";
   } catch (error) {
     console.error("Could not ask whether the payment link of booking", bookingId, "was paid", error);
+    return "unanswered";
   }
 }
 
@@ -505,10 +560,15 @@ export async function checkOpenPayLinks(db: Db, deps: PayLinkDeps): Promise<{ pa
 /** What the page a client is emailed shows. Null for an address that is no link. */
 export interface PayPage {
   id: string;
-  /** `refunded`: paid after the booking had ended, and given back in full (`late` says how far that has gone). */
-  status: "open" | "paid" | "cancelled" | "refunded";
+  /**
+   * `refunded`: paid after the booking had ended, and given back in full (`late` says how far that has gone).
+   * `closed`: the booking has ended, so nothing is to be paid here, whether or not the link was withdrawn yet.
+   */
+  status: "open" | "paid" | "cancelled" | "refunded" | "closed";
   /** For `refunded`: how the booking ended, and whether the refund was made or has not reached the card yet. */
   late: { released: boolean; made: boolean } | null;
+  /** For `closed`: whether the booking was released for a reschedule code rather than cancelled. */
+  closed: { released: boolean } | null;
   amountCents: number;
   ref: string;
   studios: string;
@@ -529,30 +589,37 @@ export interface PayPage {
  */
 export async function getPayPage(db: Db, linkId: string, deps: PayLinkDeps): Promise<PayPage | null> {
   if (!/^[0-9a-f-]{36}$/i.test(linkId)) return null;
-  const status = await checkPayLink(db, linkId, deps);
-  if (status === "unknown") return null;
-  const [row] = await db
-    .select({ link: paymentLinks, booking: bookings })
-    .from(paymentLinks)
-    .innerJoin(bookings, eq(bookings.id, paymentLinks.bookingId))
-    .where(eq(paymentLinks.id, linkId))
-    .limit(1);
-  if (!row) return null;
+  const read = async () =>
+    (
+      await db
+        .select({ link: paymentLinks, booking: bookings })
+        .from(paymentLinks)
+        .innerJoin(bookings, eq(bookings.id, paymentLinks.bookingId))
+        .where(eq(paymentLinks.id, linkId))
+        .limit(1)
+    )[0];
+  const first = await read();
+  if (!first) return null;
+  // A client sent back from paying sees that it arrived; the link of a booking that has ended is withdrawn.
+  await lookAtPayLink(db, first.booking, deps);
+  const row = (await read()) ?? first;
+  const ended = !ACTIVE.includes(row.booking.status);
+  const released = row.booking.cancelReason === "rescheduled";
   // Paid for a booking that had ended: `settle` gave it back, and the page says so. A payment that counted while the
   // booking was active stays "paid", whatever a cancellation refunded of it later: that is the cancellation's to tell.
-  const back =
-    row.link.status === "paid" && !ACTIVE.includes(row.booking.status) && row.link.paymentId
-      ? await lateRefundOf(db, row.link.paymentId, row.booking.ref)
-      : null;
+  const back = row.link.status === "paid" && ended && row.link.paymentId ? await lateRefundOf(db, row.link.paymentId, row.booking.ref) : null;
+  // A booking that has ended is not paid for here, whether or not its link could be withdrawn yet.
+  const status: PayPage["status"] = back ? "refunded" : ended && row.link.status !== "paid" ? "closed" : row.link.status;
   return {
     id: row.link.id,
-    status: back ? "refunded" : row.link.status,
-    late: back ? { released: row.booking.cancelReason === "rescheduled", made: back.made } : null,
+    status,
+    late: back ? { released, made: back.made } : null,
+    closed: status === "closed" ? { released } : null,
     amountCents: row.link.amountCents,
     ref: row.booking.ref,
     studios: await studioNamesOf(db, row.booking.id),
     when: formatInstant(row.booking.startAt),
-    processorUrl: row.link.status === "open" && row.link.provider !== "mock" ? row.link.url : null,
+    processorUrl: status === "open" && row.link.provider !== "mock" ? row.link.url : null,
     pretend: row.link.provider === "mock",
   };
 }

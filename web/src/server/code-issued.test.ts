@@ -6,7 +6,7 @@ import { addons, bookings, payments, promoCodes } from "@/db/schema";
 import { MOCK_TOKEN_DECLINED } from "./payments";
 import { createAdminBooking } from "./appointments";
 import type { AuthUser } from "./auth";
-import { cancelBooking, ownerCancelBooking, ownerRefund, requestRescheduleCode } from "./manage";
+import { cancelBooking, ownerCancelBooking, ownerRefund, requestRescheduleCode, retryOpenRefunds } from "./manage";
 import { givePetFeeCredit } from "./pet-fee";
 import { issuePromo } from "./promos";
 import { recordStudioPayment } from "./studio-payments";
@@ -34,16 +34,18 @@ beforeEach(async () => {
 });
 
 const dana = { name: "Dana Diaz", email: "dana@example.com", phone: "407-555-0133" };
+/** The day after FAR, a Thursday: its studios are free. */
+const NEXT_DAY = "2026-12-10";
 const byToken = (token: string) => ({ kind: "token", token }) as const;
 
-/** The statements of the migration that fill the column in. */
+/** The statements of the migrations that fill the column in: 0024, then 0025, which corrects reschedule codes from their history. */
 function fillIn(): string[] {
-  const file = readFileSync(path.join(process.cwd(), "drizzle", "0024_code_issued_value.sql"), "utf8");
-  return file
-    .split("--> statement-breakpoint")
-    .map((statement) => statement.trim())
-    .filter((statement) => statement.startsWith("UPDATE") || statement.startsWith("--"))
-    .filter((statement) => /UPDATE "promo_codes"/.test(statement));
+  return ["0024_code_issued_value.sql", "0025_code_issued_from_history.sql"].flatMap((name) =>
+    readFileSync(path.join(process.cwd(), "drizzle", name), "utf8")
+      .split("--> statement-breakpoint")
+      .map((statement) => statement.trim())
+      .filter((statement) => /UPDATE "promo_codes"/.test(statement)),
+  );
 }
 
 /** A pet credit of $40, from a booking with the pet fee paid in cash on `startMinute` of FAR. */
@@ -126,6 +128,15 @@ describe("what a code was issued for, worked out by migration 0024", () => {
     });
     await world.db.update(promoCodes).set({ value: 0, usedCount: 1 }).where(eq(promoCodes.id, stranded.id));
 
+    // A reschedule code of a booking whose refund failed before the release, and went through after it: the code was
+    // worth what the card still held at the release, and the refund came off the card, not off the code.
+    const refundedBefore = expectOk(await world.book({ date: NEXT_DAY, startMinute: h(10), durationMinutes: 120 })); // $176 by card
+    world.failRefunds = "The card account is closed";
+    expectOk(await ownerRefund(world.db, refundedBefore.ref, { amountCents: 5000, reason: "" }, world.manageDeps()));
+    world.failRefunds = null;
+    const heldBack = expectOk(await requestRescheduleCode(world.db, refundedBefore.ref, byToken(refundedBefore.manageToken), world.manageDeps())).code;
+    expect(await retryOpenRefunds(world.db, world.manageDeps({ now: hoursAfter(NOW, 2) }))).toEqual({ succeeded: 1, failed: 0 });
+
     // A percent code: what it was issued for is its percent.
     await issuePromo(world.db, { kind: "percent", value: 10, source: "loyalty", email: dana.email, expiresAt: daysAfter(NOW, 60) });
 
@@ -137,6 +148,7 @@ describe("what a code was issued for, worked out by migration 0024", () => {
     expect(kept.get(given)).toBe(3000);
     expect(kept.get(refused)).toBe(2500);
     expect(kept.get(stranded.code)).toBe(2000);
+    expect(kept.get(heldBack)).toBe(12600);
 
     // A database from before: the figure is not there, and the migration works it out again from what it has.
     await world.db.update(promoCodes).set({ issuedCents: null });

@@ -444,7 +444,13 @@ describe("an attempt to book sent again", () => {
 
   it("is over when it did not go through: the next press books anew", async () => {
     expect(await book({ requestId: attempt, paymentToken: MOCK_TOKEN_DECLINED })).toMatchObject({ ok: false, code: "payment_failed" });
-    expect(await book({ requestId: attempt })).toMatchObject({ ok: false, status: 409, code: "attempt_over" });
+    // Told what the first answer told: the card was not charged.
+    expect(await book({ requestId: attempt })).toMatchObject({
+      ok: false,
+      status: 409,
+      code: "attempt_over",
+      message: "That attempt did not make a booking, and your card was not charged. If an amount appears as held on your card, it is released by itself within 24 hours. Please try again.",
+    });
     expect(charges).toHaveLength(0);
     // A new attempt, with an id of its own, books the time.
     expect(await book({ requestId: "0b2c4d6e-8f10-4a2b-9c3d-4e5f6a7b8c9d" })).toMatchObject({ ok: true });

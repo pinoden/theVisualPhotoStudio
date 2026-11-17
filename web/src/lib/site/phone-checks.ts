@@ -159,7 +159,9 @@ export function brokenWords(doc: Document = document): string[] {
     for (let parent = box.parentElement; parent; parent = box.parentElement) {
       const shown = view.getComputedStyle(box).display;
       const outer = view.getComputedStyle(parent).display;
-      if (/(flex|grid)/.test(outer) || /^inline-(block|flex|grid)$/.test(shown) || (shown === "block" && outer === "table-cell")) {
+      // A block in a table's cell, however deep (a summary in a details in the cell), is as wide as the cell lets it be.
+      const inCell = /^(block|list-item|flow-root)$/.test(shown) && parent.closest("td, th") !== null;
+      if (/(flex|grid)/.test(outer) || /^inline-(block|flex|grid)$/.test(shown) || inCell) {
         own += edges(box);
         box = parent;
         continue;

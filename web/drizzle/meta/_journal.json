@@ -176,6 +176,13 @@
       "when": 1794903040034,
       "tag": "0024_code_issued_value",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1794912332537,
+      "tag": "0025_code_issued_from_history",
+      "breakpoints": true
     }
   ]
 }

@@ -402,6 +402,14 @@ test("the admin fits a phone: the calendar in its three views, an appointment, a
   await page.getByRole("checkbox", { name: "I hold a licence that allows this font on a website" }).check();
   await page.getByRole("button", { name: "Add the font" }).click();
   await expect(byText(page, "Font added. Now add its files: one for each weight you use.")).toBeVisible();
+  // And a page named so, which the list of pages repeats on its buttons. It is made on a computer: making a page opens
+  // its editor, which is made for a wider screen.
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto("/admin/website/pages");
+  await byLabel(page, "Name of a new page").fill(LONG_ADDON);
+  await page.getByRole("button", { name: "Make the page" }).click();
+  await expect(byText(page, "Page made. It is a draft: visitors see it once you publish it.")).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
 
   for (const path of [
     "/admin",

@@ -26,6 +26,7 @@ import {
   openPayLinkOf,
   pretendToPay,
   sendPayLink,
+  withinSeconds,
   type PayLinkDeps,
 } from "./pay-links";
 import type { PaymentProvider } from "./payments";
@@ -481,8 +482,8 @@ describe("a booking that stops being active", () => {
       ok: false,
       message: "The card processor could not say whether the link was paid. Try again in a moment.",
     });
-    // The booking is cancelled all the same, and its link stays open, to be asked about again.
-    expectOk(await cancelBooking(world.db, made.ref, dana, world.manageDeps({ payments: square })));
+    // The studio cancels the booking all the same, and its link stays open, to be asked about again.
+    expectOk(await ownerCancelBooking(world.db, made.ref, { refundCents: 0 }, world.manageDeps({ payments: square })));
     expect((await links())[0].status).toBe("open");
     expect(world.links[0].state.state).toBe("unknown");
     expect(await checkOpenPayLinks(world.db, deps())).toEqual({ paid: 0, closed: 0 });
@@ -555,6 +556,99 @@ describe("what a client is told before cancelling or moving", () => {
   });
 });
 
+describe("when the processor cannot say whether a link was paid", () => {
+  const refusal = {
+    ok: false,
+    status: 503,
+    code: "try_again",
+    message: "We could not check with the card processor whether the payment for this booking went through, so nothing was changed. Please try again in a moment.",
+  };
+
+  it("the client's cancellation and move wait for it, so that a payment counts under the terms", async () => {
+    const made = await madeInAdmin(); // four days ahead: inside the refund window
+    expectOk(await sendPayLink(world.db, owner, made.ref, deps()));
+    // Paid on the processor's page, which cannot say so at the moment the client presses.
+    world.links[0].state = { state: "unknown", message: "No answer from Square" };
+    const manage = world.manageDeps({ payments: square });
+    expect(await cancelBooking(world.db, made.ref, dana, manage)).toEqual(refusal);
+    expect(await requestRescheduleCode(world.db, made.ref, dana, manage)).toEqual(refusal);
+    expect((await row(made.ref)).status).toBe("confirmed");
+    expect(await world.db.select().from(promoCodes)).toEqual([]);
+    // Once it can, the payment counts under the cancellation's terms.
+    clientPays();
+    expect(expectOk(await cancelBooking(world.db, made.ref, dana, manage)).message).toBe("No refund is due, because the booking starts in less than 14 days.");
+    expect(await netCardPaidCents(world.db, made.id)).toBe(17600);
+    expect(await world.db.select().from(refunds)).toEqual([]);
+  });
+
+  it("the studio's cancellation goes ahead, and the link stays open, to be asked about again", async () => {
+    const made = await madeInAdmin();
+    expectOk(await sendPayLink(world.db, owner, made.ref, deps()));
+    world.links[0].state = { state: "unknown", message: "No answer from Square" };
+    expectOk(await ownerCancelBooking(world.db, made.ref, { refundCents: 0 }, world.manageDeps({ payments: square })));
+    expect((await row(made.ref)).status).toBe("cancelled");
+    expect((await links())[0].status).toBe("open");
+  });
+});
+
+describe("the link of a booking that has ended", () => {
+  it("offers nothing to pay on its page, and is withdrawn once the processor says it was not paid", async () => {
+    const made = await madeInAdmin();
+    expectOk(await sendPayLink(world.db, owner, made.ref, deps()));
+    const [link] = await links();
+    // Cancelled while the link could not be withdrawn at the processor.
+    world.failLinks = "Could not reach the payment processor.";
+    expectOk(await ownerCancelBooking(world.db, made.ref, { refundCents: 0 }, world.manageDeps({ payments: square })));
+    expect((await links())[0].status).toBe("open");
+    expect(await getPayPage(world.db, link.id, deps())).toMatchObject({ status: "closed", closed: { released: false }, processorUrl: null, late: null });
+    expect((await links())[0].status).toBe("open");
+    // The processor answers again: opening the page withdraws the link.
+    world.failLinks = null;
+    expect(await getPayPage(world.db, link.id, deps())).toMatchObject({ status: "closed", processorUrl: null });
+    expect((await links())[0].status).toBe("cancelled");
+    expect(world.links[0].state.state).toBe("cancelled");
+  });
+
+  it("says a booking released for a reschedule code, and is withdrawn when the client opens the booking or the account", async () => {
+    const withLinkLeftOpen = async (date: string, startMinute: number) => {
+      const made = await madeInAdmin(date, startMinute);
+      expectOk(await recordStudioPayment(world.db, owner, made.ref, { amountCents: 7600, method: "cash", note: "" }, NOW));
+      expectOk(await sendPayLink(world.db, owner, made.ref, deps()));
+      world.failLinks = "Could not reach the payment processor.";
+      expectOk(await requestRescheduleCode(world.db, made.ref, dana, world.manageDeps({ payments: square })));
+      world.failLinks = null;
+      return made;
+    };
+    const first = await withLinkLeftOpen(FAR, h(9));
+    const second = await withLinkLeftOpen(FAR, h(13));
+    const linkOf = async (bookingId: string) => (await links()).find((link) => link.bookingId === bookingId)!;
+    world.failLinks = "Could not reach the payment processor.";
+    expect(await getPayPage(world.db, (await linkOf(first.id)).id, deps())).toMatchObject({ status: "closed", closed: { released: true } });
+    world.failLinks = null;
+
+    await noticeBookingPayments(world.db, first.ref, dana, deps());
+    expect((await linkOf(first.id)).status).toBe("cancelled");
+    await noticePaidLinksOf(world.db, dana.email, deps());
+    expect((await linkOf(second.id)).status).toBe("cancelled");
+  });
+});
+
+describe("a page's wait for the processor", () => {
+  it("is cut short, and the work goes on by itself", async () => {
+    let done = false;
+    const slow = new Promise<string>((resolve) =>
+      setTimeout(() => {
+        done = true;
+        resolve("late");
+      }, 200),
+    );
+    expect(await withinSeconds(0.02, slow)).toBeUndefined();
+    expect(done).toBe(false);
+    expect(await slow).toBe("late");
+    expect(await withinSeconds(1, Promise.resolve("soon"))).toBe("soon");
+  });
+});
+
 describe("the page a client's link leads to", () => {
   it("shows what is owed and where to pay, then that the payment arrived", async () => {
     const made = await madeInAdmin();
@@ -571,6 +665,7 @@ describe("the page a client's link leads to", () => {
       processorUrl: "https://pay.test/link_1",
       pretend: false,
       late: null,
+      closed: null,
     });
     // The client pays at the processor and is sent back: opening the page finds the payment.
     clientPays();

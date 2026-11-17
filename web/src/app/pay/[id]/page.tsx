@@ -75,7 +75,7 @@ async function Pay({ params }: Pick<PageProps<"/pay/[id]">, "params">) {
   return (
     <div className="confirmation-card" style={{ textAlign: "left" }}>
       <div style={{ textAlign: "center" }}>
-        <div className="confirmation-icon">{page.status === "paid" ? "✓" : page.status === "cancelled" || page.status === "refunded" ? "×" : "$"}</div>
+        <div className="confirmation-icon">{page.status === "paid" ? "✓" : page.status === "open" ? "$" : "×"}</div>
         <h1 style={{ fontSize: "2rem" }}>
           {page.status === "paid"
             ? "Payment Received"
@@ -85,7 +85,9 @@ async function Pay({ params }: Pick<PageProps<"/pay/[id]">, "params">) {
                 : "Payment to Be Refunded"
               : page.status === "cancelled"
                 ? "This Link Is No Longer Valid"
-                : "Pay for Your Booking"}
+                : page.closed
+                  ? "Nothing to Pay Here"
+                  : "Pay for Your Booking"}
         </h1>
         <div className="divider" />
       </div>
@@ -109,6 +111,13 @@ async function Pay({ params }: Pick<PageProps<"/pay/[id]">, "params">) {
           </p>
           {details}
         </>
+      )}
+
+      {page.closed && (
+        <p>
+          Booking {page.ref} {page.closed.released ? "was released for a reschedule code" : "was cancelled"}, so nothing is to be paid
+          here. If you have a question about it, please call us at <a href={telHref(business.phone)}>{business.phone}</a>.
+        </p>
       )}
 
       {page.status === "cancelled" && (

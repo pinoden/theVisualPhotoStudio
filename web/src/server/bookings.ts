@@ -175,7 +175,15 @@ async function answerAgain(db: Db, requestKey: string, input: ParsedInput): Prom
     await db.update(bookings).set({ retryTokenHash: hashToken(manageToken) }).where(eq(bookings.id, earlier.id));
     return { ok: true, ref: earlier.ref, manageToken, totalCents: earlier.totalCents };
   }
-  return fail(409, "attempt_over", "That attempt did not go through. If your card was charged for it, contact us and we will refund it. Please try again.");
+  // A booking that was not made never charged its card: what it reserved is given back (`createBooking`).
+  if (earlier.status === "expired") {
+    return fail(
+      409,
+      "attempt_over",
+      `That attempt did not make a booking, and your card was not charged. If an amount appears as held on your card, it is released by itself within ${RESERVE_HOURS} hours. Please try again.`,
+    );
+  }
+  return fail(409, "attempt_over", "That booking was made, and has been cancelled since. Please try again.");
 }
 
 const NO_SUCH_SESSION = "That photography session is not offered. Please choose a studio and a length from the list.";
