@@ -563,27 +563,38 @@ export function ownerUnseenLinkNotice(input: {
   customer: string;
   linkCents: number;
   ended: "cancelled" | "released";
-  /** Made by another processor than the one set up now (in test mode, or with Square's other account): the site can never ask it. */
-  foreign: boolean;
+  /**
+   * `unseen`: the processor could not say. `other`: the link was made by another processor than the one set up now (in
+   * test mode, or with Square's other account), which the site can never ask. `none`: no processor was set up.
+   */
+  kind: "unseen" | "other" | "none";
 }): QueuedEmail {
   const ended = `${input.customer}'s booking ${input.ref} was ${input.ended === "released" ? "released for a reschedule code" : "cancelled"}`;
   const close = 'close it on the appointment\'s page with "Close it by hand"';
+  const settle = `When it was not paid, ${close}. When it was paid, refund it to the client there, as the client was told to ask, then ${close}.`;
   return {
     to: input.to,
     kind: "owner_unseen_link",
     subject: `CHECK THE PAYMENT LINK of ${input.ref}`,
-    body: input.foreign
-      ? [
-          `${ended}. Its payment link for ${money(input.linkCents)} was made by another card processor than the one set up now (in test mode, or with Square's other account), which the site cannot ask whether it was paid.`,
-          "",
-          `Look the link up there. When it was not paid, ${close}. When it was paid, refund it to the client there, as the client was told to ask, then ${close}.`,
-        ].join("\n")
-      : [
-          `${ended} while the card processor could not say whether its payment link for ${money(input.linkCents)} had been paid.`,
-          "",
-          "If it was paid, the payment is refunded to the card in full once the processor tells the site, and the client was told so. The site keeps asking.",
-          `If the processor never can (a link it no longer knows), look the link up in Square. When it was not paid, ${close}. When Square shows it was paid, the site will never see that payment: refund it to the client in Square, as they were promised, then ${close}.`,
-        ].join("\n"),
+    body:
+      input.kind === "other"
+        ? [
+            `${ended}. Its payment link for ${money(input.linkCents)} was made by another card processor than the one set up now (in test mode, or with Square's other account), which the site cannot ask whether it was paid.`,
+            "",
+            `Look the link up there. ${settle}`,
+          ].join("\n")
+        : input.kind === "none"
+          ? [
+              `${ended} while no card processor was set up, so the site could not ask whether its payment link for ${money(input.linkCents)} had been paid.`,
+              "",
+              `Look the link up in Square. ${settle}`,
+            ].join("\n")
+          : [
+              `${ended} while the card processor could not say whether its payment link for ${money(input.linkCents)} had been paid.`,
+              "",
+              "If it was paid, the payment is refunded to the card in full once the processor tells the site, and the client was told so. The site keeps asking.",
+              `If the processor never can (a link it no longer knows), look the link up in Square. When it was not paid, ${close}. When Square shows it was paid, the site will never see that payment: refund it to the client in Square, as they were promised, then ${close}.`,
+            ].join("\n"),
   };
 }
 
@@ -720,6 +731,39 @@ export function ownerCaptureNotice(input: {
       `Reason: ${input.reason}`,
       "",
       `The site tries again every time its scheduled task runs. If the money has not been taken by ${formatInstant(input.givenBackAt)}, Square gives the amount back to the card and the booking is unpaid: then take the payment at the studio, or cancel the booking.`,
+    ].join("\n"),
+  };
+}
+
+/** A refund that cannot be sent with the card processor set up now, and waits for the right one. */
+export function ownerRefundWaitingNotice(input: { to: string; ref: string; customer: string; amountCents: number; reason: string }): QueuedEmail {
+  return {
+    to: input.to,
+    kind: "owner_refund_waiting",
+    subject: `A refund for ${input.ref} is waiting`,
+    body: [
+      `A refund of ${money(input.amountCents)} for booking ${input.ref} (${input.customer}) has not been sent.`,
+      "",
+      input.reason,
+      "",
+      "The client was told it has not reached their card yet. It is listed on the admin's overview until it goes through.",
+    ].join("\n"),
+  };
+}
+
+/**
+ * The amount reserved on a booking's card lapsed before the site could take it:
+ * the card was not charged, and the booking, which stands, now owes its price.
+ */
+export function ownerReservationLapsedNotice(input: { to: string; ref: string; customer: string; amountCents: number }): QueuedEmail {
+  return {
+    to: input.to,
+    kind: "owner_reservation_lapsed",
+    subject: `ACTION NEEDED: ${input.ref} was not paid`,
+    body: [
+      `The ${money(input.amountCents)} reserved on the card for booking ${input.ref} (${input.customer}) lapsed before it could be taken: Square gave it back to the card, and nothing was charged.`,
+      "",
+      "The booking still stands, and owes its price. Take the payment at the studio and record it on the appointment's page, or email the client a payment link from there, or cancel the booking.",
     ].join("\n"),
   };
 }

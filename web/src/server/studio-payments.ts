@@ -10,12 +10,11 @@ import { isBookingRef } from "./bookings";
 import { codeRefundEmail, paymentReceivedEmail, queueEmail } from "./email";
 import { recordEvent } from "./history";
 import { openPayLinkOf } from "./pay-links";
-import { netCardPaidCents, paidAtStudioCents, STANDS } from "./money";
+import { netCardPaidCents, owedCents, paidAtStudioCents, STANDS } from "./money";
 import { petFeeCentsOf, studioRefundableCents } from "./pet-fee";
 import { codeStanding, rescheduleCodeOf, spendable, takeOffRescheduleCode } from "./promos";
 import { loadSettings } from "./settings";
 import { canViewDay } from "./staff";
-import { isRetiredTestPayment } from "./test-mode";
 import { formatInstant, localDateOf } from "./tz";
 
 /**
@@ -54,12 +53,12 @@ export interface BookingMoney {
   totalCents: number;
   /** Every payment that succeeded, before refunds. */
   receivedCents: number;
-  /** What is still to pay: nothing once the booking has ended. */
+  /** What is still to pay (`owedCents`): nothing once the booking has ended. */
   dueCents: number;
   /** How the booking ended, if it has: then nothing more is to pay, whatever was received. */
   ended: "cancelled" | "released" | null;
-  /** Its card payment was taken in test mode, and no longer counts (src/server/test-mode.ts). */
-  testMode: boolean;
+  /** Made in the admin, and so paid at the studio or through a payment link; else made online, and paid by card then. */
+  madeInAdmin: boolean;
   payments: PaymentLine[];
 }
 
@@ -67,6 +66,7 @@ export interface BookingMoney {
 export async function moneyOf(
   db: DbLike,
   booking: Pick<BookingRow, "id" | "totalCents" | "madeBy" | "status" | "cancelReason">,
+  now: Date = new Date(),
 ): Promise<BookingMoney> {
   const rows = await db
     .select()
@@ -74,8 +74,6 @@ export async function moneyOf(
     .where(and(eq(payments.bookingId, booking.id), inArray(payments.status, ["succeeded", "voided"])))
     .orderBy(asc(payments.createdAt));
   const receivedCents = rows.filter((row) => row.status === "succeeded").reduce((sum, row) => sum + row.amountCents, 0);
-  // Paid in test mode, and retired once the live processor was set up: nothing was received for it.
-  const testMode = rows.some(isRetiredTestPayment);
   // The card payments that came in through a payment link, to say so beside them.
   const throughLink = new Set(
     (
@@ -88,20 +86,15 @@ export async function moneyOf(
   return {
     totalCents: booking.totalCents,
     receivedCents,
-    // A booking made online is paid in full when it is made, so only one made in the admin can owe anything, or one
-    // whose payment was taken in test mode (`testMode`); and only while it stands: a cancelled one, or one released for
-    // a reschedule code, owes nothing.
-    dueCents:
-      (booking.madeBy !== null || testMode) && STANDS.includes(booking.status) ? Math.max(0, booking.totalCents - receivedCents) : 0,
-    testMode,
+    dueCents: await owedCents(db, booking, now),
+    madeInAdmin: booking.madeBy !== null,
     ended: STANDS.includes(booking.status) ? null : booking.cancelReason === "rescheduled" ? "released" : "cancelled",
     payments: rows.map((row) => ({
       id: row.id,
       at: row.createdAt.toISOString(),
       byHand: row.provider === MANUAL_PROVIDER,
-      how: isRetiredTestPayment(row)
-        ? "Card, in test mode: no money moved"
-        : row.provider === MANUAL_PROVIDER
+      how:
+        row.provider === MANUAL_PROVIDER
           ? isPaymentMethod(row.method)
             ? PAYMENT_METHODS[row.method]
             : "At the studio"
@@ -164,7 +157,7 @@ export async function recordStudioPayment(
     if (!["confirmed", "completed", "no_show"].includes(booking.status)) {
       return refuse("not_active", "A payment can be recorded for a booking that is confirmed or has taken place, not for a cancelled one.");
     }
-    const money = await moneyOf(tx, booking);
+    const money = await moneyOf(tx, booking, now);
     if (money.dueCents <= 0) return refuse("nothing_due", "Nothing is owed for this booking.");
     const link = await openPayLinkOf(tx, booking.id);
     if (link) {

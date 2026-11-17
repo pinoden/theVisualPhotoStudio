@@ -237,10 +237,18 @@ describe("which card processor is used", () => {
     expect(resolvePayments({ ...live, SQUARE_ENVIRONMENT: " Production ", NODE_ENV: "production" }).provider?.name).toBe("square");
     // A setting that says the other account, or neither: no processor at all, rather than the wrong one.
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
-    expect(resolvePayments({ ...live, SQUARE_ENVIRONMENT: "sandbox", NODE_ENV: "production" })).toEqual({ provider: null, client: { mode: "disabled" } });
+    expect(resolvePayments({ ...live, SQUARE_ENVIRONMENT: "sandbox", NODE_ENV: "production" })).toEqual({
+      provider: null,
+      client: {
+        mode: "disabled",
+        problem: "Card payments are off: SQUARE_ENVIRONMENT says sandbox, but the application id is of Square's live account. Set SQUARE_ENVIRONMENT to production, or leave it empty.",
+      },
+    });
     expect(resolvePayments({ ...square, SQUARE_ENVIRONMENT: "production", NODE_ENV: "production" }).client.mode).toBe("disabled");
     expect(resolvePayments({ ...live, SQUARE_ENVIRONMENT: "prod", NODE_ENV: "production" }).client.mode).toBe("disabled");
-    expect(errors).toHaveBeenCalledWith("Card payments are off: SQUARE_ENVIRONMENT is sandbox, but the application id is of Square's production.");
+    expect(errors).toHaveBeenCalledWith(
+      "Card payments are off: SQUARE_ENVIRONMENT says sandbox, but the application id is of Square's live account. Set SQUARE_ENVIRONMENT to production, or leave it empty.",
+    );
     errors.mockRestore();
   });
 

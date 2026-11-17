@@ -22,6 +22,7 @@ import {
   codeRefundEmail,
   ownerHandRefundNotice,
   ownerRefundNotice,
+  ownerRefundWaitingNotice,
   ownerUnseenLinkNotice,
   queueEmail,
   refundNotYetEmail,
@@ -328,13 +329,20 @@ export async function processRefund(db: Db, refundId: string, deps: ManageDeps):
     .limit(1);
   if (!row) return "failed";
   if (row.refund.status === "succeeded") return "succeeded";
-  if (!deps.payments) return "pending";
+  if (!deps.payments) return waitForProcessor(db, row, "No card processor is set up now, so the refund waits: it is sent once one is.", deps);
 
   // A payment taken through another processor than the one set up now is unknown to this one, which is never asked
   // about it: its refund waits, untouched, for that processor to be set up again. (What test mode took is retired
   // when the live processor is set up, and has nothing to refund: src/server/test-mode.ts.) Not failed: an owner told
   // to refund it by hand could see it refunded a second time once the right processor is back.
-  if (row.provider !== deps.payments.name) return "pending";
+  if (row.provider !== deps.payments.name) {
+    return waitForProcessor(
+      db,
+      row,
+      "Its payment was taken through another card processor, or Square account, than the one set up now, so the refund waits: it is sent once that one is set up again.",
+      deps,
+    );
+  }
   const result = row.providerPaymentId
     ? await deps.payments.refund({
         paymentId: row.providerPaymentId,
@@ -446,6 +454,32 @@ export async function processRefund(db: Db, refundId: string, deps: ManageDeps):
     }
     return "failed";
   });
+}
+
+/**
+ * A refund that cannot be sent with the processor set up now waits for the
+ * right one, untouched (`processRefund`). It says why, where the owner sees
+ * refunds that have not gone through, and the owner is emailed, once: the
+ * client is told the studio knows.
+ */
+async function waitForProcessor(
+  db: Db,
+  row: { refund: { id: string; amountCents: number; error: string | null }; ref: string; customer: string },
+  reason: string,
+  deps: ManageDeps,
+): Promise<"pending"> {
+  if (row.refund.error === reason) return "pending";
+  await db.transaction(async (tx) => {
+    const marked = await tx
+      .update(refunds)
+      .set({ error: reason })
+      .where(and(eq(refunds.id, row.refund.id), eq(refunds.status, "pending")))
+      .returning({ id: refunds.id });
+    if (marked.length > 0 && deps.ownerEmail) {
+      await queueEmail(tx, ownerRefundWaitingNotice({ to: deps.ownerEmail, ref: row.ref, customer: row.customer, amountCents: row.refund.amountCents, reason }));
+    }
+  });
+  return "pending";
 }
 
 /**
@@ -691,24 +725,28 @@ const LOOK_AGAIN = "What this would do has changed since the page was opened. He
 async function noteUnseenLink(tx: DbLike, booking: BookingRow, ended: "cancelled" | "released", deps: ManageDeps): Promise<string | null> {
   const link = await openPayLinkOf(tx, booking.id);
   if (!link) return null;
-  const foreign = link.provider !== (deps.payments?.name ?? null);
+  // Asked of a processor that could not say; of none, none being set up; or of another than the link's own.
+  const kind = !deps.payments ? "none" : link.provider === deps.payments.name ? "unseen" : "other";
   await recordEvent(tx, {
     bookingId: booking.id,
     from: "cancelled",
     to: "cancelled",
     actor: BY_SYSTEM,
     at: deps.now,
-    note: foreign
-      ? `The payment link for ${formatCents(link.amountCents)} was made by another card processor than the one set up now: the site cannot ask whether it was paid`
-      : `The card processor could not say whether the payment link for ${formatCents(link.amountCents)} was paid: a payment through it is refunded in full once it is seen`,
+    note:
+      kind === "other"
+        ? `The payment link for ${formatCents(link.amountCents)} was made by another card processor than the one set up now: the site cannot ask whether it was paid`
+        : kind === "none"
+          ? `No card processor was set up, so the site could not ask whether the payment link for ${formatCents(link.amountCents)} was paid`
+          : `The card processor could not say whether the payment link for ${formatCents(link.amountCents)} was paid: a payment through it is refunded in full once it is seen`,
   });
   if (deps.ownerEmail) {
     await queueEmail(
       tx,
-      ownerUnseenLinkNotice({ to: deps.ownerEmail, ref: booking.ref, customer: booking.customerName, linkCents: link.amountCents, ended, foreign }),
+      ownerUnseenLinkNotice({ to: deps.ownerEmail, ref: booking.ref, customer: booking.customerName, linkCents: link.amountCents, ended, kind }),
     );
   }
-  return foreign ? FOREIGN_LINK : UNSEEN_LINK;
+  return kind === "unseen" ? UNSEEN_LINK : FOREIGN_LINK;
 }
 
 /**
@@ -999,7 +1037,7 @@ export async function requestRescheduleCode(db: Db, ref: string, actor: Actor, d
       outcome.reason !== "nothing_paid" || !unseen
         ? ""
         : look === "foreign"
-          ? ` ${FOREIGN_LINK}`
+          ? " The site cannot check the payment link for this booking. If you paid it, please contact us."
           : " We could not check just now whether the payment link for this booking was paid. If you paid it, please try again later, or call us.";
     const said = outcome.reason === "not_confirmed" ? endedText(outcome.booking) : rescheduleBlockText(outcome.reason, settings);
     return { ok: false, status: 409, code: outcome.reason, message: `${said}${unseenNote}` };
@@ -1026,7 +1064,7 @@ export type OwnerRefundResult =
       /** Money taken at the studio for a booking the studio cancelled: the studio gives back by hand what it owes of it. */
       atStudioCents?: number;
       /** The processor could not say whether the booking's payment link was paid, or it was another processor's (`noteUnseenLink`). */
-      unseenLink?: "unseen" | "foreign";
+      unseenLink?: "unseen" | "foreign" | "none";
     }
   | { ok: false; status: number; code: "not_found" | "bad_amount" | "not_cancellable" | "changed"; message: string };
 
@@ -1168,7 +1206,7 @@ export async function ownerCancelBooking(
     refund,
     refundCents: input.refundCents,
     ...(outcome.atStudio > 0 ? { atStudioCents: outcome.atStudio } : {}),
-    ...(outcome.unseenNote ? { unseenLink: outcome.unseenNote === FOREIGN_LINK ? ("foreign" as const) : ("unseen" as const) } : {}),
+    ...(outcome.unseenNote ? { unseenLink: look === "foreign" ? (deps.payments ? ("foreign" as const) : ("none" as const)) : ("unseen" as const) } : {}),
   };
 }
 

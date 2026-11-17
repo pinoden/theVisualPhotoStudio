@@ -83,8 +83,8 @@ export function BookingSummary({ booking }: { booking: BookingView }) {
           <span>{formatCents(-booking.promoDiscountCents)}</span>
         </div>
       )}
-      {/* A booking made in the admin is paid at the studio or through a payment link, perhaps in parts: what was received, then what is owed. */}
-      {paidStatus && booking.madeByAdmin && booking.receivedCents > 0 && booking.dueCents > 0 && (
+      {/* A booking paid in parts (made in the admin, or one whose card was never charged): what was received, then what is owed. */}
+      {paidStatus && booking.receivedCents > 0 && booking.dueCents > 0 && (
         <div className="price-row">
           <span>{byCard > 0 ? "Paid so far" : "Paid at the studio so far"}</span>
           <span>{formatCents(booking.receivedCents)}</span>
@@ -92,20 +92,20 @@ export function BookingSummary({ booking }: { booking: BookingView }) {
       )}
       <div className="price-row total">
         <span>
-          {/* A booking made online owes only when its card payment was taken in test mode, which moved no money. */}
+          {/* A booking made online owes only when the amount its card held lapsed before it was taken. */}
           {!paidStatus || booking.totalCents === 0
             ? "Total"
             : booking.dueCents > 0
               ? booking.madeByAdmin
                 ? "To pay at the studio"
                 : "To pay"
-              : !booking.madeByAdmin
-                ? "Charged to card"
-                : byCard <= 0
-                  ? "Paid at the studio"
-                  : booking.receivedAtStudioCents > 0
-                    ? "Paid by card and at the studio"
-                    : "Paid by card"}
+              : booking.receivedAtStudioCents > 0
+                ? byCard > 0
+                  ? "Paid by card and at the studio"
+                  : "Paid at the studio"
+                : booking.madeByAdmin
+                  ? "Paid by card"
+                  : "Charged to card"}
         </span>
         <span>{formatCents(paidStatus && booking.dueCents > 0 ? booking.dueCents : booking.totalCents)}</span>
       </div>

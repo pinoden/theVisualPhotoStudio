@@ -24,7 +24,6 @@ import { MANUAL_PROVIDER } from "@/lib/payment-methods";
 import { parseStudioFacts, type StudioFacts } from "@/lib/studio-facts";
 import { deleteAllSessions, normalizeEmail } from "./auth";
 import { toBookingViews, type BookingView } from "./bookings";
-import { TEST_PROCESSORS } from "./test-mode";
 import { issuePromo } from "./promos";
 import { dayBoundsUtc, localToUtc } from "./tz";
 
@@ -427,24 +426,6 @@ export async function listRefundProblems(db: DbLike): Promise<RefundProblem[]> {
     .where(and(inArray(refunds.status, ["pending", "failed"]), eq(payments.status, "succeeded")))
     .orderBy(desc(refunds.createdAt));
   return rows as RefundProblem[];
-}
-
-/**
- * Bookings paid in test mode that still stand and owe their price: their card
- * payment was retired once the live processor was set up (src/server/test-mode.ts).
- * The owners have each paid, or cancel it.
- */
-export async function listTestModeBookings(db: DbLike): Promise<{ ref: string; customerName: string; startAt: string; dueCents: number }[]> {
-  const rows = await db
-    .selectDistinct({ booking: bookings })
-    .from(bookings)
-    .innerJoin(payments, eq(payments.bookingId, bookings.id))
-    .where(and(inArray(bookings.status, ["confirmed", "completed", "no_show"]), eq(payments.status, "voided"), inArray(payments.provider, [...TEST_PROCESSORS])))
-    .orderBy(asc(bookings.startAt));
-  const views = await toBookingViews(db, rows.map((row) => row.booking));
-  return views
-    .filter((view) => view.dueCents > 0)
-    .map((view) => ({ ref: view.ref, customerName: view.customerName, startAt: view.startAt, dueCents: view.dueCents }));
 }
 
 // ── Codes ────────────────────────────────────────────────────────────────────

@@ -419,6 +419,8 @@ export interface PaymentClientConfig {
   squareApplicationId?: string;
   squareLocationId?: string;
   squareEnvironment?: "sandbox" | "production";
+  /** For `disabled` when credentials are set but disagree: why payments are off, for the owners' overview. */
+  problem?: string;
 }
 
 type Env = Record<string, string | undefined>;
@@ -434,19 +436,20 @@ const warned = new Set<string>();
  * and links keep the account that made them, and a site that took the live
  * account for the sandbox would leave live money unseen.
  */
-export function squareEnvironment(applicationId: string, declared: string | undefined): "sandbox" | "production" | null {
+export function squareEnvironment(applicationId: string, declared: string | undefined): "sandbox" | "production" | { problem: string } {
   const fromId = applicationId.trim().startsWith("sandbox-") ? "sandbox" : "production";
   const said = (declared ?? "").trim().toLowerCase();
   if (said === "" || said === fromId) return fromId;
+  const account = (environment: string) => (environment === "sandbox" ? "Square's sandbox" : "Square's live account");
   const problem =
     said === "sandbox" || said === "production"
-      ? `SQUARE_ENVIRONMENT is ${said}, but the application id is of Square's ${fromId}`
+      ? `SQUARE_ENVIRONMENT says ${said}, but the application id is of ${account(fromId)}. Set SQUARE_ENVIRONMENT to ${fromId}, or leave it empty`
       : `SQUARE_ENVIRONMENT is "${declared}", which is neither sandbox nor production`;
   if (!warned.has(problem)) {
     warned.add(problem);
     console.error(`Card payments are off: ${problem}.`);
   }
-  return null;
+  return { problem: `Card payments are off: ${problem}.` };
 }
 
 /**
@@ -462,7 +465,7 @@ export function resolvePayments(env: Env = process.env): { provider: PaymentProv
   const applicationId = env.SQUARE_APPLICATION_ID;
   if (accessToken && locationId && applicationId) {
     const environment = squareEnvironment(applicationId, env.SQUARE_ENVIRONMENT);
-    if (!environment) return { provider: null, client: { mode: "disabled" } };
+    if (typeof environment !== "string") return { provider: null, client: { mode: "disabled", problem: environment.problem } };
     return {
       provider: squareProvider({ accessToken, locationId, environment }),
       client: {

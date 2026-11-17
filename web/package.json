@@ -17,6 +17,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/migrate.ts",
     "db:seed": "tsx scripts/seed.ts",
+    "db:clear-test-mode": "tsx scripts/clear-test-mode.ts",
     "check:square": "tsx scripts/square-sandbox-check.ts"
   },
   "dependencies": {

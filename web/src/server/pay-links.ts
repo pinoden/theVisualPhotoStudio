@@ -9,7 +9,7 @@ import type { AuthUser } from "./auth";
 import { isBookingRef } from "./bookings";
 import { latePaymentEmail, payLinkEmail, paymentReceivedEmail, queueEmail, replaceQueuedEmail } from "./email";
 import { BY_CUSTOMER, BY_SYSTEM, recordEvent } from "./history";
-import { receivedCentsByBooking } from "./money";
+import { owedCents } from "./money";
 import type { PaymentProvider } from "./payments";
 import { loadSettings } from "./settings";
 import { canViewDay } from "./staff";
@@ -88,11 +88,8 @@ function view(row: LinkRow): PayLinkView {
 }
 
 /** What a booking still owes: its price less every payment that succeeded. */
-async function dueCentsOf(db: DbLike, booking: Pick<BookingRow, "id" | "totalCents" | "madeBy">): Promise<number> {
-  if (booking.madeBy === null) return 0; // a booking made online is paid when it is made
-  const received = (await receivedCentsByBooking(db, [booking.id])).get(booking.id) ?? 0;
-  return Math.max(0, booking.totalCents - received);
-}
+/** What a booking still owes, the one rule of the site (`owedCents` in money.ts). */
+const dueCentsOf = (db: DbLike, booking: Pick<BookingRow, "id" | "totalCents" | "status">, now: Date) => owedCents(db, booking, now);
 
 async function studioNamesOf(db: DbLike, bookingId: string): Promise<string> {
   const rows = await db
@@ -135,7 +132,7 @@ export async function sendPayLink(db: Db, viewer: AuthUser, ref: string, deps: P
   if (!["confirmed", "completed", "no_show"].includes(booking.status)) {
     return refuse("not_active", "A payment link can be sent for a booking that is confirmed or has taken place, not for a cancelled one.");
   }
-  const dueCents = await dueCentsOf(db, booking);
+  const dueCents = await dueCentsOf(db, booking, deps.now);
   if (dueCents <= 0) return refuse("nothing_due", "Nothing is owed for this booking.");
 
   const email = (linkId: string) =>
@@ -294,7 +291,7 @@ async function settle(db: Db, link: LinkRow, paid: { paymentId: string; amountCe
       return { settled: true, late: { refundId: refund.id, emailId, email } };
     }
 
-    const dueCents = await dueCentsOf(tx, booking);
+    const dueCents = await dueCentsOf(tx, booking, now);
     await recordEvent(tx, {
       bookingId: booking.id,
       from: label,
@@ -499,7 +496,10 @@ export async function checkPayLink(db: Db, linkId: string, deps: PayLinkDeps): P
  */
 function cannotAskText(link: LinkRow, deps: PayLinkDeps, withdrawing: boolean): string {
   const not = withdrawing ? ", so it was not withdrawn" : "";
-  return deps.payments && deps.payments.name === link.provider
+  if (!deps.payments) {
+    return `No card processor is set up now, so the site cannot ask whether the link was paid${not}. Look it up in Square: an owner can then close it here by hand.`;
+  }
+  return deps.payments.name === link.provider
     ? `The card processor could not say whether the link was paid${not}. Try again in a moment. If it goes on, look the link up in Square: an owner can then close it here by hand.`
     : `This link was made by another card processor than the one set up now (in test mode, or with Square's other account), which the site cannot ask${not}. Look it up there: an owner can then close it here by hand.`;
 }

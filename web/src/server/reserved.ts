@@ -1,7 +1,10 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { bookings, payments, refunds } from "@/db/schema";
 import type { Db } from "@/db/client";
-import { ownerCaptureNotice, queueEmail } from "./email";
+import { labelOf } from "@/lib/domain/labels";
+import { formatCents } from "@/lib/domain/pricing";
+import { ownerCaptureNotice, ownerReservationLapsedNotice, queueEmail } from "./email";
+import { BY_SYSTEM, recordEvent } from "./history";
 import { RESERVE_HOURS, type PaymentProvider } from "./payments";
 
 /**
@@ -146,18 +149,26 @@ export async function settleReservedPayments(db: Db, deps: SettleDeps): Promise<
       createdAt: payments.createdAt,
       ref: bookings.ref,
       customer: bookings.customerName,
+      bookingId: bookings.id,
       bookingStatus: bookings.status,
+      bookingLabel: bookings.label,
     })
     .from(payments)
     .innerJoin(bookings, eq(bookings.id, payments.bookingId))
     // Only what the processor set up now reserved: another's is never asked, and never marked, so that a setting
-    // wrong for a moment changes nothing for good. What test mode reserved is retired with it (src/server/test-mode.ts).
+    // wrong for a moment changes nothing for good.
     .where(and(eq(payments.status, "authorized"), eq(payments.provider, deps.payments.name)))
     .limit(50);
   let taken = 0;
   let released = 0;
   for (const row of open) {
     if (!row.providerPaymentId) continue;
+    // Lapsed: the processor gave the amount back to the card by itself, and nothing can be taken now. The card was not
+    // charged; a booking that stands owes its price (`owedCents` in money.ts), and the owner is told to collect it.
+    if (deps.now.getTime() - row.createdAt.getTime() >= RESERVE_HOURS * 3_600_000) {
+      await lapse(db, row, deps);
+      continue;
+    }
     const reserved = { ...row, providerPaymentId: row.providerPaymentId };
     if ((STANDING as readonly string[]).includes(row.bookingStatus)) {
       if (await takeReserved(db, reserved, deps)) taken++;
@@ -168,4 +179,32 @@ export async function settleReservedPayments(db: Db, deps: SettleDeps): Promise<
     if (await giveBackReserved(db, reserved, deps.payments, why)) released++;
   }
   return { taken, released };
+}
+
+/** A reserved amount the processor gave back by itself (`settleReservedPayments`): failed, written into the booking's history, and, while the booking stands, told to the owner. */
+async function lapse(
+  db: Db,
+  row: { id: string; amountCents: number; ref: string; customer: string; bookingId: string; bookingStatus: string; bookingLabel: string | null },
+  deps: SettleDeps,
+): Promise<void> {
+  await db.transaction(async (tx) => {
+    const lapsed = await tx
+      .update(payments)
+      .set({ status: "failed", error: "The amount reserved lapsed before it was taken: the card was not charged." })
+      .where(and(eq(payments.id, row.id), eq(payments.status, "authorized")))
+      .returning({ id: payments.id });
+    if (lapsed.length === 0) return;
+    const label = labelOf({ status: row.bookingStatus, label: row.bookingLabel });
+    await recordEvent(tx, {
+      bookingId: row.bookingId,
+      from: label,
+      to: label,
+      actor: BY_SYSTEM,
+      at: deps.now,
+      note: `The ${formatCents(row.amountCents)} reserved on the card lapsed before it was taken: the card was not charged`,
+    });
+    if ((STANDING as readonly string[]).includes(row.bookingStatus) && deps.ownerEmail) {
+      await queueEmail(tx, ownerReservationLapsedNotice({ to: deps.ownerEmail, ref: row.ref, customer: row.customer, amountCents: row.amountCents }));
+    }
+  });
 }

@@ -118,10 +118,16 @@ test("the check for broken words sees a word squeezed in a table, at any depth o
       null,
     ],
     [
-      // Too narrow for the word within the table's own width, wide enough within the grid's row.
-      "a table in one of two grid columns",
-      `<div style="display:grid;grid-template-columns:1fr 1fr"><table style="border-collapse:collapse"><tr><td style="padding:4px"><button ${squeezed}>Refunded it in Square</button></td><td style="padding:4px">${"photograph studio rental ".repeat(4)}</td></tr></table><div>beside</div></div>`,
+      // Too narrow for the word within the table's own width, wide enough within the row it is in.
+      "a table in a box of a flex row",
+      `<div style="display:flex"><table style="border-collapse:collapse;flex:0 1 170px"><tr><td style="padding:4px"><button ${squeezed}>Refunded</button></td><td style="padding:4px">${"photograph studio rental ".repeat(4)}</td></tr></table><div style="flex:1 1 0">beside</div></div>`,
       "Refunded",
+    ],
+    [
+      // A grid's track sets the width of what is in it, as a width given to a column does.
+      "a table in one of two grid columns",
+      `<div style="display:grid;grid-template-columns:1fr 1fr"><table style="border-collapse:collapse"><tr><td style="padding:4px"><button ${squeezed}>Refunded</button></td><td style="padding:4px">${"photograph studio rental ".repeat(4)}</td></tr></table><div>beside</div></div>`,
+      null,
     ],
     ["a table inside an inline element", `<span>${row(`<button ${squeezed}>Refunded it in Square</button>`)}</span>`, "Refunded"],
     [
@@ -377,8 +383,9 @@ test("starting from the time works on a phone", async ({ page }) => {
 });
 
 test("a tablet's touch screen gets the touch rules: controls a finger can press, fields an iPad does not zoom", async ({ browser }) => {
-  test.setTimeout(240_000);
-  // An iPad: touch, so its pointer is coarse, at a width where the phones' layout no longer applies.
+  test.setTimeout(300_000);
+  // An iPad: touch, so its pointer is coarse, at a width where the phones' layout no longer applies; then held sideways,
+  // wide enough for the whole menu.
   const context = await browser.newContext({ viewport: { width: 768, height: 1024 }, hasTouch: true, isMobile: true });
   const page = await context.newPage();
   // Its errors go where the other tests' go, and fail the test after it.
@@ -395,16 +402,23 @@ test("a tablet's touch screen gets the touch rules: controls a finger can press,
     expect(await hardToTouch(page), `${where} on an iPad: hard to use by touch`).toEqual([]);
     expect(await tooSmallToRead(page), `${where} on an iPad: text too small`).toEqual([]);
   };
-  for (const path of PUBLIC_PAGES) {
-    await page.goto(path);
-    await expect(page.locator("main h1, main h2").first()).toBeVisible();
-    await touchable(path);
-  }
-  await signIn(page, IPAD_OWNER, "/admin");
-  for (const path of ["/admin", "/admin/calendar", "/admin/calendar/new", "/admin/bookings", "/admin/customers", "/admin/prices", "/admin/studios", "/admin/hours", "/admin/codes", "/admin/settings", "/admin/website/pages", "/account", "/account/appointments?tab=past"]) {
-    await page.goto(path);
-    await expect(page.locator("main h1").first()).toBeVisible();
-    await touchable(path);
+  const OWNER_PAGES = ["/admin", "/admin/calendar", "/admin/calendar/new", "/admin/bookings", "/admin/customers", "/admin/prices", "/admin/studios", "/admin/hours", "/admin/codes", "/admin/settings", "/admin/website/pages", "/account", "/account/appointments?tab=past"];
+  for (const size of [
+    { width: 768, height: 1024 },
+    { width: 1180, height: 820 },
+  ]) {
+    await page.setViewportSize(size);
+    for (const path of PUBLIC_PAGES) {
+      await page.goto(path);
+      await expect(page.locator("main h1, main h2").first()).toBeVisible();
+      await touchable(`${path} at ${size.width}px`);
+    }
+    if (size.width === 768) await signIn(page, IPAD_OWNER, "/admin");
+    for (const path of OWNER_PAGES) {
+      await page.goto(path);
+      await expect(page.locator("main h1").first()).toBeVisible();
+      await touchable(`${path} at ${size.width}px`);
+    }
   }
   await context.close();
 });

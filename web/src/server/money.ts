@@ -1,8 +1,8 @@
-import { and, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, ne, sql } from "drizzle-orm";
 import { payments, refunds } from "@/db/schema";
 import type { DbLike } from "@/db/client";
 import { MANUAL_PROVIDER } from "@/lib/payment-methods";
-import { TEST_PROCESSORS } from "./test-mode";
+import { RESERVE_HOURS } from "./payments";
 
 /**
  * What is held for a booking, by where the money is.
@@ -47,17 +47,43 @@ export async function paidAtStudioCents(db: DbLike, bookingId: string): Promise<
 }
 
 /**
- * The bookings, of those given, whose card payment was taken in test mode and
- * retired once the live processor was set up (src/server/test-mode.ts):
- * nothing was received for them, and one that stands owes its price.
+ * What each booking still owes, of those given: for one that stands, its
+ * price less what it received and what a card holds reserved for it, which is
+ * taken shortly; nothing for one that ended. A booking made online is paid
+ * when it is made, so it owes only when its card's amount was reserved and
+ * never taken: once the reservation has lapsed (`RESERVE_HOURS`), the card
+ * holds nothing, and the studio collects the price. One made in the admin
+ * owes until it is paid.
  */
-export async function paidInTestMode(db: DbLike, bookingIds: string[]): Promise<Set<string>> {
-  if (bookingIds.length === 0) return new Set();
-  const rows = await db
-    .selectDistinct({ bookingId: payments.bookingId })
-    .from(payments)
-    .where(and(inArray(payments.bookingId, bookingIds), eq(payments.status, "voided"), inArray(payments.provider, [...TEST_PROCESSORS])));
-  return new Set(rows.map((row) => row.bookingId));
+export async function owedCentsByBooking(
+  db: DbLike,
+  rows: { id: string; totalCents: number; status: string }[],
+  now: Date,
+): Promise<Map<string, number>> {
+  const standing = rows.filter((row) => STANDS.includes(row.status));
+  if (standing.length === 0) return new Map(rows.map((row) => [row.id, 0]));
+  const ids = standing.map((row) => row.id);
+  const lapsedBefore = new Date(now.getTime() - RESERVE_HOURS * 3_600_000);
+  const [received, reserved] = await Promise.all([
+    receivedCentsByBooking(db, ids),
+    db
+      .select({ bookingId: payments.bookingId, total: sql<number>`coalesce(sum(${payments.amountCents}), 0)::int` })
+      .from(payments)
+      .where(and(inArray(payments.bookingId, ids), eq(payments.status, "authorized"), gt(payments.createdAt, lapsedBefore)))
+      .groupBy(payments.bookingId),
+  ]);
+  const held = new Map(reserved.map((row) => [row.bookingId, row.total]));
+  return new Map(
+    rows.map((row) => [
+      row.id,
+      STANDS.includes(row.status) ? Math.max(0, row.totalCents - (received.get(row.id) ?? 0) - (held.get(row.id) ?? 0)) : 0,
+    ]),
+  );
+}
+
+/** What one booking still owes (`owedCentsByBooking`). */
+export async function owedCents(db: DbLike, booking: { id: string; totalCents: number; status: string }, now: Date): Promise<number> {
+  return (await owedCentsByBooking(db, [booking], now)).get(booking.id) ?? 0;
 }
 
 /**

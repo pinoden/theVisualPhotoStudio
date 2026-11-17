@@ -28,7 +28,8 @@ async function openPglite(dataDir?: string): Promise<{ db: Db; close: () => Prom
   return { db: db as unknown as Db, close: () => client.close() };
 }
 
-async function openPostgres(url: string): Promise<{ db: Db; close: () => Promise<void> }> {
+/** The PostgreSQL server named by `url`, opened as it is: no migrations, no checks. For scripts. */
+export async function openPostgres(url: string): Promise<{ db: Db; close: () => Promise<void> }> {
   const { Pool } = await import("pg");
   const { drizzle } = await import("drizzle-orm/node-postgres");
   const pool = new Pool({ connectionString: url });
@@ -61,14 +62,14 @@ export function getDb(): Promise<Db> {
   if (!globalForDb.__studioDb) {
     globalForDb.__studioDb = (async () => {
       const url = process.env.DATABASE_URL;
-      // Once the live card processor is set up, what test mode left is retired before anything counts money
-      // (src/server/test-mode.ts). Imported here, as the pages are below: the server's code needs this module.
-      const leaveTestMode = async (db: Db) => {
-        const [{ retireTestMode }, { resolvePayments }] = await Promise.all([import("../server/test-mode"), import("../server/payments")]);
-        await retireTestMode(db, resolvePayments().provider?.name ?? null, new Date());
+      // A database holds test money or live money, never both: one that would mix them with the processor set up now is
+      // refused, with what to do (src/server/test-mode.ts). Imported here, as the pages are below: that module needs this one.
+      const oneKindOfMoney = async (db: Db) => {
+        const [{ assertOneKindOfMoney }, { resolvePayments }] = await Promise.all([import("../server/test-mode"), import("../server/payments")]);
+        await assertOneKindOfMoney(db, resolvePayments().provider?.name ?? null);
         return db;
       };
-      if (url) return leaveTestMode((await openPostgres(url)).db);
+      if (url) return oneKindOfMoney((await openPostgres(url)).db);
       const { seed } = await import("./seed");
       // The pages the website was built with, into a database that never had them (src/server/pages.ts).
       const { ensureBuiltInPages } = await import("../server/pages");
@@ -92,7 +93,7 @@ export function getDb(): Promise<Db> {
       const { db } = await openPglite(dataDir);
       await seed(db);
       await ensureBuiltInPages(db, new Date());
-      return leaveTestMode(db);
+      return oneKindOfMoney(db);
     })();
     globalForDb.__studioDb.catch(() => {
       globalForDb.__studioDb = undefined;

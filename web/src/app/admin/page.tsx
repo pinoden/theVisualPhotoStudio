@@ -4,11 +4,11 @@ import { connection } from "next/server";
 import { Suspense } from "react";
 import { getDb } from "@/db/client";
 import { formatCents } from "@/lib/domain/pricing";
-import { countUpcoming, listBookings, listRefundProblems, listTestModeBookings } from "@/server/admin";
+import { countUpcoming, listBookings, listRefundProblems } from "@/server/admin";
 import { resolveEmailTransport } from "@/server/email";
 import { resolvePayments } from "@/server/payments";
 import { requireOwner } from "@/server/session";
-import { formatInstant, localDateOf } from "@/server/tz";
+import { localDateOf } from "@/server/tz";
 import { recordRefundMadeInSquareAction } from "./actions";
 import { AdminFrame, AdminLoading } from "./frame";
 
@@ -28,13 +28,12 @@ async function Overview({ searchParams }: Pick<PageProps<"/admin">, "searchParam
   const db = await getDb();
   const now = new Date();
   const today = localDateOf(now);
-  const [upcoming, todays, problems, testMode] = await Promise.all([
+  const [upcoming, todays, problems] = await Promise.all([
     countUpcoming(db, now),
     listBookings(db, { from: today, to: today }),
     listRefundProblems(db),
-    listTestModeBookings(db),
   ]);
-  const payments = resolvePayments().client.mode;
+  const { mode: payments, problem: paymentsProblem } = resolvePayments().client;
   const sandbox = resolvePayments().provider?.name === "square-sandbox";
   const email = resolveEmailTransport()?.name ?? null;
 
@@ -70,27 +69,11 @@ async function Overview({ searchParams }: Pick<PageProps<"/admin">, "searchParam
                 set to production, to take real payments.
               </li>
             )}
-            {payments === "disabled" && <li>No card processor is configured, so paid bookings are refused. Add the Square credentials.</li>}
+            {payments === "disabled" && (
+              <li>{paymentsProblem ?? "No card processor is configured, so paid bookings are refused. Add the Square credentials."}</li>
+            )}
             {email === "log" && <li>Emails are written to the server log instead of being sent. Add an email service to send them.</li>}
             {email === null && <li>No email service is configured, so emails (including sign-in codes) wait unsent.</li>}
-          </ul>
-        </div>
-      )}
-
-      {testMode.length > 0 && (
-        <div className="admin-card">
-          <h3>Bookings paid in test mode</h3>
-          <p style={{ fontSize: ".875rem" }}>
-            These were paid while card payments were in test mode, so nothing was received for them. Each still stands and owes
-            its price: have it paid, with a payment link or at the studio, or cancel it.
-          </p>
-          <ul style={{ margin: 0 }}>
-            {testMode.map((booking) => (
-              <li key={booking.ref}>
-                <Link href={`/admin/appointments/${booking.ref}`}>{booking.ref}</Link> · {booking.customerName} ·{" "}
-                {formatInstant(new Date(booking.startAt))} · {formatCents(booking.dueCents)} to pay
-              </li>
-            ))}
           </ul>
         </div>
       )}

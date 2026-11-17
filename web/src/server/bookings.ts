@@ -23,7 +23,7 @@ import { bookingConfirmationEmail, queueEmail } from "./email";
 import { BY_CUSTOMER, recordEvent } from "./history";
 import { releaseHolds } from "./holds";
 import { giveBackReserved, takeReserved } from "./reserved";
-import { paidInTestMode, receivedCentsByBooking, STANDS } from "./money";
+import { owedCentsByBooking, receivedCentsByBooking } from "./money";
 import { RESERVE_HOURS, type PaymentProvider } from "./payments";
 import {
   creditName,
@@ -650,11 +650,11 @@ export interface BookingView {
 type BookingRow = typeof bookings.$inferSelect;
 
 /** Attach studios and add-ons to booking rows, keeping their order. */
-export async function toBookingViews(db: DbLike, rows: BookingRow[]): Promise<BookingView[]> {
+export async function toBookingViews(db: DbLike, rows: BookingRow[], now: Date = new Date()): Promise<BookingView[]> {
   if (rows.length === 0) return [];
   const ids = rows.map((r) => r.id);
   const codeIds = rows.map((r) => r.promoCodeId).filter((id): id is string => id !== null);
-  const [holdRows, addonRows, codeRows, received, atStudio, testPaid] = await Promise.all([
+  const [holdRows, addonRows, codeRows, received, atStudio, owed] = await Promise.all([
     db
       .select({ bookingId: studioHolds.bookingId, name: studios.name, priceCents: studioHolds.priceCents, sort: studios.sortOrder })
       .from(studioHolds)
@@ -669,7 +669,7 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[]): Promise<Bo
       : [],
     receivedCentsByBooking(db, ids),
     receivedCentsByBooking(db, ids, "at_studio"),
-    paidInTestMode(db, ids),
+    owedCentsByBooking(db, rows, now),
   ]);
   return rows.map((booking) => ({
     id: booking.id,
@@ -701,12 +701,7 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[]): Promise<Bo
     totalCents: booking.totalCents,
     receivedCents: received.get(booking.id) ?? 0,
     receivedAtStudioCents: atStudio.get(booking.id) ?? 0,
-    // Only a booking made in the admin can owe, or one whose card payment was taken in test mode (`paidInTestMode`), and
-    // only while it stands (`STANDS`).
-    dueCents:
-      (booking.madeBy !== null || testPaid.has(booking.id)) && STANDS.includes(booking.status)
-        ? Math.max(0, booking.totalCents - (received.get(booking.id) ?? 0))
-        : 0,
+    dueCents: owed.get(booking.id) ?? 0,
     rescheduledCount: booking.rescheduledCount,
   }));
 }

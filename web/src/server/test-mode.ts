@@ -1,64 +1,79 @@
-import { and, eq, inArray } from "drizzle-orm";
-import { bookings, paymentLinks, payments } from "@/db/schema";
-import type { Db } from "@/db/client";
-import { labelOf } from "@/lib/domain/labels";
-import { formatCents } from "@/lib/domain/pricing";
-import { BY_SYSTEM, recordEvent } from "./history";
+import { eq, inArray, ne, sql } from "drizzle-orm";
+import { bookings, emailOutbox, loyaltyLedger, paymentLinks, payments, promoCodes, refunds } from "@/db/schema";
+import type { Db, DbLike } from "@/db/client";
 
 /**
- * Leaving test mode. The pretend processor and Square's sandbox move no
- * money: what they recorded (`payments.provider`, `payment_links.provider`)
- * is test money. While the site runs in test mode it counts as money, so that
- * test mode can be tried end to end. Once the live processor is set up, it
- * never may: a booking paid in test mode would otherwise give real credit (a
- * reschedule code worth what it "paid"), a receipt, or a refund.
+ * Test mode and the live account, kept apart. The pretend processor and
+ * Square's sandbox move no money: what they record (`payments.provider`,
+ * `payment_links.provider`) is test money. A database holds test money or live
+ * money, never both. On a database that holds test mode's bookings, the live
+ * account would count them as money: credit from a reschedule code, a pet
+ * fee's credit, a free hour, a refund, a receipt, all of it made from nothing.
+ * And test mode on a database that took real payments would mix pretend
+ * bookings with them. So the site refuses to open either
+ * (`assertOneKindOfMoney`, from `getDb`), and says what to do:
+ * `npm run db:clear-test-mode` makes a test database ready for the live
+ * account (`clearTestMode`), keeping everything the owners set up.
  */
 export const TEST_PROCESSORS = ["mock", "square-sandbox"] as const;
 
-/** What a test payment says once it is retired, on the appointment's page among its payments. */
-export const TEST_MODE_NOTE = "Taken in test mode: no money moved.";
-
-/** The processor that takes real money. Anything else set up is test mode. */
+/** The processor that takes real money: Square's live account. */
 export const LIVE_PROCESSOR = "square";
 
-/**
- * Once the live processor is set up, what test mode left is retired: its card
- * payments, taken or only reserved, are voided, so that nothing counts them
- * as money; its open payment links are closed, for they can never be paid.
- * Each booking concerned gets a line in its history. The bookings themselves
- * stand: a booking that stands with nothing received now owes its price, and
- * the overview lists them for the owners, to cancel or to have paid. Nothing
- * of the live processor's, or taken by hand, is touched. Safe to run again;
- * run when the database is opened (`getDb`).
- */
-export async function retireTestMode(db: Db, processor: string | null, now: Date): Promise<{ payments: number; links: number }> {
-  if (processor !== LIVE_PROCESSOR) return { payments: 0, links: 0 };
-  return db.transaction(async (tx) => {
-    const voided = await tx
-      .update(payments)
-      .set({ status: "voided", error: TEST_MODE_NOTE })
-      .where(and(inArray(payments.provider, [...TEST_PROCESSORS]), inArray(payments.status, ["pending", "authorized", "succeeded"])))
-      .returning({ bookingId: payments.bookingId, amountCents: payments.amountCents });
-    const closed = await tx
-      .update(paymentLinks)
-      .set({ status: "cancelled", cancelledAt: now })
-      .where(and(inArray(paymentLinks.provider, [...TEST_PROCESSORS]), eq(paymentLinks.status, "open")))
-      .returning({ bookingId: paymentLinks.bookingId, amountCents: paymentLinks.amountCents });
-    const notes = new Map<string, string[]>();
-    for (const payment of voided) notes.set(payment.bookingId, [...(notes.get(payment.bookingId) ?? []), `card payment of ${formatCents(payment.amountCents)} taken in test mode voided: no money moved`]);
-    for (const link of closed) notes.set(link.bookingId, [...(notes.get(link.bookingId) ?? []), `payment link for ${formatCents(link.amountCents)} made in test mode closed`]);
-    if (notes.size > 0) {
-      const rows = await tx.select().from(bookings).where(inArray(bookings.id, [...notes.keys()]));
-      for (const booking of rows) {
-        const label = labelOf(booking);
-        const said = notes.get(booking.id)!.join("; ");
-        await recordEvent(tx, { bookingId: booking.id, from: label, to: label, actor: BY_SYSTEM, at: now, note: `The live card processor was set up: ${said}` });
-      }
-    }
-    return { payments: voided.length, links: closed.length };
-  });
+/** Whether the database holds a payment or a payment link of any of these processors. */
+async function holdsMoneyOf(db: DbLike, processors: readonly string[]): Promise<boolean> {
+  const [payment] = await db.select({ id: payments.id }).from(payments).where(inArray(payments.provider, [...processors])).limit(1);
+  if (payment) return true;
+  const [link] = await db.select({ id: paymentLinks.id }).from(paymentLinks).where(inArray(paymentLinks.provider, [...processors])).limit(1);
+  return link !== undefined;
 }
 
-/** A card payment retired by `retireTestMode`: test money, which no longer counts. */
-export const isRetiredTestPayment = (payment: { status: string; provider: string }) =>
-  payment.status === "voided" && (TEST_PROCESSORS as readonly string[]).includes(payment.provider);
+export const LIVE_ON_TEST =
+  "The live card processor (Square's live account) is set up, and this database holds bookings paid in test mode, when no money moved. With the live account they would count as money. Make the database ready for it with `npm run db:clear-test-mode`, which removes the bookings and what they made and keeps the website, the studios, prices, settings and staff; or start from a new database.";
+
+export const TEST_ON_LIVE =
+  "Test mode is set up (the pretend processor, or Square's sandbox), and this database took real payments through Square's live account. Test mode's bookings would mix with them. Set up the live account's credentials here, or test on a copy of the database.";
+
+/**
+ * Refuses a database that would mix test money and live money with the
+ * processor set up now: thrown when the database is opened, so that the site
+ * does not run on it until it is put right. No processor set up: nothing to mix.
+ */
+export async function assertOneKindOfMoney(db: DbLike, processor: string | null): Promise<void> {
+  if (processor === null) return;
+  if (processor === LIVE_PROCESSOR) {
+    if (await holdsMoneyOf(db, TEST_PROCESSORS)) throw new Error(LIVE_ON_TEST);
+  } else if (await holdsMoneyOf(db, [LIVE_PROCESSOR])) {
+    throw new Error(TEST_ON_LIVE);
+  }
+}
+
+/**
+ * Makes a test database ready for the live account: removes every booking and
+ * what bookings made (payments, refunds, links, history, holds, the codes they
+ * issued, loyalty corrections, queued mail), and gives the owners' own codes
+ * their uses and amounts back. Keeps everything else: the website and its
+ * pictures and fonts, the studios, hours, prices, add-ons, settings, blocked
+ * time, photography, staff and accounts. Refused, changing nothing, on a
+ * database that took real payments.
+ */
+export async function clearTestMode(db: Db): Promise<{ bookings: number }> {
+  if (await holdsMoneyOf(db, [LIVE_PROCESSOR])) {
+    throw new Error("This database took real payments through Square's live account, so nothing was cleared: test mode is cleared only from a test database.");
+  }
+  return db.transaction(async (tx) => {
+    await tx.delete(refunds);
+    await tx.delete(paymentLinks);
+    await tx.delete(payments);
+    // Their history, holds and add-ons go with them.
+    const removed = await tx.delete(bookings).returning({ id: bookings.id });
+    await tx.delete(promoCodes).where(ne(promoCodes.source, "manual"));
+    await tx
+      .update(promoCodes)
+      .set({ usedCount: 0, value: sql`case when ${promoCodes.kind} = 'amount' then coalesce(${promoCodes.issuedCents}, ${promoCodes.value}) else ${promoCodes.value} end` })
+      .where(eq(promoCodes.source, "manual"));
+    await tx.delete(loyaltyLedger);
+    await tx.delete(emailOutbox);
+    return { bookings: removed.length };
+  });
+}

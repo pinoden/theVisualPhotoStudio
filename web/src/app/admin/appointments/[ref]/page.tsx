@@ -268,9 +268,9 @@ async function AppointmentDetails({
             {appointment.payments.dueCents > 0 ? (
               <>
                 <strong>{formatCents(appointment.payments.dueCents)} is still to pay.</strong>{" "}
-                {appointment.payments.testMode
-                  ? "Its card payment was taken in test mode, before the live card processor was set up, so nothing was received for it."
-                  : "This booking was made in the admin, so nothing was charged online."}
+                {appointment.payments.madeInAdmin
+                  ? "This booking was made in the admin, so nothing was charged online."
+                  : "The amount its card held lapsed before it was taken, so the card was not charged: collect the price at the studio, or with a payment link."}
               </>
             ) : appointment.payments.ended && appointment.payments.receivedCents < appointment.payments.totalCents ? (
               <>

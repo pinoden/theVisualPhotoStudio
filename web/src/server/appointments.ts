@@ -95,9 +95,9 @@ export async function getAppointment(db: DbLike, viewer: AuthUser, ref: string, 
 
   const settings = await loadSettings(db);
   const may = (ability: Ability) => can(viewer, ability, settings);
-  const [view] = await toBookingViews(db, [booking]);
+  const [view] = await toBookingViews(db, [booking], now);
   const active = ["confirmed", "completed", "no_show"].includes(booking.status);
-  const money = await moneyOf(db, booking);
+  const money = await moneyOf(db, booking, now);
   const seesPayments = may("seePrices") || (may("recordPayments") && money.dueCents > 0);
   const pet = viewer.role === "owner" ? await petCreditStanding(db, booking) : null;
 

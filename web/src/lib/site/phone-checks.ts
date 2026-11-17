@@ -207,7 +207,8 @@ export function brokenWords(doc: Document = document): string[] {
       // A block in a table's cell, however deep (a summary in a details in the cell, a row of buttons), is as wide as the
       // cell lets it be.
       const inCell = /^(block|list-item|flow-root|flex|grid)$/.test(shown) && parent.closest("td, th") !== null;
-      if (/(flex|grid)/.test(outer) || /^inline-(block|flex|grid)$/.test(shown) || inCell || (passable(box) && inRowItem(box))) {
+      // A box of a flex row could have had the row; one of a grid has what its track gives it, as a column's width.
+      if (/flex/.test(outer) || /^inline-(block|flex|grid)$/.test(shown) || inCell || (passable(box) && inRowItem(box))) {
         own += edges(box);
         box = parent;
         continue;
@@ -256,10 +257,16 @@ export function brokenWords(doc: Document = document): string[] {
         // The room around the table, past any inline element it sits in.
         let around: Element = table.parentElement;
         while (around.parentElement && /^(inline|contents)$/.test(view.getComputedStyle(around).display)) around = around.parentElement;
-        // A table in a flex or grid row could have had the row's room, as any box there: climb on from the table.
-        if (/(flex|grid)/.test(view.getComputedStyle(around).display)) {
+        // A table in a flex row could have had the row's room, as any box there: climb on from the table. In a grid's
+        // track it has what the track gives it.
+        const aroundShown = view.getComputedStyle(around).display;
+        if (/flex/.test(aroundShown)) {
           box = table;
           continue;
+        }
+        if (/grid/.test(aroundShown)) {
+          box = table;
+          break;
         }
         // A table narrower than the room around it was given its width (a table as wide as its words breaks none of
         // them): its cells share that width.

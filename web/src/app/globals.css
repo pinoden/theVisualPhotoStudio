@@ -2094,6 +2094,12 @@ fieldset { min-inline-size: 0; }
 .site-nav[data-folded] .nav-links { gap: .25rem; padding: 1rem 2rem 1.5rem; max-height: calc(100vh - 72px); overflow-y: auto; }
 .site-nav[data-folded] :is(.nav-links a, .nav-links button) { display: flex; align-items: center; min-height: 44px; }
 
+/* A touch screen wide enough for the whole menu, a tablet held sideways: the logo, the menu's links and the booking
+   button are as easy to press as on a phone. They keep their places in the row; only their height grows. */
+@media (pointer: coarse) and (min-width: 1001px) {
+  .site-nav:not([data-folded]) :is(.site-logo, .nav-links a, .nav-more) { display: inline-flex; align-items: center; min-height: 44px; }
+}
+
 @media (max-width: 760px), (pointer: coarse) {
   input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]),
   select,
