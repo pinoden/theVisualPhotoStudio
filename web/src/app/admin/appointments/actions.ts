@@ -8,6 +8,7 @@ import { isIsoDate } from "@/lib/domain/time";
 import { dollarsToCents, formText, intInRange } from "@/lib/parse";
 import { createAdminBooking, moveBooking, setLabel } from "@/server/appointments";
 import { cancelPayLink, checkBookingPayLink, closePayLinkByHand, sendPayLink } from "@/server/pay-links";
+import { resolvePayments } from "@/server/payments";
 import { givePetFeeCredit } from "@/server/pet-fee";
 import { flushEmailsSoon, payLinkDeps, siteUrl } from "@/server/runtime";
 import { requireOwner, requireStaff } from "@/server/session";
@@ -105,7 +106,8 @@ export async function createAdminBookingAction(formData: FormData): Promise<void
       // A reward or credit of the client's, used on their behalf: it is checked and spent as at checkout.
       promoCode: formText(formData.get("code")) || undefined,
     },
-    { now: new Date(), baseUrl: await siteUrl() },
+    // The processor set up now says what kind of money the booking is: test mode's, or real (src/server/test-mode.ts).
+    { now: new Date(), baseUrl: await siteUrl(), processor: resolvePayments().provider?.name ?? null },
   );
   if (!result.ok) redirect(withMessage(form, "error", result.message));
   flushEmailsSoon();

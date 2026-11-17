@@ -403,13 +403,14 @@ export async function createAdminBooking(
   db: Db,
   viewer: AuthUser,
   input: Omit<BookingInput, "acceptTerms" | "paymentToken" | "expectedTotalCents">,
-  deps: Pick<BookingDeps, "now" | "baseUrl">,
+  // `processor`: the one set up now, which says what kind of money the booking is. Left out: none, and so real.
+  deps: Pick<BookingDeps, "now" | "baseUrl" | "processor">,
 ): Promise<CreateBookingResult | { ok: false; status: 403; code: "forbidden"; message: string }> {
   const settings = await loadSettings(db);
   if (!can(viewer, "createBookings", settings)) {
     return { ok: false, status: 403, code: "forbidden", message: "You cannot make bookings for clients." };
   }
-  return createBooking(db, { ...input, acceptTerms: true }, { ...deps, payments: null, madeBy: viewer.email });
+  return createBooking(db, { ...input, acceptTerms: true }, { ...deps, processor: deps.processor ?? null, payments: null, madeBy: viewer.email });
 }
 
 /** The date of a booking, for links back to its day. */

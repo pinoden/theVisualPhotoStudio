@@ -8,6 +8,7 @@ import { countUpcoming, listBookings, listRefundProblems } from "@/server/admin"
 import { resolveEmailTransport } from "@/server/email";
 import { resolvePayments } from "@/server/payments";
 import { requireOwner } from "@/server/session";
+import { otherMoneyNotice } from "@/server/test-mode";
 import { localDateOf } from "@/server/tz";
 import { recordRefundMadeInSquareAction } from "./actions";
 import { AdminFrame, AdminLoading } from "./frame";
@@ -28,13 +29,16 @@ async function Overview({ searchParams }: Pick<PageProps<"/admin">, "searchParam
   const db = await getDb();
   const now = new Date();
   const today = localDateOf(now);
-  const [upcoming, todays, problems] = await Promise.all([
+  const processor = resolvePayments().provider?.name ?? null;
+  const [upcoming, todays, problems, otherMoney] = await Promise.all([
     countUpcoming(db, now),
     listBookings(db, { from: today, to: today }),
     listRefundProblems(db),
+    // Bookings of the other kind of money, written by a server of the other mode since this one started.
+    otherMoneyNotice(db, processor),
   ]);
   const { mode: payments, problem: paymentsProblem } = resolvePayments().client;
-  const sandbox = resolvePayments().provider?.name === "square-sandbox";
+  const sandbox = processor === "square-sandbox";
   const email = resolveEmailTransport()?.name ?? null;
 
   return (
@@ -58,6 +62,13 @@ async function Overview({ searchParams }: Pick<PageProps<"/admin">, "searchParam
         </div>
       </div>
 
+      {otherMoney && (
+        <div className="admin-card">
+          <h3>Test money and real money</h3>
+          <p style={{ margin: 0 }}>{otherMoney}</p>
+        </div>
+      )}
+
       {(payments !== "square" || sandbox || email !== "resend") && (
         <div className="admin-card">
           <h3>Set-up still needed</h3>
@@ -65,8 +76,8 @@ async function Overview({ searchParams }: Pick<PageProps<"/admin">, "searchParam
             {payments === "mock" && <li>Card payments are in test mode: no card is charged. Add the Square credentials to take real payments.</li>}
             {sandbox && (
               <li>
-                Card payments go to Square&apos;s sandbox: no real card is charged. Set the live credentials, with SQUARE_ENVIRONMENT
-                set to production, to take real payments.
+                Card payments go to Square&apos;s sandbox: no real card is charged. Set the live account&apos;s credentials to take
+                real payments.
               </li>
             )}
             {payments === "disabled" && (

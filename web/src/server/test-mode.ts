@@ -1,27 +1,32 @@
-import { and, asc, eq, gt, inArray, ne, notInArray, sql } from "drizzle-orm";
-import { bookings, emailOutbox, loyaltyLedger, moneyKind, paymentLinks, payments, promoCodes, refunds } from "@/db/schema";
+import { and, asc, eq, inArray, isNull, notInArray, sql } from "drizzle-orm";
+import { bookings, emailOutbox, loyaltyLedger, paymentLinks, payments, promoCodes, refunds } from "@/db/schema";
 import type { Db, DbLike } from "@/db/client";
+import type { PromoKind } from "@/lib/domain/pricing";
 import { formatCents } from "@/lib/domain/pricing";
 import { MANUAL_PROVIDER } from "@/lib/payment-methods";
 import { count } from "@/lib/words";
 import { STANDS } from "./money";
+import { giveBackUnmade } from "./promos";
 import { formatInstant } from "./tz";
 
 /**
  * Test mode and the live account, kept apart. The pretend processor and
- * Square's sandbox move no money: whatever is recorded while one of them is
- * set up is test money, the bookings made in the admin and the payments
- * recorded by hand included. A database holds test money or live money, never
- * both, and says which (`money_kind`): `test` once it was opened in test mode,
- * `live` once it was opened with Square's live account. On a database of test
- * mode, the live account would count what test mode left as money: credit
- * from a reschedule code, a pet fee's credit, a free hour, a refund, a
- * receipt, cash recorded for a pretend booking, all of it made from nothing.
- * And test mode on a database of the live account would mix pretend bookings
- * with real ones. So the site refuses to open either (`assertOneKindOfMoney`,
- * from `getDb`), and says what to do: `npm run db:clear-test-mode` makes a
- * database of test mode ready for the live account (`clearTestMode`), keeping
- * everything the owners set up.
+ * Square's sandbox move no money. Each booking says which kind of money it is
+ * (`bookings.money_kind`), from the processor set up when it was made: `test`
+ * in test mode, `live` with Square's live account or with no processor at all.
+ * Everything a booking makes is that kind of money too: its payments, recorded
+ * by hand or not, its refunds, links and codes.
+ *
+ * A database must not hold both while it is used. With the live account,
+ * test mode's bookings would count as money: credit from a reschedule code, a
+ * pet fee's credit, a free hour, a refund, a receipt, cash recorded for a
+ * pretend booking, all of it made from nothing. And test mode beside real
+ * bookings would mix pretend ones with them. So the site refuses to open such
+ * a database (`assertOneKindOfMoney`, from `getDb`), and says what to do:
+ * `npm run db:clear-test-mode` removes test mode's bookings and what they made
+ * (`clearTestMode`), and nothing else, so it is the way out whenever test
+ * money is where it must not be, also when a server still running in test
+ * mode wrote it beside the live account.
  */
 export const TEST_PROCESSORS = ["mock", "square-sandbox"] as const;
 
@@ -30,186 +35,301 @@ export const LIVE_PROCESSOR = "square";
 
 export type MoneyKind = "test" | "live";
 
-/** Which kind of money the database holds, as it says: null for one never opened with a card processor. */
-export async function storedMoneyKind(db: DbLike): Promise<MoneyKind | null> {
-  const [row] = await db.select({ kind: moneyKind.kind }).from(moneyKind).limit(1);
-  return row?.kind ?? null;
+/** The kind of money a booking made now is, by the processor set up (its name): test in test mode, else live. */
+export function moneyKindOf(processor: string | null): MoneyKind {
+  return processor !== null && (TEST_PROCESSORS as readonly string[]).includes(processor) ? "test" : "live";
 }
 
-async function storeMoneyKind(db: DbLike, kind: MoneyKind, now: Date): Promise<void> {
-  await db.insert(moneyKind).values({ id: 1, kind, setAt: now }).onConflictDoUpdate({ target: moneyKind.id, set: { kind, setAt: now } });
-}
-
-/** Whether the database holds a payment or a payment link of any of these processors. */
-async function holdsMoneyOf(db: DbLike, processors: readonly string[]): Promise<boolean> {
-  const [payment] = await db.select({ id: payments.id }).from(payments).where(inArray(payments.provider, [...processors])).limit(1);
+/** Whether the database holds bookings of this kind of money, or card payments or links of its processors. */
+async function holdsMoney(db: DbLike, kind: MoneyKind): Promise<boolean> {
+  const [booking] = await db.select({ id: bookings.id }).from(bookings).where(eq(bookings.moneyKind, kind)).limit(1);
+  if (booking) return true;
+  const processors: string[] = kind === "test" ? [...TEST_PROCESSORS] : [LIVE_PROCESSOR];
+  const [payment] = await db.select({ id: payments.id }).from(payments).where(inArray(payments.provider, processors)).limit(1);
   if (payment) return true;
-  const [link] = await db.select({ id: paymentLinks.id }).from(paymentLinks).where(inArray(paymentLinks.provider, [...processors])).limit(1);
+  const [link] = await db.select({ id: paymentLinks.id }).from(paymentLinks).where(inArray(paymentLinks.provider, processors)).limit(1);
   return link !== undefined;
 }
 
-async function holdsBookings(db: DbLike): Promise<boolean> {
-  const [booking] = await db.select({ id: bookings.id }).from(bookings).limit(1);
-  return booking !== undefined;
-}
-
 export const LIVE_ON_TEST =
-  "Square's live account is set up, and this database was used in test mode, when no money moved: what was recorded then (bookings, card payments, cash recorded by hand, credit and codes) would count as money with the live account. Make it ready for the live account with `npm run db:clear-test-mode`, which lists what it would remove and removes it when run again with `-- --yes`, keeping the website, the studios, prices, settings and staff; or start from a new database.";
+  "Square's live account is set up, and this database holds bookings made in test mode, when no money moved: with the live account, what they recorded (payments, cash recorded by hand, credit and codes) would count as money. Remove them with `npm run db:clear-test-mode`, which lists them first and removes them when run again with `-- --yes`: it removes only what test mode made, and keeps every other booking, the website, the studios, prices, settings and staff. No server in test mode may use this database: what it books is test mode's again.";
 
 export const TEST_ON_LIVE =
-  "Test mode is set up (the pretend processor, or Square's sandbox), and this database has been used with Square's live account: test bookings would mix with real ones. Set up the live account's credentials here, or test with a new, empty database.";
+  "Test mode is set up (the pretend processor, or Square's sandbox), and this database holds real bookings: made with Square's live account, or while no card processor was set up. Test bookings would mix with them. Set up the live account's credentials here, or test with a new, empty database.";
 
 /**
- * Refuses a database that would mix test money and live money with the
- * processor set up now: thrown when the database is opened, so that the site
- * does not run on it until it is put right. Otherwise the database is marked
- * with the kind it now holds. No processor set up: no card money can come in,
- * and nothing is decided.
+ * Refuses a database that holds the other kind of money than the processor
+ * set up now: thrown when the database is opened, so that the site does not
+ * run on it until it is put right. No processor set up: no card money can
+ * come in, and what is booked counts as real.
  */
-export async function assertOneKindOfMoney(db: DbLike, processor: string | null, now: Date = new Date()): Promise<void> {
+export async function assertOneKindOfMoney(db: DbLike, processor: string | null): Promise<void> {
   if (processor === null) return;
-  const want: MoneyKind = processor === LIVE_PROCESSOR ? "live" : "test";
-  const stored = await storedMoneyKind(db);
-  if (want === "live") {
-    // Test mode's card records always count. In a database that ran in test mode, every booking does: one made in the
-    // admin and paid at the studio was pretend too. With none left (cleared), the database is ready.
-    if ((await holdsMoneyOf(db, TEST_PROCESSORS)) || (stored === "test" && (await holdsBookings(db)))) throw new Error(LIVE_ON_TEST);
-  } else if (stored === "live" || (await holdsMoneyOf(db, [LIVE_PROCESSOR]))) {
+  if (moneyKindOf(processor) === "live") {
+    if (await holdsMoney(db, "test")) throw new Error(LIVE_ON_TEST);
+  } else if (await holdsMoney(db, "live")) {
     throw new Error(TEST_ON_LIVE);
   }
-  if (stored !== want) await storeMoneyKind(db, want, now);
 }
 
-export const NOT_CLEARED_LIVE =
-  "This database has been used with Square's live account, so nothing was cleared: test mode is cleared only from a database of test mode.";
-
-export const NOT_CLEARED_UNKNOWN =
-  "This database has bookings and has never been opened in test mode, so they may be real (made while no card processor was set up): nothing was cleared.";
-
-/** A database `clearTestMode` may clear: one of test mode, never one that took or recorded real money. */
-async function assertTestDatabase(db: DbLike): Promise<void> {
-  const stored = await storedMoneyKind(db);
-  if (stored === "live" || (await holdsMoneyOf(db, [LIVE_PROCESSOR]))) throw new Error(NOT_CLEARED_LIVE);
-  if (stored === null && (await holdsBookings(db)) && !(await holdsMoneyOf(db, TEST_PROCESSORS))) throw new Error(NOT_CLEARED_UNKNOWN);
+/**
+ * For the admin's overview: bookings of the other kind of money than the processor set up now, which a server of
+ * the other mode wrote after this one opened the database. The site refuses to start again on it until they are
+ * put right. Null when there are none.
+ */
+export async function otherMoneyNotice(db: DbLike, processor: string | null): Promise<string | null> {
+  if (processor === null) return null;
+  const live = moneyKindOf(processor) === "live";
+  const [row] = await db.select({ n: sql<number>`count(*)::int` }).from(bookings).where(eq(bookings.moneyKind, live ? "test" : "live"));
+  if (row.n === 0) return null;
+  const are = row.n === 1 ? "is" : "are";
+  return live
+    ? `${count(row.n, "booking")} made in test mode ${are} in this database: a server in test mode is using it beside this one. They are not real money. Stop that server, then remove them with npm run db:clear-test-mode: until then the site refuses to start again.`
+    : `${count(row.n, "real booking")} ${are} in this database (made with Square's live account, or with no card processor set up) beside test mode's. Test mode must not use a database with real bookings: the site refuses to start again on it.`;
 }
 
-/** Mail that is not about a booking or a code, and stays: messages visitors sent through the contact form, and sign-in codes. */
+/** Mail that is not about a booking or a code, and always stays: messages from the contact form, and sign-in codes. */
 const KEPT_MAIL = ["contact_message", "login_code"];
 
-/** What `clearTestMode` removes from a database of test mode, and what of the owners' it keeps. */
+/** A code the owners made, or a free hour that stamps added by hand completed: no booking issued it. */
+export interface KeptCode {
+  code: string;
+  kind: PromoKind;
+  value: number;
+  email: string | null;
+  expiresAt: Date | null;
+  cancelled: boolean;
+  /** Bookings of test mode used it: their uses, and what they spent of it, are given back. */
+  givenBack: boolean;
+}
+
+/** What `clearTestMode` removes, and what stays that a person should look at. */
 export interface TestModeContents {
-  /** Every booking, whatever became of it. */
+  /** Bookings made in test mode, whatever became of them. */
   bookings: number;
   /** Those that stand and are still to come: people may think they have them. */
   upcoming: { ref: string; customer: string; startAt: Date }[];
-  /** Card payments of test mode, taken or only reserved. */
+  /** Bookings of real money: they stay, with everything they made. */
+  keptBookings: number;
+  /** The test bookings' card payments, taken or only reserved, and their payment links. */
   cardPayments: number;
   links: number;
-  /** Payments recorded by hand (cash, the studio's own card reader), and what they came to. */
+  /** The test bookings' payments recorded by hand, and what they came to. */
   byHand: { count: number; cents: number };
-  /** Codes that bookings and visits issued: reschedule codes, pet fees' credit, free hours. */
+  /** Codes the test bookings issued: reschedule codes, pet fees' credit, free hours their visits earned. */
   codes: number;
-  /** The owners' own codes: kept, with the uses and the amounts bookings took of them given back. */
-  ownCodes: number;
-  /** What the owners added to or took off clients' stamps by hand: kept, as their codes are. */
-  stampCorrections: { email: string; stamps: number; reason: string }[];
-  /** Mail about bookings and codes, sent or waiting. */
+  /** Mail about the test bookings and their codes that has not gone out. */
   mail: number;
-  /** Messages from the contact form: kept, sent or waiting. */
-  contactMessages: number;
+  /** Codes no booking issued: they stay, as real. */
+  keptCodes: KeptCode[];
+  /** What the owners added to or took off clients' stamps by hand: it stays. */
+  stampCorrections: { email: string; stamps: number; reason: string }[];
 }
 
-/** What clearing the database would remove and keep. Refused, as `clearTestMode` is, on a database of live money. */
-export async function testModeContents(db: DbLike, now: Date): Promise<TestModeContents> {
-  await assertTestDatabase(db);
-  const number = sql<number>`count(*)::int`;
-  const [[all], upcoming, [card], [links], [byHand], [codes], [ownCodes], stampCorrections, [mail], [contact]] = await Promise.all([
-    db.select({ n: number }).from(bookings),
-    db
-      .select({ ref: bookings.ref, customer: bookings.customerName, startAt: bookings.startAt })
-      .from(bookings)
-      .where(and(inArray(bookings.status, [...STANDS] as (typeof bookings.$inferSelect.status)[]), gt(bookings.endAt, now)))
-      .orderBy(asc(bookings.startAt)),
-    db.select({ n: number }).from(payments).where(ne(payments.provider, MANUAL_PROVIDER)),
-    db.select({ n: number }).from(paymentLinks),
-    db
-      .select({ n: number, cents: sql<number>`coalesce(sum(${payments.amountCents}), 0)::int` })
-      .from(payments)
-      .where(and(eq(payments.provider, MANUAL_PROVIDER), eq(payments.status, "succeeded"))),
-    db.select({ n: number }).from(promoCodes).where(ne(promoCodes.source, "manual")),
-    db.select({ n: number }).from(promoCodes).where(eq(promoCodes.source, "manual")),
+interface ClearPlan {
+  contents: TestModeContents;
+  bookingIds: string[];
+  paymentIds: string[];
+  codeIds: string[];
+  mailIds: string[];
+  /** Codes only test bookings used and no booking issued: given every use back. */
+  resetCodeIds: string[];
+  /** Test bookings that stand and used a code that stays, shared with real bookings: each gives back what it holds. */
+  giveBack: { promoCodeId: string | null; promoDiscountCents: number; creditAppliedCents: number }[];
+}
+
+async function planClear(db: DbLike, now: Date): Promise<ClearPlan> {
+  const tests: string[] = [...TEST_PROCESSORS];
+  const [marked, paidThere, linkedThere, [all]] = await Promise.all([
+    db.select({ id: bookings.id }).from(bookings).where(eq(bookings.moneyKind, "test")),
+    db.select({ id: payments.bookingId }).from(payments).where(inArray(payments.provider, tests)),
+    db.select({ id: paymentLinks.bookingId }).from(paymentLinks).where(inArray(paymentLinks.provider, tests)),
+    db.select({ n: sql<number>`count(*)::int` }).from(bookings),
+  ]);
+  const bookingIds = [...new Set([...marked, ...paidThere, ...linkedThere].map((row) => row.id))];
+  const some = bookingIds.length > 0;
+  const [removed, paid, links, issued] = some
+    ? await Promise.all([
+        db.select().from(bookings).where(inArray(bookings.id, bookingIds)).orderBy(asc(bookings.startAt)),
+        db
+          .select({ id: payments.id, provider: payments.provider, status: payments.status, amountCents: payments.amountCents })
+          .from(payments)
+          .where(inArray(payments.bookingId, bookingIds)),
+        db.select({ id: paymentLinks.id }).from(paymentLinks).where(inArray(paymentLinks.bookingId, bookingIds)),
+        db.select({ id: promoCodes.id, code: promoCodes.code }).from(promoCodes).where(inArray(promoCodes.originBookingId, bookingIds)),
+      ])
+    : [[], [], [], []];
+  const issuedIds = new Set(issued.map((code) => code.id));
+
+  // Codes the test bookings used that stay. One no booking issued and only test bookings used gets every use back; one
+  // real bookings used too gets back what each standing test booking holds (one that ended gave back what it had to).
+  const usedIds = [...new Set(removed.map((booking) => booking.promoCodeId).filter((id): id is string => id !== null && !issuedIds.has(id)))];
+  const [usedCodes, alsoReal] =
+    usedIds.length > 0
+      ? await Promise.all([
+          db.select({ id: promoCodes.id, originBookingId: promoCodes.originBookingId }).from(promoCodes).where(inArray(promoCodes.id, usedIds)),
+          db
+            .select({ id: bookings.promoCodeId })
+            .from(bookings)
+            .where(and(inArray(bookings.promoCodeId, usedIds), notInArray(bookings.id, bookingIds))),
+        ])
+      : [[], []];
+  const shared = new Set(alsoReal.map((row) => row.id));
+  const resetCodeIds = usedCodes.filter((code) => code.originBookingId === null && !shared.has(code.id)).map((code) => code.id);
+  const giveBack = removed.filter(
+    (booking) => booking.promoCodeId !== null && usedIds.includes(booking.promoCodeId) && !resetCodeIds.includes(booking.promoCodeId) && STANDS.includes(booking.status),
+  );
+
+  // Mail that has not gone out and names a test booking or one of its codes: it would reach a client after the clear.
+  const names = [...removed.map((booking) => booking.ref), ...issued.map((code) => code.code)];
+  const waiting =
+    names.length > 0
+      ? await db
+          .select({ id: emailOutbox.id, subject: emailOutbox.subject, body: emailOutbox.body })
+          .from(emailOutbox)
+          .where(and(isNull(emailOutbox.sentAt), notInArray(emailOutbox.kind, KEPT_MAIL)))
+      : [];
+  const mailIds = waiting.filter((mail) => names.some((name) => mail.subject.includes(name) || mail.body.includes(name))).map((mail) => mail.id);
+
+  const [ownCodes, stampCorrections] = await Promise.all([
+    db.select().from(promoCodes).where(isNull(promoCodes.originBookingId)).orderBy(asc(promoCodes.code)),
     db
       .select({ email: loyaltyLedger.email, stamps: loyaltyLedger.stamps, reason: loyaltyLedger.reason })
       .from(loyaltyLedger)
       .where(eq(loyaltyLedger.kind, "stamps"))
       .orderBy(asc(loyaltyLedger.createdAt)),
-    db.select({ n: number }).from(emailOutbox).where(notInArray(emailOutbox.kind, KEPT_MAIL)),
-    db.select({ n: number }).from(emailOutbox).where(eq(emailOutbox.kind, "contact_message")),
   ]);
+
+  const byHand = paid.filter((payment) => payment.provider === MANUAL_PROVIDER && payment.status === "succeeded");
   return {
-    bookings: all.n,
-    upcoming,
-    cardPayments: card.n,
-    links: links.n,
-    byHand: { count: byHand.n, cents: byHand.cents },
-    codes: codes.n,
-    ownCodes: ownCodes.n,
-    stampCorrections,
-    mail: mail.n,
-    contactMessages: contact.n,
+    contents: {
+      bookings: removed.length,
+      upcoming: removed
+        .filter((booking) => STANDS.includes(booking.status) && booking.endAt.getTime() > now.getTime())
+        .map((booking) => ({ ref: booking.ref, customer: booking.customerName, startAt: booking.startAt })),
+      keptBookings: all.n - removed.length,
+      cardPayments: paid.filter((payment) => payment.provider !== MANUAL_PROVIDER).length,
+      links: links.length,
+      byHand: { count: byHand.length, cents: byHand.reduce((sum, payment) => sum + payment.amountCents, 0) },
+      codes: issued.length,
+      mail: mailIds.length,
+      keptCodes: ownCodes.map((code) => ({
+        code: code.code,
+        kind: code.kind,
+        value: code.value,
+        email: code.email,
+        expiresAt: code.expiresAt,
+        cancelled: code.voidedAt !== null,
+        givenBack: usedIds.includes(code.id),
+      })),
+      stampCorrections,
+    },
+    bookingIds,
+    paymentIds: paid.map((payment) => payment.id),
+    codeIds: [...issuedIds],
+    mailIds,
+    resetCodeIds,
+    giveBack,
   };
 }
 
-/** The contents in words, for the person who clears the database: what goes, then what stays. */
+/** What clearing test mode would remove from the database, and what stays that a person should look at. */
+export async function testModeContents(db: DbLike, now: Date): Promise<TestModeContents> {
+  return (await planClear(db, now)).contents;
+}
+
+/** "10% off", "$50 of credit", "a free hour". */
+function codeValue(code: KeptCode): string {
+  return code.kind === "percent" ? `${code.value}% off` : code.kind === "amount" ? `${formatCents(code.value)} of credit` : "a free hour";
+}
+
+/** At most this many lines of a list: a database that took real money for long can have many. */
+const LISTED = 40;
+
+function listed<T>(items: T[], line: (item: T) => string): string[] {
+  const lines = items.slice(0, LISTED).map((item) => `    ${line(item)}`);
+  return items.length > LISTED ? [...lines, `    and ${items.length - LISTED} more`] : lines;
+}
+
+/** The contents in words, for the person who clears the database: what goes, then what stays and is worth a look. */
 export function describeTestMode(contents: TestModeContents): string[] {
-  const lines = [`Removed: ${count(contents.bookings, "booking")}, whatever became of them, with their history.`];
+  if (contents.bookings === 0) {
+    return [
+      "Nothing of test mode is in this database: there is nothing to remove.",
+      ...(contents.keptBookings > 0 ? [`Kept: ${count(contents.keptBookings, "booking")} of real money.`] : []),
+    ];
+  }
+  const one = contents.bookings === 1;
+  const their = one ? "its" : "their";
+  const lines = [`Removed: ${count(contents.bookings, "booking")} made in test mode, and ${their} history, whatever became of ${one ? "it" : "them"}.`];
   if (contents.upcoming.length > 0) {
-    lines.push(`  ${count(contents.upcoming.length, "booking")} of them still to come, which the client may think they have:`);
-    for (const booking of contents.upcoming) lines.push(`    ${booking.ref}, ${booking.customer}, ${formatInstant(booking.startAt)}`);
+    lines.push(
+      one
+        ? "  It is still to come, and the client may think they have it:"
+        : `  ${count(contents.upcoming.length, "booking")} of them still to come, which the client may think they have:`,
+    );
+    lines.push(...listed(contents.upcoming, (booking) => `${booking.ref}, ${booking.customer}, ${formatInstant(booking.startAt)}`));
   }
-  lines.push(`Removed: ${count(contents.cardPayments, "card payment")} of test mode and ${count(contents.links, "payment link")}, with their refunds.`);
+  lines.push(`Removed: ${their} ${count(contents.cardPayments, "card payment")} and ${count(contents.links, "payment link")}, with their refunds.`);
   if (contents.byHand.count > 0) {
-    lines.push(`Removed: ${count(contents.byHand.count, "payment")} recorded by hand, ${formatCents(contents.byHand.cents)} in all.`);
+    lines.push(`Removed: ${their} ${count(contents.byHand.count, "payment")} recorded by hand, ${formatCents(contents.byHand.cents)} in all.`);
   }
-  lines.push(`Removed: ${count(contents.codes, "code")} that bookings and visits issued (reschedule codes, pet fees' credit, free hours).`);
-  lines.push(`Removed: ${count(contents.mail, "email")} about bookings and codes, sent or waiting.`);
-  lines.push(`Kept: ${count(contents.ownCodes, "code")} the owners made, with their uses given back.`);
+  lines.push(`Removed: ${count(contents.codes, "code")} ${one ? "it" : "they"} issued (reschedule codes, pet fees' credit, free hours visits earned).`);
+  lines.push(`Removed: ${count(contents.mail, "email")} about ${one ? "it" : "them"} that had not gone out.`);
+  if (contents.keptBookings > 0) lines.push(`Kept: ${count(contents.keptBookings, "booking")} of real money, with everything they made.`);
+  if (contents.keptCodes.length > 0) {
+    lines.push(`Kept, as real: ${count(contents.keptCodes.length, "code")} no booking issued. Cancel any that was only a try, under Codes:`);
+    lines.push(
+      ...listed(
+        contents.keptCodes,
+        (code) =>
+          `${code.code}: ${codeValue(code)}, ${code.email ? `for ${code.email}` : "for anyone"}${code.expiresAt ? `, until ${formatInstant(code.expiresAt)}` : ""}` +
+          `${code.cancelled ? ", cancelled" : ""}${code.givenBack ? ", used in test mode: what that took is given back" : ""}`,
+      ),
+    );
+  }
   if (contents.stampCorrections.length > 0) {
-    lines.push(`Kept: ${count(contents.stampCorrections.length, "change")} of clients' stamps made by hand. Take back any that was only a try, on the customer's page:`);
-    for (const change of contents.stampCorrections) lines.push(`    ${change.email}: ${change.stamps > 0 ? `+${change.stamps}` : change.stamps}, ${change.reason}`);
+    lines.push(
+      `Kept: ${count(contents.stampCorrections.length, "change")} of clients' stamps made by hand. Take back any that was only a try, on the customer's page (Admin, Customers lists only people with bookings: open the address given):`,
+    );
+    lines.push(
+      ...listed(
+        contents.stampCorrections,
+        (change) => `${change.email}: ${change.stamps > 0 ? `+${change.stamps}` : change.stamps}, ${change.reason}, /admin/customers/${encodeURIComponent(change.email)}`,
+      ),
+    );
   }
-  if (contents.contactMessages > 0) lines.push(`Kept: ${count(contents.contactMessages, "message")} from the contact form.`);
-  lines.push("Kept: the website, its pictures and fonts, the studios, hours, prices, add-ons, settings, blocked time, photography, staff and accounts.");
+  lines.push("Kept: the website, its pictures and fonts, the studios, hours, prices, add-ons, settings, blocked time, photography, staff and accounts, sent mail and the contact form's messages.");
   return lines;
 }
 
 /**
- * Makes a database of test mode ready for the live account: removes every
- * booking and what bookings made (payments, refunds, links, history, holds,
- * the codes they issued, mail about them), and gives the owners' own codes
- * their uses and amounts back. Keeps everything else: the website and its
- * pictures and fonts, the studios, hours, prices, add-ons, settings, blocked
- * time, photography, staff and accounts, the owners' changes of stamps, and
- * the contact form's messages. Refused, changing nothing, on a database that
- * took or recorded real money. Answers what it removed and kept.
+ * Removes test mode's bookings and what they made (payments, refunds, links,
+ * history, holds, the codes they issued and the entries about those, mail
+ * about them that has not gone out), and gives the codes that stay what test
+ * bookings took of them. Nothing else changes: bookings of real money and all
+ * they made, the website, the studios, prices, settings, staff and accounts,
+ * the owners' codes and changes of stamps. Answers what it removed and kept.
  */
 export async function clearTestMode(db: Db, now: Date): Promise<TestModeContents> {
   return db.transaction(async (tx) => {
-    const contents = await testModeContents(tx, now);
-    await tx.delete(refunds);
-    await tx.delete(paymentLinks);
-    await tx.delete(payments);
+    const plan = await planClear(tx, now);
+    if (plan.bookingIds.length === 0) return plan.contents;
+    if (plan.resetCodeIds.length > 0) {
+      await tx
+        .update(promoCodes)
+        .set({ usedCount: 0, value: sql`case when ${promoCodes.kind} = 'amount' then coalesce(${promoCodes.issuedCents}, ${promoCodes.value}) else ${promoCodes.value} end` })
+        .where(inArray(promoCodes.id, plan.resetCodeIds));
+    }
+    for (const booking of plan.giveBack) await giveBackUnmade(tx, booking);
+    if (plan.codeIds.length > 0) await tx.delete(loyaltyLedger).where(inArray(loyaltyLedger.codeId, plan.codeIds));
+    if (plan.paymentIds.length > 0) await tx.delete(refunds).where(inArray(refunds.paymentId, plan.paymentIds));
+    await tx.delete(paymentLinks).where(inArray(paymentLinks.bookingId, plan.bookingIds));
+    await tx.delete(payments).where(inArray(payments.bookingId, plan.bookingIds));
+    if (plan.mailIds.length > 0) await tx.delete(emailOutbox).where(inArray(emailOutbox.id, plan.mailIds));
+    if (plan.codeIds.length > 0) await tx.delete(promoCodes).where(inArray(promoCodes.id, plan.codeIds));
     // Their history, holds and add-ons go with them.
-    await tx.delete(bookings);
-    // The entries about rewards go with their codes; the owners' changes of stamps stay, as their own codes do.
-    const issued = tx.select({ id: promoCodes.id }).from(promoCodes).where(ne(promoCodes.source, "manual"));
-    await tx.delete(loyaltyLedger).where(inArray(loyaltyLedger.codeId, issued));
-    await tx.delete(promoCodes).where(ne(promoCodes.source, "manual"));
-    await tx
-      .update(promoCodes)
-      .set({ usedCount: 0, value: sql`case when ${promoCodes.kind} = 'amount' then coalesce(${promoCodes.issuedCents}, ${promoCodes.value}) else ${promoCodes.value} end` })
-      .where(eq(promoCodes.source, "manual"));
-    await tx.delete(emailOutbox).where(notInArray(emailOutbox.kind, KEPT_MAIL));
-    return contents;
+    await tx.delete(bookings).where(inArray(bookings.id, plan.bookingIds));
+    return plan.contents;
   });
 }

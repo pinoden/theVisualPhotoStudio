@@ -378,6 +378,7 @@ describe("payment", () => {
         studiosSubtotalCents: 17600,
         totalCents: 17600,
         manageTokenHash: "x",
+        moneyKind: "test",
       })
       .returning({ id: bookings.id });
     await db.insert(studioHolds).values({
@@ -405,6 +406,7 @@ describe("payment", () => {
         studiosSubtotalCents: 17600,
         totalCents: 17600,
         manageTokenHash: "x",
+        moneyKind: "test",
       })
       .returning({ id: bookings.id });
     await db.insert(studioHolds).values({

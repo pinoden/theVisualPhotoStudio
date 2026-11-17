@@ -197,6 +197,13 @@
       "when": 1794937128340,
       "tag": "0027_money_kind",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1794942268726,
+      "tag": "0028_booking_money_kind",
+      "breakpoints": true
     }
   ]
 }

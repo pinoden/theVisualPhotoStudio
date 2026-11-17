@@ -36,6 +36,7 @@ import {
   type UsablePromo,
 } from "./promos";
 import { loadAccessInstructions } from "./settings";
+import { moneyKindOf } from "./test-mode";
 import { formatInstant, localToUtc } from "./tz";
 
 const emailField = z.string().trim().toLowerCase().max(200).pipe(z.email());
@@ -112,6 +113,11 @@ export interface BookingDeps {
    * the studio. The notice period does not apply; every other rule does.
    */
   madeBy?: string;
+  /**
+   * The name of the card processor set up now, for a booking it does not charge (one made in the admin): the kind
+   * of money the booking is (src/server/test-mode.ts). Left out, the kind of `payments`: test in test mode, else live.
+   */
+  processor?: string | null;
 }
 
 const REF_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
@@ -426,6 +432,7 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
             rescheduledCount: spendsCode && promo!.source === "reschedule" ? promo!.rescheduleGeneration : 0,
             manageTokenHash: hashToken(manageToken),
             requestKey: deps.madeBy ? null : requestKey,
+            moneyKind: moneyKindOf(deps.processor !== undefined ? deps.processor : (deps.payments?.name ?? null)),
             photographerId: photographer ? photographer.studioId : null,
             photoIncludes: session ? session.includes : null,
             madeBy: deps.madeBy ?? null,

@@ -241,24 +241,6 @@ export const settings = pgTable("settings", {
   value: jsonb("value").notNull(),
 });
 
-/**
- * Which kind of money this database holds, in its one row: `test` once it was
- * opened in test mode (the pretend processor, or Square's sandbox), `live`
- * once it was opened with Square's live account. Everything recorded is that
- * kind of money, the bookings made in the admin and the payments recorded by
- * hand included. No row: it was never opened with a card processor. See
- * src/server/test-mode.ts.
- */
-export const moneyKind = pgTable(
-  "money_kind",
-  {
-    id: integer("id").primaryKey().default(1),
-    kind: text("kind", { enum: ["test", "live"] }).notNull(),
-    setAt: ts("set_at").notNull().defaultNow(),
-  },
-  (t) => [check("money_kind_one_row", sql`${t.id} = 1`), check("money_kind_kind", sql`${t.kind} in ('test', 'live')`)],
-);
-
 // ── Bookings ─────────────────────────────────────────────────────────────────
 
 export const promoCodes = pgTable("promo_codes", {
@@ -368,6 +350,13 @@ export const bookings = pgTable(
      * booking the customer made online. Nothing is charged online for an administrator's booking.
      */
     madeBy: text("made_by"),
+    /**
+     * The kind of money the booking is, from the card processor set up when it was made: `test` with the pretend
+     * processor or Square's sandbox, `live` with Square's live account or with none. Everything the booking makes is
+     * that kind of money too: its payments, recorded by hand or not, its refunds, links and codes. See
+     * src/server/test-mode.ts.
+     */
+    moneyKind: text("money_kind", { enum: ["test", "live"] }).notNull(),
     cancelReason: cancelReason("cancel_reason"),
     /** Hash of the secret in the customer's manage link. */
     manageTokenHash: text("manage_token_hash").notNull(),
@@ -391,6 +380,7 @@ export const bookings = pgTable(
     index("bookings_email_idx").on(t.customerEmail),
     index("bookings_start_idx").on(t.startAt),
     uniqueIndex("bookings_request_key").on(t.requestKey).where(sql`${t.requestKey} is not null`),
+    check("bookings_money_kind", sql`${t.moneyKind} in ('test', 'live')`),
   ],
 );
 

@@ -34,7 +34,7 @@ import {
 } from "./email";
 import { BY_CUSTOMER, BY_STUDIO, BY_SYSTEM, recordEvent } from "./history";
 import { releaseHolds } from "./holds";
-import { netCardPaidCents, paidAtStudioCents } from "./money";
+import { heldCentsByBooking, netCardPaidCents, paidAtStudioCents } from "./money";
 import {
   closePayLinkOf,
   lookAtPayLink,
@@ -125,13 +125,22 @@ async function manageContext(
   ref: string,
   actor: Actor,
   now: Date,
-): Promise<{ options: ManageOptions; terms: Settings } | null> {
+): Promise<{ options: ManageOptions; terms: Settings; heldCents: number } | null> {
   if (!isBookingRef(ref)) return null;
   const [booking] = await db.select().from(bookings).where(eq(bookings.ref, ref)).limit(1);
   if (!booking || !mayAct(booking, actor)) return null;
   const terms = termsFor(booking, await loadSettings(db));
   const facts = await factsFor(db, booking);
-  return { options: { cancel: cancellationOutcome(facts, now, terms), reschedule: rescheduleOutcome(facts, now, terms) }, terms };
+  return {
+    options: { cancel: cancellationOutcome(facts, now, terms), reschedule: rescheduleOutcome(facts, now, terms) },
+    terms,
+    heldCents: await heldCentsOf(db, booking.id, now),
+  };
+}
+
+/** What the booking's card holds reserved, not taken yet (`heldCentsByBooking`): it is not money paid. */
+async function heldCentsOf(db: DbLike, bookingId: string, now: Date): Promise<number> {
+  return (await heldCentsByBooking(db, [bookingId], now)).get(bookingId) ?? 0;
 }
 
 /** What would happen if the customer cancelled or moved this booking right now. */
@@ -146,17 +155,18 @@ export interface ManageChoices {
   reschedule: { allowed: boolean; text: string; offered: boolean };
 }
 
-export function describeManageOptions(options: ManageOptions, settings: Settings): ManageChoices {
+/** `heldCents`: what the booking's card holds, not taken yet, which the words say what becomes of. */
+export function describeManageOptions(options: ManageOptions, settings: Settings, heldCents = 0): ManageChoices {
   return {
     cancel: options.cancel.allowed
-      ? { allowed: true, text: cancelOutcomeText(options.cancel, settings) }
+      ? { allowed: true, text: cancelOutcomeText(options.cancel, settings, {}, heldCents) }
       : { allowed: false, text: cancelBlockText(options.cancel.reason) },
     reschedule: options.reschedule.allowed
       ? { allowed: true, offered: true, text: rescheduleOfferText(options.reschedule, settings) }
       : {
           allowed: false,
           offered: options.reschedule.reason !== "not_offered",
-          text: rescheduleBlockText(options.reschedule.reason, settings),
+          text: rescheduleBlockText(options.reschedule.reason, settings, heldCents),
         },
   };
 }
@@ -176,7 +186,7 @@ export function rescheduleOfferText(
 /** What cancelling or moving would do, in words. A page asks `noticeBookingPayments` first, so that this counts a link just paid. */
 export async function getManageChoices(db: DbLike, ref: string, actor: Actor, now: Date): Promise<ManageChoices | null> {
   const context = await manageContext(db, ref, actor, now);
-  return context ? describeManageOptions(context.options, context.terms) : null;
+  return context ? describeManageOptions(context.options, context.terms, context.heldCents) : null;
 }
 
 const NOT_CHANGEABLE = "This booking can no longer be changed.";
@@ -205,7 +215,7 @@ export function cancelBlockText(reason: CancelBlock): string {
   return reason === "already_started" ? "This booking has already started." : NOT_CHANGEABLE;
 }
 
-export function rescheduleBlockText(reason: RescheduleBlock, settings: Pick<Settings, "rescheduleCutoffHours">): string {
+export function rescheduleBlockText(reason: RescheduleBlock, settings: Pick<Settings, "rescheduleCutoffHours">, heldCents = 0): string {
   switch (reason) {
     case "already_started":
       return "This booking has already started.";
@@ -218,7 +228,10 @@ export function rescheduleBlockText(reason: RescheduleBlock, settings: Pick<Sett
     case "limit_reached":
       return "This booking was already moved and cannot be moved again online. Please call the studio.";
     case "nothing_paid":
-      return "Nothing was paid for this booking, so there is no credit to move. You can cancel it and book again.";
+      // The card holds the amount, and taking it did not go through yet: it is not money paid.
+      return heldCents > 0
+        ? `Nothing was charged for this booking yet: the ${formatCents(heldCents)} your card holds for it has not been taken, so there is no credit to move. You can cancel it, which releases that amount, and book again.`
+        : "Nothing was paid for this booking, so there is no credit to move. You can cancel it and book again.";
   }
 }
 
@@ -258,6 +271,8 @@ export function cancelOutcomeText(
   outcome: Extract<CancelOutcome, { allowed: true }>,
   settings: Settings,
   without: { card?: boolean; pet?: boolean } = {},
+  /** What the booking's card holds, not taken yet: released by a cancellation, which says so. */
+  heldCents = 0,
 ): string {
   const pet = without.pet || outcome.creditCents <= 0 ? "" : petCreditSentence(outcome);
   const byHand = outcome.byHandCents > 0 ? handRefundSentence(outcome.byHandCents, settings) : "";
@@ -293,7 +308,9 @@ export function cancelOutcomeText(
     case "moved":
       return "No refund is due, because this booking was moved at your request: a moved booking is not refunded.";
     case "nothing_paid":
-      return "Nothing was charged to a card for this booking, so there is nothing to refund.";
+      return heldCents > 0
+        ? `Nothing was charged to your card for this booking, so there is nothing to refund: the ${formatCents(heldCents)} it holds for it is released.`
+        : "Nothing was charged to a card for this booking, so there is nothing to refund.";
   }
 }
 
@@ -863,7 +880,9 @@ export async function cancelBooking(db: Db, ref: string, actor: Actor, deps: Man
     const terms = termsFor(booking, settings);
     const decision = cancellationOutcome(await factsFor(tx, booking), deps.now, terms);
     if (!decision.allowed) return { kind: "blocked" as const, reason: decision.reason, booking: { status: booking.status, cancelReason: booking.cancelReason } };
-    if (seen !== undefined && seen !== cancelOutcomeText(decision, terms)) return { kind: "changed" as const };
+    // What the card holds, not taken yet: nothing was charged, and the cancellation says it is released.
+    const heldCents = await heldCentsOf(tx, booking.id, deps.now);
+    if (seen !== undefined && seen !== cancelOutcomeText(decision, terms, {}, heldCents)) return { kind: "changed" as const };
 
     await tx
       .update(bookings)
@@ -898,7 +917,7 @@ export async function cancelBooking(db: Db, ref: string, actor: Actor, deps: Man
 
     const refundIds = await recordRefunds(tx, booking.id, decision.refundCents, `Cancellation of ${booking.ref}`, true);
     const unseenNote = unseen ? await noteUnseenLink(tx, booking, "cancelled", deps) : null;
-    const message = `${cancelOutcomeText(decision, terms)}${codeBack ? ` ${CODE_BACK}` : ""}${unseenNote ? ` ${unseenNote}` : ""}`;
+    const message = `${cancelOutcomeText(decision, terms, {}, heldCents)}${codeBack ? ` ${CODE_BACK}` : ""}${unseenNote ? ` ${unseenNote}` : ""}`;
     // The whole outcome. The card refund is said as sent: if it does not go through, the email is put right (`refundNotSent`).
     const email: CancellationNotice = {
       to: booking.customerEmail,
@@ -907,7 +926,7 @@ export async function cancelBooking(db: Db, ref: string, actor: Actor, deps: Man
       when: formatInstant(booking.startAt),
       ...(decision.refundCents > 0 ? { refund: { cents: decision.refundCents, feeCents: decision.feeCents } } : {}),
       lines: [
-        cancelOutcomeText(decision, terms, { card: decision.refundCents > 0, pet: true }),
+        cancelOutcomeText(decision, terms, { card: decision.refundCents > 0, pet: true }, heldCents),
         ...(codeBack ? [CODE_BACK] : []),
         ...(unseenNote ? [unseenNote] : []),
       ].filter(Boolean),
@@ -997,7 +1016,14 @@ export async function requestRescheduleCode(db: Db, ref: string, actor: Actor, d
     if (!booking || !mayAct(booking, actor)) return { kind: "not_found" as const };
 
     const decision = rescheduleOutcome(await factsFor(tx, booking), deps.now, settings);
-    if (!decision.allowed) return { kind: "blocked" as const, reason: decision.reason, booking: { status: booking.status, cancelReason: booking.cancelReason } };
+    if (!decision.allowed) {
+      return {
+        kind: "blocked" as const,
+        reason: decision.reason,
+        booking: { status: booking.status, cancelReason: booking.cancelReason },
+        heldCents: await heldCentsOf(tx, booking.id, deps.now),
+      };
+    }
     if (seen !== undefined && seen !== rescheduleOfferText(decision, settings)) return { kind: "changed" as const };
 
     await tx
@@ -1057,7 +1083,7 @@ export async function requestRescheduleCode(db: Db, ref: string, actor: Actor, d
         : look === "foreign"
           ? " The site cannot check the payment link for this booking. If you paid it, please contact us."
           : " We could not check just now whether the payment link for this booking was paid. If you paid it, please try again later, or call us.";
-    const said = outcome.reason === "not_confirmed" ? endedText(outcome.booking) : rescheduleBlockText(outcome.reason, settings);
+    const said = outcome.reason === "not_confirmed" ? endedText(outcome.booking) : rescheduleBlockText(outcome.reason, settings, outcome.heldCents);
     return { ok: false, status: 409, code: outcome.reason, message: `${said}${unseenNote}` };
   }
   if (outcome.kind === "changed") return { ok: false, status: 409, code: "changed", message: LOOK_AGAIN };

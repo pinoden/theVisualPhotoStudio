@@ -116,6 +116,7 @@ describe("what a code was issued for, worked out by migration 0024", () => {
         creditAppliedCents: 2000,
         totalCents: 5800,
         manageTokenHash: "x",
+        moneyKind: "test",
       })
       .returning({ id: bookings.id });
     await world.db.insert(payments).values({

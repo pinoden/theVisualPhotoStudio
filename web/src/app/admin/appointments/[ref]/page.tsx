@@ -72,6 +72,8 @@ async function AppointmentDetails({
   // A link the processor set up now did not make (one of test mode, left after the real keys went in), or any link
   // while none is set up: the site can neither ask about it nor withdraw it, and its page offers nothing to pay.
   const foreignLink = appointment.payLink !== null && appointment.payLink.provider !== processorName;
+  // How the booking ended, if it has: an amount its card still holds is given back, not taken.
+  const ended = appointment.payments?.ended ?? null;
 
   return (
     <AdminFrame
@@ -321,7 +323,13 @@ async function AppointmentDetails({
                           {formatCents(payment.amountCents)} · {payment.how}
                         </span>
                         {payment.voided && <div style={{ fontSize: ".8rem" }}>Taken back: it does not count.</div>}
-                        {payment.held && <div style={{ fontSize: ".8rem" }}>Not received yet: the card holds it until it is taken.</div>}
+                        {payment.held && (
+                          <div style={{ fontSize: ".8rem" }}>
+                            {ended
+                              ? "Not taken: the booking ended first, so it is given back to the card."
+                              : "Not received yet: the card holds it until it is taken."}
+                          </div>
+                        )}
                         {payment.refundedCents > 0 && (
                           <div style={{ fontSize: ".8rem" }}>{formatCents(payment.refundedCents)} given back.</div>
                         )}

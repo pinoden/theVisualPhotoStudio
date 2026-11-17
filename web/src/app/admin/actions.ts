@@ -28,6 +28,7 @@ import {
 import { CATALOG_TAG } from "@/server/cached";
 import { FREE_HOUR_MINUTES } from "@/server/loyalty";
 import { ownerCancelBooking, ownerRefund, recordRefundMadeInSquare, type RefundsState } from "@/server/manage";
+import { resolvePayments } from "@/server/payments";
 import { flushEmailsSoon, manageDeps } from "@/server/runtime";
 import { notFound } from "next/navigation";
 import { can, type Ability } from "@/lib/abilities";
@@ -269,7 +270,7 @@ const refundNote = (refund: RefundsState, cents: number) =>
     : refund === "sent"
       ? `${formatCents(cents)} refunded to the card.`
       : refund === "waiting"
-        ? `${formatCents(cents)} refund recorded, not sent: the card processor set up now cannot send it, so it waits, listed on the overview with the reason.`
+        ? `${formatCents(cents)} refund recorded, not sent: ${resolvePayments().provider ? "the card processor set up now cannot send it" : "no card processor is set up now"}, so it waits, listed on the overview with the reason.`
         : `${formatCents(cents)} refund recorded; it has not gone through yet and will be retried.`;
 
 export async function ownerCancelAction(formData: FormData): Promise<void> {
