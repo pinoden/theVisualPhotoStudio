@@ -34,7 +34,16 @@ import {
 import { BY_CUSTOMER, BY_STUDIO, BY_SYSTEM, recordEvent } from "./history";
 import { releaseHolds } from "./holds";
 import { netCardPaidCents, paidAtStudioCents } from "./money";
-import { closePayLinkOf, lookAtPayLink, openPayLinkOf, PAGE_WAIT_SECONDS, withinSeconds, type LinkLook, type PayLinkDeps } from "./pay-links";
+import {
+  closePayLinkOf,
+  lookAtPayLink,
+  openPayLinkOf,
+  PAGE_WAIT_SECONDS,
+  withinSeconds,
+  type LinkLook,
+  type PayLinkDeps,
+  type UnseenLink,
+} from "./pay-links";
 import type { PaymentProvider } from "./payments";
 import { issuePetCredit, petCreditOf, petFeeCentsOf, petFeeReturnedCents, studioRefundableCents } from "./pet-fee";
 import { issuePromo, rescheduleCodeOf, restorePromo, spendable, takeOffRescheduleCode, type RescheduleCode } from "./promos";
@@ -321,23 +330,19 @@ export async function processRefund(db: Db, refundId: string, deps: ManageDeps):
   if (row.refund.status === "succeeded") return "succeeded";
   if (!deps.payments) return "pending";
 
-  // A payment taken through another processor than the one set up now (in test mode, or with Square's other keys) is
-  // unknown to this one: it is refunded there by hand, then recorded as made ("Refunded it in Square").
-  const result =
-    row.provider !== deps.payments.name
-      ? ({
-          ok: false,
-          message:
-            "This payment was taken through another card processor than the one set up now (in test mode, or with other keys), so the site cannot refund it. Refund it there by hand, then record the refund as made.",
-        } as const)
-      : row.providerPaymentId
-        ? await deps.payments.refund({
-            paymentId: row.providerPaymentId,
-            amountCents: row.refund.amountCents,
-            idempotencyKey: row.refund.id,
-            reason: row.refund.reason || `Refund for ${row.ref}`,
-          })
-        : ({ ok: false, message: "The payment has no processor id." } as const);
+  // A payment taken through another processor than the one set up now is unknown to this one, which is never asked
+  // about it: its refund waits, untouched, for that processor to be set up again. (What test mode took is retired
+  // when the live processor is set up, and has nothing to refund: src/server/test-mode.ts.) Not failed: an owner told
+  // to refund it by hand could see it refunded a second time once the right processor is back.
+  if (row.provider !== deps.payments.name) return "pending";
+  const result = row.providerPaymentId
+    ? await deps.payments.refund({
+        paymentId: row.providerPaymentId,
+        amountCents: row.refund.amountCents,
+        idempotencyKey: row.refund.id,
+        reason: row.refund.reason || `Refund for ${row.ref}`,
+      })
+    : ({ ok: false, message: "The payment has no processor id." } as const);
 
   const label = labelOf({ status: row.bookingStatus, label: row.bookingLabel });
   if (result.ok) {
@@ -443,12 +448,18 @@ export async function processRefund(db: Db, refundId: string, deps: ManageDeps):
   });
 }
 
-/** Retry refunds that have not gone through. Run from the scheduled task. */
+/**
+ * Retry refunds that have not gone through. Run from the scheduled task. Only
+ * refunds of payments the processor set up now took, and that stand: one of
+ * another processor's waits for it, and keeps none of the others waiting.
+ */
 export async function retryOpenRefunds(db: Db, deps: ManageDeps): Promise<{ succeeded: number; failed: number }> {
+  if (!deps.payments) return { succeeded: 0, failed: 0 };
   const open = await db
     .select({ id: refunds.id })
     .from(refunds)
-    .where(inArray(refunds.status, ["pending", "failed"]))
+    .innerJoin(payments, eq(payments.id, refunds.paymentId))
+    .where(and(inArray(refunds.status, ["pending", "failed"]), eq(payments.provider, deps.payments.name), eq(payments.status, "succeeded")))
     .limit(50);
   let succeeded = 0;
   let failed = 0;
@@ -482,7 +493,10 @@ export async function checkUnsettledRefunds(db: Db, deps: ManageDeps): Promise<{
     .from(refunds)
     .innerJoin(payments, eq(payments.id, refunds.paymentId))
     .innerJoin(bookings, eq(bookings.id, payments.bookingId))
-    .where(and(eq(refunds.status, "succeeded"), isNull(refunds.settledAt), isNotNull(refunds.providerRefundId)))
+    // Only the processor set up now is asked, about its own refunds: another's would not know them.
+    .where(
+      and(eq(refunds.status, "succeeded"), isNull(refunds.settledAt), isNotNull(refunds.providerRefundId), eq(payments.provider, deps.payments.name)),
+    )
     .limit(50);
   let settled = 0;
   let rejected = 0;
@@ -725,16 +739,16 @@ export async function noticeBookingPayments(
   actor: Actor,
   deps: PayLinkDeps,
   afterward?: (work: Promise<unknown>) => void,
-): Promise<boolean> {
+): Promise<UnseenLink> {
   const look = countPaidLink(db, ref, actor, deps).catch((error: unknown): LinkLook => {
     console.error("Could not look at the payment link of booking", ref, error);
     return "unanswered";
   });
   afterward?.(look);
-  // True when the booking has an open link that nobody could say anything about in time: the page says that what it
-  // shows may not count a payment made through it yet.
+  // The booking has an open link that nobody could say anything about in time: the page says that what it shows may
+  // not count a payment made through it yet, or, for another processor's, that the client should say if they paid it.
   const answer = await withinSeconds(PAGE_WAIT_SECONDS, look);
-  return answer === undefined || answer === "unanswered";
+  return answer === undefined || answer === "unanswered" ? "unanswered" : answer === "foreign" ? "foreign" : null;
 }
 
 /** A cancellation email before it is known whether its card refund goes through. */
@@ -779,7 +793,8 @@ export type CancelResult =
 export async function cancelBooking(db: Db, ref: string, actor: Actor, deps: ManageDeps, seen?: string): Promise<CancelResult> {
   if (!isBookingRef(ref)) return { ok: false, status: 404, code: "not_found", message: "Booking not found." };
   const settings = await loadSettings(db);
-  const unseen = (await countPaidLink(db, ref, actor, deps)) === "unanswered";
+  const look = await countPaidLink(db, ref, actor, deps);
+  const unseen = look === "unanswered" || look === "foreign";
 
   const outcome = await db.transaction(async (tx) => {
     // Lock the row so two cancellations at once cannot both refund.
@@ -918,7 +933,8 @@ export type RescheduleResult =
 export async function requestRescheduleCode(db: Db, ref: string, actor: Actor, deps: ManageDeps, seen?: string): Promise<RescheduleResult> {
   if (!isBookingRef(ref)) return { ok: false, status: 404, code: "not_found", message: "Booking not found." };
   const settings = await loadSettings(db);
-  const unseen = (await countPaidLink(db, ref, actor, deps)) === "unanswered";
+  const look = await countPaidLink(db, ref, actor, deps);
+  const unseen = look === "unanswered" || look === "foreign";
 
   const outcome = await db.transaction(async (tx) => {
     const [booking] = await tx.select().from(bookings).where(eq(bookings.ref, ref)).for("update").limit(1);
@@ -980,9 +996,11 @@ export async function requestRescheduleCode(db: Db, ref: string, actor: Actor, d
   if (outcome.kind === "blocked") {
     // Nothing paid that the site knows of: a link the processor could not answer about may have been.
     const unseenNote =
-      outcome.reason === "nothing_paid" && unseen
-        ? " We could not check just now whether the payment link for this booking was paid. If you paid it, please try again later, or call us."
-        : "";
+      outcome.reason !== "nothing_paid" || !unseen
+        ? ""
+        : look === "foreign"
+          ? ` ${FOREIGN_LINK}`
+          : " We could not check just now whether the payment link for this booking was paid. If you paid it, please try again later, or call us.";
     const said = outcome.reason === "not_confirmed" ? endedText(outcome.booking) : rescheduleBlockText(outcome.reason, settings);
     return { ok: false, status: 409, code: outcome.reason, message: `${said}${unseenNote}` };
   }
@@ -1061,7 +1079,8 @@ export async function ownerCancelBooking(
   if (!Number.isInteger(input.refundCents) || input.refundCents < 0) {
     return { ok: false, status: 400, code: "bad_amount", message: "Enter a refund amount of zero or more." };
   }
-  const unseen = (await countPaidLink(db, ref, null, deps)) === "unanswered";
+  const look = await countPaidLink(db, ref, null, deps);
+  const unseen = look === "unanswered" || look === "foreign";
 
   const outcome = await db.transaction(async (tx) => {
     const [booking] = await tx.select().from(bookings).where(eq(bookings.ref, ref)).for("update").limit(1);

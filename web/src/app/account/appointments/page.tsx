@@ -95,8 +95,9 @@ async function Appointments({ searchParams }: Pick<PageProps<"/account/appointme
         <>
           {unseenLink && upcoming.length > 0 && (
             <div className="notice">
-              We could not check just now whether a payment link of your bookings was paid, so what this page says does
-              not count a payment made through it yet. If you paid one, please look again later.
+              {unseenLink === "foreign"
+                ? "The site cannot check the payment link of one of your bookings. If you paid it, please contact us: what this page says does not count that payment."
+                : "We could not check just now whether a payment link of your bookings was paid, so what this page says does not count a payment made through it yet. If you paid one, please look again later."}
             </div>
           )}
           {upcoming.length === 0 && (

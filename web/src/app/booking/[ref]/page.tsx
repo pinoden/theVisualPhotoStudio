@@ -121,8 +121,9 @@ async function BookingDetails({ params, searchParams }: Pick<PageProps<"/booking
 
       {unseenLink && booking.status === "confirmed" && (
         <div className="notice">
-          We could not check just now whether the payment link for this booking was paid, so what this page says does not
-          count a payment made through it yet. If you paid it, please look again later.
+          {unseenLink === "foreign"
+            ? "The site cannot check the payment link for this booking. If you paid it, please contact us: what this page says does not count that payment."
+            : "We could not check just now whether the payment link for this booking was paid, so what this page says does not count a payment made through it yet. If you paid it, please look again later."}
         </div>
       )}
 

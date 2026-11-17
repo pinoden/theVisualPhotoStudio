@@ -157,7 +157,7 @@ export async function sendPayLink(db: Db, viewer: AuthUser, ref: string, deps: P
     if ((deps.payments?.name ?? null) !== open.provider) {
       return refuse(
         "other_processor_open",
-        "The open payment link of this booking was made by another card processor than the one set up now (in test mode, or with other keys), so it cannot be paid. An owner closes it by hand first; then a new one can be emailed.",
+        "The open payment link of this booking was made by another card processor than the one set up now (in test mode, or with Square's other account), so it cannot be paid. An owner closes it by hand first; then a new one can be emailed.",
       );
     }
     if (open.amountCents !== dueCents) {
@@ -342,7 +342,7 @@ async function giveBackLate(db: Db, late: LateRefund | undefined, deps: PayLinkD
  * that were paid and not seen yet, before the account says what cancelling or
  * moving would do (`noticePaidLink`).
  */
-export async function noticePaidLinksOf(db: Db, email: string, deps: PayLinkDeps, afterward?: (work: Promise<unknown>) => void): Promise<boolean> {
+export async function noticePaidLinksOf(db: Db, email: string, deps: PayLinkDeps, afterward?: (work: Promise<unknown>) => void): Promise<UnseenLink> {
   const open = await db
     .select({ id: bookings.id, status: bookings.status })
     .from(paymentLinks)
@@ -351,20 +351,27 @@ export async function noticePaidLinksOf(db: Db, email: string, deps: PayLinkDeps
   // `lookAtPayLink` never throws, so the work can go on by itself once the page stops waiting for it. It answers
   // whether the link of a booking that stands could not be asked about.
   const work = (async () => {
-    let unseen = false;
+    let unseen: UnseenLink = null;
     for (const booking of open) {
-      if ((await lookAtPayLink(db, booking, deps)) === "unanswered" && ACTIVE.includes(booking.status)) unseen = true;
+      const look = await lookAtPayLink(db, booking, deps);
+      if (!ACTIVE.includes(booking.status)) continue;
+      if (look === "foreign") unseen = "foreign";
+      else if (look === "unanswered" && unseen === null) unseen = "unanswered";
     }
     return unseen;
   })();
   afterward?.(work);
-  // True when the account shows a booking whose link nobody could say anything about in time (see `noticeBookingPayments`).
+  // What the account says of a booking whose link nobody could say anything about in time (see `noticeBookingPayments`).
   const answer = await withinSeconds(PAGE_WAIT_SECONDS, work);
-  return answer === undefined ? open.some((booking) => ACTIVE.includes(booking.status)) : answer;
+  return answer === undefined ? (open.some((booking) => ACTIVE.includes(booking.status)) ? "unanswered" : null) : answer;
 }
 
+/** A page's word on a payment link it could not check: the processor could not say, or the link is another processor's. */
+export type UnseenLink = "unanswered" | "foreign" | null;
+
 /** What became of a booking's open payment link when the processor was asked: `none` when it had none. */
-export type LinkLook = "none" | "open" | "paid" | "cancelled" | "unanswered" | "unknown";
+/** `foreign`: made by another processor than the one set up now, which can never be asked about it. */
+export type LinkLook = "none" | "open" | "paid" | "cancelled" | "unanswered" | "foreign" | "unknown";
 
 /**
  * How long a page waits for the processor before it is drawn without its
@@ -436,11 +443,12 @@ export async function noticePaidLink(db: Db, bookingId: string, deps: PayLinkDep
 /**
  * Ask the processor whether an open link was paid, and record it if so.
  * Returns the link's status afterwards: "open" also when no processor is set
- * up to ask, because nothing is known to have changed; "unanswered" when the
+ * up to ask, because nothing is known to have changed; "foreign" for a link of
+ * another processor than the one set up now, which can never be asked; "unanswered" when the
  * processor was asked and could not say, so that the link may have been paid;
  * "unknown" for an address that is no link.
  */
-export async function checkPayLink(db: Db, linkId: string, deps: PayLinkDeps): Promise<"open" | "paid" | "cancelled" | "unanswered" | "unknown"> {
+export async function checkPayLink(db: Db, linkId: string, deps: PayLinkDeps): Promise<"open" | "paid" | "cancelled" | "unanswered" | "foreign" | "unknown"> {
   if (!/^[0-9a-f-]{36}$/i.test(linkId)) return "unknown";
   const [link] = await db.select().from(paymentLinks).where(eq(paymentLinks.id, linkId)).limit(1);
   if (!link) return "unknown";
@@ -450,7 +458,7 @@ export async function checkPayLink(db: Db, linkId: string, deps: PayLinkDeps): P
   // scheduled task moves on to the others.
   if (!deps.payments || deps.payments.name !== link.provider) {
     await db.update(paymentLinks).set({ checkedAt: deps.now }).where(eq(paymentLinks.id, link.id));
-    return "unanswered";
+    return "foreign";
   }
 
   const state = await deps.payments.payLinkState({ linkId: link.providerLinkId, orderId: link.providerOrderId });
@@ -493,7 +501,7 @@ function cannotAskText(link: LinkRow, deps: PayLinkDeps, withdrawing: boolean): 
   const not = withdrawing ? ", so it was not withdrawn" : "";
   return deps.payments && deps.payments.name === link.provider
     ? `The card processor could not say whether the link was paid${not}. Try again in a moment. If it goes on, look the link up in Square: an owner can then close it here by hand.`
-    : `This link was made by another card processor than the one set up now (in test mode, or with other keys), which the site cannot ask${not}. Look it up there: an owner can then close it here by hand.`;
+    : `This link was made by another card processor than the one set up now (in test mode, or with Square's other account), which the site cannot ask${not}. Look it up there: an owner can then close it here by hand.`;
 }
 
 /** `late`: paid for a booking that had ended, and so refunded in full (`made`), or due back (`lateRefundOf`). */
@@ -580,7 +588,7 @@ export async function closePayLinkByHand(db: Db, viewer: AuthUser, ref: string, 
   }
   // Found cancelled at the processor (deleted in Square, as the page asks): closed, with its line in the history.
   if (seen === "cancelled") return { ok: true, outcome: "cancelled" };
-  if (seen !== "unanswered") return withdraw(db, link, deps, viewer.email);
+  if (seen !== "unanswered" && seen !== "foreign") return withdraw(db, link, deps, viewer.email);
   // Tried at the processor too, when it is the link's own, for what it is worth: the link is closed here whatever it answers.
   if (deps.payments && deps.payments.name === link.provider) {
     try {
@@ -624,7 +632,7 @@ export async function checkBookingPayLink(
   if (!open) return { ok: false, message: "This booking has no open payment link." };
   const status = await checkPayLink(db, open.id, deps);
   if (status === "unknown") return { ok: false, message: "The payment link could not be checked." };
-  if (status === "unanswered") {
+  if (status === "unanswered" || status === "foreign") {
     const [link] = await db.select().from(paymentLinks).where(eq(paymentLinks.id, open.id)).limit(1);
     return { ok: false, message: cannotAskText(link, deps, false) };
   }
@@ -693,6 +701,8 @@ export interface PayPage {
   late: { released: boolean; made: boolean } | null;
   /** For `closed`: whether the booking was released for a reschedule code rather than cancelled. */
   closed: { released: boolean } | null;
+  /** For `cancelled`: the link is still open, but another processor's than the one set up now, so it cannot be paid. */
+  foreign: boolean;
   amountCents: number;
   ref: string;
   studios: string;
@@ -747,6 +757,7 @@ export async function getPayPage(db: Db, linkId: string, deps: PayLinkDeps): Pro
     status,
     late: back ? { released, made: back.made } : null,
     closed: status === "closed" ? { released } : null,
+    foreign: status === "cancelled" && row.link.status === "open",
     amountCents: row.link.amountCents,
     ref: row.booking.ref,
     studios: await studioNamesOf(db, row.booking.id),

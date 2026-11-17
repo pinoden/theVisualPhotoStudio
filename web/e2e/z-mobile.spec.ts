@@ -46,10 +46,14 @@ const PUBLIC_PAGES = ["/", "/studios", "/rates", "/services", "/faq", "/policies
 
 // The owner addresses of site.spec.ts have each used the three sign-in codes an address may ask for.
 const OWNER = "owner4@studio.test";
+/** The owner who measures the admin on a tablet: their sign-in codes are their own. */
+const IPAD_OWNER = "owner12@studio.test";
 /** An add-on's name of one word as long as the field allows a word to be: longer than a line on the smallest phone. */
 const LONG_ADDON = "Seamlesspaperbackdroprollwithstands";
 /** A font's name of one long word, as long as its field takes on a phone. */
 const LONG_FONT = "Horizonextendedcondenseddisplaygrotesque";
+/** A client's name with one long word, which fits a phone's line from 375px on. */
+const LONG_CLIENT = "Bartholomewmaximilianchristophersonthethird Smith";
 const mia = { name: "Mia Mobile", email: "mia.mobile@example.com", phone: "407-555-0177" };
 
 let browserProblems: string[] = [];
@@ -372,11 +376,58 @@ test("starting from the time works on a phone", async ({ page }) => {
   await confirmAndGetRef(page, "Confirm & pay $88");
 });
 
+test("a tablet's touch screen gets the touch rules: controls a finger can press, fields an iPad does not zoom", async ({ browser }) => {
+  test.setTimeout(240_000);
+  // An iPad: touch, so its pointer is coarse, at a width where the phones' layout no longer applies.
+  const context = await browser.newContext({ viewport: { width: 768, height: 1024 }, hasTouch: true, isMobile: true });
+  const page = await context.newPage();
+  // Its errors go where the other tests' go, and fail the test after it.
+  page.on("pageerror", (error) => {
+    if (!frameworkNoise(error.message)) browserProblems.push(`script error on an iPad: ${error.message}`);
+  });
+  page.on("console", (message) => {
+    if (message.type() === "error" && !message.text().startsWith("Failed to load resource")) {
+      browserProblems.push(`console error on an iPad: ${message.text().slice(0, 400)}`);
+    }
+  });
+  expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches), "an iPad's pointer is coarse").toBe(true);
+  const touchable = async (where: string) => {
+    expect(await hardToTouch(page), `${where} on an iPad: hard to use by touch`).toEqual([]);
+    expect(await tooSmallToRead(page), `${where} on an iPad: text too small`).toEqual([]);
+  };
+  for (const path of PUBLIC_PAGES) {
+    await page.goto(path);
+    await expect(page.locator("main h1, main h2").first()).toBeVisible();
+    await touchable(path);
+  }
+  await signIn(page, IPAD_OWNER, "/admin");
+  for (const path of ["/admin", "/admin/calendar", "/admin/calendar/new", "/admin/bookings", "/admin/customers", "/admin/prices", "/admin/studios", "/admin/hours", "/admin/codes", "/admin/settings", "/admin/website/pages", "/account", "/account/appointments?tab=past"]) {
+    await page.goto(path);
+    await expect(page.locator("main h1").first()).toBeVisible();
+    await touchable(path);
+  }
+  await context.close();
+});
+
 test("the admin fits a phone: the calendar in its three views, an appointment, and every page of the owners", async ({ page }) => {
   test.setTimeout(300_000);
   await page.setViewportSize({ width: 390, height: 844 });
   const day = dateAhead(70); // the day of the first phone booking above
-  await signIn(page, OWNER, `/admin/calendar?view=week&date=${day}`);
+  await signIn(page, OWNER, `/admin/calendar?view=day&date=${day}`);
+
+  // A client whose name is one long word, booked for the same day from the calendar: the week's list keeps the name
+  // whole beside its status where the name fits a line of its own.
+  await page.getByRole("link", { name: "New booking" }).click();
+  await page.getByRole("checkbox", { name: "Studio Blanche" }).check();
+  await byLabel(page, "Length").selectOption({ label: "1 hour" });
+  await page.getByRole("button", { name: "Show free times" }).click();
+  await page.getByLabel("Free start times").selectOption({ label: "3:00 PM – 4:00 PM" });
+  await page.getByLabel("Client’s name").fill(LONG_CLIENT);
+  await page.getByLabel("Client’s email").fill("long.name@example.com");
+  await page.getByLabel("Client’s phone").fill("407-555-0199");
+  await page.getByRole("button", { name: "Book for the client" }).click();
+  await expect(page.getByRole("heading", { name: LONG_CLIENT })).toBeVisible();
+  await page.goto(`/admin/calendar?view=week&date=${day}`);
 
   // The week on a phone is a list, day by day, with each appointment a row that can be tapped.
   const row = onScreen(page.locator(".cal-agenda li", { hasText: "Mia Mobile" }));

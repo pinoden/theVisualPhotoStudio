@@ -563,7 +563,7 @@ export function ownerUnseenLinkNotice(input: {
   customer: string;
   linkCents: number;
   ended: "cancelled" | "released";
-  /** Made by another processor than the one set up now (in test mode, or with other keys): the site can never ask it. */
+  /** Made by another processor than the one set up now (in test mode, or with Square's other account): the site can never ask it. */
   foreign: boolean;
 }): QueuedEmail {
   const ended = `${input.customer}'s booking ${input.ref} was ${input.ended === "released" ? "released for a reschedule code" : "cancelled"}`;
@@ -574,7 +574,7 @@ export function ownerUnseenLinkNotice(input: {
     subject: `CHECK THE PAYMENT LINK of ${input.ref}`,
     body: input.foreign
       ? [
-          `${ended}. Its payment link for ${money(input.linkCents)} was made by another card processor than the one set up now (in test mode, or with other keys), which the site cannot ask whether it was paid.`,
+          `${ended}. Its payment link for ${money(input.linkCents)} was made by another card processor than the one set up now (in test mode, or with Square's other account), which the site cannot ask whether it was paid.`,
           "",
           `Look the link up there. When it was not paid, ${close}. When it was paid, refund it to the client there, as the client was told to ask, then ${close}.`,
         ].join("\n")

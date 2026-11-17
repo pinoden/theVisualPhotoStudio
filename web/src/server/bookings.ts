@@ -23,7 +23,7 @@ import { bookingConfirmationEmail, queueEmail } from "./email";
 import { BY_CUSTOMER, recordEvent } from "./history";
 import { releaseHolds } from "./holds";
 import { giveBackReserved, takeReserved } from "./reserved";
-import { receivedCentsByBooking, STANDS } from "./money";
+import { paidInTestMode, receivedCentsByBooking, STANDS } from "./money";
 import { RESERVE_HOURS, type PaymentProvider } from "./payments";
 import {
   creditName,
@@ -654,7 +654,7 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[]): Promise<Bo
   if (rows.length === 0) return [];
   const ids = rows.map((r) => r.id);
   const codeIds = rows.map((r) => r.promoCodeId).filter((id): id is string => id !== null);
-  const [holdRows, addonRows, codeRows, received, atStudio] = await Promise.all([
+  const [holdRows, addonRows, codeRows, received, atStudio, testPaid] = await Promise.all([
     db
       .select({ bookingId: studioHolds.bookingId, name: studios.name, priceCents: studioHolds.priceCents, sort: studios.sortOrder })
       .from(studioHolds)
@@ -669,6 +669,7 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[]): Promise<Bo
       : [],
     receivedCentsByBooking(db, ids),
     receivedCentsByBooking(db, ids, "at_studio"),
+    paidInTestMode(db, ids),
   ]);
   return rows.map((booking) => ({
     id: booking.id,
@@ -700,8 +701,12 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[]): Promise<Bo
     totalCents: booking.totalCents,
     receivedCents: received.get(booking.id) ?? 0,
     receivedAtStudioCents: atStudio.get(booking.id) ?? 0,
-    // Only a booking made in the admin can owe, and only while it stands (`STANDS`).
-    dueCents: booking.madeBy !== null && STANDS.includes(booking.status) ? Math.max(0, booking.totalCents - (received.get(booking.id) ?? 0)) : 0,
+    // Only a booking made in the admin can owe, or one whose card payment was taken in test mode (`paidInTestMode`), and
+    // only while it stands (`STANDS`).
+    dueCents:
+      (booking.madeBy !== null || testPaid.has(booking.id)) && STANDS.includes(booking.status)
+        ? Math.max(0, booking.totalCents - (received.get(booking.id) ?? 0))
+        : 0,
     rescheduledCount: booking.rescheduledCount,
   }));
 }

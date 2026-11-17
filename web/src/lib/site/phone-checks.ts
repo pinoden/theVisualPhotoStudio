@@ -43,8 +43,12 @@ export function widerThanScreen(doc: Document = document): string[] {
     let right = rect.right;
     let left = rect.left;
     // A box inside the screen whose own words run out of it (a long word in a box that lets it show past its edge):
-    // named by those words, where they end.
-    if (right <= limit && left >= -1 && el.scrollWidth > el.clientWidth + 1 && !/(hidden|clip)/.test(view.getComputedStyle(el).overflowX)) {
+    // named by those words, where they end. Not a box that clips them, nor one made to scroll sideways, whose words
+    // stay inside it, as for the boxes around (below).
+    const ownOverflow = view.getComputedStyle(el).overflowX;
+    const keepsItsWords =
+      /(hidden|clip)/.test(ownOverflow) || (/(auto|scroll)/.test(ownOverflow) && el.matches(".data-table-wrap, .blk-table-wrap, [data-scrolls-sideways]"));
+    if (right <= limit && left >= -1 && el.scrollWidth > el.clientWidth + 1 && !keepsItsWords) {
       for (const node of Array.from(el.childNodes)) {
         if (node.nodeType !== 3 || !(node.textContent ?? "").trim()) continue; // 3 is a text node
         range.selectNodeContents(node);
@@ -171,12 +175,15 @@ export function brokenWords(doc: Document = document): string[] {
     }
     return most;
   };
-  const blockish = (el: Element) => /^(block|list-item|flow-root)$/.test(view.getComputedStyle(el).display);
-  // A block inside a box of a flex or grid row, through blocks only (a paragraph in a card of a row): as wide as that box.
+  // A box as wide as the box around it lets it be: a block, or one as wide as its words (a table, an inline-block).
+  const passable = (el: Element) => /^(block|list-item|flow-root|table|inline-table|inline-block|inline-flex|inline-grid)$/.test(view.getComputedStyle(el).display);
+  // A box inside a box of a flex row, through such boxes only (a paragraph in a card of a row): as wide as that box. Not
+  // of a grid, whose tracks set the width of what is in them, as a width given to a column does.
   const inRowItem = (start: Element): boolean => {
     for (let at: Element = start; at.parentElement; at = at.parentElement) {
-      if (/(flex|grid)/.test(view.getComputedStyle(at.parentElement).display)) return at !== start;
-      if (!blockish(at.parentElement)) return false;
+      const outer = view.getComputedStyle(at.parentElement).display;
+      if (/flex/.test(outer)) return at !== start;
+      if (/grid/.test(outer) || !passable(at.parentElement)) return false;
     }
     return false;
   };
@@ -200,7 +207,7 @@ export function brokenWords(doc: Document = document): string[] {
       // A block in a table's cell, however deep (a summary in a details in the cell, a row of buttons), is as wide as the
       // cell lets it be.
       const inCell = /^(block|list-item|flow-root|flex|grid)$/.test(shown) && parent.closest("td, th") !== null;
-      if (/(flex|grid)/.test(outer) || /^inline-(block|flex|grid)$/.test(shown) || inCell || (blockish(box) && inRowItem(box))) {
+      if (/(flex|grid)/.test(outer) || /^inline-(block|flex|grid)$/.test(shown) || inCell || (passable(box) && inRowItem(box))) {
         own += edges(box);
         box = parent;
         continue;
@@ -219,7 +226,9 @@ export function brokenWords(doc: Document = document): string[] {
         const place = new Map<Element, { first: number; across: number }>();
         const taken = new Map<number, Set<number>>();
         let columns = 0;
-        rowsOf(table).forEach((row, at) => {
+        // Cells with no row box of their own sit in the one row the browser makes for them.
+        const rows = rowsOf(table);
+        (rows.length > 0 ? rows : [box.parentElement!]).forEach((row, at) => {
           let column = 0;
           for (const cell of Array.from(row.children)) {
             while (taken.get(at)?.has(column)) column++;

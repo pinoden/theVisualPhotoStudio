@@ -15,6 +15,7 @@ import { petFeeCentsOf, studioRefundableCents } from "./pet-fee";
 import { codeStanding, rescheduleCodeOf, spendable, takeOffRescheduleCode } from "./promos";
 import { loadSettings } from "./settings";
 import { canViewDay } from "./staff";
+import { isRetiredTestPayment } from "./test-mode";
 import { formatInstant, localDateOf } from "./tz";
 
 /**
@@ -57,6 +58,8 @@ export interface BookingMoney {
   dueCents: number;
   /** How the booking ended, if it has: then nothing more is to pay, whatever was received. */
   ended: "cancelled" | "released" | null;
+  /** Its card payment was taken in test mode, and no longer counts (src/server/test-mode.ts). */
+  testMode: boolean;
   payments: PaymentLine[];
 }
 
@@ -71,6 +74,8 @@ export async function moneyOf(
     .where(and(eq(payments.bookingId, booking.id), inArray(payments.status, ["succeeded", "voided"])))
     .orderBy(asc(payments.createdAt));
   const receivedCents = rows.filter((row) => row.status === "succeeded").reduce((sum, row) => sum + row.amountCents, 0);
+  // Paid in test mode, and retired once the live processor was set up: nothing was received for it.
+  const testMode = rows.some(isRetiredTestPayment);
   // The card payments that came in through a payment link, to say so beside them.
   const throughLink = new Set(
     (
@@ -83,16 +88,20 @@ export async function moneyOf(
   return {
     totalCents: booking.totalCents,
     receivedCents,
-    // A booking made online is paid in full when it is made, so only one made in the admin can owe anything, and only
-    // while it stands: a cancelled one, or one released for a reschedule code, owes nothing.
-    dueCents: booking.madeBy !== null && STANDS.includes(booking.status) ? Math.max(0, booking.totalCents - receivedCents) : 0,
+    // A booking made online is paid in full when it is made, so only one made in the admin can owe anything, or one
+    // whose payment was taken in test mode (`testMode`); and only while it stands: a cancelled one, or one released for
+    // a reschedule code, owes nothing.
+    dueCents:
+      (booking.madeBy !== null || testMode) && STANDS.includes(booking.status) ? Math.max(0, booking.totalCents - receivedCents) : 0,
+    testMode,
     ended: STANDS.includes(booking.status) ? null : booking.cancelReason === "rescheduled" ? "released" : "cancelled",
     payments: rows.map((row) => ({
       id: row.id,
       at: row.createdAt.toISOString(),
       byHand: row.provider === MANUAL_PROVIDER,
-      how:
-        row.provider === MANUAL_PROVIDER
+      how: isRetiredTestPayment(row)
+        ? "Card, in test mode: no money moved"
+        : row.provider === MANUAL_PROVIDER
           ? isPaymentMethod(row.method)
             ? PAYMENT_METHODS[row.method]
             : "At the studio"

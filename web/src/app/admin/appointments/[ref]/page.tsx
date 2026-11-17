@@ -267,8 +267,10 @@ async function AppointmentDetails({
           <p>
             {appointment.payments.dueCents > 0 ? (
               <>
-                <strong>{formatCents(appointment.payments.dueCents)} is still to pay.</strong> This booking was made in the admin,
-                so nothing was charged online.
+                <strong>{formatCents(appointment.payments.dueCents)} is still to pay.</strong>{" "}
+                {appointment.payments.testMode
+                  ? "Its card payment was taken in test mode, before the live card processor was set up, so nothing was received for it."
+                  : "This booking was made in the admin, so nothing was charged online."}
               </>
             ) : appointment.payments.ended && appointment.payments.receivedCents < appointment.payments.totalCents ? (
               <>
@@ -361,7 +363,7 @@ async function AppointmentDetails({
                 A link to pay {formatCents(appointment.payLink.amountCents)} by card was emailed to the client on{" "}
                 {formatInstant(new Date(appointment.payLink.createdAt))} by {appointment.payLink.createdBy}.{" "}
                 {foreignLink
-                  ? "It was made by another card processor than the one set up now (in test mode, or with other keys), so it cannot be paid, and the site cannot ask about it. Look it up there: an owner then closes it here by hand, and a new one can be emailed."
+                  ? "It was made by another card processor than the one set up now (in test mode, or with Square's other account), so it cannot be paid, and the site cannot ask about it. Look it up there: an owner then closes it here by hand, and a new one can be emailed."
                   : appointment.payments.ended
                     ? "The booking has ended, and the link is still open: it is withdrawn as soon as the card processor says it was not paid. If the processor cannot say, look the link up in Square: an owner then closes it here by hand."
                     : "It has not been paid yet."}

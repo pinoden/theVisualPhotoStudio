@@ -59,7 +59,7 @@ describe("a booking made in the admin", () => {
   it("owes its whole price until a payment is recorded", async () => {
     const made = await madeInAdmin();
     const booking = await row(made.ref);
-    expect(await moneyOf(world.db, booking)).toEqual({ totalCents: 17600, receivedCents: 0, dueCents: 17600, ended: null, payments: [] });
+    expect(await moneyOf(world.db, booking)).toEqual({ totalCents: 17600, receivedCents: 0, dueCents: 17600, ended: null, testMode: false, payments: [] });
     expect((await toBookingViews(world.db, [booking]))[0]).toMatchObject({ madeByAdmin: true, receivedCents: 0, dueCents: 17600 });
     const appointment = (await getAppointment(world.db, owner, made.ref, NOW))!;
     expect(appointment.payments).toMatchObject({ dueCents: 17600 });

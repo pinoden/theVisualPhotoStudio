@@ -61,7 +61,14 @@ export function getDb(): Promise<Db> {
   if (!globalForDb.__studioDb) {
     globalForDb.__studioDb = (async () => {
       const url = process.env.DATABASE_URL;
-      if (url) return (await openPostgres(url)).db;
+      // Once the live card processor is set up, what test mode left is retired before anything counts money
+      // (src/server/test-mode.ts). Imported here, as the pages are below: the server's code needs this module.
+      const leaveTestMode = async (db: Db) => {
+        const [{ retireTestMode }, { resolvePayments }] = await Promise.all([import("../server/test-mode"), import("../server/payments")]);
+        await retireTestMode(db, resolvePayments().provider?.name ?? null, new Date());
+        return db;
+      };
+      if (url) return leaveTestMode((await openPostgres(url)).db);
       const { seed } = await import("./seed");
       // The pages the website was built with, into a database that never had them (src/server/pages.ts).
       const { ensureBuiltInPages } = await import("../server/pages");
@@ -85,7 +92,7 @@ export function getDb(): Promise<Db> {
       const { db } = await openPglite(dataDir);
       await seed(db);
       await ensureBuiltInPages(db, new Date());
-      return db;
+      return leaveTestMode(db);
     })();
     globalForDb.__studioDb.catch(() => {
       globalForDb.__studioDb = undefined;

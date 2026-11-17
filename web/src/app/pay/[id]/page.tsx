@@ -123,8 +123,9 @@ async function Pay({ params }: Pick<PageProps<"/pay/[id]">, "params">) {
 
       {page.status === "cancelled" && (
         <p>
-          This payment link was cancelled, so nothing can be paid here. If you still need to pay for booking {page.ref},
-          please call us at <a href={telHref(business.phone)}>{business.phone}</a> or pay at the studio.
+          {page.foreign ? "This payment link can no longer be used" : "This payment link was cancelled"}, so nothing can be paid
+          here. If you still need to pay for booking {page.ref}, please call us at{" "}
+          <a href={telHref(business.phone)}>{business.phone}</a> or pay at the studio.
         </p>
       )}
 

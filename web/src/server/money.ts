@@ -2,6 +2,7 @@ import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import { payments, refunds } from "@/db/schema";
 import type { DbLike } from "@/db/client";
 import { MANUAL_PROVIDER } from "@/lib/payment-methods";
+import { TEST_PROCESSORS } from "./test-mode";
 
 /**
  * What is held for a booking, by where the money is.
@@ -27,11 +28,12 @@ export async function netCardPaidCents(db: DbLike, bookingId: string): Promise<n
     .select({ total: sql<number>`coalesce(sum(${payments.amountCents}), 0)::int` })
     .from(payments)
     .where(and(viaSite, eq(payments.status, "succeeded")));
+  // Refunds of payments that stand: a payment taken in test mode and retired (src/server/test-mode.ts) counts neither way.
   const [back] = await db
     .select({ total: sql<number>`coalesce(sum(${refunds.amountCents}), 0)::int` })
     .from(refunds)
     .innerJoin(payments, eq(payments.id, refunds.paymentId))
-    .where(and(viaSite, inArray(refunds.status, ["pending", "succeeded", "failed"])));
+    .where(and(viaSite, eq(payments.status, "succeeded"), inArray(refunds.status, ["pending", "succeeded", "failed"])));
   return paid.total - back.total;
 }
 
@@ -42,6 +44,20 @@ export async function paidAtStudioCents(db: DbLike, bookingId: string): Promise<
     .from(payments)
     .where(and(eq(payments.bookingId, bookingId), eq(payments.provider, MANUAL_PROVIDER), eq(payments.status, "succeeded")));
   return row.total;
+}
+
+/**
+ * The bookings, of those given, whose card payment was taken in test mode and
+ * retired once the live processor was set up (src/server/test-mode.ts):
+ * nothing was received for them, and one that stands owes its price.
+ */
+export async function paidInTestMode(db: DbLike, bookingIds: string[]): Promise<Set<string>> {
+  if (bookingIds.length === 0) return new Set();
+  const rows = await db
+    .selectDistinct({ bookingId: payments.bookingId })
+    .from(payments)
+    .where(and(inArray(payments.bookingId, bookingIds), eq(payments.status, "voided"), inArray(payments.provider, [...TEST_PROCESSORS])));
+  return new Set(rows.map((row) => row.bookingId));
 }
 
 /**

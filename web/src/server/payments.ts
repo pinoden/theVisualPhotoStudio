@@ -423,6 +423,32 @@ export interface PaymentClientConfig {
 
 type Env = Record<string, string | undefined>;
 
+const warned = new Set<string>();
+
+/**
+ * Which of Square's two accounts the credentials are for: its sandbox, which
+ * moves no money, or the live one. Square's application ids say so themselves
+ * (a sandbox one begins with `sandbox-`); `SQUARE_ENVIRONMENT`, when set, must
+ * agree. When it does not, or says neither, card payments are off, with a word
+ * in the server's log, rather than working with the wrong account: payments
+ * and links keep the account that made them, and a site that took the live
+ * account for the sandbox would leave live money unseen.
+ */
+export function squareEnvironment(applicationId: string, declared: string | undefined): "sandbox" | "production" | null {
+  const fromId = applicationId.trim().startsWith("sandbox-") ? "sandbox" : "production";
+  const said = (declared ?? "").trim().toLowerCase();
+  if (said === "" || said === fromId) return fromId;
+  const problem =
+    said === "sandbox" || said === "production"
+      ? `SQUARE_ENVIRONMENT is ${said}, but the application id is of Square's ${fromId}`
+      : `SQUARE_ENVIRONMENT is "${declared}", which is neither sandbox nor production`;
+  if (!warned.has(problem)) {
+    warned.add(problem);
+    console.error(`Card payments are off: ${problem}.`);
+  }
+  return null;
+}
+
 /**
  * Which processor to use.
  *  - Square credentials present -> Square.
@@ -435,7 +461,8 @@ export function resolvePayments(env: Env = process.env): { provider: PaymentProv
   const locationId = env.SQUARE_LOCATION_ID;
   const applicationId = env.SQUARE_APPLICATION_ID;
   if (accessToken && locationId && applicationId) {
-    const environment = env.SQUARE_ENVIRONMENT === "production" ? "production" : "sandbox";
+    const environment = squareEnvironment(applicationId, env.SQUARE_ENVIRONMENT);
+    if (!environment) return { provider: null, client: { mode: "disabled" } };
     return {
       provider: squareProvider({ accessToken, locationId, environment }),
       client: {

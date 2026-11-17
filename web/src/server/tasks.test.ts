@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { bookings, emailOutbox, payments, promoCodes, settings } from "@/db/schema";
 import { deliverPendingEmails, MAX_EMAIL_ATTEMPTS, queueEmail, replaceQueuedEmail, resolveEmailTransport, type EmailTransport } from "./email";
@@ -216,17 +216,32 @@ describe("a charge that was interrupted", () => {
 });
 
 describe("which card processor is used", () => {
-  const square = { SQUARE_ACCESS_TOKEN: "t", SQUARE_LOCATION_ID: "l", SQUARE_APPLICATION_ID: "a" };
+  // Square's application ids say which of its accounts they are for: a sandbox one begins with "sandbox-".
+  const square = { SQUARE_ACCESS_TOKEN: "t", SQUARE_LOCATION_ID: "l", SQUARE_APPLICATION_ID: "sandbox-sq0idb-a" };
+  const live = { ...square, SQUARE_APPLICATION_ID: "sq0idp-a" };
 
   it("uses Square only when all three credentials are present", () => {
     expect(resolvePayments({ ...square, NODE_ENV: "production" }).client).toEqual({
       mode: "square",
-      squareApplicationId: "a",
+      squareApplicationId: "sandbox-sq0idb-a",
       squareLocationId: "l",
       squareEnvironment: "sandbox",
     });
-    expect(resolvePayments({ ...square, SQUARE_ENVIRONMENT: "production", NODE_ENV: "production" }).client.squareEnvironment).toBe("production");
+    expect(resolvePayments({ ...live, SQUARE_ENVIRONMENT: "production", NODE_ENV: "production" }).client.squareEnvironment).toBe("production");
     expect(resolvePayments({ SQUARE_ACCESS_TOKEN: "t", NODE_ENV: "production" }).client.mode).toBe("disabled");
+  });
+
+  it("tells Square's sandbox from its live account by the application id, and turns payments off when the setting disagrees", () => {
+    expect(resolvePayments({ ...square, NODE_ENV: "production" }).provider?.name).toBe("square-sandbox");
+    expect(resolvePayments({ ...live, NODE_ENV: "production" }).provider?.name).toBe("square");
+    expect(resolvePayments({ ...live, SQUARE_ENVIRONMENT: " Production ", NODE_ENV: "production" }).provider?.name).toBe("square");
+    // A setting that says the other account, or neither: no processor at all, rather than the wrong one.
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(resolvePayments({ ...live, SQUARE_ENVIRONMENT: "sandbox", NODE_ENV: "production" })).toEqual({ provider: null, client: { mode: "disabled" } });
+    expect(resolvePayments({ ...square, SQUARE_ENVIRONMENT: "production", NODE_ENV: "production" }).client.mode).toBe("disabled");
+    expect(resolvePayments({ ...live, SQUARE_ENVIRONMENT: "prod", NODE_ENV: "production" }).client.mode).toBe("disabled");
+    expect(errors).toHaveBeenCalledWith("Card payments are off: SQUARE_ENVIRONMENT is sandbox, but the application id is of Square's production.");
+    errors.mockRestore();
   });
 
   it("never falls back to the pretend processor in production unless asked to", () => {

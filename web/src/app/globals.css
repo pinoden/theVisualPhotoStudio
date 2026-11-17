@@ -1562,7 +1562,12 @@ button { font-family: inherit; }
   padding: .35rem 0 .35rem .65rem;
   border-left: 4px solid var(--studio);
 }
-.cal-agenda li a { display: grid; gap: .1rem; min-height: 2.75rem; align-content: center; color: var(--color-dark); font-size: .85rem; }
+.cal-agenda li a { display: flex; flex-direction: column; justify-content: center; gap: .1rem; min-height: 2.75rem; color: var(--color-dark); font-size: .85rem; }
+/* A long client name keeps its words whole: the status goes below it when both do not fit on one line, and a word is
+   broken only when it is longer than the whole line. The link is a column, as wide at the least as its longest word,
+   whose lines take its width when it has less. */
+.cal-agenda li { flex-wrap: wrap; }
+.cal-agenda li a { flex: 1 1 min-content; min-width: 0; overflow-wrap: break-word; }
 .cal-agenda-time { font-size: .78rem; }
 
 @media (max-width: 900px) {

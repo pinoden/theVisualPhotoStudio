@@ -147,28 +147,17 @@ export async function settleReservedPayments(db: Db, deps: SettleDeps): Promise<
       ref: bookings.ref,
       customer: bookings.customerName,
       bookingStatus: bookings.status,
-      provider: payments.provider,
     })
     .from(payments)
     .innerJoin(bookings, eq(bookings.id, payments.bookingId))
-    .where(eq(payments.status, "authorized"))
+    // Only what the processor set up now reserved: another's is never asked, and never marked, so that a setting
+    // wrong for a moment changes nothing for good. What test mode reserved is retired with it (src/server/test-mode.ts).
+    .where(and(eq(payments.status, "authorized"), eq(payments.provider, deps.payments.name)))
     .limit(50);
   let taken = 0;
   let released = 0;
   for (const row of open) {
     if (!row.providerPaymentId) continue;
-    // Reserved through another processor than the one set up now (in test mode, or with Square's other keys): this one
-    // can neither take it nor give it back. Nothing was taken, and the reservation lapses there by itself.
-    if (row.provider !== deps.payments.name) {
-      await db
-        .update(payments)
-        .set({
-          status: "failed",
-          error: "Reserved through another card processor than the one set up now: nothing was taken, and the reservation lapses there by itself.",
-        })
-        .where(and(eq(payments.id, row.id), eq(payments.status, "authorized")));
-      continue;
-    }
     const reserved = { ...row, providerPaymentId: row.providerPaymentId };
     if ((STANDING as readonly string[]).includes(row.bookingStatus)) {
       if (await takeReserved(db, reserved, deps)) taken++;

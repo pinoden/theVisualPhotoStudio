@@ -92,19 +92,22 @@ export function BookingSummary({ booking }: { booking: BookingView }) {
       )}
       <div className="price-row total">
         <span>
+          {/* A booking made online owes only when its card payment was taken in test mode, which moved no money. */}
           {!paidStatus || booking.totalCents === 0
             ? "Total"
-            : !booking.madeByAdmin
-              ? "Charged to card"
-              : booking.dueCents > 0
+            : booking.dueCents > 0
+              ? booking.madeByAdmin
                 ? "To pay at the studio"
+                : "To pay"
+              : !booking.madeByAdmin
+                ? "Charged to card"
                 : byCard <= 0
                   ? "Paid at the studio"
                   : booking.receivedAtStudioCents > 0
                     ? "Paid by card and at the studio"
                     : "Paid by card"}
         </span>
-        <span>{formatCents(paidStatus && booking.madeByAdmin && booking.dueCents > 0 ? booking.dueCents : booking.totalCents)}</span>
+        <span>{formatCents(paidStatus && booking.dueCents > 0 ? booking.dueCents : booking.totalCents)}</span>
       </div>
     </div>
   );

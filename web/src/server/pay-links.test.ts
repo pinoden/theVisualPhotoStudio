@@ -268,9 +268,9 @@ describe("when the client pays the link", () => {
     // Asked, and it could not say: the link may have been paid, and stays open.
     expect(await checkPayLink(world.db, link.id, deps())).toBe("unanswered");
     expect((await links())[0].status).toBe("open");
-    // No processor at all, or a different one from the link's own: nobody can say either, and the link stays open.
-    expect(await checkPayLink(world.db, link.id, { ...deps(), payments: null })).toBe("unanswered");
-    expect(await checkPayLink(world.db, link.id, { ...deps(), payments: world.provider })).toBe("unanswered");
+    // No processor at all, or a different one from the link's own: it can never be asked, and the link stays open.
+    expect(await checkPayLink(world.db, link.id, { ...deps(), payments: null })).toBe("foreign");
+    expect(await checkPayLink(world.db, link.id, { ...deps(), payments: world.provider })).toBe("foreign");
     expect((await links())[0].status).toBe("open");
     expect(await checkPayLink(world.db, "not-a-link", deps())).toBe("unknown");
     expect(await world.db.select().from(payments)).toHaveLength(0);
@@ -790,6 +790,7 @@ describe("the page a client's link leads to", () => {
       pretend: false,
       late: null,
       closed: null,
+      foreign: false,
     });
     // The client pays at the processor and is sent back: opening the page finds the payment.
     clientPays();
@@ -843,7 +844,7 @@ describe("the page a client's link leads to", () => {
     expect(await checkBookingPayLink(world.db, owner, made.ref, deps())).toEqual({
       ok: false,
       message:
-        "This link was made by another card processor than the one set up now (in test mode, or with other keys), which the site cannot ask. Look it up there: an owner can then close it here by hand.",
+        "This link was made by another card processor than the one set up now (in test mode, or with Square's other account), which the site cannot ask. Look it up there: an owner can then close it here by hand.",
     });
     expect(await cancelPayLink(world.db, owner, made.ref, deps())).toMatchObject({ ok: false });
     // Nor emailed again, with the real processor or with none.
@@ -864,8 +865,8 @@ describe("the page a client's link leads to", () => {
     const cancelled = expectOk(await cancelBooking(world.db, made.ref, dana, world.manageDeps({ payments: square })));
     expect(cancelled.message).toContain("The site cannot check the payment link for this booking. If you paid it, please contact us, and we will refund it.");
     const [notice] = await world.emails("owner_unseen_link");
-    expect(notice.body).toContain("was made by another card processor than the one set up now (in test mode, or with other keys)");
-    expect(notice.body).not.toContain("Square");
+    expect(notice.body).toContain("was made by another card processor than the one set up now (in test mode, or with Square's other account)");
+    expect(notice.body).not.toContain("look the link up in Square");
     const notes = (await world.db.select().from(bookingEvents).where(eq(bookingEvents.bookingId, made.id))).map((event) => event.note);
     expect(notes).toContain("The payment link for $176 was made by another card processor than the one set up now: the site cannot ask whether it was paid");
     // The studio's cancel says the same to the owner.
@@ -879,13 +880,18 @@ describe("a page that could not check a booking's payment link", () => {
   it("says so, while the processor cannot answer, and not otherwise", async () => {
     const made = await madeInAdmin();
     // No link at all: nothing to say.
-    expect(await noticeBookingPayments(world.db, made.ref, dana, deps())).toBe(false);
-    expect(await noticePaidLinksOf(world.db, dana.email, deps())).toBe(false);
+    expect(await noticeBookingPayments(world.db, made.ref, dana, deps())).toBeNull();
+    expect(await noticePaidLinksOf(world.db, dana.email, deps())).toBeNull();
     expectOk(await sendPayLink(world.db, owner, made.ref, deps()));
-    expect(await noticeBookingPayments(world.db, made.ref, dana, deps())).toBe(false);
+    expect(await noticeBookingPayments(world.db, made.ref, dana, deps())).toBeNull();
     world.links[0].state = { state: "unknown", message: "No answer from Square" };
-    expect(await noticeBookingPayments(world.db, made.ref, dana, deps())).toBe(true);
-    expect(await noticePaidLinksOf(world.db, dana.email, deps())).toBe(true);
+    expect(await noticeBookingPayments(world.db, made.ref, dana, deps())).toBe("unanswered");
+    expect(await noticePaidLinksOf(world.db, dana.email, deps())).toBe("unanswered");
+    // A link of another processor than the one set up now can never be checked: the client is asked to say if they paid.
+    expect(await noticeBookingPayments(world.db, made.ref, dana, { ...deps(), payments: world.provider })).toBe("foreign");
+    expect(await noticePaidLinksOf(world.db, dana.email, { ...deps(), payments: world.provider })).toBe("foreign");
+    const [link] = await links();
+    expect(await getPayPage(world.db, link.id, { ...deps(), payments: world.provider })).toMatchObject({ status: "cancelled", foreign: true });
   });
 });
 
