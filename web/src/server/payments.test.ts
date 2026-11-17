@@ -42,6 +42,13 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe("Square's two accounts", () => {
+  it("are two processors: what the sandbox made is unknown to the live account", () => {
+    expect(square("sandbox").name).toBe("square-sandbox");
+    expect(square("production").name).toBe("square");
+  });
+});
+
 describe("charging through Square", () => {
   it("sends the amount, the card token and the idempotency key, and returns Square's payment id", async () => {
     const fetchMock = stubSquare(json(200, { payment: { id: "PAY1", status: "COMPLETED" } }));

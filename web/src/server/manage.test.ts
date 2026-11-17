@@ -17,6 +17,7 @@ import {
   type Actor,
 } from "./manage";
 import { issuePromo } from "./promos";
+import { settleReservedPayments } from "./reserved";
 import { DEFAULT_SETTINGS } from "./settings";
 import { createTestWorld, daysAfter, expectOk, FAR, h, hoursAfter, NEAR, NOW, OWNER_EMAIL, type TestWorld } from "./testing";
 
@@ -762,5 +763,62 @@ describe("the owner", () => {
     const total = (await world.db.select().from(refunds)).reduce((sum, r) => sum + r.amountCents, 0);
     expect(total).toBe(5000 + 11970);
     expect((await world.db.select().from(payments))[0].refundedCents).toBe(16970);
+  });
+});
+
+describe("a payment taken through another processor than the one set up now", () => {
+  // The site was in test mode when the booking was paid; the real keys are in now.
+  const live = (): PaymentProvider => ({ ...world.provider, name: "square" });
+
+  it("is not sent to this one to refund: it is refunded there by hand", async () => {
+    const booked = expectOk(await world.book({ date: FAR })); // $176 through the pretend processor
+    const cancelled = expectOk(await cancelBooking(world.db, booked.ref, byToken(booked.manageToken), world.manageDeps({ payments: live() })));
+    expect(cancelled.refund).toBe("pending");
+    expect(world.refundCalls).toEqual([]);
+    expect((await world.db.select().from(refunds))[0]).toMatchObject({
+      status: "failed",
+      error:
+        "This payment was taken through another card processor than the one set up now (in test mode, or with other keys), so the site cannot refund it. Refund it there by hand, then record the refund as made.",
+    });
+  });
+
+  it("is neither taken nor given back by this one when it was only reserved: it lapses there", async () => {
+    const booked = expectOk(await world.book({ date: FAR }));
+    // Reserved, and not taken yet, when the keys changed.
+    await world.db.update(payments).set({ status: "authorized" }).where(eq(payments.bookingId, (await bookingRow(booked.ref)).id));
+    const [captures, releases] = [[...world.captures], [...world.releases]];
+    expect(await settleReservedPayments(world.db, { now: NOW, payments: live(), ownerEmail: null })).toEqual({ taken: 0, released: 0 });
+    expect(world.captures).toEqual(captures);
+    expect(world.releases).toEqual(releases);
+    expect((await world.db.select().from(payments))[0]).toMatchObject({
+      status: "failed",
+      error: "Reserved through another card processor than the one set up now: nothing was taken, and the reservation lapses there by itself.",
+    });
+  });
+});
+
+describe("a client's change of a booking that stopped being confirmed while their page was open", () => {
+  it("is refused with what became of the booking", async () => {
+    const moved = expectOk(await world.book({ date: FAR }));
+    expectOk(await requestRescheduleCode(world.db, moved.ref, byToken(moved.manageToken), world.manageDeps()));
+    expect(await cancelBooking(world.db, moved.ref, byToken(moved.manageToken), world.manageDeps())).toMatchObject({
+      ok: false,
+      code: "not_confirmed",
+      message: "This booking was released for a reschedule code meanwhile, so nothing more was done. Reload the page to see it as it is now.",
+    });
+
+    const missed = expectOk(await world.book({ date: FAR, startMinute: h(14), durationMinutes: 60 }));
+    await world.db.update(bookings).set({ status: "no_show" }).where(eq(bookings.ref, missed.ref));
+    expect(await requestRescheduleCode(world.db, missed.ref, byToken(missed.manageToken), world.manageDeps())).toMatchObject({
+      ok: false,
+      code: "not_confirmed",
+      message: "This booking was marked as missed, so it can no longer be changed online. Please call the studio.",
+    });
+    await world.db.update(bookings).set({ status: "completed" }).where(eq(bookings.ref, missed.ref));
+    expect(await cancelBooking(world.db, missed.ref, byToken(missed.manageToken), world.manageDeps())).toMatchObject({
+      ok: false,
+      code: "not_confirmed",
+      message: "This visit has taken place, so the booking can no longer be changed online.",
+    });
   });
 });

@@ -554,17 +554,36 @@ export function ownerHandRefundNotice(input: { to: string; ref: string; customer
 export const UNSEEN_LINK =
   "We could not check just now whether the payment link for this booking was paid. If it was, that payment is refunded to your card in full once the card processor tells us.";
 
-export function ownerUnseenLinkNotice(input: { to: string; ref: string; customer: string; linkCents: number; ended: "cancelled" | "released" }): QueuedEmail {
+/** The same, for a link of another processor than the one set up now, which the site can never ask. */
+export const FOREIGN_LINK = "The site cannot check the payment link for this booking. If you paid it, please contact us, and we will refund it.";
+
+export function ownerUnseenLinkNotice(input: {
+  to: string;
+  ref: string;
+  customer: string;
+  linkCents: number;
+  ended: "cancelled" | "released";
+  /** Made by another processor than the one set up now (in test mode, or with other keys): the site can never ask it. */
+  foreign: boolean;
+}): QueuedEmail {
+  const ended = `${input.customer}'s booking ${input.ref} was ${input.ended === "released" ? "released for a reschedule code" : "cancelled"}`;
+  const close = 'close it on the appointment\'s page with "Close it by hand"';
   return {
     to: input.to,
     kind: "owner_unseen_link",
-    subject: `CHECK IN SQUARE: the payment link of ${input.ref}`,
-    body: [
-      `${input.customer}'s booking ${input.ref} was ${input.ended === "released" ? "released for a reschedule code" : "cancelled"} while the card processor could not say whether its payment link for ${money(input.linkCents)} had been paid.`,
-      "",
-      "If it was paid, the payment is refunded to the card in full once the processor tells the site, and the client was told so. The site keeps asking.",
-      "If the processor never can (a link it no longer knows), look the link up in Square. When it was not paid, close it on the appointment's page with \"Close it by hand\". When Square shows it was paid, the site will never see that payment: refund it to the client in Square, as they were promised, then close the link here by hand.",
-    ].join("\n"),
+    subject: `CHECK THE PAYMENT LINK of ${input.ref}`,
+    body: input.foreign
+      ? [
+          `${ended}. Its payment link for ${money(input.linkCents)} was made by another card processor than the one set up now (in test mode, or with other keys), which the site cannot ask whether it was paid.`,
+          "",
+          `Look the link up there. When it was not paid, ${close}. When it was paid, refund it to the client there, as the client was told to ask, then ${close}.`,
+        ].join("\n")
+      : [
+          `${ended} while the card processor could not say whether its payment link for ${money(input.linkCents)} had been paid.`,
+          "",
+          "If it was paid, the payment is refunded to the card in full once the processor tells the site, and the client was told so. The site keeps asking.",
+          `If the processor never can (a link it no longer knows), look the link up in Square. When it was not paid, ${close}. When Square shows it was paid, the site will never see that payment: refund it to the client in Square, as they were promised, then ${close}.`,
+        ].join("\n"),
   };
 }
 
@@ -578,8 +597,8 @@ export function rescheduleCodeEmail(input: {
   discountCents?: number;
   expires: string;
   bookUrl: string;
-  /** The card processor could not say whether the booking's payment link had been paid (`UNSEEN_LINK`). */
-  unseenLink?: boolean;
+  /** What the client is told of a payment link the site could not check (`UNSEEN_LINK`, `FOREIGN_LINK`). */
+  unseenNote?: string | null;
 }): QueuedEmail {
   const credit =
     (input.discountCents ?? 0) > 0
@@ -593,7 +612,7 @@ export function rescheduleCodeEmail(input: {
       `Hi ${input.name},`,
       "",
       credit,
-      ...(input.unseenLink ? ["", UNSEEN_LINK] : []),
+      ...(input.unseenNote ? ["", input.unseenNote] : []),
       "",
       `Reschedule code: ${input.code}`,
       `Valid until: ${input.expires}`,

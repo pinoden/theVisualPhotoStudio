@@ -232,7 +232,11 @@ export async function closePayLinkByHandAction(formData: FormData): Promise<void
       page,
       "notice",
       result.outcome === "was_paid"
-        ? "The card processor answered: the client had paid through the link. The payment is recorded, and nothing was closed."
+        ? result.late
+          ? result.late.made
+            ? "The card processor answered: the client had paid through the link. The booking had ended, so the payment is refunded to the card in full, and the client is told."
+            : "The card processor answered: the client had paid through the link. The booking had ended, so the payment is due back to the card in full; the refund has not gone through yet, and is tried again by itself."
+          : "The card processor answered: the client had paid through the link. The payment is recorded, and nothing was closed."
         : "The payment link was closed. The site no longer asks about it.",
     ),
   );

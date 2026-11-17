@@ -81,6 +81,19 @@ async function expectFits(page: Page, where: string): Promise<void> {
   expect(await brokenWords(page), `${where}: words broken in two`).toEqual([]);
 }
 
+test("the check for what is wider than the screen names words that run out of their box", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 600 });
+  const word = "Holidayminisessionsforfamiliesandpetsarenowopen";
+  const box = (style: string) =>
+    `<!doctype html><html><body style="margin:0;font:16px/1.4 monospace"><div style="width:272px;${style}">${word}: book before December</div></body></html>`;
+  await page.setContent(box(""));
+  const found = await widerThanScreen(page);
+  expect(found.some((line) => line.startsWith('"Holidayminisessions') && / reaches \d+px$/.test(line)), found.join(" | ")).toBe(true);
+  // In a box that clips it, nothing shows past the box, and nothing is named.
+  await page.setContent(box("overflow:hidden"));
+  expect(await widerThanScreen(page)).toEqual([]);
+});
+
 test("the check for broken words sees a word squeezed in a table, at any depth of its cell, and nothing else", async ({ page }) => {
   // Made-up layouts. The other column has room to give: its words are short and many, so a word squeezed beside it
   // would have fitted.
@@ -107,6 +120,27 @@ test("the check for broken words sees a word squeezed in a table, at any depth o
       "Refunded",
     ],
     ["a table inside an inline element", `<span>${row(`<button ${squeezed}>Refunded it in Square</button>`)}</span>`, "Refunded"],
+    [
+      "a paragraph in a box of a flex row",
+      `<div style="display:flex"><div><p ${squeezed}>Refunded it in Square</p></div><div style="flex:0 0 300px">${filler}</div></div>`,
+      "Refunded",
+    ],
+    [
+      // Its column is the second: the first is taken by a cell of the row above that spans both rows.
+      "a table whose cell spanning rows leaves another column little room",
+      `<table style="border-collapse:collapse"><tr><td rowspan="2" style="padding:4px">Averyveryverylongwordindeed</td><td style="padding:4px">a</td></tr><tr><td style="padding:4px"><button ${squeezed}>Refunded it in Square</button></td></tr></table>`,
+      null,
+    ],
+    [
+      "a table made with CSS whose other column is made wide by another row",
+      `<div style="display:table"><div style="display:table-row"><div style="display:table-cell;padding:4px"><button ${squeezed}>Refunded it in Square</button></div><div style="display:table-cell;padding:4px">short</div></div><div style="display:table-row"><div style="display:table-cell;padding:4px">x</div><div style="display:table-cell;padding:4px">Averyveryverylongwordindeed</div></div></div>`,
+      null,
+    ],
+    [
+      "a table whose other column holds a wide field",
+      `<table style="border-collapse:collapse"><tr><td style="padding:4px"><button ${squeezed}>Refunded it in Square</button></td><td style="padding:4px"><input style="width:240px;font:inherit" aria-label="Note"></td></tr></table>`,
+      null,
+    ],
     [
       "a table whose other column is made wide by another row",
       `<table style="border-collapse:collapse"><tr><td style="padding:4px"><button ${squeezed}>Refunded it in Square</button></td><td style="padding:4px">short</td></tr><tr><td style="padding:4px">x</td><td style="padding:4px">Averyveryverylongwordindeed</td></tr></table>`,

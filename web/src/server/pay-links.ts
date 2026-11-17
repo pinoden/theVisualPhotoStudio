@@ -57,6 +57,8 @@ export interface PayLinkView {
   status: "open" | "paid" | "cancelled";
   createdBy: string;
   createdAt: string;
+  /** The processor that made it (`PaymentProvider.name`): one that is not the processor set up now cannot be paid or asked about. */
+  provider: string;
 }
 
 /** The address the client is emailed: a page of this site that shows what is owed and leads to the processor. */
@@ -75,7 +77,14 @@ export async function openPayLinkOf(db: DbLike, bookingId: string): Promise<PayL
 }
 
 function view(row: LinkRow): PayLinkView {
-  return { id: row.id, amountCents: row.amountCents, status: row.status, createdBy: row.createdBy, createdAt: row.createdAt.toISOString() };
+  return {
+    id: row.id,
+    amountCents: row.amountCents,
+    status: row.status,
+    createdBy: row.createdBy,
+    createdAt: row.createdAt.toISOString(),
+    provider: row.provider,
+  };
 }
 
 /** What a booking still owes: its price less every payment that succeeded. */
@@ -95,7 +104,15 @@ async function studioNamesOf(db: DbLike, bookingId: string): Promise<string> {
   return rows.map((row) => row.name).join(" + ");
 }
 
-export type SendPayLinkBlock = "forbidden" | "not_found" | "not_active" | "nothing_due" | "no_processor" | "other_amount_open" | "processor_refused";
+export type SendPayLinkBlock =
+  | "forbidden"
+  | "not_found"
+  | "not_active"
+  | "nothing_due"
+  | "no_processor"
+  | "other_amount_open"
+  | "other_processor_open"
+  | "processor_refused";
 
 export type SendPayLinkResult =
   | { ok: true; amountCents: number; /** True when a link already open was emailed again, and no new one was made. */ again: boolean }
@@ -136,6 +153,13 @@ export async function sendPayLink(db: Db, viewer: AuthUser, ref: string, deps: P
 
   const open = await openPayLinkOf(db, booking.id);
   if (open) {
+    // A link the processor set up now did not make (one of test mode, left after the real keys went in) cannot be paid.
+    if ((deps.payments?.name ?? null) !== open.provider) {
+      return refuse(
+        "other_processor_open",
+        "The open payment link of this booking was made by another card processor than the one set up now (in test mode, or with other keys), so it cannot be paid. An owner closes it by hand first; then a new one can be emailed.",
+      );
+    }
     if (open.amountCents !== dueCents) {
       return refuse(
         "other_amount_open",
@@ -318,18 +342,25 @@ async function giveBackLate(db: Db, late: LateRefund | undefined, deps: PayLinkD
  * that were paid and not seen yet, before the account says what cancelling or
  * moving would do (`noticePaidLink`).
  */
-export async function noticePaidLinksOf(db: Db, email: string, deps: PayLinkDeps, afterward?: (work: Promise<unknown>) => void): Promise<void> {
+export async function noticePaidLinksOf(db: Db, email: string, deps: PayLinkDeps, afterward?: (work: Promise<unknown>) => void): Promise<boolean> {
   const open = await db
     .select({ id: bookings.id, status: bookings.status })
     .from(paymentLinks)
     .innerJoin(bookings, eq(bookings.id, paymentLinks.bookingId))
     .where(and(eq(paymentLinks.status, "open"), eq(bookings.customerEmail, email.trim().toLowerCase())));
-  // `lookAtPayLink` never throws, so the work can go on by itself once the page stops waiting for it.
+  // `lookAtPayLink` never throws, so the work can go on by itself once the page stops waiting for it. It answers
+  // whether the link of a booking that stands could not be asked about.
   const work = (async () => {
-    for (const booking of open) await lookAtPayLink(db, booking, deps);
+    let unseen = false;
+    for (const booking of open) {
+      if ((await lookAtPayLink(db, booking, deps)) === "unanswered" && ACTIVE.includes(booking.status)) unseen = true;
+    }
+    return unseen;
   })();
   afterward?.(work);
-  await withinSeconds(PAGE_WAIT_SECONDS, work);
+  // True when the account shows a booking whose link nobody could say anything about in time (see `noticeBookingPayments`).
+  const answer = await withinSeconds(PAGE_WAIT_SECONDS, work);
+  return answer === undefined ? open.some((booking) => ACTIVE.includes(booking.status)) : answer;
 }
 
 /** What became of a booking's open payment link when the processor was asked: `none` when it had none. */
@@ -465,7 +496,8 @@ function cannotAskText(link: LinkRow, deps: PayLinkDeps, withdrawing: boolean): 
     : `This link was made by another card processor than the one set up now (in test mode, or with other keys), which the site cannot ask${not}. Look it up there: an owner can then close it here by hand.`;
 }
 
-export type CancelPayLinkResult = { ok: true; outcome: "cancelled" | "was_paid" } | { ok: false; message: string };
+/** `late`: paid for a booking that had ended, and so refunded in full (`made`), or due back (`lateRefundOf`). */
+export type CancelPayLinkResult = { ok: true; outcome: "cancelled" | "was_paid"; late?: { made: boolean } } | { ok: false; message: string };
 
 /**
  * Withdraw an open link at the processor, so that it can no longer be paid.
@@ -539,7 +571,13 @@ export async function closePayLinkByHand(db: Db, viewer: AuthUser, ref: string, 
     .limit(1);
   if (!link) return { ok: false, message: "This booking has no open payment link." };
   const seen = await checkPayLink(db, link.id, deps);
-  if (seen === "paid") return { ok: true, outcome: "was_paid" };
+  if (seen === "paid") {
+    // Paid for a booking that had ended: `settle` gave it back, or is to, and the owner is told which.
+    if (ACTIVE.includes(booking.status)) return { ok: true, outcome: "was_paid" };
+    const [paid] = await db.select({ paymentId: paymentLinks.paymentId }).from(paymentLinks).where(eq(paymentLinks.id, link.id)).limit(1);
+    const late = paid?.paymentId ? await lateRefundOf(db, paid.paymentId, booking.ref) : null;
+    return { ok: true, outcome: "was_paid", ...(late ? { late } : {}) };
+  }
   // Found cancelled at the processor (deleted in Square, as the page asks): closed, with its line in the history.
   if (seen === "cancelled") return { ok: true, outcome: "cancelled" };
   if (seen !== "unanswered") return withdraw(db, link, deps, viewer.email);
@@ -565,7 +603,7 @@ export async function closePayLinkByHand(db: Db, viewer: AuthUser, ref: string, 
       to: label,
       actor: viewer.email,
       at: deps.now,
-      note: `Payment link for ${formatCents(link.amountCents)} closed by hand: the card processor could not say whether it was paid, and the owner looked it up in Square`,
+      note: `Payment link for ${formatCents(link.amountCents)} closed by hand: the card processor could not say whether it was paid, and the owner looked it up at the processor`,
     });
   });
   return { ok: true, outcome: "cancelled" };

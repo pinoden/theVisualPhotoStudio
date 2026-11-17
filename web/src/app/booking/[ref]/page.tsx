@@ -52,7 +52,7 @@ async function BookingDetails({ params, searchParams }: Pick<PageProps<"/booking
   const db = await getDb();
   // A payment link paid that the site has not seen yet is recorded first: what the page says counts it. A slow
   // processor is waited for a few seconds at most; its answer is still recorded after the response, with its mail.
-  await noticeBookingPayments(db, ref, { kind: "token", token }, await payLinkDeps(), finishAfterResponse);
+  const unseenLink = await noticeBookingPayments(db, ref, { kind: "token", token }, await payLinkDeps(), finishAfterResponse);
   const booking = await getBookingByToken(db, ref, token);
   const { business } = (await siteFrame()).frame;
 
@@ -117,6 +117,13 @@ async function BookingDetails({ params, searchParams }: Pick<PageProps<"/booking
             </div>
           )}
         </>
+      )}
+
+      {unseenLink && booking.status === "confirmed" && (
+        <div className="notice">
+          We could not check just now whether the payment link for this booking was paid, so what this page says does not
+          count a payment made through it yet. If you paid it, please look again later.
+        </div>
       )}
 
       <ManageBooking bookingRef={booking.ref} token={token} choices={choices} />

@@ -27,6 +27,7 @@ import {
   refundNotYetEmail,
   replaceQueuedEmail,
   rescheduleCodeEmail,
+  FOREIGN_LINK,
   UNSEEN_LINK,
   type RefundState,
 } from "./email";
@@ -168,11 +169,30 @@ export async function getManageChoices(db: DbLike, ref: string, actor: Actor, no
   return context ? describeManageOptions(context.options, context.terms) : null;
 }
 
-/** A booking that ended while the client's page was open: their own request did nothing. */
-const ENDED_MEANWHILE = "This booking is no longer confirmed: it was cancelled or released meanwhile, so nothing more was done. Reload the page to see it as it is now.";
+const NOT_CHANGEABLE = "This booking can no longer be changed.";
+
+/**
+ * A booking that stopped being confirmed while the client's page was open,
+ * said as what became of it: their own request did nothing.
+ */
+function endedText(booking: { status: string; cancelReason: string | null }): string {
+  const look = " Reload the page to see it as it is now.";
+  switch (booking.status) {
+    case "cancelled":
+      return booking.cancelReason === "rescheduled"
+        ? `This booking was released for a reschedule code meanwhile, so nothing more was done.${look}`
+        : `This booking was cancelled meanwhile, so nothing more was done.${look}`;
+    case "completed":
+      return "This visit has taken place, so the booking can no longer be changed online.";
+    case "no_show":
+      return "This booking was marked as missed, so it can no longer be changed online. Please call the studio.";
+    default:
+      return `${NOT_CHANGEABLE}${look}`;
+  }
+}
 
 export function cancelBlockText(reason: CancelBlock): string {
-  return reason === "already_started" ? "This booking has already started." : ENDED_MEANWHILE;
+  return reason === "already_started" ? "This booking has already started." : NOT_CHANGEABLE;
 }
 
 export function rescheduleBlockText(reason: RescheduleBlock, settings: Pick<Settings, "rescheduleCutoffHours">): string {
@@ -180,7 +200,7 @@ export function rescheduleBlockText(reason: RescheduleBlock, settings: Pick<Sett
     case "already_started":
       return "This booking has already started.";
     case "not_confirmed":
-      return ENDED_MEANWHILE;
+      return NOT_CHANGEABLE;
     case "not_offered":
       return "Bookings cannot be moved online. Please call the studio.";
     case "too_late":
@@ -284,6 +304,7 @@ export async function processRefund(db: Db, refundId: string, deps: ManageDeps):
     .select({
       refund: refunds,
       providerPaymentId: payments.providerPaymentId,
+      provider: payments.provider,
       paymentId: payments.id,
       ref: bookings.ref,
       customer: bookings.customerName,
@@ -300,14 +321,23 @@ export async function processRefund(db: Db, refundId: string, deps: ManageDeps):
   if (row.refund.status === "succeeded") return "succeeded";
   if (!deps.payments) return "pending";
 
-  const result = row.providerPaymentId
-    ? await deps.payments.refund({
-        paymentId: row.providerPaymentId,
-        amountCents: row.refund.amountCents,
-        idempotencyKey: row.refund.id,
-        reason: row.refund.reason || `Refund for ${row.ref}`,
-      })
-    : ({ ok: false, message: "The payment has no processor id." } as const);
+  // A payment taken through another processor than the one set up now (in test mode, or with Square's other keys) is
+  // unknown to this one: it is refunded there by hand, then recorded as made ("Refunded it in Square").
+  const result =
+    row.provider !== deps.payments.name
+      ? ({
+          ok: false,
+          message:
+            "This payment was taken through another card processor than the one set up now (in test mode, or with other keys), so the site cannot refund it. Refund it there by hand, then record the refund as made.",
+        } as const)
+      : row.providerPaymentId
+        ? await deps.payments.refund({
+            paymentId: row.providerPaymentId,
+            amountCents: row.refund.amountCents,
+            idempotencyKey: row.refund.id,
+            reason: row.refund.reason || `Refund for ${row.ref}`,
+          })
+        : ({ ok: false, message: "The payment has no processor id." } as const);
 
   const label = labelOf({ status: row.bookingStatus, label: row.bookingLabel });
   if (result.ok) {
@@ -639,23 +669,32 @@ const LOOK_AGAIN = "What this would do has changed since the page was opened. He
  * waiting for good. A payment through the link that is seen later is refunded
  * in full, as one that arrives after the booking ended always is; the client
  * is told so (`UNSEEN_LINK`), the history says so, and the owners are told to
- * look in Square (`ownerUnseenLinkNotice`). Answers whether there was such a link.
+ * look in Square (`ownerUnseenLinkNotice`). A link of another processor than
+ * the one set up now can never be asked about: the client is asked to say
+ * whether they paid it (`FOREIGN_LINK`). Answers what the client is told, or
+ * null when there was no open link.
  */
-async function noteUnseenLink(tx: DbLike, booking: BookingRow, ended: "cancelled" | "released", deps: ManageDeps): Promise<boolean> {
+async function noteUnseenLink(tx: DbLike, booking: BookingRow, ended: "cancelled" | "released", deps: ManageDeps): Promise<string | null> {
   const link = await openPayLinkOf(tx, booking.id);
-  if (!link) return false;
+  if (!link) return null;
+  const foreign = link.provider !== (deps.payments?.name ?? null);
   await recordEvent(tx, {
     bookingId: booking.id,
     from: "cancelled",
     to: "cancelled",
     actor: BY_SYSTEM,
     at: deps.now,
-    note: `The card processor could not say whether the payment link for ${formatCents(link.amountCents)} was paid: a payment through it is refunded in full once it is seen`,
+    note: foreign
+      ? `The payment link for ${formatCents(link.amountCents)} was made by another card processor than the one set up now: the site cannot ask whether it was paid`
+      : `The card processor could not say whether the payment link for ${formatCents(link.amountCents)} was paid: a payment through it is refunded in full once it is seen`,
   });
   if (deps.ownerEmail) {
-    await queueEmail(tx, ownerUnseenLinkNotice({ to: deps.ownerEmail, ref: booking.ref, customer: booking.customerName, linkCents: link.amountCents, ended }));
+    await queueEmail(
+      tx,
+      ownerUnseenLinkNotice({ to: deps.ownerEmail, ref: booking.ref, customer: booking.customerName, linkCents: link.amountCents, ended, foreign }),
+    );
   }
-  return true;
+  return foreign ? FOREIGN_LINK : UNSEEN_LINK;
 }
 
 /**
@@ -686,13 +725,16 @@ export async function noticeBookingPayments(
   actor: Actor,
   deps: PayLinkDeps,
   afterward?: (work: Promise<unknown>) => void,
-): Promise<void> {
+): Promise<boolean> {
   const look = countPaidLink(db, ref, actor, deps).catch((error: unknown): LinkLook => {
     console.error("Could not look at the payment link of booking", ref, error);
     return "unanswered";
   });
   afterward?.(look);
-  await withinSeconds(PAGE_WAIT_SECONDS, look);
+  // True when the booking has an open link that nobody could say anything about in time: the page says that what it
+  // shows may not count a payment made through it yet.
+  const answer = await withinSeconds(PAGE_WAIT_SECONDS, look);
+  return answer === undefined || answer === "unanswered";
 }
 
 /** A cancellation email before it is known whether its card refund goes through. */
@@ -746,7 +788,7 @@ export async function cancelBooking(db: Db, ref: string, actor: Actor, deps: Man
 
     const terms = termsFor(booking, settings);
     const decision = cancellationOutcome(await factsFor(tx, booking), deps.now, terms);
-    if (!decision.allowed) return { kind: "blocked" as const, reason: decision.reason };
+    if (!decision.allowed) return { kind: "blocked" as const, reason: decision.reason, booking: { status: booking.status, cancelReason: booking.cancelReason } };
     if (seen !== undefined && seen !== cancelOutcomeText(decision, terms)) return { kind: "changed" as const };
 
     await tx
@@ -781,8 +823,8 @@ export async function cancelBooking(db: Db, ref: string, actor: Actor, deps: Man
     });
 
     const refundIds = await recordRefunds(tx, booking.id, decision.refundCents, `Cancellation of ${booking.ref}`, true);
-    const unseenLink = unseen && (await noteUnseenLink(tx, booking, "cancelled", deps));
-    const message = `${cancelOutcomeText(decision, terms)}${codeBack ? ` ${CODE_BACK}` : ""}${unseenLink ? ` ${UNSEEN_LINK}` : ""}`;
+    const unseenNote = unseen ? await noteUnseenLink(tx, booking, "cancelled", deps) : null;
+    const message = `${cancelOutcomeText(decision, terms)}${codeBack ? ` ${CODE_BACK}` : ""}${unseenNote ? ` ${unseenNote}` : ""}`;
     // The whole outcome. The card refund is said as sent: if it does not go through, the email is put right (`refundNotSent`).
     const email: CancellationNotice = {
       to: booking.customerEmail,
@@ -793,7 +835,7 @@ export async function cancelBooking(db: Db, ref: string, actor: Actor, deps: Man
       lines: [
         cancelOutcomeText(decision, terms, { card: decision.refundCents > 0, pet: true }),
         ...(codeBack ? [CODE_BACK] : []),
-        ...(unseenLink ? [UNSEEN_LINK] : []),
+        ...(unseenNote ? [unseenNote] : []),
       ].filter(Boolean),
       ...(petCredit
         ? {
@@ -827,7 +869,8 @@ export async function cancelBooking(db: Db, ref: string, actor: Actor, deps: Man
 
   if (outcome.kind === "not_found") return { ok: false, status: 404, code: "not_found", message: "Booking not found." };
   if (outcome.kind === "blocked") {
-    return { ok: false, status: 409, code: outcome.reason, message: cancelBlockText(outcome.reason) };
+    const message = outcome.reason === "not_confirmed" ? endedText(outcome.booking) : cancelBlockText(outcome.reason);
+    return { ok: false, status: 409, code: outcome.reason, message };
   }
   if (outcome.kind === "changed") return { ok: false, status: 409, code: "changed", message: LOOK_AGAIN };
 
@@ -858,8 +901,10 @@ export type RescheduleResult =
       code: string;
       valueCents: number;
       expiresAt: Date;
-      /** The processor could not say whether the booking's payment link was paid (`UNSEEN_LINK`). */
+      /** The processor could not say whether the booking's payment link was paid. */
       unseenLink: boolean;
+      /** What the client is told of it (`noteUnseenLink`), or null. */
+      unseenNote: string | null;
     }
   | { ok: false; status: number; code: "not_found" | "changed" | RescheduleBlock; message: string };
 
@@ -880,7 +925,7 @@ export async function requestRescheduleCode(db: Db, ref: string, actor: Actor, d
     if (!booking || !mayAct(booking, actor)) return { kind: "not_found" as const };
 
     const decision = rescheduleOutcome(await factsFor(tx, booking), deps.now, settings);
-    if (!decision.allowed) return { kind: "blocked" as const, reason: decision.reason };
+    if (!decision.allowed) return { kind: "blocked" as const, reason: decision.reason, booking: { status: booking.status, cancelReason: booking.cancelReason } };
     if (seen !== undefined && seen !== rescheduleOfferText(decision, settings)) return { kind: "changed" as const };
 
     await tx
@@ -912,7 +957,7 @@ export async function requestRescheduleCode(db: Db, ref: string, actor: Actor, d
       issuedAt: deps.now,
     });
     if (!issued) throw new Error(`A reschedule code already exists for ${booking.ref}.`);
-    const unseenLink = unseen && (await noteUnseenLink(tx, booking, "released", deps));
+    const unseenNote = unseen ? await noteUnseenLink(tx, booking, "released", deps) : null;
 
     await queueEmail(
       tx,
@@ -925,10 +970,10 @@ export async function requestRescheduleCode(db: Db, ref: string, actor: Actor, d
         discountCents: decision.discountCents,
         expires: formatInstant(expiresAt),
         bookUrl: `${deps.baseUrl.replace(/\/$/, "")}/book`,
-        unseenLink,
+        unseenNote,
       }),
     );
-    return { kind: "done" as const, code: issued.code, valueCents: decision.creditCents, expiresAt, bookingId: booking.id, unseenLink };
+    return { kind: "done" as const, code: issued.code, valueCents: decision.creditCents, expiresAt, bookingId: booking.id, unseenNote };
   });
 
   if (outcome.kind === "not_found") return { ok: false, status: 404, code: "not_found", message: "Booking not found." };
@@ -938,11 +983,19 @@ export async function requestRescheduleCode(db: Db, ref: string, actor: Actor, d
       outcome.reason === "nothing_paid" && unseen
         ? " We could not check just now whether the payment link for this booking was paid. If you paid it, please try again later, or call us."
         : "";
-    return { ok: false, status: 409, code: outcome.reason, message: `${rescheduleBlockText(outcome.reason, settings)}${unseenNote}` };
+    const said = outcome.reason === "not_confirmed" ? endedText(outcome.booking) : rescheduleBlockText(outcome.reason, settings);
+    return { ok: false, status: 409, code: outcome.reason, message: `${said}${unseenNote}` };
   }
   if (outcome.kind === "changed") return { ok: false, status: 409, code: "changed", message: LOOK_AGAIN };
   if (!unseen) await closePayLinkOf(db, outcome.bookingId, deps);
-  return { ok: true, code: outcome.code, valueCents: outcome.valueCents, expiresAt: outcome.expiresAt, unseenLink: outcome.unseenLink };
+  return {
+    ok: true,
+    code: outcome.code,
+    valueCents: outcome.valueCents,
+    expiresAt: outcome.expiresAt,
+    unseenLink: outcome.unseenNote !== null,
+    unseenNote: outcome.unseenNote,
+  };
 }
 
 // ── Owner actions ────────────────────────────────────────────────────────────
@@ -954,8 +1007,8 @@ export type OwnerRefundResult =
       refundCents: number;
       /** Money taken at the studio for a booking the studio cancelled: the studio gives back by hand what it owes of it. */
       atStudioCents?: number;
-      /** The processor could not say whether the booking's payment link was paid (`noteUnseenLink`). */
-      unseenLink?: boolean;
+      /** The processor could not say whether the booking's payment link was paid, or it was another processor's (`noteUnseenLink`). */
+      unseenLink?: "unseen" | "foreign";
     }
   | { ok: false; status: number; code: "not_found" | "bad_amount" | "not_cancellable" | "changed"; message: string };
 
@@ -1046,7 +1099,7 @@ export async function ownerCancelBooking(
     // A visit that has not started was taken from the customer, so the code that paid for it goes back to them.
     // After the start the code has done its work: a later cancellation is the owner settling a refund.
     const codeBack = deps.now.getTime() < booking.startAt.getTime() && (await giveCodeBack(tx, booking, "studio"));
-    const unseenLink = unseen && (await noteUnseenLink(tx, booking, "cancelled", deps));
+    const unseenNote = unseen ? await noteUnseenLink(tx, booking, "cancelled", deps) : null;
     const email: CancellationNotice = {
       to: booking.customerEmail,
       name: booking.customerName,
@@ -1063,12 +1116,12 @@ export async function ownerCancelBooking(
             ]
           : []),
         ...(codeBack ? [CODE_BACK] : []),
-        ...(unseenLink ? [UNSEEN_LINK] : []),
+        ...(unseenNote ? [unseenNote] : []),
         "Please contact us with any questions.",
       ],
     };
     const emailId = await queueEmail(tx, noticeEmail(email, "sent"));
-    return { kind: "done" as const, refundIds, bookingId: booking.id, email, emailId, atStudio, unseenLink };
+    return { kind: "done" as const, refundIds, bookingId: booking.id, email, emailId, atStudio, unseenNote };
   });
 
   if (outcome.kind === "not_found") return { ok: false, status: 404, code: "not_found", message: "Booking not found." };
@@ -1096,7 +1149,7 @@ export async function ownerCancelBooking(
     refund,
     refundCents: input.refundCents,
     ...(outcome.atStudio > 0 ? { atStudioCents: outcome.atStudio } : {}),
-    ...(outcome.unseenLink ? { unseenLink: true } : {}),
+    ...(outcome.unseenNote ? { unseenLink: outcome.unseenNote === FOREIGN_LINK ? ("foreign" as const) : ("unseen" as const) } : {}),
   };
 }
 

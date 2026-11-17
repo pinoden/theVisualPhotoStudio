@@ -9,7 +9,9 @@ import { safeNextPath } from "@/server/session";
  * call it: it only ever takes a preview away.
  */
 export async function POST(request: Request) {
-  const to = formText((await request.formData()).get("to"));
+  // A request that is not a form (none of the site's own) still leaves the preview, and goes to the home page.
+  const form = await request.formData().catch(() => null);
+  const to = formText(form?.get("to") ?? null);
   (await draftMode()).disable();
   const path = safeNextPath(to);
   redirect(path === to ? path : "/");

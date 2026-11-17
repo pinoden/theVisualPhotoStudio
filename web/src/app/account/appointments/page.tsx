@@ -65,7 +65,7 @@ async function Appointments({ searchParams }: Pick<PageProps<"/account/appointme
   const query = await searchParams;
   const db = await getDb();
   // Payment links paid that the site has not seen yet are recorded first: what the page says counts them.
-  await noticePaidLinksOf(db, user.email, await payLinkDeps(), finishAfterResponse);
+  const unseenLink = await noticePaidLinksOf(db, user.email, await payLinkDeps(), finishAfterResponse);
   const now = new Date();
   const { upcoming, past } = await loadAppointments(db, user.email, now);
   const tab = query.tab === "past" ? "past" : "upcoming";
@@ -93,6 +93,12 @@ async function Appointments({ searchParams }: Pick<PageProps<"/account/appointme
 
       {tab === "upcoming" && (
         <>
+          {unseenLink && upcoming.length > 0 && (
+            <div className="notice">
+              We could not check just now whether a payment link of your bookings was paid, so what this page says does
+              not count a payment made through it yet. If you paid one, please look again later.
+            </div>
+          )}
           {upcoming.length === 0 && (
             <p>
               You have no upcoming appointments. <Link href="/book">Book a studio</Link>.

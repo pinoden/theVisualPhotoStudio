@@ -91,7 +91,12 @@ export type PayLinkState =
   | { state: "unknown"; message: string };
 
 export interface PaymentProvider {
-  name: "square" | "mock";
+  /**
+   * Which processor, and with which keys: Square's sandbox and its live account are two processors, for a payment or a
+   * link made with one is unknown to the other. Stored with every payment and link (`provider`), so that the site never
+   * asks one about what the other made.
+   */
+  name: "square" | "square-sandbox" | "mock";
   charge(request: ChargeRequest): Promise<ChargeResult>;
   refund(request: RefundRequest): Promise<RefundResult>;
   /** Take an amount reserved with `reserve`. Taking one already taken succeeds. */
@@ -278,7 +283,7 @@ export function squareProvider(config: SquareConfig): PaymentProvider {
   }
 
   return {
-    name: "square",
+    name: config.environment === "production" ? "square" : "square-sandbox",
 
     async charge(request) {
       const answer = await post("/v2/payments", {

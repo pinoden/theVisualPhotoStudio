@@ -22,6 +22,9 @@
  * What is wider than the screen. A box that scrolls sideways on purpose (a
  * wide table inside its own frame: `.data-table-wrap`, `.blk-table-wrap`, or
  * anything marked `data-scrolls-sideways`) is allowed; the page itself is not.
+ * A box is named when it passes the screen's edge, and so are words that run
+ * out of a box inside the screen and past that edge (a long word in an
+ * announcement): the page that scrolls is then said with what makes it.
  */
 export function widerThanScreen(doc: Document = document): string[] {
   const view = doc.defaultView!;
@@ -32,11 +35,27 @@ export function widerThanScreen(doc: Document = document): string[] {
   if (doc.documentElement.scrollWidth > limit) {
     found.push(`the page scrolls sideways (${doc.documentElement.scrollWidth}px wide on a ${limit - 1}px screen)`);
   }
+  const range = doc.createRange();
   for (const el of Array.from(doc.querySelectorAll<HTMLElement>("body *"))) {
     if (el.closest("nextjs-portal")) continue; // the development tools' own button
     const rect = el.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) continue;
-    if (rect.right <= limit && rect.left >= -1) continue;
+    let right = rect.right;
+    let left = rect.left;
+    // A box inside the screen whose own words run out of it (a long word in a box that lets it show past its edge):
+    // named by those words, where they end.
+    if (right <= limit && left >= -1 && el.scrollWidth > el.clientWidth + 1 && !/(hidden|clip)/.test(view.getComputedStyle(el).overflowX)) {
+      for (const node of Array.from(el.childNodes)) {
+        if (node.nodeType !== 3 || !(node.textContent ?? "").trim()) continue; // 3 is a text node
+        range.selectNodeContents(node);
+        for (const part of Array.from(range.getClientRects())) {
+          if (part.width === 0) continue;
+          right = Math.max(right, part.right);
+          left = Math.min(left, part.left);
+        }
+      }
+    }
+    if (right <= limit && left >= -1) continue;
     const style = view.getComputedStyle(el);
     if (style.position === "fixed" || style.clipPath !== "none") continue; // overlays, and text kept for screen readers only
     // Inside a box that clips it, nothing of it shows past the box. Inside one that scrolls, only a box made to
@@ -57,7 +76,7 @@ export function widerThanScreen(doc: Document = document): string[] {
     const words = (el.innerText || "").trim().replace(/\s+/g, " ").slice(0, 40);
     const label = (el.getAttribute("aria-label") || "").trim().slice(0, 40);
     const what = words ? `"${words}"` : label ? `"${label}"` : `<${el.tagName.toLowerCase()} class="${el.className}">`;
-    found.push(rect.left < -1 ? `${what} starts ${Math.round(-rect.left)}px left of the screen` : `${what} reaches ${Math.round(rect.right)}px`);
+    found.push(left < -1 ? `${what} starts ${Math.round(-left)}px left of the screen` : `${what} reaches ${Math.round(right)}px`);
   }
   return [...new Set(found)].slice(0, 6);
 }
@@ -138,7 +157,8 @@ export function brokenWords(doc: Document = document): string[] {
       range.selectNodeContents(cell);
       return range.getBoundingClientRect().width;
     }
-    let most = 0;
+    // What is not words takes room too: a field, a picture.
+    let most = Math.max(0, ...Array.from(cell.querySelectorAll("input, select, textarea, img, svg, video, canvas, iframe")).map((item) => item.getBoundingClientRect().width));
     const texts = doc.createTreeWalker(cell, 4 /* NodeFilter.SHOW_TEXT */);
     for (let node = texts.nextNode(); node; node = texts.nextNode()) {
       const text = node as Text;
@@ -151,6 +171,24 @@ export function brokenWords(doc: Document = document): string[] {
     }
     return most;
   };
+  const blockish = (el: Element) => /^(block|list-item|flow-root)$/.test(view.getComputedStyle(el).display);
+  // A block inside a box of a flex or grid row, through blocks only (a paragraph in a card of a row): as wide as that box.
+  const inRowItem = (start: Element): boolean => {
+    for (let at: Element = start; at.parentElement; at = at.parentElement) {
+      if (/(flex|grid)/.test(view.getComputedStyle(at.parentElement).display)) return at !== start;
+      if (!blockish(at.parentElement)) return false;
+    }
+    return false;
+  };
+  /** The rows of a table, an HTML one or one made with CSS. */
+  const rowsOf = (table: Element): Element[] =>
+    table instanceof view.HTMLTableElement
+      ? Array.from(table.rows)
+      : Array.from(table.children).flatMap((child) => {
+          const shown = view.getComputedStyle(child).display;
+          if (shown === "table-row") return [child];
+          return /^table-(row|header|footer)-group$/.test(shown) ? Array.from(child.children).filter((row) => view.getComputedStyle(row).display === "table-row") : [];
+        });
   const room = (start: Element): number => {
     let box: Element = start;
     while (box.parentElement && /^(inline|contents)$/.test(view.getComputedStyle(box).display)) box = box.parentElement;
@@ -162,7 +200,7 @@ export function brokenWords(doc: Document = document): string[] {
       // A block in a table's cell, however deep (a summary in a details in the cell, a row of buttons), is as wide as the
       // cell lets it be.
       const inCell = /^(block|list-item|flow-root|flex|grid)$/.test(shown) && parent.closest("td, th") !== null;
-      if (/(flex|grid)/.test(outer) || /^inline-(block|flex|grid)$/.test(shown) || inCell) {
+      if (/(flex|grid)/.test(outer) || /^inline-(block|flex|grid)$/.test(shown) || inCell || (blockish(box) && inRowItem(box))) {
         own += edges(box);
         box = parent;
         continue;
@@ -175,19 +213,33 @@ export function brokenWords(doc: Document = document): string[] {
         // In a frame made to scroll sideways the table could have been as wide as its words.
         if (table.closest(".data-table-wrap, .blk-table-wrap, [data-scrolls-sideways]")) return Infinity;
         const tableStyle = view.getComputedStyle(table);
-        // What the other columns need at the least: the longest word of each, over every row, not this row's alone.
-        const columnOf = (cell: Element) =>
-          cell instanceof view.HTMLTableCellElement ? cell.cellIndex : Array.from(cell.parentElement!.children).indexOf(cell);
-        const rows = table instanceof view.HTMLTableElement ? Array.from(table.rows) : [box.parentElement!];
-        const column = columnOf(box);
-        const needs = new Map<number, number>();
+        // What the other columns need at the least: the longest word of each, over every row, not this row's alone. A
+        // column is found as the browser lays the table out: a cell spanning rows takes its columns in the rows below,
+        // and a cell spanning columns shares its room among them, so it is left out of what each needs.
+        const place = new Map<Element, { first: number; across: number }>();
+        const taken = new Map<number, Set<number>>();
         let columns = 0;
-        for (const row of rows) {
-          columns = Math.max(columns, row.children.length);
+        rowsOf(table).forEach((row, at) => {
+          let column = 0;
           for (const cell of Array.from(row.children)) {
-            const index = columnOf(cell);
-            if (index !== column) needs.set(index, Math.max(needs.get(index) ?? 0, leastWidth(cell) + edges(cell)));
+            while (taken.get(at)?.has(column)) column++;
+            const across = Math.max(1, Number(cell.getAttribute("colspan")) || 1);
+            const down = Math.max(1, Number(cell.getAttribute("rowspan")) || 1);
+            place.set(cell, { first: column, across });
+            for (let below = at + 1; below < at + down; below++) {
+              const set = taken.get(below) ?? new Set<number>();
+              for (let spanned = column; spanned < column + across; spanned++) set.add(spanned);
+              taken.set(below, set);
+            }
+            column += across;
           }
+          columns = Math.max(columns, column);
+        });
+        const mine = place.get(box) ?? { first: -1, across: 1 };
+        const needs = new Map<number, number>();
+        for (const [cell, { first, across }] of place) {
+          if (across > 1 || (first >= mine.first && first < mine.first + mine.across)) continue;
+          needs.set(first, Math.max(needs.get(first) ?? 0, leastWidth(cell) + edges(cell)));
         }
         own += edges(box);
         if (tableStyle.borderCollapse === "separate") own += parseFloat(tableStyle.borderSpacing) * (columns + 1);

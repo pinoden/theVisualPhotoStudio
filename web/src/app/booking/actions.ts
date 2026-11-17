@@ -3,7 +3,6 @@
 import { refresh } from "next/cache";
 import { getDb } from "@/db/client";
 import { formatCents } from "@/lib/domain/pricing";
-import { UNSEEN_LINK } from "@/server/email";
 import { cancelBooking, requestRescheduleCode, type Actor } from "@/server/manage";
 import { flushEmailsSoon, manageDeps } from "@/server/runtime";
 import { getCurrentUser } from "@/server/session";
@@ -62,7 +61,7 @@ export async function rescheduleBookingAction(_previous: ManageState, formData: 
     status: "rescheduled",
     code: result.code,
     message: `Your booking was released. Your code is worth ${formatCents(result.valueCents)} and is valid until ${formatInstant(result.expiresAt)}. We also emailed it to you.${
-      result.unseenLink ? ` ${UNSEEN_LINK}` : ""
+      result.unseenNote ? ` ${result.unseenNote}` : ""
     }`,
   };
 }

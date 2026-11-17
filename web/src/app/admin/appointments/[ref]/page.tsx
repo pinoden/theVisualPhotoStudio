@@ -68,6 +68,8 @@ async function AppointmentDetails({
   const day = localDateOf(new Date(appointment.startAt));
   // A payment link needs a card processor. In test mode the pretend one stands in, and says so to the client.
   const cardProcessor = resolvePayments().client.mode;
+  // A link the processor set up now did not make (one of test mode, left after the real keys went in) cannot be paid.
+  const foreignLink = appointment.payLink !== null && appointment.payLink.provider !== (resolvePayments().provider?.name ?? null);
 
   return (
     <AdminFrame
@@ -358,11 +360,13 @@ async function AppointmentDetails({
               <p>
                 A link to pay {formatCents(appointment.payLink.amountCents)} by card was emailed to the client on{" "}
                 {formatInstant(new Date(appointment.payLink.createdAt))} by {appointment.payLink.createdBy}.{" "}
-                {appointment.payments.ended
-                  ? "The booking has ended, and the link is still open: it is withdrawn as soon as the card processor says it was not paid. If the processor cannot say, look the link up in Square, then close it here by hand."
-                  : "It has not been paid yet."}
+                {foreignLink
+                  ? "It was made by another card processor than the one set up now (in test mode, or with other keys), so it cannot be paid, and the site cannot ask about it. Look it up there: an owner then closes it here by hand, and a new one can be emailed."
+                  : appointment.payments.ended
+                    ? "The booking has ended, and the link is still open: it is withdrawn as soon as the card processor says it was not paid. If the processor cannot say, look the link up in Square: an owner then closes it here by hand."
+                    : "It has not been paid yet."}
               </p>
-              {appointment.may.recordPayment && (
+              {appointment.may.recordPayment && !foreignLink && (
                 <>
                   <div className="link-actions">
                     <form action={checkPayLinkAction}>

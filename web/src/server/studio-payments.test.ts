@@ -169,7 +169,7 @@ describe("a booking made in the admin that has ended", () => {
     expect(await cancelBooking(world.db, partPaid.ref, dana, world.manageDeps())).toMatchObject({
       ok: false,
       code: "not_confirmed",
-      message: "This booking is no longer confirmed: it was cancelled or released meanwhile, so nothing more was done. Reload the page to see it as it is now.",
+      message: "This booking was cancelled meanwhile, so nothing more was done. Reload the page to see it as it is now.",
     });
     // A record taken back does not make it owe anything; one of a booking that stands does.
     const [cashOfEnded] = await world.db.select().from(payments).where(eq(payments.bookingId, partPaid.id));
