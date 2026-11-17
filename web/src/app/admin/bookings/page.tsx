@@ -145,6 +145,12 @@ async function Bookings({ searchParams }: Pick<PageProps<"/admin/bookings">, "se
                                 The pet fee was already returned as studio credit, so it is not refunded to the card.
                               </div>
                             )}
+                            {b.studioHeldCents > 0 && (
+                              <div style={{ fontSize: ".75rem", maxWidth: "12rem" }}>
+                                {formatCents(b.studioHeldCents)} was paid at the studio. It cannot be refunded from here: give back what is owed by
+                                hand, then record it on the appointment&apos;s page.
+                              </div>
+                            )}
                             <br />
                             <button type="submit" className="btn btn-dark btn-small" style={{ marginTop: ".4rem" }}>
                               Cancel booking

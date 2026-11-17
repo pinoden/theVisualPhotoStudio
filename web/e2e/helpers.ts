@@ -22,6 +22,16 @@ export function dateAhead(minDays: number, kind: "weekday" | "saturday" = "weekd
   throw new Error("no matching date");
 }
 
+/**
+ * Errors of the development build's own tooling, not of the site: React's
+ * performance timeline sometimes measures a part of a page from before it
+ * started ("'\u200bBookings [Prerender]' cannot have a negative time stamp",
+ * seen when a signed-in client or staff member opens an owner's page). A
+ * production build has no such timeline. The browser tests leave out this one
+ * message; any other error the browser reports fails the test.
+ */
+export const frameworkNoise = (text: string) => /^Failed to execute 'measure' on 'Performance': '.*' cannot have a negative time stamp\.?$/.test(text);
+
 /*
  * After an in-app navigation the framework keeps the previous pages in the
  * document, hidden, so their state survives going back. A plain text or label

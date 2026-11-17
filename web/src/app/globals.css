@@ -2088,12 +2088,17 @@ button { font-family: inherit; }
    broken, on every screen: left alone, it pushes the whole page wider than a phone. Running text only:
    a table keeps its words whole and scrolls inside its own box instead. */
 .page-content :is(p, li, dd, h1, h2, h3, h4, summary, blockquote),
-.addon-row span,
-.price-row span,
 .studio-option-card,
 .notice,
 .flash {
   overflow-wrap: anywhere;
+}
+/* In a row of two sides (a label and its price, "When" and its date), a word is broken only when it is longer than a
+   line by itself. "anywhere" would let either side shrink to a letter's width, and break "When" and "$385" in two;
+   with "break-word" neither side is squeezed below its longest word. */
+.addon-row > span,
+.price-row > * {
+  overflow-wrap: break-word;
 }
 
 @media (max-width: 380px) {

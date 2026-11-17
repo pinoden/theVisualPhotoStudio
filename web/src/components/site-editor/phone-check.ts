@@ -171,20 +171,47 @@ async function inTurns<T, R>(items: T[], at: number, work: (item: T) => Promise<
   return results;
 }
 
+/** What a change would break on phones (`problems`), and what pages already had wrong without it (`already`), in sentences. */
+export interface WebsiteCheck {
+  problems: string[];
+  already: string[];
+}
+
+/** A problem without its numbers: the same problem when a change only moves it a few pixels. */
+const kindOf = (problem: string) => problem.replace(/\d+(\.\d+)?/g, "#");
+
 /**
  * What would be wrong on a phone once this change of the design (`design`)
  * or of the header, menu and footer (`frame`) is published: a sentence for
  * each width and set of pages with the same problems, "At 320px, on the home
  * page and the booking page: ...". The header and the footer are on every
  * page, so their problems are said once, for every page that has them.
+ *
+ * A page with a problem is measured again as visitors have it now: what it
+ * had already is not the change's doing, and does not keep the change from
+ * being published (`already`). Only what the change brings is in `problems`.
  */
-export async function checkWebsiteOnPhones(scope: "design" | "frame", paths: readonly string[]): Promise<string[]> {
+export async function checkWebsiteOnPhones(scope: "design" | "frame", paths: readonly string[]): Promise<WebsiteCheck> {
   const jobs = CHECK_WIDTHS.flatMap((width) => paths.filter((path) => width === CHECK_WIDTHS[0] || ALSO_WIDER.has(path)).map((path) => ({ width, path })));
-  // Three at a time: each is a whole page in a frame of its own.
-  const found = await inTurns(jobs, 3, (job) => {
+  const measure = (job: { width: number; path: string }, as: string) => {
     const name = nameOf(job.path);
-    return checkAt(previewUrl(`${job.path}?${WEBSITE_CHECK_PARAM}=${scope}`), job.width, pageDrawn, name.charAt(0).toUpperCase() + name.slice(1));
+    return checkAt(previewUrl(`${job.path}?${WEBSITE_CHECK_PARAM}=${as}`), job.width, pageDrawn, name.charAt(0).toUpperCase() + name.slice(1));
+  };
+  // Three at a time: each is a whole page in a frame of its own.
+  const found = await inTurns(jobs, 3, (job) => measure(job, scope));
+  const troubled = jobs.map((job, index) => ({ job, index })).filter(({ index }) => found[index].length > 0);
+  const before = await inTurns(troubled, 3, ({ job }) => measure(job, "published"));
+  const brought: string[][] = found.map(() => []);
+  const had: string[][] = found.map(() => []);
+  troubled.forEach(({ index }, at) => {
+    const kinds = new Set(before[at].map(kindOf));
+    for (const problem of found[index]) (kinds.has(kindOf(problem)) ? had : brought)[index].push(problem);
   });
+  return { problems: grouped(jobs, brought), already: grouped(jobs, had) };
+}
+
+/** The problems found on each page, as a sentence for each width and set of pages that have the same ones. */
+function grouped(jobs: { width: number; path: string }[], found: string[][]): string[] {
   const sentences: string[] = [];
   for (const width of CHECK_WIDTHS) {
     const checked = jobs.filter((job) => job.width === width).length;

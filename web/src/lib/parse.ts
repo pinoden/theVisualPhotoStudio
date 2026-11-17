@@ -74,8 +74,9 @@ export function hhmmToMinutes(raw: unknown): number | null {
 
 /** A whole number within [min, max], from a form field. */
 export function intInRange(raw: unknown, min: number, max: number): number | null {
-  // Whatever a number field lets through that is a whole number: "5", "5.0", "1e3", ".5e2" and "0050" too. Never "0x10" or "5.5".
-  if (typeof raw !== "string" || raw.trim().length > 40 || !/^-?(\d+(\.\d*)?|\.\d+)(e[+-]?\d+)?$/i.test(raw.trim())) return null;
+  // Whatever a number field lets through that is a whole number: "5", "5.0", "1e3", ".5e2" and "0050" too, however many
+  // noughts lead it. Never "0x10" or "5.5".
+  if (typeof raw !== "string" || !/^-?(\d+(\.\d*)?|\.\d+)(e[+-]?\d+)?$/i.test(raw.trim())) return null;
   const value = Number(raw.trim());
   return Number.isInteger(value) && value >= min && value <= max ? value : null;
 }

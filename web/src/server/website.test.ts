@@ -136,6 +136,18 @@ describe("publishing", () => {
     expect(versions[0]).toMatchObject({ number: 1, publishedBy: owner.email, publishedAt: later.toISOString(), current: true });
   });
 
+  it("publishes only the draft that was checked: one changed since, here or in another window, waits", async () => {
+    const checked = expectOk(await draft("#123456")).revision;
+    // Saved again after the editor's check, by an undo or in another window.
+    expectOk(await draft("#654321"));
+    const refused = await publishDraft(world.db, owner, DESIGN_DOC, NOW, checked);
+    expect(refused).toMatchObject({ ok: false, message: expect.stringMatching(/^Not published: the draft was changed somewhere else while it was being checked/) });
+    expect(await publishedAccent()).not.toBe("#654321");
+    const current = (await loadForEditing(world.db, owner, DESIGN_DOC))!.revision;
+    expectOk(await publishDraft(world.db, owner, DESIGN_DOC, NOW, current));
+    expect(await publishedAccent()).toBe("#654321");
+  });
+
   it("is refused when there is nothing to publish", async () => {
     const nothing = await publishDraft(world.db, owner, DESIGN_DOC, NOW);
     expect(nothing).toMatchObject({ ok: false });

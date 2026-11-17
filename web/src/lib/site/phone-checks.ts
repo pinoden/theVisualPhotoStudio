@@ -14,6 +14,8 @@
  * So that Playwright can send them into a page, each is complete in itself:
  * it uses nothing of this module or of any other, and reads the document it
  * is given, or the page's own when it is given none.
+ *
+ * `brokenWords` is run by the phone tests only, not yet by the page editor.
  */
 
 /** What is wider than the screen. A box that scrolls sideways on purpose (a wide table inside its own frame) is allowed; the page itself is not. */
@@ -93,6 +95,45 @@ export function tooSmallToRead(doc: Document = document): string[] {
     if (rect.width === 0 || rect.height === 0) continue;
     const size = parseFloat(view.getComputedStyle(el).fontSize);
     if (size < 11) found.push(`"${text.slice(0, 30)}" is ${size}px`);
+  }
+  return [...new Set(found)].slice(0, 6);
+}
+
+/**
+ * Words broken in two that would have fitted on a line: "W/he/n", "$38/5".
+ * A word longer than the room it has may be broken (a web address in a note),
+ * and a word may break at a hyphen or a dash; any other break inside a word
+ * is a layout that squeezed it, such as a row that let one side shrink to a
+ * letter's width. The room a word had is that of the box it is in, or, for a
+ * box in a flex or grid row, of the row: the room the row could have given it.
+ */
+export function brokenWords(doc: Document = document): string[] {
+  const view = doc.defaultView!;
+  const found: string[] = [];
+  const room = (start: Element): number => {
+    let box: Element = start;
+    while (box.parentElement && /^(inline|contents)$/.test(view.getComputedStyle(box).display)) box = box.parentElement;
+    while (box.parentElement && /(flex|grid)/.test(view.getComputedStyle(box.parentElement).display)) box = box.parentElement;
+    const style = view.getComputedStyle(box);
+    return box.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+  };
+  const walker = doc.createTreeWalker(doc.body, 4 /* NodeFilter.SHOW_TEXT */);
+  const range = doc.createRange();
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const text = node as Text;
+    const holder = text.parentElement;
+    if (!holder || holder.closest("script, style, nextjs-portal")) continue;
+    if (view.getComputedStyle(holder).hyphens === "auto") continue; // broken with a hyphen on purpose
+    // A word is what lies between spaces, hyphens and dashes, soft hyphens and zero-width spaces.
+    const words = /[^\s\-\u00ad\u200b\u2010-\u2015]+/g;
+    for (let match = words.exec(text.data); match; match = words.exec(text.data)) {
+      range.setStart(text, match.index);
+      range.setEnd(text, match.index + match[0].length);
+      const rects = Array.from(range.getClientRects()).filter((rect) => rect.width > 0 && rect.height > 0);
+      if (new Set(rects.map((rect) => Math.round(rect.top))).size < 2) continue;
+      const width = rects.reduce((sum, rect) => sum + rect.width, 0);
+      if (width <= room(holder)) found.push(`"${match[0].slice(0, 30)}" is broken in two`);
+    }
   }
   return [...new Set(found)].slice(0, 6);
 }

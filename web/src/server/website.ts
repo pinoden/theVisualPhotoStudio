@@ -219,7 +219,15 @@ export async function saveDraft<T, C>(
 export type PublishResult = { ok: true; version: number } | { ok: false; message: string };
 
 /** Make the draft public, and keep a copy of it as a version. */
-export async function publishDraft<T, C>(db: Db, viewer: AuthUser, spec: DocumentSpec<T, C>, now: Date): Promise<PublishResult> {
+/** What a publish answers when the draft is no longer the one the editor checked (`basedOn`). */
+export const DRAFT_CHANGED = "Not published: the draft was changed somewhere else while it was being checked, so what was checked is not what would be published. Reload the page to see the draft as it is now, then publish again.";
+
+/**
+ * Make the draft what the public sees, and keep a copy as a version.
+ * `basedOn` is the revision of the draft the editor checked on phones: one
+ * changed since, here or in another window, is not published unchecked.
+ */
+export async function publishDraft<T, C>(db: Db, viewer: AuthUser, spec: DocumentSpec<T, C>, now: Date, basedOn?: number): Promise<PublishResult> {
   const settings = await loadSettings(db);
   if (!can(viewer, spec.ability, settings) || !can(viewer, "publishWebsite", settings)) {
     return { ok: false, message: "You cannot publish changes to the website. An owner can." };
@@ -227,6 +235,7 @@ export async function publishDraft<T, C>(db: Db, viewer: AuthUser, spec: Documen
   const context = await contextOf(db, spec);
   return db.transaction(async (tx): Promise<PublishResult> => {
     const row = await rowForUpdate(tx, spec);
+    if (basedOn !== undefined && row.draftRevision !== basedOn) return { ok: false, message: DRAFT_CHANGED };
     if (row.draft == null) return { ok: false, message: "There is nothing to publish: the website already shows this." };
     const content = spec.parse(row.draft, context);
     const [last] = await tx.select({ number: max(siteVersions.number) }).from(siteVersions).where(eq(siteVersions.documentId, row.id));

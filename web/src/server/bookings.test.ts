@@ -501,6 +501,15 @@ describe("bad input is refused", () => {
     });
   }
 
+  it("names a field the customer typed in the words of the screen", async () => {
+    // An address the booking's own rule refuses: the rule every email field follows (src/lib/parse.ts).
+    expect(await book({ customer: { name: "A B", email: "kim..lee@example.com", phone: "5550100100" } })).toMatchObject({
+      ok: false,
+      message: "Please check the email address: it does not look like one.",
+    });
+    expect(await book({ customer: { name: "A B", email: "a@example.com", phone: "" } })).toMatchObject({ ok: false, message: "Please check the phone number." });
+  });
+
   it("a character the database cannot store, which is dropped instead of failing the request", async () => {
     const result = await book({ customer: { name: "Jane\u0000 Smith", email: "jane@example.com", phone: "407-555-0100" }, notes: "Bring\u0000 props\r\nand lights" });
     expect(result).toMatchObject({ ok: true });

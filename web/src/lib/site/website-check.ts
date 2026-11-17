@@ -9,11 +9,13 @@
  *
  * `page` is the page editor's check: its route draws the page's draft by
  * itself, and the design and the header, menu and footer as published.
+ * `published` shows no draft at all: what visitors have now, to tell a
+ * problem a change brings from one a page had before it.
  */
 export const WEBSITE_CHECK_PARAM = "website-check";
 export const WEBSITE_CHECK_HEADER = "x-website-check";
 
-export const CHECK_SCOPES = ["design", "frame", "page"] as const;
+export const CHECK_SCOPES = ["design", "frame", "page", "published"] as const;
 export type CheckScope = (typeof CHECK_SCOPES)[number];
 
 export const isCheckScope = (value: unknown): value is CheckScope => typeof value === "string" && (CHECK_SCOPES as readonly string[]).includes(value);

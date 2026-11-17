@@ -123,10 +123,11 @@ export async function savePageDraftAction(id: string, content: unknown, basedOn:
   return savePageDraft(await getDb(), viewer, String(id), content, { basedOn: Number.isInteger(basedOn) ? basedOn : -1, force: force === true, now: new Date() });
 }
 
-export async function publishPageAction(id: string): Promise<PublishPageResult> {
+/** Publish the page's draft, if it is still the revision the editor checked on phones (`basedOn`). */
+export async function publishPageAction(id: string, basedOn: number): Promise<PublishPageResult> {
   const viewer = await getCurrentUser();
   if (!viewer) return { ok: false, message: NOT_SIGNED_IN };
-  const result = await publishPage(await getDb(), viewer, String(id), new Date());
+  const result = await publishPage(await getDb(), viewer, String(id), new Date(), Number.isInteger(basedOn) ? basedOn : -1);
   if (result.ok) updateTag(WEBSITE_TAG);
   return result;
 }

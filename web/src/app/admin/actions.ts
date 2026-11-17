@@ -278,7 +278,10 @@ export async function ownerCancelAction(formData: FormData): Promise<void> {
   const result = await ownerCancelBooking(await getDb(), text(formData, "ref"), { refundCents }, await manageDeps());
   flushEmailsSoon();
   if (!result.ok) failed(back, result.message);
-  done(back, `Booking cancelled. ${refundNote(result.refund, result.refundCents)}`);
+  const atStudio = result.atStudioCents
+    ? ` ${formatCents(result.atStudioCents)} was paid at the studio: give back what is owed by hand, then record it on the appointment's page.`
+    : "";
+  done(back, `Booking cancelled. ${refundNote(result.refund, result.refundCents)}${atStudio}`);
 }
 
 /** The owner refunded a payment by hand in Square after the site could not: the site stops trying, and counts it as made. */

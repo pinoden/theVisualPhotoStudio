@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { bookings, emailOutbox, payments, promoCodes, settings } from "@/db/schema";
-import { deliverPendingEmails, MAX_EMAIL_ATTEMPTS, queueEmail, resolveEmailTransport, type EmailTransport } from "./email";
+import { deliverPendingEmails, MAX_EMAIL_ATTEMPTS, queueEmail, replaceQueuedEmail, resolveEmailTransport, type EmailTransport } from "./email";
 import { cancelBooking } from "./manage";
 import { MOCK_TOKEN_DECLINED, mockProvider, resolvePayments, type PaymentProvider } from "./payments";
 import { completeVisits, runScheduledTasks } from "./tasks";
@@ -73,6 +73,25 @@ describe("email delivery", () => {
   });
 
   const message = (n: number) => ({ to: `person${n}@example.com`, subject: `Subject ${n}`, body: "Body", kind: "test" });
+
+  it("sends a message as it is when it is taken, put right meanwhile or not", async () => {
+    await queueEmail(world.db, message(1));
+    const second = await queueEmail(world.db, message(2));
+    const bodies: string[] = [];
+    // While the first goes out, the second, already read with the others, is put right.
+    const putRight: EmailTransport = {
+      name: "test",
+      async send(mail) {
+        bodies.push(mail.text);
+        if (bodies.length === 1) expect(await replaceQueuedEmail(world.db, second, { ...message(2), body: "Put right" })).toBe(true);
+        return { ok: true };
+      },
+    };
+    expect(await deliverPendingEmails(world.db, putRight, NOW)).toEqual({ sent: 2, failed: 0 });
+    expect(bodies).toEqual(["Body", "Put right"]);
+    // Once it has left, it is not replaced.
+    expect(await replaceQueuedEmail(world.db, second, { ...message(2), body: "Too late" })).toBe(false);
+  });
 
   it("sends each queued message once", async () => {
     await queueEmail(world.db, message(1));

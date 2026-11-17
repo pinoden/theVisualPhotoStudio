@@ -8,6 +8,7 @@ import {
   confirmAndGetRef,
   dateAhead,
   fillDetails,
+  frameworkNoise,
   latestEmail,
   next,
   onScreen,
@@ -59,7 +60,9 @@ let freeHourCodes: string[] = [];
 let browserProblems: string[] = [];
 test.beforeEach(({ page }) => {
   browserProblems = [];
-  page.on("pageerror", (error) => browserProblems.push(`script error: ${error.message}`));
+  page.on("pageerror", (error) => {
+    if (!frameworkNoise(error.message)) browserProblems.push(`script error: ${error.message}`);
+  });
   page.on("console", (message) => {
     // Pages that deliberately answer "not found" log a failed request; that is expected.
     if (message.type() === "error" && !message.text().startsWith("Failed to load resource")) {
@@ -156,11 +159,16 @@ test("a visitor's message reaches the owner, who can reply straight to the visit
   await expect(page.getByRole("heading", { name: "Contact Us" })).toBeVisible();
   await expect(byText(page, "Mon–Fri: 9:00 AM – 7:00 PM")).toBeVisible();
 
-  // An address the browser accepts and the server does not: nothing typed is lost.
+  // An address the server would refuse is refused by the browser first, by the same rule: the form is not sent.
   await byLabel(page, "Your name").fill("Vera Visitor");
-  await byLabel(page, "Email address").fill("vera@nowhere");
+  const email = byLabel(page, "Email address");
+  await email.fill("vera@nowhere");
   await byLabel(page, "Topic").selectOption({ label: "Photography session" });
   await byLabel(page, "Message").fill("Do you photograph newborns?");
+  await page.getByRole("button", { name: "Send Message" }).click();
+  expect(await email.evaluate((input: HTMLInputElement) => input.validity.patternMismatch)).toBe(true);
+  // Sent all the same, as a browser without that check would: the server refuses it, and nothing typed is lost.
+  await email.evaluate((input: HTMLInputElement) => input.removeAttribute("pattern"));
   await page.getByRole("button", { name: "Send Message" }).click();
   await expect(onScreen(page.locator(".field-error"))).toHaveText("Please enter a valid email address.");
   await expect(byLabel(page, "Your name")).toHaveValue("Vera Visitor");

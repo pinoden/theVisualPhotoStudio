@@ -185,21 +185,30 @@ export function rescheduleBlockText(reason: RescheduleBlock, settings: Pick<Sett
   }
 }
 
-/** What a cancellation leaves to the studio to refund by hand, of what was paid at the studio: the amount after the fee. */
+/**
+ * What a cancellation leaves to the studio to refund by hand, of what was
+ * paid at the studio: the amount after the fee. A fee of 100% keeps it all,
+ * and then there is nothing to ask the studio for.
+ */
 function handRefundSentence(byHandCents: number, settings: Pick<Settings, "refundFeePercent">): string {
   const back = afterFee(byHandCents, settings.refundFeePercent);
+  if (back <= 0) {
+    return `Of what you paid at the studio (${formatCents(byHandCents)}), nothing is refunded: the ${settings.refundFeePercent}% processing fee is not refundable.`;
+  }
   const fee = back < byHandCents ? ` (${formatCents(byHandCents)}, less the ${settings.refundFeePercent}% processing fee)` : "";
   return `Of what you paid at the studio, ${formatCents(back)} is refunded${fee}: that cannot be sent back online, so please contact the studio about it.`;
 }
 
 /**
  * The pet fee coming back as credit: the whole fee, or part of it, when part
- * was refunded to the card already or only part of it was paid.
+ * was refunded to the card already or only part of it was paid. A booking
+ * with no card payment is not told about a card.
  */
 function petCreditSentence(outcome: Extract<CancelOutcome, { allowed: true }>): string {
+  const card = outcome.why === "paid_at_studio" ? "" : " to your card";
   return outcome.petFeeCents === undefined || outcome.creditCents === outcome.petFeeCents
-    ? `The pet fee (${formatCents(outcome.creditCents)}) is not refunded to your card: it is returned as studio credit, and we email you the code.`
-    : `Of the pet fee, ${formatCents(outcome.creditCents)} is returned to you as studio credit, not to your card, and we email you the code.`;
+    ? `The pet fee (${formatCents(outcome.creditCents)}) is not refunded${card}: it is returned as studio credit, and we email you the code.`
+    : `Of the pet fee, ${formatCents(outcome.creditCents)} is returned to you as studio credit, not${card || " refunded"}, and we email you the code.`;
 }
 
 /**
@@ -218,15 +227,19 @@ export function cancelOutcomeText(
   switch (outcome.why) {
     case "refund": {
       // Only the pet fee was on the card, and an administrator has already returned it as credit.
-      if (outcome.refundCents <= 0 && outcome.creditCents <= 0 && outcome.byHandCents <= 0) {
+      if (outcome.refundCents <= 0 && outcome.feeCents <= 0 && outcome.creditCents <= 0 && outcome.byHandCents <= 0) {
         return "Nothing is refunded to your card: what it paid was the pet fee, which was already returned to you as studio credit.";
       }
+      const fee = `The ${settings.refundFeePercent}% processing fee (${formatCents(outcome.feeCents)}) is not refundable.`;
       const card =
-        without.card || outcome.refundCents <= 0
+        without.card || (outcome.refundCents <= 0 && outcome.feeCents <= 0)
           ? ""
-          : outcome.feeCents > 0
-            ? `You will be refunded ${formatCents(outcome.refundCents)} to your card. The ${settings.refundFeePercent}% processing fee (${formatCents(outcome.feeCents)}) is not refundable.`
-            : `You will be refunded ${formatCents(outcome.refundCents)} to your card.`;
+          : outcome.refundCents <= 0
+            ? // A fee of 100%: the card keeps nothing to give back.
+              `Nothing is refunded to your card. ${fee}`
+            : outcome.feeCents > 0
+              ? `You will be refunded ${formatCents(outcome.refundCents)} to your card. ${fee}`
+              : `You will be refunded ${formatCents(outcome.refundCents)} to your card.`;
       // The owner's rule: the pet fee is not refunded; when the pet does not come it becomes studio credit.
       return [card, pet, byHand].filter(Boolean).join(" ");
     }
@@ -330,15 +343,28 @@ export async function processRefund(db: Db, refundId: string, deps: ManageDeps):
     return "succeeded";
   }
 
-  // Tell the owner the first time a refund fails, not on every retry. Only a refund still open becomes failed:
-  // one an owner recorded as made in Square while the processor was answering stays made.
-  const wasPending = row.refund.status === "pending";
+  // Tell the owner the first time a refund fails, not on every retry: only the attempt that turns it from waiting to
+  // failed does, so two attempts at once (the scheduled task beside the cancellation) tell once. Only a refund still
+  // open becomes failed: one an owner recorded as made in Square while the processor was answering stays made.
   const marked = await db
     .update(refunds)
     .set({ status: "failed", error: result.message })
-    .where(and(eq(refunds.id, refundId), inArray(refunds.status, ["pending", "failed"])))
+    .where(and(eq(refunds.id, refundId), eq(refunds.status, "pending")))
     .returning({ id: refunds.id });
-  if (marked.length > 0 && wasPending) {
+  const firstFailure = marked.length > 0;
+  if (!firstFailure) {
+    const still = await db
+      .update(refunds)
+      .set({ error: result.message })
+      .where(and(eq(refunds.id, refundId), eq(refunds.status, "failed")))
+      .returning({ id: refunds.id });
+    // Made meanwhile, by another attempt or by hand in Square: it is not a failure.
+    if (still.length === 0) {
+      const [now] = await db.select({ status: refunds.status }).from(refunds).where(eq(refunds.id, refundId)).limit(1);
+      if (now?.status === "succeeded") return "succeeded";
+    }
+  }
+  if (firstFailure) {
     // The booking's history says so, the first time: whatever happens to the refund later then reads in order.
     await recordEvent(db, {
       bookingId: row.bookingId,
@@ -349,7 +375,7 @@ export async function processRefund(db: Db, refundId: string, deps: ManageDeps):
       note: `The refund of ${formatCents(row.refund.amountCents)} did not go through, and is tried again. The processor's answer: ${asSentence(result.message)}`,
     });
   }
-  if (marked.length > 0 && wasPending && deps.ownerEmail) {
+  if (firstFailure && deps.ownerEmail) {
     await queueEmail(
       db,
       ownerRefundNotice({
@@ -648,7 +674,11 @@ export async function cancelBooking(db: Db, ref: string, actor: Actor, deps: Man
         decision.refundCents > 0 ? `Refund ${formatCents(decision.refundCents)}` : "No refund",
         ...(petCredit ? [`pet fee of ${formatCents(decision.creditCents)} returned as studio credit`] : []),
         ...(decision.byHandCents > 0
-          ? [`${formatCents(afterFee(decision.byHandCents, terms.refundFeePercent))} of what was paid at the studio is to be refunded by hand`]
+          ? [
+              afterFee(decision.byHandCents, terms.refundFeePercent) > 0
+                ? `${formatCents(afterFee(decision.byHandCents, terms.refundFeePercent))} of what was paid at the studio is to be refunded by hand`
+                : `nothing of the ${formatCents(decision.byHandCents)} paid at the studio is refunded (the ${terms.refundFeePercent}% fee)`,
+            ]
           : []),
       ].join("; "),
     });
@@ -662,13 +692,14 @@ export async function cancelBooking(db: Db, ref: string, actor: Actor, deps: Man
       ref: booking.ref,
       when: formatInstant(booking.startAt),
       ...(decision.refundCents > 0 ? { refund: { cents: decision.refundCents, feeCents: decision.feeCents } } : {}),
-      lines: [cancelOutcomeText(decision, terms, { card: true, pet: true }), ...(codeBack ? [CODE_BACK] : [])].filter(Boolean),
+      lines: [cancelOutcomeText(decision, terms, { card: decision.refundCents > 0, pet: true }), ...(codeBack ? [CODE_BACK] : [])].filter(Boolean),
       ...(petCredit
         ? {
             petCredit: {
               code: petCredit.code,
               cents: decision.creditCents,
               feeCents: decision.petFeeCents ?? decision.creditCents,
+              card: decision.why !== "paid_at_studio",
               expires: formatInstant(petCredit.expiresAt),
               bookUrl: `${deps.baseUrl.replace(/\/$/, "")}/book`,
             },
@@ -677,7 +708,7 @@ export async function cancelBooking(db: Db, ref: string, actor: Actor, deps: Man
     };
     const emailId = await queueEmail(tx, noticeEmail(email, "sent"));
     // Money taken at the studio that the terms say goes back: only a person can give it back.
-    if (decision.byHandCents > 0 && deps.ownerEmail) {
+    if (afterFee(decision.byHandCents, terms.refundFeePercent) > 0 && deps.ownerEmail) {
       await queueEmail(
         tx,
         ownerHandRefundNotice({
@@ -793,7 +824,13 @@ export async function requestRescheduleCode(db: Db, ref: string, actor: Actor, d
 // ── Owner actions ────────────────────────────────────────────────────────────
 
 export type OwnerRefundResult =
-  | { ok: true; refund: "sent" | "pending" | "none"; refundCents: number }
+  | {
+      ok: true;
+      refund: "sent" | "pending" | "none";
+      refundCents: number;
+      /** Money taken at the studio for a booking the studio cancelled: the studio gives back by hand what it owes of it. */
+      atStudioCents?: number;
+    }
   | { ok: false; status: number; code: "not_found" | "bad_amount" | "not_cancellable"; message: string };
 
 /**
@@ -841,13 +878,18 @@ export async function ownerCancelBooking(
       .where(eq(bookings.id, booking.id));
     await releaseHolds(tx, booking.id);
     const refundIds = await recordRefunds(tx, booking.id, input.refundCents, `Cancelled by the studio: ${booking.ref}`, false);
+    // Money taken at the studio cannot be sent back from here: the studio gives back by hand what it owes of it.
+    const atStudio = await paidAtStudioCents(tx, booking.id);
     await recordEvent(tx, {
       bookingId: booking.id,
       from: labelOf(booking),
       to: "cancelled",
       actor: BY_STUDIO,
       at: deps.now,
-      note: input.refundCents > 0 ? `Refund ${formatCents(input.refundCents)}` : "No refund",
+      note: [
+        input.refundCents > 0 ? `Refund ${formatCents(input.refundCents)}` : "No refund",
+        ...(atStudio > 0 ? [`${formatCents(atStudio)} paid at the studio is for the studio to give back by hand`] : []),
+      ].join("; "),
     });
     // A visit that has not started was taken from the customer, so the code that paid for it goes back to them.
     // After the start the code has done its work: a later cancellation is the owner settling a refund.
@@ -859,10 +901,14 @@ export async function ownerCancelBooking(
       when: formatInstant(booking.startAt),
       byStudio: true,
       ...(input.refundCents > 0 ? { refund: { cents: input.refundCents, feeCents: 0 } } : {}),
-      lines: [...(codeBack ? [CODE_BACK] : []), "Please contact us with any questions."],
+      lines: [
+        ...(atStudio > 0 ? [`What you paid at the studio (${formatCents(atStudio)}) cannot be sent back online: the studio will be in touch with you about it.`] : []),
+        ...(codeBack ? [CODE_BACK] : []),
+        "Please contact us with any questions.",
+      ],
     };
     const emailId = await queueEmail(tx, noticeEmail(email, "sent"));
-    return { kind: "done" as const, refundIds, bookingId: booking.id, email, emailId };
+    return { kind: "done" as const, refundIds, bookingId: booking.id, email, emailId, atStudio };
   });
 
   if (outcome.kind === "not_found") return { ok: false, status: 404, code: "not_found", message: "Booking not found." };
@@ -876,7 +922,7 @@ export async function ownerCancelBooking(
     if ((await processRefund(db, id, deps)) !== "succeeded") refund = "pending";
   }
   if (refund === "pending") await refundNotSent(db, outcome.emailId, outcome.email);
-  return { ok: true, refund, refundCents: input.refundCents };
+  return { ok: true, refund, refundCents: input.refundCents, ...(outcome.atStudio > 0 ? { atStudioCents: outcome.atStudio } : {}) };
 }
 
 /** A refund without cancelling, e.g. a goodwill partial refund. */

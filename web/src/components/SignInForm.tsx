@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useActionState } from "react";
 import { signInAction, type SignInState } from "@/app/account/actions";
+import { EMAIL_FIELD } from "@/lib/parse";
 
 const START: SignInState = { step: "email", email: "", error: "", notice: "" };
 
@@ -33,7 +34,7 @@ export function SignInForm({ next, devHint }: { next: string; devHint: boolean }
             <input
               id="sign-in-email"
               name="email"
-              type="email"
+              {...EMAIL_FIELD}
               className="form-control"
               autoComplete="email"
               defaultValue={state.email}

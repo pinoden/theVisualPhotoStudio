@@ -4,6 +4,7 @@ import { bookingEvents, bookings, emailOutbox, payments, promoCodes, refunds, se
 import {
   cancelBooking,
   cancelOutcomeText,
+  processRefund,
   getManageChoices,
   getManageOptions,
   netCardPaidCents,
@@ -261,6 +262,24 @@ describe("when a refund cannot be sent", () => {
 
     expect(await retryOpenRefunds(world.db, world.manageDeps())).toEqual({ succeeded: 1, failed: 0 });
     expect((await world.db.select().from(refunds))[0].status).toBe("succeeded");
+  });
+});
+
+describe("a refund tried twice at once", () => {
+  it("that fails is told once: one line in the history, one alert to the owner", async () => {
+    const booked = expectOk(await world.book({ date: FAR }));
+    // Recorded with no processor to send it to: it waits, as one does between the cancellation and its sending.
+    expectOk(await ownerRefund(world.db, booked.ref, { amountCents: 5000, reason: "" }, world.manageDeps({ payments: null })));
+    const [refund] = await world.db.select().from(refunds);
+    expect(refund.status).toBe("pending");
+    world.failRefunds = "The card account is closed";
+    // The request that recorded it, and the scheduled task beside it.
+    const deps = world.manageDeps();
+    expect(await Promise.all([processRefund(world.db, refund.id, deps), processRefund(world.db, refund.id, deps)])).toEqual(["failed", "failed"]);
+    const bookingId = (await bookingRow(booked.ref)).id;
+    const notes = (await world.db.select().from(bookingEvents).where(eq(bookingEvents.bookingId, bookingId))).map((event) => event.note);
+    expect(notes.filter((note) => note.startsWith("The refund of $50 did not go through"))).toHaveLength(1);
+    expect(await world.emails("owner_refund_failed")).toHaveLength(1);
   });
 });
 

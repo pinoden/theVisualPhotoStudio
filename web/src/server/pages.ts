@@ -15,7 +15,7 @@ import { collectionShows, loadCollection } from "./collections";
 import { loadPictures } from "./media";
 import { loadSettings } from "./settings";
 import { localDateOf } from "./tz";
-import { FRAME_DOC, loadBusiness, loadDraftOrPublished, loadPublished, type VersionSummary } from "./website";
+import { DRAFT_CHANGED, FRAME_DOC, loadBusiness, loadDraftOrPublished, loadPublished, type VersionSummary } from "./website";
 
 /**
  * The website's pages: the ones the owners make and edit, each a list of
@@ -425,13 +425,16 @@ export type PublishPageResult = { ok: true; version: number; path: string } | { 
 /**
  * Put the page on the website as its draft has it, and keep a copy as a
  * version. A page whose pictures do not all say what they show is not
- * published: the answer names them.
+ * published: the answer names them. `basedOn` is the revision of the draft
+ * the editor checked on phones, as for `publishDraft`.
  */
-export async function publishPage(db: Db, viewer: AuthUser, id: string, now: Date): Promise<PublishPageResult> {
+export async function publishPage(db: Db, viewer: AuthUser, id: string, now: Date, basedOn?: number): Promise<PublishPageResult> {
   if (!(await abilities(db, viewer)).publish) return { ok: false, message: CANNOT_PUBLISH };
   return db.transaction(async (tx): Promise<PublishPageResult> => {
     const row = await pageRow(tx, id, true);
     if (!row) return { ok: false, message: NOT_FOUND };
+    // The editor checked the draft at this revision on phones: one changed since is not published unchecked.
+    if (basedOn !== undefined && row.draftRevision !== basedOn) return { ok: false, message: DRAFT_CHANGED };
     if (row.draft == null) return { ok: false, message: "There is nothing to publish: the website already shows this page as it is here." };
     const content = parsePage(row.draft);
     const site = await pageSite(tx, content, now);
@@ -580,7 +583,12 @@ export async function savePageSettings(
       // published), and what led to the old address leads on to the new, however it was written.
       if (row.published != null) await tx.delete(siteRedirects).where(eq(siteRedirects.fromPath, to));
       for (const redirect of await tx.select().from(siteRedirects)) {
-        if (pathOf(redirect.toPath, own) === from) await tx.update(siteRedirects).set({ toPath: to }).where(eq(siteRedirects.fromPath, redirect.fromPath));
+        if (pathOf(redirect.toPath, own) !== from) continue;
+        // To the same place on the page: what followed the path (a #section, a ?query) stays.
+        await tx
+          .update(siteRedirects)
+          .set({ toPath: `${to}${afterPath(redirect.toPath)}` })
+          .where(eq(siteRedirects.fromPath, redirect.fromPath));
       }
       if (row.published != null) {
         await tx.insert(siteRedirects).values({ fromPath: from, toPath: to }).onConflictDoUpdate({ target: siteRedirects.fromPath, set: { toPath: to } });
@@ -762,6 +770,12 @@ function pathOf(href: string, own: readonly string[]): string | null {
     if (ours) path = url.pathname;
   }
   return path === null ? null : normalPath(path);
+}
+
+/** What follows a link's path: its "?query" and "#section", or nothing. */
+function afterPath(href: string): string {
+  const at = href.search(/[?#]/);
+  return at === -1 ? "" : href.slice(at);
 }
 
 /**

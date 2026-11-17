@@ -74,7 +74,7 @@ function PageEditorBody({ initial, versions, collections, links, fontClasses, no
   const actions = useMemo<DraftActions<PageContent>>(
     () => ({
       save: (content, basedOn, force) => savePageDraftAction(initial.id, content, basedOn, force),
-      publish: () => publishPageAction(initial.id),
+      publish: (basedOn) => publishPageAction(initial.id, basedOn),
       discard: () => discardPageDraftAction(initial.id),
       restore: (versionId) => restorePageVersionAction(initial.id, versionId),
       // Requirement 24's guard rails: the draft, as visitors would get it, measured at phone widths before it is published.
@@ -82,7 +82,7 @@ function PageEditorBody({ initial, versions, collections, links, fontClasses, no
         busy: "Checking the page at the width of a phone…",
         subject: "this page",
         // Drawn with the design and the header, menu and footer as published, whatever drafts of them are waiting.
-        run: () => checkOnPhones(`/admin/website/pages/${encodeURIComponent(initial.id)}/check?${WEBSITE_CHECK_PARAM}=page`),
+        run: async () => ({ problems: await checkOnPhones(`/admin/website/pages/${encodeURIComponent(initial.id)}/check?${WEBSITE_CHECK_PARAM}=page`) }),
       },
     }),
     [initial.id],

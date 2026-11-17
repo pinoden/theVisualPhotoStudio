@@ -90,6 +90,7 @@ describe("times and numbers typed into a form", () => {
     expect(intInRange(".5e2", 0, 100)).toBe(50);
     expect(intInRange("0000000050", 0, 100)).toBe(50);
     expect(intInRange("1e400", 0, 100)).toBeNull();
+    expect(intInRange(`${"0".repeat(41)}50`, 0, 100)).toBe(50);
     expect(intInRange("5.", 0, 100)).toBe(5);
   });
 });

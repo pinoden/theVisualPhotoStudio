@@ -282,6 +282,26 @@ describe("a page's name and address", () => {
     expect(await findRedirect(world.db, "/vouchers")).toBe("/gift-cards");
   });
 
+  it("publish only the draft that was checked on phones", async () => {
+    const id = await make();
+    const checked = (await state(id)).revision;
+    expectOk(await draft(id, heading("Changed after the check")));
+    expect(await publishPage(world.db, owner, id, NOW, checked)).toMatchObject({ ok: false, message: expect.stringMatching(/changed somewhere else/) });
+    expect(await published("gift-cards")).toBeNull();
+    expectOk(await publishPage(world.db, owner, id, NOW, (await state(id)).revision));
+  });
+
+  it("take the place on the page with them: an old address's #section and ?query stay when its page moves", async () => {
+    const id = await make("Rates Four", "four-rates");
+    expectOk(await publishPage(world.db, owner, id, NOW));
+    expectOk(await addRedirect(world.db, owner, { from: "/four-weekend", to: "/four-rates#weekend" }));
+    expectOk(await addRedirect(world.db, owner, { from: "/four-flyer", to: "/four-rates?utm_source=flyer" }));
+    expectOk(await savePageSettings(world.db, owner, id, { title: "Rates Four", slug: "four-prices" }));
+    expect(await findRedirect(world.db, "/four-weekend")).toBe("/four-prices#weekend");
+    expect(await findRedirect(world.db, "/four-flyer")).toBe("/four-prices?utm_source=flyer");
+    expect(await findRedirect(world.db, "/four-rates")).toBe("/four-prices");
+  });
+
   it("leave no redirect behind for a page nobody could have visited", async () => {
     const id = await make();
     expectOk(await savePageSettings(world.db, owner, id, { title: "Gift Cards", slug: "vouchers" }));

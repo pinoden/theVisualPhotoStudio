@@ -130,10 +130,18 @@ function fail<T extends string>(status: number, code: T, message: string) {
   return { ok: false as const, status, code, message };
 }
 
+/** The fields a customer types, by the names the screen gives them. */
+const FIELD_WORDS: Record<string, string> = {
+  "customer.email": "Please check the email address: it does not look like one.",
+  "customer.name": "Please check your name.",
+  "customer.phone": "Please check the phone number.",
+  "customer.notes": "Please make the notes shorter.",
+};
+
 function firstIssue(error: z.ZodError): string {
   const issue = error.issues[0];
   const field = issue?.path.join(".") || "request";
-  return `Please check ${field}: ${issue?.message ?? "invalid value"}.`;
+  return FIELD_WORDS[field] ?? `Please check ${field}: ${issue?.message ?? "invalid value"}.`;
 }
 
 /** Raised inside the booking transaction when the code was spent by another request. */

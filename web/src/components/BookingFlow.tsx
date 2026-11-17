@@ -30,6 +30,7 @@ import {
   studioToday,
   type DayType,
 } from "@/lib/domain/time";
+import { EMAIL_FIELD, EMAIL_RULE } from "@/lib/parse";
 import { count, hoursInWords } from "@/lib/words";
 import type { DayAvailability } from "@/server/availability";
 import type { Catalog } from "@/server/catalog";
@@ -432,7 +433,8 @@ export function BookingFlow({
         return start === null ? "Please select a time." : "";
       case "details":
         if (name.trim().length < 2) return "Please enter your name.";
-        if (!/^\S+@\S+\.\S+$/.test(email.trim())) return "Please enter a valid email address.";
+        // The booking's own rule (src/lib/parse.ts): an address taken here is never refused at "Confirm & pay".
+        if (!EMAIL_RULE.test(email.trim())) return "Please enter a valid email address.";
         if (phone.trim().length < 7) return "Please enter your phone number.";
         if (!terms) return "Please agree to the studio policies to continue.";
         return "";
@@ -909,7 +911,7 @@ export function BookingFlow({
               </label>
               <input
                 id="customer-email"
-                type="email"
+                {...EMAIL_FIELD}
                 className="form-control"
                 autoComplete="email"
                 value={email}

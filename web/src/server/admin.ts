@@ -303,6 +303,8 @@ export interface AdminBooking extends BookingView {
   cardHeldCents: number;
   /** What the studio can still send back to the card: what it holds, less a pet fee already returned as studio credit. */
   refundableCents: number;
+  /** Money taken at the studio and not given back: the site cannot send it anywhere, the studio gives it back by hand. */
+  studioHeldCents: number;
   refundProblem: boolean;
 }
 
@@ -347,6 +349,13 @@ export async function listBookings(
     .where(and(inArray(payments.bookingId, ids), ne(payments.provider, MANUAL_PROVIDER)))
     .groupBy(payments.bookingId, refunds.status);
 
+  // Money taken at the studio, less what the studio gave back by hand.
+  const atStudio = await db
+    .select({ bookingId: payments.bookingId, cents: sql<number>`coalesce(sum(${payments.amountCents} - ${payments.refundedCents}), 0)::int` })
+    .from(payments)
+    .where(and(inArray(payments.bookingId, ids), eq(payments.status, "succeeded"), eq(payments.provider, MANUAL_PROVIDER)))
+    .groupBy(payments.bookingId);
+
   // The pet fees already returned as studio credit (see src/server/pet-fee.ts): not to be refunded to the card as well.
   const petReturned = await db
     .select({ bookingId: bookingAddons.bookingId, cents: sql<number>`coalesce(sum(${bookingAddons.unitCents} * ${bookingAddons.quantity}), 0)::int` })
@@ -372,6 +381,7 @@ export async function listBookings(
       notes: rows[i].notes,
       cardHeldCents,
       refundableCents: Math.max(0, cardHeldCents - asCredit),
+      studioHeldCents: atStudio.find((p) => p.bookingId === view.id)?.cents ?? 0,
       refundProblem: refundRows.some((b) => b.status === "failed"),
     };
   });

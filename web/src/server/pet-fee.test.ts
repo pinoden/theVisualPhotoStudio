@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-import { addons, bookingAddons, bookings, promoCodes, refunds } from "@/db/schema";
+import { addons, bookingAddons, bookings, promoCodes, refunds, settings } from "@/db/schema";
 import { createAdminBooking, getAppointment } from "./appointments";
 import type { AuthUser } from "./auth";
 import { listBookings } from "./admin";
@@ -95,8 +95,9 @@ describe("cancelling a booking that has a pet fee", () => {
     const [mail] = await world.emails("booking_cancelled");
     expect(mail.body).toContain("Of the pet fee, $18 is returned to you as studio credit, not to a card:");
     expect(mail.body).not.toContain("The pet fee of $18");
-    // Said once, with its code.
+    // Said once, with its code, after one empty line.
     expect(mail.body.split("Of the pet fee").length).toBe(2);
+    expect(mail.body).not.toContain("\n\n\n");
   });
 
   it("paid at the studio, in time: the rest is to be refunded by hand, and the pet fee comes back as studio credit", async () => {
@@ -113,7 +114,8 @@ describe("cancelling a booking that has a pet fee", () => {
     const result = expectOk(await cancelBooking(world.db, made.ref, { kind: "customer", email: dana.email }, world.manageDeps()));
     expect(result).toMatchObject({ refundCents: 0, creditCents: 4000, refund: "none" });
     expect(result.message).toBe(
-      "Of what you paid at the studio, $74.10 is refunded ($78, less the 5% processing fee): that cannot be sent back online, so please contact the studio about it. The pet fee ($40) is not refunded to your card: it is returned as studio credit, and we email you the code.",
+      // Nothing was paid by card, so nothing is said of a card.
+      "Of what you paid at the studio, $74.10 is refunded ($78, less the 5% processing fee): that cannot be sent back online, so please contact the studio about it. The pet fee ($40) is not refunded: it is returned as studio credit, and we email you the code.",
     );
     expect((await codes()).filter((code) => code.source === "pet_fee")).toMatchObject([{ value: 4000, email: dana.email }]);
     // The owner is asked to give back the $78 of studio, not the pet fee.
@@ -129,6 +131,64 @@ describe("cancelling a booking that has a pet fee", () => {
     const [mail] = await world.emails("booking_cancelled");
     expect(mail.body.split("pet fee").length).toBe(2);
     expect(mail.body).toContain("Of what you paid at the studio, $74.10 is refunded ($78, less the 5% processing fee)");
+    expect(mail.body).toContain("The pet fee of $40 is not refunded. It is returned to you as studio credit:");
+    expect(mail.body).not.toContain("card");
+  });
+
+  it("with a fee of 100%: says the fee keeps the money, and asks the owner for nothing", async () => {
+    await world.db.insert(settings).values({ key: "refundFeePercent", value: 100 });
+    // By card, no pet fee: the fee keeps it all.
+    const card = expectOk(await world.book({ date: FAR }));
+    const byCard = expectOk(await cancelBooking(world.db, card.ref, byToken(card.manageToken), world.manageDeps()));
+    expect(byCard).toMatchObject({ refundCents: 0, feeCents: 17600, refund: "none" });
+    expect(byCard.message).toBe("Nothing is refunded to your card. The 100% processing fee ($176) is not refundable.");
+    expect((await world.emails("booking_cancelled"))[0].body).toContain("Nothing is refunded to your card. The 100% processing fee ($176) is not refundable.");
+    // By card, with the pet fee: the fee keeps the rest, and the pet fee comes back as credit.
+    const pet = expectOk(await withPet({ date: FAR, startMinute: h(14) }));
+    const withFee = expectOk(await cancelBooking(world.db, pet.ref, byToken(pet.manageToken), world.manageDeps()));
+    expect(withFee.message).toBe(
+      "Nothing is refunded to your card. The 100% processing fee ($78) is not refundable. The pet fee ($40) is not refunded to your card: it is returned as studio credit, and we email you the code.",
+    );
+    // Paid at the studio: nothing to give back by hand, and the owner is not asked to.
+    const dana = { name: "Dana Diaz", email: "dana@example.com", phone: "407-555-0133" };
+    const made = expectOk(
+      await createAdminBooking(
+        world.db,
+        owner,
+        { studioIds: [world.ids.blanche], date: FAR, startMinute: h(10), durationMinutes: 60, addons: [], customer: dana },
+        { now: NOW, baseUrl: BASE_URL },
+      ),
+    );
+    expectOk(await recordStudioPayment(world.db, owner, made.ref, { amountCents: 8800, method: "cash", note: "" }, NOW));
+    const atStudio = expectOk(await cancelBooking(world.db, made.ref, { kind: "customer", email: dana.email }, world.manageDeps()));
+    expect(atStudio.message).toBe("Of what you paid at the studio ($88), nothing is refunded: the 100% processing fee is not refundable.");
+    expect(await world.emails("owner_hand_refund")).toHaveLength(0);
+    expect((await getAppointment(world.db, owner, made.ref, NOW))!.history.at(-1)?.note).toBe(
+      "No refund; nothing of the $88 paid at the studio is refunded (the 100% fee)",
+    );
+  });
+
+  it("cancelled by the studio after it was paid at the studio: the owner and the client are told about that money", async () => {
+    const dana = { name: "Dana Diaz", email: "dana@example.com", phone: "407-555-0133" };
+    const made = expectOk(
+      await createAdminBooking(
+        world.db,
+        owner,
+        { studioIds: [world.ids.dayglow], date: FAR, startMinute: h(10), durationMinutes: 60, addons: [{ addonId: petFeeId, quantity: 1 }], customer: dana },
+        { now: NOW, baseUrl: BASE_URL },
+      ),
+    );
+    expectOk(await recordStudioPayment(world.db, owner, made.ref, { amountCents: 11800, method: "cash", note: "" }, NOW));
+    const [listed] = await listBookings(world.db, { from: FAR, to: FAR });
+    expect(listed).toMatchObject({ ref: made.ref, studioHeldCents: 11800, refundableCents: 0 });
+    const result = expectOk(await ownerCancelBooking(world.db, made.ref, { refundCents: 0 }, world.manageDeps()));
+    expect(result).toMatchObject({ refund: "none", atStudioCents: 11800 });
+    expect((await getAppointment(world.db, owner, made.ref, NOW))!.history.at(-1)?.note).toBe(
+      "No refund; $118 paid at the studio is for the studio to give back by hand",
+    );
+    const [mail] = await world.emails("booking_cancelled");
+    expect(mail.body).toContain("has been cancelled by the studio.");
+    expect(mail.body).toContain("What you paid at the studio ($118) cannot be sent back online: the studio will be in touch with you about it.");
   });
 
   it("too late to be refunded: nothing comes back by itself, the pet fee included", async () => {

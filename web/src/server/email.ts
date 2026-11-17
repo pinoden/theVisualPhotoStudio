@@ -145,19 +145,20 @@ export async function deliverPendingEmails(
   let sent = 0;
   let failed = 0;
   for (const row of pending) {
-    // Claim the row by bumping its attempt count; whoever loses the race skips it.
-    const claimed = await db
+    // Claim the row by bumping its attempt count; whoever loses the race skips it. What is sent is the message as it is
+    // once claimed: one put right meanwhile (`replaceQueuedEmail`) goes out put right.
+    const [claimed] = await db
       .update(emailOutbox)
       .set({ attempts: sql`${emailOutbox.attempts} + 1` })
       .where(and(eq(emailOutbox.id, row.id), isNull(emailOutbox.sentAt), eq(emailOutbox.attempts, row.attempts)))
-      .returning({ id: emailOutbox.id });
-    if (claimed.length === 0) continue;
+      .returning({ toEmail: emailOutbox.toEmail, subject: emailOutbox.subject, body: emailOutbox.body, replyTo: emailOutbox.replyTo });
+    if (!claimed) continue;
 
     const result = await transport.send({
-      to: row.toEmail,
-      subject: row.subject,
-      text: row.body,
-      ...(row.replyTo ? { replyTo: row.replyTo } : {}),
+      to: claimed.toEmail,
+      subject: claimed.subject,
+      text: claimed.body,
+      ...(claimed.replyTo ? { replyTo: claimed.replyTo } : {}),
     });
     if (result.ok) {
       await db.update(emailOutbox).set({ sentAt: now, error: null }).where(eq(emailOutbox.id, row.id));
@@ -316,16 +317,21 @@ export function cancellationEmail(input: {
   refund?: { cents: number; feeCents: number; state: RefundState };
   /** The rest of what the cancellation does, or why nothing is refunded: a sentence each. */
   lines: string[];
-  /** The pet fee, returned as a code for studio credit and not to the card: `cents` of a fee of `feeCents`. */
-  petCredit?: { code: string; cents: number; feeCents: number; expires: string; bookUrl: string };
+  /**
+   * The pet fee, returned as a code for studio credit and not to the card:
+   * `cents` of a fee of `feeCents`. `card` is false for a booking that no
+   * card paid, which is not told about a card.
+   */
+  petCredit?: { code: string; cents: number; feeCents: number; card?: boolean; expires: string; bookUrl: string };
 }): QueuedEmail {
   const credit = input.petCredit;
+  const notBack = credit?.card === false ? "not refunded" : "not refunded to a card";
   const creditLines = credit
     ? [
         "",
         credit.cents === credit.feeCents
-          ? `The pet fee of ${money(credit.feeCents)} is not refunded to a card. It is returned to you as studio credit:`
-          : `Of the pet fee, ${money(credit.cents)} is returned to you as studio credit, not to a card:`,
+          ? `The pet fee of ${money(credit.feeCents)} is ${notBack}. It is returned to you as studio credit:`
+          : `Of the pet fee, ${money(credit.cents)} is returned to you as studio credit, ${credit.card === false ? "not refunded" : "not to a card"}:`,
         "",
         `Code: ${credit.code}`,
         `Valid until: ${credit.expires}`,
@@ -333,6 +339,7 @@ export function cancellationEmail(input: {
         `Book at ${credit.bookUrl} and enter the code at checkout, with this email address. What you do not spend stays on the code.`,
       ]
     : [];
+  const outcome = [...(input.refund ? [refundSentence(input.refund)] : []), ...input.lines];
   return {
     to: input.to,
     kind: "booking_cancelled",
@@ -341,9 +348,8 @@ export function cancellationEmail(input: {
       `Hi ${input.name},`,
       "",
       `Your booking ${input.ref} on ${input.when} has been cancelled${input.byStudio ? " by the studio" : ""}.`,
-      "",
-      ...(input.refund ? [refundSentence(input.refund)] : []),
-      ...input.lines,
+      // One empty line between parts, also when the cancellation says nothing but the pet fee's credit.
+      ...(outcome.length > 0 ? ["", ...outcome] : []),
       ...creditLines,
       "",
       SIGN_OFF,

@@ -47,11 +47,15 @@ export async function saveDraftAction(kind: DocumentKind, content: unknown, base
   });
 }
 
-/** Make the draft public. The cached pages are refreshed, so visitors see it at their next page. */
-export async function publishAction(kind: DocumentKind): Promise<PublishResult> {
+/**
+ * Make the draft public, if it is still the revision the editor checked
+ * (`basedOn`). The cached pages are refreshed, so visitors see it at their
+ * next page.
+ */
+export async function publishAction(kind: DocumentKind, basedOn: number): Promise<PublishResult> {
   const [user, spec] = [await getCurrentUser(), specOf(kind)];
   if (!user || !spec) return { ok: false, message: NOT_ALLOWED };
-  const result = await publishDraft(await getDb(), user, spec, new Date());
+  const result = await publishDraft(await getDb(), user, spec, new Date(), Number.isInteger(basedOn) ? basedOn : -1);
   if (result.ok) updateTag(WEBSITE_TAG);
   return result;
 }

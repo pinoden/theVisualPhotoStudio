@@ -26,6 +26,8 @@ export async function signInAction(previous: SignInState, formData: FormData): P
     if (!result.ok) {
       return {
         ...previous,
+        // What was typed comes back in the field, to be put right.
+        email: String(formData.get("email") ?? "").trim().slice(0, 200),
         notice: "",
         error:
           result.code === "too_many"

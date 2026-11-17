@@ -1,6 +1,6 @@
 import { expect, test, type Browser, type Locator, type Page } from "@playwright/test";
 import sharp from "sharp";
-import { accessibilityProblems, byLabel, byText, onScreen, shot, signIn } from "./helpers";
+import { accessibilityProblems, byLabel, byText, frameworkNoise, onScreen, shot, signIn } from "./helpers";
 
 /**
  * The website's editor (the owner's requirements 21, 25, 26 and 27, and the
@@ -22,7 +22,9 @@ const MANAGER = "wes.e2e@studio.test";
 
 let browserProblems: string[] = [];
 const watch = (page: Page) => {
-  page.on("pageerror", (error) => browserProblems.push(`script error: ${error.message}`));
+  page.on("pageerror", (error) => {
+    if (!frameworkNoise(error.message)) browserProblems.push(`script error: ${error.message}`);
+  });
   page.on("console", (message) => {
     // Pages that deliberately answer "not found" log a failed request; that is expected.
     if (message.type() === "error" && !message.text().startsWith("Failed to load resource")) {
@@ -940,9 +942,19 @@ test("a page that would be wider than a phone is not published, and is once it f
   await page.getByRole("combobox", { name: "On a phone" }).selectOption({ label: "One under the other" });
   await expect(canvas.locator(".blk-columns")).toHaveAttribute("data-phone", "stack");
   await expect(byText(page, /Draft saved at/)).toBeVisible();
+  // While the check runs (held back here, as on a slow connection), the editor's undo key, which works on the whole
+  // document, changes nothing: what is published is what was checked.
+  await page.route(/\/admin\/website\/pages\/[^/]+\/check/, async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 3_000));
+    await route.fallback();
+  });
   await page.getByRole("button", { name: "Publish", exact: true }).click();
+  await expect(byText(page, "Checking the page at the width of a phone…")).toBeVisible();
+  await page.keyboard.press("ControlOrMeta+z");
   await published(page);
+  await page.unrouteAll({ behavior: "ignoreErrors" });
   expect((await guest.goto(path))?.status()).toBe(200);
+  await expect(guest.locator(".blk-columns")).toHaveAttribute("data-phone", "stack");
   await guest.context().close();
 });
 

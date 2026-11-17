@@ -7,6 +7,7 @@ import {
   confirmAndGetRef,
   dateAhead,
   fillDetails,
+  frameworkNoise,
   latestEmail,
   next,
   onScreen,
@@ -15,7 +16,12 @@ import {
   signIn,
   totalRow,
 } from "./helpers";
-import { hardToTouch as hardToTouchIn, tooSmallToRead as tooSmallToReadIn, widerThanScreen as widerThanScreenIn } from "../src/lib/site/phone-checks";
+import {
+  brokenWords as brokenWordsIn,
+  hardToTouch as hardToTouchIn,
+  tooSmallToRead as tooSmallToReadIn,
+  widerThanScreen as widerThanScreenIn,
+} from "../src/lib/site/phone-checks";
 
 /**
  * The owner's requirement 13: the whole site on a phone. Runs after
@@ -45,7 +51,9 @@ const mia = { name: "Mia Mobile", email: "mia.mobile@example.com", phone: "407-5
 let browserProblems: string[] = [];
 test.beforeEach(({ page }) => {
   browserProblems = [];
-  page.on("pageerror", (error) => browserProblems.push(`script error: ${error.message}`));
+  page.on("pageerror", (error) => {
+    if (!frameworkNoise(error.message)) browserProblems.push(`script error: ${error.message}`);
+  });
   page.on("console", (message) => {
     if (message.type() === "error" && !message.text().startsWith("Failed to load resource")) {
       browserProblems.push(`console error: ${message.text().slice(0, 400)}`);
@@ -61,9 +69,12 @@ test.afterEach(() => {
 const widerThanScreen = (page: Page) => page.evaluate(widerThanScreenIn as () => string[]);
 const hardToTouch = (page: Page) => page.evaluate(hardToTouchIn as () => string[]);
 const tooSmallToRead = (page: Page) => page.evaluate(tooSmallToReadIn as () => string[]);
+const brokenWords = (page: Page) => page.evaluate(brokenWordsIn as () => string[]);
 
+/** Nothing wider than the screen, and no word broken in two that would have fitted on its line. */
 async function expectFits(page: Page, where: string): Promise<void> {
   expect(await widerThanScreen(page), `${where}: wider than the screen`).toEqual([]);
+  expect(await brokenWords(page), `${where}: words broken in two`).toEqual([]);
 }
 
 test("no public page is wider than the screen, and its text can be read, on any phone", async ({ page }) => {
@@ -139,6 +150,30 @@ for (const [index, size] of BOOKING_SIZES.entries()) {
     await expect(onScreen(page.locator(".price-row", { hasText: "Studio Paris" }))).toBeVisible();
   });
 }
+
+test("the booking summary keeps its words and amounts whole on the smallest phone, however long it is", async ({ page }) => {
+  // Three studios for the longest time they share, with every add-on: the longest summary the booking screen draws.
+  await page.setViewportSize({ width: 320, height: 568 });
+  await page.goto("/book");
+  for (const studio of ["Studio Blanche", "Studio Dayglow", "Studio Paris"]) await pickStudio(page, studio);
+  await next(page);
+  await byLabel(page, "Date").fill(dateAhead(150));
+  await page.getByRole("button", { name: "5 hr", exact: true }).click();
+  await next(page);
+  await page.getByRole("button", { name: "9:00 AM", exact: true }).click();
+  await next(page);
+  await fillDetails(page, mia);
+  // Every add-on offered, whatever the tests before have made of them (site.spec.ts renames the pet fee).
+  const addons = onScreen(page.locator("label.addon-row input[type=checkbox]"));
+  await expect(addons.first()).toBeVisible();
+  for (const addon of await addons.all()) await addon.check();
+  await expectFits(page, "the details step with every add-on");
+  await agreeToPolicies(page);
+  await next(page);
+  await expect(totalRow(page)).toBeVisible();
+  await expectFits(page, "the payment step of three studios with every add-on");
+  await shot(page, "m-320-long-summary");
+});
 
 test("a photographer can be booked on a phone", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 667 });
@@ -309,7 +344,9 @@ test("the admin fits a phone: the calendar in its three views, an appointment, a
   expect(linkMail.subject).toMatch(/^Pay for your booking VS-/);
   const payPath = new URL(/https?:\/\/\S+\/pay\/[0-9a-f-]{36}/.exec(linkMail.body)![0]).pathname;
   const client = await page.context().newPage();
-  client.on("pageerror", (error) => browserProblems.push(`script error: ${error.message}`));
+  client.on("pageerror", (error) => {
+    if (!frameworkNoise(error.message)) browserProblems.push(`script error: ${error.message}`);
+  });
   await client.setViewportSize({ width: 390, height: 844 });
   await client.goto(payPath);
   await expect(client.getByRole("heading", { name: "Pay for Your Booking" })).toBeVisible();

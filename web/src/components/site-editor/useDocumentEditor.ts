@@ -60,20 +60,23 @@ export type SaveOutcome =
 /** What an editor asks of the server. Each answers with a result and never redirects. */
 export interface DraftActions<T> {
   save(content: T, basedOn: number, force: boolean): Promise<SaveOutcome>;
-  publish(): Promise<Outcome>;
+  /** Publish the draft, if it is still revision `basedOn`: the one that was checked. */
+  publish(basedOn: number): Promise<Outcome>;
   discard(): Promise<Outcome>;
   restore(versionId: string): Promise<Outcome>;
   /**
    * Run after the draft is saved and before it is published: what would be
-   * wrong with it on the website, in sentences. Nothing is published while
-   * anything is. The phone checks of phone-check.ts.
+   * wrong with it on the website, in sentences (`problems`), and what was
+   * wrong before it and is not its doing (`already`, said once it is
+   * published). Nothing is published while there are problems. The phone
+   * checks of phone-check.ts.
    */
   check?: {
     /** What the editor says while the check runs. */
     busy: string;
     /** What would be hard to use on a phone: "this page", "the website with this design". */
     subject: string;
-    run(): Promise<string[]>;
+    run(): Promise<{ problems: string[]; already?: string[] }>;
   };
 }
 
@@ -100,7 +103,7 @@ export function useDocumentEditor<T>(kind: DocumentKind, initial: DraftStart<T>,
     initial,
     {
       save: (content, basedOn, force) => saveDraftAction(kind, content, basedOn, force),
-      publish: () => publishAction(kind),
+      publish: (basedOn) => publishAction(kind, basedOn),
       discard: () => discardAction(kind),
       restore: (versionId) => restoreVersionAction(kind, versionId),
       check: {
@@ -126,6 +129,9 @@ export function useDocumentEditor<T>(kind: DocumentKind, initial: DraftStart<T>,
  * `report`, which belongs to something that stays: see `EditorFrame`. It is
  * told together with that new rendering, and the editor stays busy until
  * then: a change made in between would be thrown away with the old editor.
+ * While it is busy nothing changes the content, not even the page editor's
+ * undo keys, which work on the whole document: what is published is what was
+ * checked, and the server publishes only the revision that was.
  */
 export function useDraftEditor<T>(initial: DraftStart<T>, actions: DraftActions<T>, report: (notice: string) => void): DocumentEditor<T> {
   const router = useRouter();
@@ -145,6 +151,8 @@ export function useDraftEditor<T>(initial: DraftStart<T>, actions: DraftActions<
   const stored = useRef(JSON.stringify(initial.content));
   const revision = useRef(initial.revision);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // What the publish's check found wrong that was there before the change: said with "Published".
+  const already = useRef<string[]>([]);
   const running = useRef<Promise<boolean> | null>(null);
 
   const save = async (force: boolean): Promise<boolean> => {
@@ -195,7 +203,12 @@ export function useDraftEditor<T>(initial: DraftStart<T>, actions: DraftActions<
     }
   };
 
+  // From Publish, Discard or a version brought back until the editor starts again: nothing may change the content.
+  const locked = busy || refreshing;
+
   const change = (next: T) => {
+    // Whatever reaches the editor while it is busy is not taken: it would be published unchecked, or thrown away unsaid.
+    if (locked) return;
     // An editor that reports its content without anything having changed (the page editor does, when it opens) changes nothing.
     if (JSON.stringify(next) === JSON.stringify(latest.current)) return;
     latest.current = next;
@@ -222,13 +235,46 @@ export function useDraftEditor<T>(initial: DraftStart<T>, actions: DraftActions<
     [],
   );
 
+  // The page editor's undo and redo keys work on the whole document and in its canvas, an inert form or not: while the
+  // editor is busy they are not passed on.
+  useEffect(() => {
+    if (!locked) return;
+    const swallow = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && (event.code === "KeyZ" || event.code === "KeyY")) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+    };
+    const windows: Window[] = [window];
+    for (const frame of Array.from(document.querySelectorAll("iframe"))) {
+      try {
+        if (frame.contentWindow) {
+          frame.contentWindow.addEventListener("keydown", swallow, { capture: true });
+          windows.push(frame.contentWindow);
+        }
+      } catch {
+        // A frame of another site: the editor's keys are not there.
+      }
+    }
+    window.addEventListener("keydown", swallow, { capture: true });
+    return () => {
+      for (const view of windows) {
+        try {
+          view.removeEventListener("keydown", swallow, { capture: true });
+        } catch {
+          // Gone with its frame.
+        }
+      }
+    };
+  }, [locked]);
+
   /**
    * Run one of the three big actions: save first, then act, then let the
    * server render the page again. `doing` is what the editor says meanwhile;
    * `done` is said with the page rendered again, when the editor has started
    * again from what is stored.
    */
-  const act = async (run: () => Promise<Outcome>, doing: string, done: string, saveFirst: boolean) => {
+  const act = async (run: () => Promise<Outcome>, doing: string, done: string | (() => string), saveFirst: boolean) => {
     setBusy(true);
     setProblem("");
     report(doing);
@@ -244,8 +290,9 @@ export function useDraftEditor<T>(initial: DraftStart<T>, actions: DraftActions<
         return setProblem(result.message);
       }
       // One transition: the notice, and the page as the server renders it now. Until it is shown the editor stays busy.
+      const said = typeof done === "string" ? done : done();
       startRefresh(() => {
-        report(done);
+        report(said);
         router.refresh();
       });
     } catch {
@@ -264,7 +311,7 @@ export function useDraftEditor<T>(initial: DraftStart<T>, actions: DraftActions<
     hasDraft,
     savedAt,
     conflict,
-    busy: busy || refreshing,
+    busy: locked,
     mayPublish: initial.may.publish,
     saves,
     saveNow: () => save(false),
@@ -273,29 +320,35 @@ export function useDraftEditor<T>(initial: DraftStart<T>, actions: DraftActions<
     publish: () =>
       act(
         async () => {
+          already.current = [];
           if (actions.check) {
             report(actions.check.busy);
-            let problems: string[];
+            let found: { problems: string[]; already?: string[] };
             try {
-              problems = await actions.check.run();
+              found = await actions.check.run();
             } catch (error) {
               return {
                 ok: false,
                 message: `Not published: ${error instanceof Error ? error.message : "the change could not be checked."} Look at it with Preview, then publish again.`,
               };
             }
-            if (problems.length > 0) {
+            if (found.problems.length > 0) {
               return {
                 ok: false,
-                message: `Not published: on a phone, ${actions.check.subject} would be hard to use. ${problems.join(" ")} Change it so it fits, then publish again.`,
+                message: `Not published: on a phone, ${actions.check.subject} would be hard to use. ${found.problems.join(" ")} Change it so it fits, then publish again.`,
               };
             }
+            already.current = found.already ?? [];
             report("Publishing…");
           }
-          return actions.publish();
+          // What was saved and checked, and nothing else: the server refuses a draft that changed since.
+          return actions.publish(revision.current);
         },
         "Publishing…",
-        "Published. Visitors see it now.",
+        () =>
+          already.current.length === 0
+            ? "Published. Visitors see it now."
+            : `Published. Visitors see it now. Not because of this change, these pages do not fit a phone as visitors have them: ${already.current.join(" ")} Change them so they fit.`,
         true,
       ),
     discard: () => act(actions.discard, "Discarding the changes…", "The changes were discarded.", false),
