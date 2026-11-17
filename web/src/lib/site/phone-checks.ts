@@ -112,36 +112,85 @@ export function tooSmallToRead(doc: Document = document): string[] {
  * A word longer than the room it has may be broken (a web address in a note),
  * and a word may break at a hyphen or a dash; any other break inside a word
  * is a layout that squeezed it, such as a row that let one side shrink to a
- * letter's width. The room a word had is that of the box it is in, or, for a
- * box in a flex or grid row, of the row: the room the row could have given it.
+ * letter's width. The room a word had is that of the box it is in, or more
+ * when the box could have been wider: a box in a flex or grid row could have
+ * had the row's width, a box as wide as its words (a button) its container's,
+ * and a table's cell the table's room less what the row's other cells need at
+ * the least, or any width in a frame that scrolls sideways.
  */
 export function brokenWords(doc: Document = document): string[] {
   const view = doc.defaultView!;
   const found: string[] = [];
+  const range = doc.createRange();
+  // A word is what lies between spaces, hyphens and dashes, soft hyphens and zero-width spaces.
+  const wordPattern = () => /[^\s\-\u00ad\u200b\u2010-\u2015]+/g;
+  const edges = (el: Element): number => {
+    const style = view.getComputedStyle(el);
+    let sum = 0;
+    for (const side of ["Left", "Right"] as const) {
+      sum += parseFloat(style[`padding${side}`]) + parseFloat(style[`border${side}Width`]) + parseFloat(style[`margin${side}`]);
+    }
+    return sum;
+  };
+  /** The least room a cell takes: its longest word, or all of it when it does not wrap. */
+  const leastWidth = (cell: Element): number => {
+    if (/^(nowrap|pre)$/.test(view.getComputedStyle(cell).whiteSpace)) {
+      range.selectNodeContents(cell);
+      return range.getBoundingClientRect().width;
+    }
+    let most = 0;
+    const texts = doc.createTreeWalker(cell, 4 /* NodeFilter.SHOW_TEXT */);
+    for (let node = texts.nextNode(); node; node = texts.nextNode()) {
+      const text = node as Text;
+      const pattern = wordPattern();
+      for (let match = pattern.exec(text.data); match; match = pattern.exec(text.data)) {
+        range.setStart(text, match.index);
+        range.setEnd(text, match.index + match[0].length);
+        most = Math.max(most, Array.from(range.getClientRects()).reduce((sum, rect) => sum + rect.width, 0));
+      }
+    }
+    return most;
+  };
   const room = (start: Element): number => {
     let box: Element = start;
     while (box.parentElement && /^(inline|contents)$/.test(view.getComputedStyle(box).display)) box = box.parentElement;
-    // A box in a flex or grid row could have had the row's width, less its own padding, border and margin (a button's).
+    // What the boxes climbed through take for themselves: their padding, border and margin (a button's).
     let own = 0;
-    while (box.parentElement && /(flex|grid)/.test(view.getComputedStyle(box.parentElement).display)) {
-      const item = view.getComputedStyle(box);
-      for (const side of ["Left", "Right"] as const) {
-        own += parseFloat(item[`padding${side}`]) + parseFloat(item[`border${side}Width`]) + parseFloat(item[`margin${side}`]);
+    for (let parent = box.parentElement; parent; parent = box.parentElement) {
+      const shown = view.getComputedStyle(box).display;
+      const outer = view.getComputedStyle(parent).display;
+      if (/(flex|grid)/.test(outer) || /^inline-(block|flex|grid)$/.test(shown) || (shown === "block" && outer === "table-cell")) {
+        own += edges(box);
+        box = parent;
+        continue;
       }
-      box = box.parentElement;
+      if (shown === "table-cell") {
+        let table: Element | null = box.parentElement;
+        while (table && view.getComputedStyle(table).display !== "table") table = table.parentElement;
+        // A table whose columns are fixed gives each cell the room it has.
+        if (!table?.parentElement || view.getComputedStyle(table).tableLayout === "fixed") break;
+        // In a frame made to scroll sideways the table could have been as wide as its words.
+        if (table.closest(".data-table-wrap, .blk-table-wrap, [data-scrolls-sideways]")) return Infinity;
+        const cells = Array.from(box.parentElement!.children);
+        const tableStyle = view.getComputedStyle(table);
+        own += edges(box) + edges(table);
+        if (tableStyle.borderCollapse === "separate") own += parseFloat(tableStyle.borderSpacing) * (cells.length + 1);
+        for (const cell of cells) if (cell !== box) own += leastWidth(cell) + edges(cell);
+        box = table.parentElement;
+        continue;
+      }
+      break;
     }
     const style = view.getComputedStyle(box);
     return box.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) - own;
   };
   const walker = doc.createTreeWalker(doc.body, 4 /* NodeFilter.SHOW_TEXT */);
-  const range = doc.createRange();
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
     const text = node as Text;
     const holder = text.parentElement;
     if (!holder || holder.closest("script, style, nextjs-portal")) continue;
     if (view.getComputedStyle(holder).hyphens === "auto") continue; // broken with a hyphen on purpose
-    // A word is what lies between spaces, hyphens and dashes, soft hyphens and zero-width spaces.
-    const words = /[^\s\-\u00ad\u200b\u2010-\u2015]+/g;
+    const words = wordPattern();
     for (let match = words.exec(text.data); match; match = words.exec(text.data)) {
       range.setStart(text, match.index);
       range.setEnd(text, match.index + match[0].length);

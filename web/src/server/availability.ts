@@ -5,24 +5,35 @@ import { noticeHours, type StudioDay } from "@/lib/domain/availability";
 import { daysBetween, isIsoDate, isoWeekday, type DayType, type IsoDate } from "@/lib/domain/time";
 import { dayTypeFor, type Catalog } from "./catalog";
 import { releaseHolds } from "./holds";
+import { giveBackUnmade } from "./promos";
 import { clockChangeOn, dayBoundsUtc, localDateOf, localMinuteOn, localMinuteOnFloor } from "./tz";
 
 /**
- * Free the slots of bookings whose payment never completed. Runs before every
- * availability read and every booking attempt, so no scheduler is needed.
+ * Free the slots of bookings whose payment never completed (the server
+ * stopped while the card was answering), and give back the codes they spent:
+ * the booking was never made. Runs before every availability read and every
+ * booking attempt, so no scheduler is needed.
  */
 export async function releaseExpiredHolds(db: DbLike, now: Date): Promise<number> {
-  const expired = await db
-    .update(bookings)
-    .set({ status: "expired" })
-    .where(and(eq(bookings.status, "pending_payment"), lt(bookings.holdExpiresAt, now)))
-    .returning({ id: bookings.id });
-  if (expired.length === 0) return 0;
-  await releaseHolds(
-    db,
-    expired.map((b) => b.id),
-  );
-  return expired.length;
+  return db.transaction(async (tx) => {
+    const expired = await tx
+      .update(bookings)
+      .set({ status: "expired" })
+      .where(and(eq(bookings.status, "pending_payment"), lt(bookings.holdExpiresAt, now)))
+      .returning({
+        id: bookings.id,
+        promoCodeId: bookings.promoCodeId,
+        promoDiscountCents: bookings.promoDiscountCents,
+        creditAppliedCents: bookings.creditAppliedCents,
+      });
+    if (expired.length === 0) return 0;
+    await releaseHolds(
+      tx,
+      expired.map((b) => b.id),
+    );
+    for (const booking of expired) await giveBackUnmade(tx, booking);
+    return expired.length;
+  });
 }
 
 export type WindowProblem = "invalid_date" | "past" | "too_far";

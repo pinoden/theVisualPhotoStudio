@@ -66,7 +66,7 @@ async function Pay({ params }: Pick<PageProps<"/pay/[id]">, "params">) {
         <strong>{page.when}</strong>
       </div>
       <div className="price-row total">
-        <span>{page.status === "paid" ? "Paid" : page.status === "refunded" ? "Refunded" : "To pay"}</span>
+        <span>{page.status === "paid" ? "Paid" : page.late ? (page.late.made ? "Refunded" : "To be refunded") : "To pay"}</span>
         <span>{amount}</span>
       </div>
     </div>
@@ -79,8 +79,10 @@ async function Pay({ params }: Pick<PageProps<"/pay/[id]">, "params">) {
         <h1 style={{ fontSize: "2rem" }}>
           {page.status === "paid"
             ? "Payment Received"
-            : page.status === "refunded"
-              ? "Payment Refunded"
+            : page.late
+              ? page.late.made
+                ? "Payment Refunded"
+                : "Payment to Be Refunded"
               : page.status === "cancelled"
                 ? "This Link Is No Longer Valid"
                 : "Pay for Your Booking"}
@@ -95,11 +97,15 @@ async function Pay({ params }: Pick<PageProps<"/pay/[id]">, "params">) {
         </>
       )}
 
-      {page.status === "refunded" && (
+      {page.late && (
         <>
           <p>
-            Your payment of {amount} reached us after booking {page.ref} was cancelled, so it is refunded to your card in full. We have
-            emailed you about it.
+            Your payment of {amount} reached us after booking {page.ref}{" "}
+            {page.late.released ? "was released for a reschedule code" : "was cancelled"},{" "}
+            {page.late.made
+              ? "so it is refunded to your card in full."
+              : "so it is due back to your card in full. It has not reached your card yet: it is tried again by itself, and the studio has been told."}{" "}
+            We have emailed you about it.
           </p>
           {details}
         </>

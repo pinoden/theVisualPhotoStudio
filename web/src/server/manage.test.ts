@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, isNull } from "drizzle-orm";
 import { bookingEvents, bookings, emailOutbox, payments, promoCodes, refunds, settings, studioHolds } from "@/db/schema";
+import type { PaymentProvider } from "./payments";
 import {
   cancelBooking,
   cancelOutcomeText,
@@ -604,9 +605,47 @@ describe("a booking released for a reschedule code that an owner cancelled", () 
       ok: false,
       message: `At most $88 can be refunded to the card for this booking: what was paid is on its reschedule code ${moved.code}, which has $88 left.`,
     });
-    expectOk(await ownerRefund(world.db, booked.ref, { amountCents: 8800, reason: "" }, world.manageDeps()));
+    expectOk(await ownerRefund(world.db, booked.ref, { amountCents: 5000, reason: "" }, world.manageDeps()));
+    // The client is not told of credit they can no longer use.
+    expect((await world.emails("reschedule_code_refund"))[0].body).toContain(
+      `A refund of $50 to your card for booking ${booked.ref} came off your reschedule code ${moved.code}. That code can no longer be used.`,
+    );
+    expectOk(await ownerRefund(world.db, booked.ref, { amountCents: 3800, reason: "" }, world.manageDeps()));
+    expect((await world.emails("reschedule_code_refund"))[1].body).toContain(`came off your reschedule code ${moved.code}, which has nothing left on it.`);
     expect((await world.db.select().from(promoCodes).where(eq(promoCodes.id, code.id)))[0].value).toBe(0);
     expect(await ownerRefund(world.db, booked.ref, { amountCents: 100, reason: "" }, world.manageDeps())).toMatchObject({ ok: false, code: "bad_amount" });
+  });
+});
+
+describe("a refund off a reschedule code that does not go through", () => {
+  it("puts the client's email right: it has not reached the card yet", async () => {
+    const booked = expectOk(await world.book({ date: FAR })); // $176 by card
+    const moved = expectOk(await requestRescheduleCode(world.db, booked.ref, byToken(booked.manageToken), world.manageDeps()));
+    world.failRefunds = "The card account is closed";
+    expect(await ownerRefund(world.db, booked.ref, { amountCents: 5000, reason: "" }, world.manageDeps())).toMatchObject({ ok: true, refund: "pending" });
+    const told = await world.emails("reschedule_code_refund");
+    expect(told).toHaveLength(1);
+    expect(told[0].body).toContain(
+      `A refund of $50 to your card for booking ${booked.ref} came off your reschedule code ${moved.code}, which now has $126 left. The refund has not reached your card yet: it is tried again by itself, and the studio has been told.`,
+    );
+  });
+
+  it("follows an email that has already left with one that says so", async () => {
+    const booked = expectOk(await world.book({ date: FAR }));
+    expectOk(await requestRescheduleCode(world.db, booked.ref, byToken(booked.manageToken), world.manageDeps()));
+    // Every message waiting goes out at the moment the refund is sent, before its answer comes back.
+    const sending: PaymentProvider = {
+      ...world.provider,
+      refund: async () => {
+        await world.db.update(emailOutbox).set({ sentAt: NOW, attempts: 1 }).where(isNull(emailOutbox.sentAt));
+        return { ok: false, message: "The card account is closed" };
+      },
+    };
+    expectOk(await ownerRefund(world.db, booked.ref, { amountCents: 5000, reason: "" }, world.manageDeps({ payments: sending })));
+    const told = await world.emails("reschedule_code_refund");
+    expect(told).toHaveLength(2);
+    expect(told[0].body).not.toContain("has not reached your card yet");
+    expect(told[1].body).toContain("The refund has not reached your card yet");
   });
 });
 
@@ -668,15 +707,22 @@ describe("the owner", () => {
     expect(alert.body).not.toContain("told a refund is coming");
   });
 
-  it("does not cancel on figures that changed since its page was drawn, a payment received meanwhile", async () => {
+  it("does not cancel on figures that changed since its page was drawn: a payment received, or a refund sent, meanwhile", async () => {
     const booked = expectOk(await world.book({ date: NEAR }));
     expect(await ownerCancelBooking(world.db, booked.ref, { refundCents: 0, seenCardCents: 0 }, world.manageDeps())).toMatchObject({
       ok: false,
       code: "changed",
-      message: "Money was received for this booking after this page was opened: the card now holds $176. Look at it again, then cancel.",
+      message: "The money on this booking changed after this page was opened: the card now holds $176. Look at it again, then cancel.",
     });
     expect((await bookingRow(booked.ref)).status).toBe("confirmed");
-    expectOk(await ownerCancelBooking(world.db, booked.ref, { refundCents: 0, seenCardCents: 17600 }, world.manageDeps()));
+    // A refund sent from another window: the card holds less than the page showed.
+    expectOk(await ownerRefund(world.db, booked.ref, { amountCents: 5000, reason: "" }, world.manageDeps()));
+    expect(await ownerCancelBooking(world.db, booked.ref, { refundCents: 0, seenCardCents: 17600 }, world.manageDeps())).toMatchObject({
+      ok: false,
+      code: "changed",
+      message: "The money on this booking changed after this page was opened: the card now holds $126. Look at it again, then cancel.",
+    });
+    expectOk(await ownerCancelBooking(world.db, booked.ref, { refundCents: 0, seenCardCents: 12600 }, world.manageDeps()));
   });
 
   it("cannot refund more than the card paid, or cancel twice", async () => {

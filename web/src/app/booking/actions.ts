@@ -31,7 +31,10 @@ const SIGNED_OUT: ManageState = { status: "error", message: "Please sign in agai
 export async function cancelBookingAction(_previous: ManageState, formData: FormData): Promise<ManageState> {
   const actor = await actorFrom(formData);
   if (!actor) return SIGNED_OUT;
-  const result = await cancelBooking(await getDb(), String(formData.get("ref") ?? ""), actor, await manageDeps());
+  const seen = formData.get("seen");
+  const result = await cancelBooking(await getDb(), String(formData.get("ref") ?? ""), actor, await manageDeps(), typeof seen === "string" ? seen : undefined);
+  // Changed since the page was drawn: it is drawn again, with what cancelling does now.
+  if (!result.ok && result.code === "changed") refresh();
   if (!result.ok) return { status: "error", message: result.message };
   flushEmailsSoon();
   if (!formData.get("keepInPlace")) refresh();
@@ -43,7 +46,9 @@ export async function cancelBookingAction(_previous: ManageState, formData: Form
 export async function rescheduleBookingAction(_previous: ManageState, formData: FormData): Promise<ManageState> {
   const actor = await actorFrom(formData);
   if (!actor) return SIGNED_OUT;
-  const result = await requestRescheduleCode(await getDb(), String(formData.get("ref") ?? ""), actor, await manageDeps());
+  const seen = formData.get("seen");
+  const result = await requestRescheduleCode(await getDb(), String(formData.get("ref") ?? ""), actor, await manageDeps(), typeof seen === "string" ? seen : undefined);
+  if (!result.ok && result.code === "changed") refresh();
   if (!result.ok) return { status: "error", message: result.message };
   flushEmailsSoon();
   if (!formData.get("keepInPlace")) refresh();

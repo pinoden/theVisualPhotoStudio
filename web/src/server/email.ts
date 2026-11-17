@@ -437,19 +437,37 @@ export function paymentReceivedEmail(input: {
 }
 
 /** A refund of a booking released for a reschedule code: it came off the code, and the client is told what is left on it. */
-export function codeRefundEmail(input: { to: string; name: string; ref: string; code: string; cents: number; leftCents: number; byHand: boolean }): QueuedEmail {
+/**
+ * A refund of a booking released for a reschedule code, which came off that
+ * code. What is left on it is named only while the code can be spent. A
+ * card refund's `state` says whether it went through, as a cancellation's
+ * email does.
+ */
+export function codeRefundEmail(input: {
+  to: string;
+  name: string;
+  ref: string;
+  code: string;
+  cents: number;
+  leftCents: number;
+  /** False once the code was cancelled or has expired. */
+  usable: boolean;
+  byHand: boolean;
+  state?: RefundState;
+}): QueuedEmail {
   const what = input.byHand ? `${money(input.cents)} given back to you at the studio` : `A refund of ${money(input.cents)} to your card`;
+  const left =
+    input.leftCents <= 0
+      ? ", which has nothing left on it."
+      : input.usable
+        ? `, which now has ${money(input.leftCents)} left.`
+        : ". That code can no longer be used.";
+  const notYet = !input.byHand && input.state === "not_yet" ? " The refund has not reached your card yet: it is tried again by itself, and the studio has been told." : "";
   return {
     to: input.to,
     kind: "reschedule_code_refund",
     subject: `A refund for booking ${input.ref}`,
-    body: [
-      `Hi ${input.name},`,
-      "",
-      `${what} for booking ${input.ref} came off your reschedule code ${input.code}, which now has ${money(input.leftCents)} left.`,
-      "",
-      SIGN_OFF,
-    ].join("\n"),
+    body: [`Hi ${input.name},`, "", `${what} for booking ${input.ref} came off your reschedule code ${input.code}${left}${notYet}`, "", SIGN_OFF].join("\n"),
   };
 }
 
@@ -467,7 +485,7 @@ export function latePaymentEmail(input: { to: string; name: string; ref: string;
   return {
     to: input.to,
     kind: "late_payment_refunded",
-    subject: `Your payment for booking ${input.ref} is refunded`,
+    subject: input.state === "sent" ? `Your payment for booking ${input.ref} is refunded` : `Your payment for booking ${input.ref} is due back to your card`,
     body: [`Hi ${input.name},`, "", `Your payment of ${money(input.amountCents)} for booking ${input.ref} reached us after the booking ${ended}, ${back}`, "", SIGN_OFF].join("\n"),
   };
 }

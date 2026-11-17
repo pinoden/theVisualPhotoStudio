@@ -1674,8 +1674,12 @@ fieldset.editor-form { border: 0; padding: 0; margin: 0; min-inline-size: 0; }
 fieldset { min-inline-size: 0; }
 /* The admin's buttons often carry a name the owners typed ("Save Seamlesspaperbackdroprollwithstands", "Take Gift
    Cards off the website"): on a phone such a button wraps, and breaks a word longer than the screen, rather than push the
-   page wider than it. */
-.admin-main .btn { white-space: normal; overflow-wrap: anywhere; max-width: 100%; }
+   page wider than it. At words only (`break-word`): `anywhere` lets a table squeeze a button to a letter's width. */
+.admin-main .btn { white-space: normal; overflow-wrap: break-word; max-width: 100%; }
+/* So does a label that repeats such a name ("Add a file of Horizonextendedcondensed…"), and the field it sits in may be
+   narrower than that word. */
+.admin-main .form-label { overflow-wrap: break-word; }
+.admin-form-row > .form-group { min-width: 0; }
 /* While publishing, discarding or bringing a version back, until the editor starts again from what is stored: nothing can be changed. */
 .editor-form[inert], .page-editor-canvas[inert] { opacity: 0.6; }
 .editor-preview { position: sticky; top: calc(72px + 8.5rem); min-width: 0; }

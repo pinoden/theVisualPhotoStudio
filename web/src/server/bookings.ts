@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
-import { desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { bookingAddons, bookings, payments, photographerHolds, promoCodes, studioHolds, studios } from "@/db/schema";
@@ -22,7 +22,7 @@ import { dayTypeFor, loadCatalog, type Catalog, type CatalogPhotoPackage } from 
 import { bookingConfirmationEmail, queueEmail } from "./email";
 import { BY_CUSTOMER, recordEvent } from "./history";
 import { releaseHolds } from "./holds";
-import { takeReserved } from "./reserved";
+import { giveBackReserved, takeReserved } from "./reserved";
 import { receivedCentsByBooking } from "./money";
 import { RESERVE_HOURS, type PaymentProvider } from "./payments";
 import {
@@ -508,7 +508,13 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
           .update(payments)
           .set({ status: "failed", error: charge.detail ?? charge.message })
           .where(eq(payments.id, payment.id));
-        await tx.update(bookings).set({ status: "expired" }).where(eq(bookings.id, bookingId));
+        // Only the attempt that ends the hold gives the code back: a hold that ran out meanwhile gave it back already.
+        const [ended] = await tx
+          .update(bookings)
+          .set({ status: "expired" })
+          .where(and(eq(bookings.id, bookingId), eq(bookings.status, "pending_payment")))
+          .returning({ id: bookings.id });
+        if (!ended) return;
         await releaseHolds(tx, bookingId);
         if (spendsCode) await restorePromo(tx, promo!.id, promo!.kind, price.promoDiscountCents);
       });
@@ -522,14 +528,30 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
       );
     }
 
-    await db.transaction(async (tx) => {
+    const stands = await db.transaction(async (tx) => {
       await tx
         .update(payments)
         .set({ status: "authorized", providerPaymentId: charge.paymentId })
         .where(eq(payments.id, payment.id));
-      await tx.update(bookings).set({ status: "confirmed", holdExpiresAt: null }).where(eq(bookings.id, bookingId));
+      const [confirmed] = await tx
+        .update(bookings)
+        .set({ status: "confirmed", holdExpiresAt: null })
+        .where(and(eq(bookings.id, bookingId), eq(bookings.status, "pending_payment")))
+        .returning({ id: bookings.id });
+      if (!confirmed) return false;
       await recordEvent(tx, { bookingId, from: "new", to: "confirmed", at: now, ...booked });
+      return true;
     });
+    if (!stands) {
+      // The hold on the time ran out while the card was answering, and the time was given up (with the code): nothing
+      // is booked, and what was reserved goes back. Should the processor not answer now, the scheduled task tries again.
+      await giveBackReserved(db, { id: payment.id, providerPaymentId: charge.paymentId }, provider);
+      return fail(
+        409,
+        "slot_taken",
+        `That took too long, and the time was given up. Your booking was not made, and your card was not charged. If an amount appears as held on your card, it is released by itself within ${RESERVE_HOURS} hours. Please choose a time again.`,
+      );
+    }
     // The booking stands now. Taking the money that does not go through is tried again by the scheduled task.
     await takeReserved(
       db,

@@ -156,6 +156,19 @@ export async function restorePromo(tx: DbLike, promoId: string, kind: PromoKind,
     .where(eq(promoCodes.id, promoId));
 }
 
+/**
+ * A booking that was never made (its card was refused, or its hold on the
+ * time ran out before it was paid) gives back what it spent of its code: an
+ * amount, and a use.
+ */
+export async function giveBackUnmade(
+  tx: DbLike,
+  booking: { promoCodeId: string | null; promoDiscountCents: number; creditAppliedCents: number },
+): Promise<void> {
+  if (!booking.promoCodeId || booking.promoDiscountCents <= 0) return;
+  await restorePromo(tx, booking.promoCodeId, booking.creditAppliedCents > 0 ? "amount" : "percent", booking.creditAppliedCents);
+}
+
 export interface IssuePromoInput {
   kind: PromoKind;
   value: number;
@@ -240,10 +253,13 @@ export async function issuePromo(tx: DbLike, given: IssuePromoInput): Promise<{ 
  * whether the code can be spent or the owner cancelled it, and what was spent
  * of it cannot come back. Null for a booking never released so.
  */
-export async function rescheduleCodeOf(
-  db: DbLike,
-  bookingId: string,
-): Promise<{ id: string; code: string; valueCents: number; voided: boolean; expiresAt: Date | null } | null> {
+/** The reschedule code a booking's money went into when it was released (`rescheduleCodeOf`). */
+export type RescheduleCode = { id: string; code: string; valueCents: number; voided: boolean; expiresAt: Date | null };
+
+/** Whether what is left on a reschedule code can still be spent: not cancelled, not expired. */
+export const spendable = (code: RescheduleCode, now: Date) => !code.voided && (code.expiresAt === null || code.expiresAt.getTime() > now.getTime());
+
+export async function rescheduleCodeOf(db: DbLike, bookingId: string): Promise<RescheduleCode | null> {
   const [code] = await db
     .select({ id: promoCodes.id, code: promoCodes.code, valueCents: promoCodes.value, voidedAt: promoCodes.voidedAt, expiresAt: promoCodes.expiresAt })
     .from(promoCodes)

@@ -225,7 +225,9 @@ export async function checkPayLinkAction(formData: FormData): Promise<void> {
       "notice",
       result.status === "paid"
         ? result.late
-          ? "The client paid through the link after the booking ended: the payment is refunded to the card in full, and the client is told."
+          ? result.late.made
+            ? "The client paid through the link after the booking ended: the payment is refunded to the card in full, and the client is told."
+            : "The client paid through the link after the booking ended. The payment is due back to the card in full, and the refund has not gone through yet: it is tried again by itself, and the client is told."
           : "The client has paid through the link. The payment is recorded."
         : result.status === "cancelled"
           ? "The link was cancelled at the card processor."

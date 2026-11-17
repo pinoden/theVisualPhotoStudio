@@ -101,6 +101,8 @@ export function ManageBooking({
           <p>{choices.reschedule.text}</p>
           <form action={moveAction} style={{ display: "flex", gap: ".75rem", flexWrap: "wrap" }}>
             {hidden}
+            {/* What the client was told: if moving would give something else now, nothing is done until they look again. */}
+            <input type="hidden" name="seen" value={choices.reschedule.text} />
             {choices.reschedule.allowed && (
               <button type="submit" className="btn btn-dark" disabled={busy}>
                 {moving ? "Working…" : "Yes, release it and send my code"}
@@ -122,6 +124,8 @@ export function ManageBooking({
           )}
           <form action={cancelAction} style={{ display: "flex", gap: ".75rem", flexWrap: "wrap" }}>
             {hidden}
+            {/* What the client was told: if cancelling would give back something else now, nothing is done until they look again. */}
+            <input type="hidden" name="seen" value={choices.cancel.text} />
             {choices.cancel.allowed && (
               <button type="submit" className="btn btn-dark" disabled={busy}>
                 {cancelling ? "Working…" : "Yes, cancel it"}

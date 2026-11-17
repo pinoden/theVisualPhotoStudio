@@ -6,7 +6,15 @@ import { BookingSummary } from "@/components/BookingSummary";
 import { bookings, paymentLinks, payments, promoCodes, refunds, settings, staffShifts } from "@/db/schema";
 import { createAdminBooking, getAppointment } from "./appointments";
 import type { AuthUser } from "./auth";
-import { cancelBooking, ownerCancelBooking, requestRescheduleCode, retryOpenRefunds } from "./manage";
+import {
+  cancelBooking,
+  getManageChoices,
+  noticeBookingPayments,
+  ownerCancelBooking,
+  ownerRefund,
+  requestRescheduleCode,
+  retryOpenRefunds,
+} from "./manage";
 import { netCardPaidCents } from "./money";
 import {
   cancelPayLink,
@@ -14,6 +22,7 @@ import {
   checkOpenPayLinks,
   checkPayLink,
   getPayPage,
+  noticePaidLinksOf,
   openPayLinkOf,
   pretendToPay,
   sendPayLink,
@@ -254,7 +263,9 @@ describe("when the client pays the link", () => {
     expectOk(await sendPayLink(world.db, owner, made.ref, deps()));
     const [link] = await links();
     world.links[0].state = { state: "unknown", message: "No answer from Square" };
-    expect(await checkPayLink(world.db, link.id, deps())).toBe("open");
+    // Asked, and it could not say: the link may have been paid, and stays open.
+    expect(await checkPayLink(world.db, link.id, deps())).toBe("unanswered");
+    expect((await links())[0].status).toBe("open");
     // No processor at all, or a different one from the link's own: nothing is known to have changed.
     expect(await checkPayLink(world.db, link.id, { ...deps(), payments: null })).toBe("open");
     expect(await checkPayLink(world.db, link.id, { ...deps(), payments: world.provider })).toBe("open");
@@ -407,14 +418,80 @@ describe("a booking that stops being active", () => {
     expect(await checkOpenPayLinks(world.db, { ...deps(), ownerEmail: "owner@studio.test" })).toEqual({ paid: 1, closed: 0 });
     expect(await world.db.select().from(refunds)).toMatchObject([{ amountCents: 17600, automatic: true, status: "failed", reason: `Paid after ${made.ref} was cancelled` }]);
     const [late] = await world.emails("late_payment_refunded");
+    expect(late.subject).toBe(`Your payment for booking ${made.ref} is due back to your card`);
     expect(late.body).toContain(`Your payment of $176 for booking ${made.ref} reached us after the booking was cancelled, so it is due back to your card in full. It has not reached your card yet`);
+    // The page the client is sent back to says it has not reached the card yet.
+    const [link] = await links();
+    expect(await getPayPage(world.db, link.id, deps())).toMatchObject({ status: "refunded", late: { released: false, made: false } });
     // Tried again by the scheduled task, it goes through; the money comes back once.
     world.failRefunds = null;
     expect(await retryOpenRefunds(world.db, world.manageDeps({ payments: square }))).toEqual({ succeeded: 1, failed: 0 });
     expect(await netCardPaidCents(world.db, made.id)).toBe(0);
-    // The page the client is sent back to says so.
-    const page = await getPayPage(world.db, (await links())[0].id, deps());
-    expect(page?.status).toBe("refunded");
+    // And then that it is refunded.
+    expect(await getPayPage(world.db, link.id, deps())).toMatchObject({ status: "refunded", late: { released: false, made: true } });
+  });
+
+  it("tells the administrator who checks whether a late payment's refund went through", async () => {
+    const made = await madeInAdmin();
+    expectOk(await sendPayLink(world.db, owner, made.ref, deps()));
+    world.failLinks = "Could not reach the payment processor.";
+    expectOk(await cancelBooking(world.db, made.ref, dana, world.manageDeps({ payments: square })));
+    world.failLinks = null;
+    clientPays();
+    world.failRefunds = "The card account is closed";
+    expect(await checkBookingPayLink(world.db, owner, made.ref, { ...deps(), ownerEmail: "owner@studio.test" })).toEqual({
+      ok: true,
+      status: "paid",
+      late: { made: false },
+    });
+  });
+
+  it("is still a payment received on its page when a cancellation refunded part of it", async () => {
+    // Paid while the booking stood, then the studio cancelled it and refunded $50: the payment counted, and the
+    // cancellation's email tells the refund. The page does not say it was refunded in full.
+    const made = await madeInAdmin();
+    expectOk(await sendPayLink(world.db, owner, made.ref, deps()));
+    clientPays();
+    const [link] = await links();
+    expect(await getPayPage(world.db, link.id, deps())).toMatchObject({ status: "paid" });
+    expectOk(await ownerCancelBooking(world.db, made.ref, { refundCents: 5000 }, world.manageDeps({ payments: square })));
+    expect(await getPayPage(world.db, link.id, deps())).toMatchObject({ status: "paid", late: null });
+
+    // Released for a reschedule code, and a refund taken off the code: the same.
+    const other = await madeInAdmin(FAR, h(9));
+    expectOk(await sendPayLink(world.db, owner, other.ref, deps()));
+    clientPays(1);
+    expectOk(await requestRescheduleCode(world.db, other.ref, dana, world.manageDeps({ payments: square })));
+    expectOk(await ownerRefund(world.db, other.ref, { amountCents: 2000, reason: "" }, world.manageDeps({ payments: square })));
+    const second = (await links()).find((candidate) => candidate.bookingId === other.id)!;
+    expect(await getPayPage(world.db, second.id, deps())).toMatchObject({ status: "paid", late: null });
+  });
+
+  it("is not withdrawn while the processor cannot say whether it was paid, so that no payment is lost with it", async () => {
+    const made = await madeInAdmin();
+    expectOk(await sendPayLink(world.db, owner, made.ref, deps()));
+    const [link] = await links();
+    world.links[0].state = { state: "unknown", message: "The payment behind the link could not be read" };
+
+    expect(await cancelPayLink(world.db, owner, made.ref, deps())).toEqual({
+      ok: false,
+      message: "The card processor could not say whether the link was paid, so it was not withdrawn. Try again in a moment.",
+    });
+    expect(await checkBookingPayLink(world.db, owner, made.ref, deps())).toEqual({
+      ok: false,
+      message: "The card processor could not say whether the link was paid. Try again in a moment.",
+    });
+    // The booking is cancelled all the same, and its link stays open, to be asked about again.
+    expectOk(await cancelBooking(world.db, made.ref, dana, world.manageDeps({ payments: square })));
+    expect((await links())[0].status).toBe("open");
+    expect(world.links[0].state.state).toBe("unknown");
+    expect(await checkOpenPayLinks(world.db, deps())).toEqual({ paid: 0, closed: 0 });
+
+    // It was paid after all: once the processor can say so, the payment is recorded, and given back in full.
+    clientPays();
+    expect(await checkOpenPayLinks(world.db, { ...deps(), ownerEmail: "owner@studio.test" })).toEqual({ paid: 1, closed: 0 });
+    expect(await getPayPage(world.db, link.id, deps())).toMatchObject({ status: "refunded", late: { released: false, made: true } });
+    expect(await netCardPaidCents(world.db, made.id)).toBe(0);
   });
 
   it("says a booking released for a reschedule code when a payment comes after it", async () => {
@@ -429,6 +506,52 @@ describe("a booking that stops being active", () => {
     expect(await world.db.select().from(refunds)).toMatchObject([{ amountCents: 10000, status: "succeeded", reason: `Paid after ${made.ref} was released for a reschedule code` }]);
     expect((await world.emails("late_payment_refunded"))[0].body).toContain("reached us after the booking was released for a reschedule code, so it is refunded to your card in full.");
     expect((await world.db.select().from(promoCodes).where(eq(promoCodes.code, moved.code)))[0].value).toBe(7600);
+  });
+});
+
+describe("what a client is told before cancelling or moving", () => {
+  it("counts a payment made on the processor's page that the site has not seen yet", async () => {
+    const made = await madeInAdmin(); // four days ahead: inside the refund window
+    expectOk(await sendPayLink(world.db, owner, made.ref, deps()));
+    clientPays();
+    // The booking's page asks the processor before it says what cancelling would do.
+    await noticeBookingPayments(world.db, made.ref, dana, deps());
+    expect((await getManageChoices(world.db, made.ref, dana, NOW))!.cancel.text).toBe("No refund is due, because the booking starts in less than 14 days.");
+    expect(await netCardPaidCents(world.db, made.id)).toBe(17600);
+    // Nobody else's link is asked about from a booking's page.
+    const other = await madeInAdmin(FAR, h(9));
+    expectOk(await sendPayLink(world.db, owner, other.ref, deps()));
+    clientPays(1);
+    await noticeBookingPayments(world.db, other.ref, { kind: "customer", email: "someone@example.com" }, deps());
+    expect((await links()).find((link) => link.bookingId === other.id)!.status).toBe("open");
+  });
+
+  it("does so for every booking on the client's account", async () => {
+    const first = await madeInAdmin();
+    const second = await madeInAdmin(FAR, h(9));
+    expectOk(await sendPayLink(world.db, owner, first.ref, deps()));
+    expectOk(await sendPayLink(world.db, owner, second.ref, deps()));
+    clientPays(0);
+    clientPays(1);
+    await noticePaidLinksOf(world.db, "Dana@Example.com", deps());
+    expect((await links()).map((link) => link.status)).toEqual(["paid", "paid"]);
+  });
+
+  it("refuses a cancellation or a move that would now do something other than what the client was shown", async () => {
+    const made = await madeInAdmin(FAR, h(9)); // outside the refund window
+    expectOk(await sendPayLink(world.db, owner, made.ref, deps()));
+    const shown = (await getManageChoices(world.db, made.ref, dana, NOW))!;
+    // Nothing was paid when the page was drawn. The client then pays the link in another window.
+    clientPays();
+    const manage = world.manageDeps({ payments: square });
+    expect(await cancelBooking(world.db, made.ref, dana, manage, shown.cancel.text)).toMatchObject({ ok: false, status: 409, code: "changed" });
+    expect(await requestRescheduleCode(world.db, made.ref, dana, manage, shown.reschedule.text)).toMatchObject({ ok: false, status: 409, code: "changed" });
+    expect((await row(made.ref)).status).toBe("confirmed");
+    expect(await world.db.select().from(refunds)).toEqual([]);
+    // Shown again as it is now, the cancellation goes through, and refunds what was paid under its terms.
+    const now = (await getManageChoices(world.db, made.ref, dana, NOW))!;
+    expect(now.cancel.text).not.toBe(shown.cancel.text);
+    expect(expectOk(await cancelBooking(world.db, made.ref, dana, manage, now.cancel.text))).toMatchObject({ refundCents: 16720 });
   });
 });
 
@@ -447,6 +570,7 @@ describe("the page a client's link leads to", () => {
       when: "Wed, Nov 18, 2026, 2:00 PM",
       processorUrl: "https://pay.test/link_1",
       pretend: false,
+      late: null,
     });
     // The client pays at the processor and is sent back: opening the page finds the payment.
     clientPays();

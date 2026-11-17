@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { bookings, payments, refunds } from "@/db/schema";
 import type { Db } from "@/db/client";
 import { ownerCaptureNotice, queueEmail } from "./email";
@@ -109,9 +109,31 @@ async function recordTaken(db: Db, payment: Reserved): Promise<void> {
 }
 
 /**
+ * Give back an amount reserved for a booking that does not stand. When the
+ * processor does not answer, the payment stays `authorized` and the
+ * scheduled task tries again (`settleReservedPayments`); the processor gives
+ * it back by itself in the end.
+ */
+export async function giveBackReserved(
+  db: Db,
+  payment: { id: string; providerPaymentId: string },
+  provider: PaymentProvider,
+  why = "the booking was not made",
+): Promise<boolean> {
+  const result = await provider.release(payment.providerPaymentId);
+  if (!result.ok) return false;
+  const done = await db
+    .update(payments)
+    .set({ status: "failed", error: `Given back before it was taken: ${why}.` })
+    .where(and(eq(payments.id, payment.id), eq(payments.status, "authorized")))
+    .returning({ id: payments.id });
+  return done.length > 0;
+}
+
+/**
  * Settle every reserved amount the moment of booking left behind: take it
  * while its booking stands, give it back when the booking was cancelled
- * first. Run from the scheduled task.
+ * first, or never made. Run from the scheduled task.
  */
 export async function settleReservedPayments(db: Db, deps: SettleDeps): Promise<{ taken: number; released: number }> {
   if (!deps.payments) return { taken: 0, released: 0 };
@@ -139,14 +161,9 @@ export async function settleReservedPayments(db: Db, deps: SettleDeps): Promise<
       if (await takeReserved(db, reserved, deps)) taken++;
       continue;
     }
-    const result = await deps.payments.release(row.providerPaymentId);
-    if (!result.ok) continue; // tried again next time; the processor gives it back by itself in the end
-    const done = await db
-      .update(payments)
-      .set({ status: "failed", error: "Given back before it was taken: the booking was cancelled first." })
-      .where(and(eq(payments.id, row.id), inArray(payments.status, ["authorized"])))
-      .returning({ id: payments.id });
-    if (done.length > 0) released++;
+    // Not given back now: tried again next time; the processor gives it back by itself in the end.
+    const why = row.bookingStatus === "cancelled" ? "the booking was cancelled first" : "the booking was not made";
+    if (await giveBackReserved(db, reserved, deps.payments, why)) released++;
   }
   return { taken, released };
 }

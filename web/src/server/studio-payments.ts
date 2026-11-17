@@ -12,7 +12,7 @@ import { recordEvent } from "./history";
 import { openPayLinkOf } from "./pay-links";
 import { netCardPaidCents, paidAtStudioCents } from "./money";
 import { petFeeCentsOf, studioRefundableCents } from "./pet-fee";
-import { codeStanding, rescheduleCodeOf, takeOffRescheduleCode } from "./promos";
+import { codeStanding, rescheduleCodeOf, spendable, takeOffRescheduleCode } from "./promos";
 import { loadSettings } from "./settings";
 import { canViewDay } from "./staff";
 import { formatInstant, localDateOf } from "./tz";
@@ -259,7 +259,7 @@ export async function voidStudioPayment(db: Db, viewer: AuthUser, paymentId: str
       if (standing.usedCents > 0) {
         return {
           ok: false,
-          message: `This booking's money went into its reschedule code ${moved.code}, and ${formatCents(standing.usedCents)} of it was used: this record cannot be taken back.`,
+          message: `This booking's money went into its reschedule code ${moved.code}, and ${formatCents(standing.usedCents)} of it was spent or refunded: this record cannot be taken back.`,
         };
       }
       if (standing.usable) {
@@ -340,6 +340,7 @@ export async function recordHandRefund(
           code: back.code.code,
           cents: input.amountCents,
           leftCents: back.code.valueCents - input.amountCents,
+          usable: spendable(back.code, now),
           byHand: true,
         }),
       );

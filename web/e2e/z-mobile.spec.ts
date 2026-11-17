@@ -48,6 +48,8 @@ const PUBLIC_PAGES = ["/", "/studios", "/rates", "/services", "/faq", "/policies
 const OWNER = "owner4@studio.test";
 /** An add-on's name of one word as long as the field allows a word to be: longer than a line on the smallest phone. */
 const LONG_ADDON = "Seamlesspaperbackdroprollwithstands";
+/** A font's name of one long word, as long as its field takes on a phone. */
+const LONG_FONT = "Horizonextendedcondenseddisplaygrotesque";
 const mia = { name: "Mia Mobile", email: "mia.mobile@example.com", phone: "407-555-0177" };
 
 let browserProblems: string[] = [];
@@ -392,6 +394,14 @@ test("the admin fits a phone: the calendar in its three views, an appointment, a
   await expect(page.getByRole("row", { name: /\$68 · Card, through the payment link/ })).toBeVisible();
   await expectFits(page, "an appointment paid through a link");
   expect(await hardToTouch(page), "an appointment paid through a link: hard to use by touch").toEqual([]);
+
+  // A font of the owners' own with a name of one long word, which its page repeats in a label above its file.
+  await page.goto("/admin/website/fonts");
+  await byLabel(page, "Name of the font").fill(LONG_FONT);
+  await byLabel(page, "The licence you hold for it").fill("Web licence from the maker");
+  await page.getByRole("checkbox", { name: "I hold a licence that allows this font on a website" }).check();
+  await page.getByRole("button", { name: "Add the font" }).click();
+  await expect(byText(page, "Font added. Now add its files: one for each weight you use.")).toBeVisible();
 
   for (const path of [
     "/admin",

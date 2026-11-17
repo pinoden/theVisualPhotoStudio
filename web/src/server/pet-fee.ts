@@ -8,7 +8,7 @@ import { isBookingRef } from "./bookings";
 import { petCreditEmail, queueEmail } from "./email";
 import { recordEvent } from "./history";
 import { netCardPaidCents, paidAtStudioCents } from "./money";
-import { issuePromo, rescheduleCodeOf } from "./promos";
+import { issuePromo, rescheduleCodeOf, type RescheduleCode } from "./promos";
 import { loadSettings } from "./settings";
 import { formatInstant } from "./tz";
 
@@ -74,7 +74,7 @@ export async function petFeeReturnedCents(db: DbLike, bookingId: string): Promis
 export async function studioRefundableCents(
   db: DbLike,
   bookingId: string,
-): Promise<{ cents: number; petReturnedCents: number; petFeeCents: number; code: { id: string; code: string; valueCents: number } | null }> {
+): Promise<{ cents: number; petReturnedCents: number; petFeeCents: number; code: RescheduleCode | null }> {
   const atStudio = Math.max(0, await paidAtStudioCents(db, bookingId));
   // The pet fee's credit, which may be only part of the fee: what the card did not hold of it was paid at the studio.
   const credit = await petFeeReturnedCents(db, bookingId);
