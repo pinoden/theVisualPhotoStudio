@@ -1,6 +1,7 @@
 import { and, asc, eq, isNull, lt, sql } from "drizzle-orm";
 import { emailOutbox } from "@/db/schema";
 import type { DbLike } from "@/db/client";
+import { afterFee } from "@/lib/domain/policy";
 import { formatInstant } from "./tz";
 import { loadBusiness } from "./website";
 
@@ -29,17 +30,41 @@ export interface QueuedEmail {
 const STUDIO = "{{studio}}";
 const ADDRESS = "{{address}}";
 
-export async function queueEmail(db: DbLike, message: QueuedEmail): Promise<void> {
+/** The message with the studio's published name and address in place of their marks. */
+async function filled(db: DbLike, message: QueuedEmail): Promise<{ subject: string; body: string }> {
   const business = await loadBusiness(db);
   const fill = (text: string) =>
     text.replaceAll(STUDIO, () => business.name).replaceAll(ADDRESS, () => `${business.addressLine1}, ${business.addressLine2}`);
-  await db.insert(emailOutbox).values({
-    toEmail: message.to.trim().toLowerCase(),
-    replyTo: message.replyTo?.trim().toLowerCase() || null,
-    subject: fill(message.subject),
-    body: fill(message.body),
-    kind: message.kind,
-  });
+  return { subject: fill(message.subject), body: fill(message.body) };
+}
+
+/** Queue a message. Answers its id, with which it can be replaced while it waits (`replaceQueuedEmail`). */
+export async function queueEmail(db: DbLike, message: QueuedEmail): Promise<string> {
+  const [row] = await db
+    .insert(emailOutbox)
+    .values({
+      toEmail: message.to.trim().toLowerCase(),
+      replyTo: message.replyTo?.trim().toLowerCase() || null,
+      ...(await filled(db, message)),
+      kind: message.kind,
+    })
+    .returning({ id: emailOutbox.id });
+  return row.id;
+}
+
+/**
+ * Put `message` in the place of a queued one that has not started on its way:
+ * for a message written before the outcome it reports was known (a refund
+ * that is sent after the cancellation is recorded). Answers false when the
+ * queued one is already being sent, or was sent.
+ */
+export async function replaceQueuedEmail(db: DbLike, id: string, message: QueuedEmail): Promise<boolean> {
+  const replaced = await db
+    .update(emailOutbox)
+    .set({ ...(await filled(db, message)), kind: message.kind })
+    .where(and(eq(emailOutbox.id, id), isNull(emailOutbox.sentAt), eq(emailOutbox.attempts, 0)))
+    .returning({ id: emailOutbox.id });
+  return replaced.length > 0;
 }
 
 export type SendResult = { ok: true } | { ok: false; error: string };
@@ -266,38 +291,46 @@ export function bookingMovedEmail(input: {
   };
 }
 
+/**
+ * Where a card refund stands: `sent` when the processor accepted it, `not_yet`
+ * when it did not go through, and is tried again.
+ */
+export type RefundState = "sent" | "not_yet";
+
+/** A card refund, in a sentence: what the customer can expect. */
+function refundSentence(refund: { cents: number; feeCents: number; state: RefundState }): string {
+  const fee = refund.feeCents > 0 ? ` (${money(refund.feeCents)} processing fee kept)` : "";
+  return refund.state === "sent"
+    ? `A refund of ${money(refund.cents)} is on its way to your card${fee}. Banks usually show it within 5 to 10 business days.`
+    : `A refund of ${money(refund.cents)} is due to your card${fee}, and has not reached it yet: it is tried again by itself, and the studio has been told.`;
+}
+
 export function cancellationEmail(input: {
   to: string;
   name: string;
   ref: string;
   when: string;
-  refundCents: number;
-  feeCents: number;
-  /** Why no refund is due, when refundCents is 0. */
-  note: string;
-  /** With a card refund, the rest of what the cancellation does, a sentence each. */
-  more?: string[];
-  /** The pet fee, returned as a code for studio credit and not to the card. */
-  petCredit?: { code: string; cents: number; expires: string; bookUrl: string };
+  /** True when the studio cancelled: the email says so first. */
+  byStudio?: boolean;
+  /** The card refund, when there is one. */
+  refund?: { cents: number; feeCents: number; state: RefundState };
+  /** The rest of what the cancellation does, or why nothing is refunded: a sentence each. */
+  lines: string[];
+  /** The pet fee, returned as a code for studio credit and not to the card: `cents` of a fee of `feeCents`. */
+  petCredit?: { code: string; cents: number; feeCents: number; expires: string; bookUrl: string };
 }): QueuedEmail {
-  const refundLines =
-    input.refundCents > 0
-      ? [
-          `A refund of ${money(input.refundCents)} is on its way to your card${
-            input.feeCents > 0 ? ` (${money(input.feeCents)} processing fee kept)` : ""
-          }. Banks usually show it within 5 to 10 business days.`,
-          ...(input.more ?? []),
-        ]
-      : [input.note];
-  const creditLines = input.petCredit
+  const credit = input.petCredit;
+  const creditLines = credit
     ? [
         "",
-        `The pet fee of ${money(input.petCredit.cents)} is not refunded to a card. It is returned to you as studio credit:`,
+        credit.cents === credit.feeCents
+          ? `The pet fee of ${money(credit.feeCents)} is not refunded to a card. It is returned to you as studio credit:`
+          : `Of the pet fee, ${money(credit.cents)} is returned to you as studio credit, not to a card:`,
         "",
-        `Code: ${input.petCredit.code}`,
-        `Valid until: ${input.petCredit.expires}`,
+        `Code: ${credit.code}`,
+        `Valid until: ${credit.expires}`,
         "",
-        `Book at ${input.petCredit.bookUrl} and enter the code at checkout, with this email address. What you do not spend stays on the code.`,
+        `Book at ${credit.bookUrl} and enter the code at checkout, with this email address. What you do not spend stays on the code.`,
       ]
     : [];
   return {
@@ -307,10 +340,30 @@ export function cancellationEmail(input: {
     body: [
       `Hi ${input.name},`,
       "",
-      `Your booking ${input.ref} on ${input.when} has been cancelled.`,
+      `Your booking ${input.ref} on ${input.when} has been cancelled${input.byStudio ? " by the studio" : ""}.`,
       "",
-      ...refundLines,
+      ...(input.refund ? [refundSentence(input.refund)] : []),
+      ...input.lines,
       ...creditLines,
+      "",
+      SIGN_OFF,
+    ].join("\n"),
+  };
+}
+
+/**
+ * A card refund that was promised in a cancellation email already on its way
+ * did not go through: what the customer was told is put right.
+ */
+export function refundNotYetEmail(input: { to: string; name: string; ref: string; cents: number; feeCents: number }): QueuedEmail {
+  return {
+    to: input.to,
+    kind: "refund_not_yet",
+    subject: `Your refund for booking ${input.ref}`,
+    body: [
+      `Hi ${input.name},`,
+      "",
+      `About your cancelled booking ${input.ref}: ${refundSentence({ cents: input.cents, feeCents: input.feeCents, state: "not_yet" })}`,
       "",
       SIGN_OFF,
     ].join("\n"),
@@ -420,9 +473,7 @@ export function ownerHandRefundNotice(input: { to: string; ref: string; customer
       `${input.customer} cancelled booking ${input.ref} early enough to be refunded.`,
       "",
       `Of what was paid at the studio, ${money(input.paidCents)} is refunded by the rental terms${
-        input.feePercent > 0
-          ? `, less the ${input.feePercent}% fee: ${money(input.paidCents - Math.round((input.paidCents * input.feePercent) / 100))}`
-          : ", in full"
+        input.feePercent > 0 ? `, less the ${input.feePercent}% fee: ${money(afterFee(input.paidCents, input.feePercent))}` : ", in full"
       }. The site cannot send that back.`,
       "Refund the customer by hand, then record the refund on the appointment's page.",
     ].join("\n"),
@@ -519,7 +570,7 @@ export function ownerRefundNotice(input: {
           "",
           `Reason: ${input.failedReason}`,
           "",
-          "The booking is cancelled and the customer was told a refund is coming. The system will retry; if it keeps failing, refund the payment in Square.",
+          "The site tries it again by itself. If it keeps failing, refund the payment in Square, then press \u201cRefunded it in Square\u201d beside it on the admin's overview, so that the site stops trying.",
         ].join("\n")
       : [
           `${input.automatic ? "An automatic refund" : "A refund"} of ${money(input.amountCents)} was sent for booking ${input.ref} (${input.customer}).`,

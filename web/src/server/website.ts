@@ -248,17 +248,19 @@ export async function publishDraft<T, C>(db: Db, viewer: AuthUser, spec: Documen
   });
 }
 
-/** Throw the draft away. The website and its history are not touched. */
+/**
+ * Throw the draft away. The website and its history are not touched. The
+ * revision moves on even when no draft was stored, so that an editor starts
+ * again from what is published, without a change it had not saved yet.
+ */
 export async function discardDraft<T, C>(db: Db, viewer: AuthUser, spec: DocumentSpec<T, C>): Promise<{ ok: true } | { ok: false; message: string }> {
   if (!can(viewer, spec.ability, await loadSettings(db))) return { ok: false, message: `You cannot change ${spec.name}.` };
   return db.transaction(async (tx) => {
     const row = await rowForUpdate(tx, spec);
-    if (row.draft != null) {
-      await tx
-        .update(siteDocuments)
-        .set({ draft: null, draftBy: null, draftAt: null, draftRevision: row.draftRevision + 1 })
-        .where(eq(siteDocuments.id, row.id));
-    }
+    await tx
+      .update(siteDocuments)
+      .set({ draft: null, draftBy: null, draftAt: null, draftRevision: row.draftRevision + 1 })
+      .where(eq(siteDocuments.id, row.id));
     return { ok: true as const };
   });
 }

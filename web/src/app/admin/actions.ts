@@ -462,6 +462,7 @@ export async function saveAddonAction(formData: FormData): Promise<void> {
   const priceCents = dollarsToCents(text(formData, "price"));
   const kind = text(formData, "kind");
   if (priceCents === null) failed("/admin/studios", "Enter the price as an amount, for example 40 or 40.50.");
+  if (priceCents > PRICE_MAX_CENTS) failed("/admin/studios", `A price can be at most ${formatCents(PRICE_MAX_CENTS)}.`);
   if (!isAddonKind(kind)) failed("/admin/studios", "Choose what the add-on is for.");
   const addonId = text(formData, "addonId") || null;
   const result = await saveAddon(await getDb(), addonId, {

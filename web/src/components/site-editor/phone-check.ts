@@ -50,31 +50,50 @@ const draftDrawn: Drawn = (doc, view) => {
 };
 
 /**
- * Any page of the website, drawn: its header is fixed to the top by the site's
- * stylesheet, something of the page is on screen, and nothing is still on its
- * way (a part still to come shows a `.spinner` in its place: the booking
- * screens draw themselves in the browser).
+ * Whether a part the server sends after the rest of the page has still to be
+ * shown. React marks its place with a comment until it is: "$?" while it is on
+ * its way, "$~" once it has arrived and waits to be shown with others. Once
+ * every part is shown, each such comment reads "$".
  */
-const pageDrawn: Drawn = (doc, view) => {
+export function partStillComing(doc: Document): boolean {
+  const walker = doc.createTreeWalker(doc.body ?? doc, 128 /* NodeFilter.SHOW_COMMENT */);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const mark = (node as Comment).data;
+    if (mark === "$?" || mark === "$~") return true;
+  }
+  return false;
+}
+
+/**
+ * Any page of the website, drawn: its header is fixed to the top by the site's
+ * stylesheet, every part the server streams is shown, and nothing is still on
+ * its way in the browser (a part still to come shows a `.spinner` in its place:
+ * the booking screens draw themselves there). A page with nothing on it is
+ * drawn too: an empty page fits any phone.
+ */
+export const pageDrawn: Drawn = (doc, view) => {
   const header = doc.querySelector(".site-nav");
   const main = doc.querySelector("main");
   if (!header || view.getComputedStyle(header).position !== "fixed" || !main) return false;
-  const shown = Array.from(main.children).some((child) => child.getBoundingClientRect().height > 0);
-  const coming = Array.from(main.querySelectorAll(".spinner")).some((spinner) => spinner.getClientRects().length > 0);
-  return shown && !coming;
+  if (partStillComing(doc)) return false;
+  return !Array.from(main.querySelectorAll(".spinner")).some((spinner) => spinner.getClientRects().length > 0);
 };
 
 /**
  * `url` loaded in a frame `width` CSS pixels wide, out of sight; what the
  * checks find in it once it is `drawn`. A page that does not arrive in time is
- * asked for once more: a busy server is not a problem of the page. `name`
- * says which page in a message.
+ * asked for once more: a busy server is not a problem of the page. One that
+ * fails twice is named (`name`) in what is thrown.
  */
 async function checkAt(url: string, width: number, drawn: Drawn, name = "The page"): Promise<string[]> {
   try {
     return await checkOnce(url, width, drawn, name);
   } catch {
-    return checkOnce(url, width, drawn, name);
+    try {
+      return await checkOnce(url, width, drawn, name);
+    } catch {
+      throw new Error(`${name} did not finish loading for its check, twice.`);
+    }
   }
 }
 
@@ -168,6 +187,7 @@ export async function checkWebsiteOnPhones(scope: "design" | "frame", paths: rea
   });
   const sentences: string[] = [];
   for (const width of CHECK_WIDTHS) {
+    const checked = jobs.filter((job) => job.width === width).length;
     const groups: { problems: string[]; pages: string[] }[] = [];
     jobs.forEach((job, index) => {
       if (job.width !== width || found[index].length === 0) return;
@@ -175,9 +195,20 @@ export async function checkWebsiteOnPhones(scope: "design" | "frame", paths: rea
       if (same) same.pages.push(nameOf(job.path));
       else groups.push({ problems: found[index], pages: [nameOf(job.path)] });
     });
-    for (const group of groups) sentences.push(...said(`At ${width}px, on ${listed(group.pages)}`, group.problems));
+    for (const group of groups) sentences.push(...said(`At ${width}px, on ${pagesListed(group.pages, checked)}`, group.problems));
   }
   return sentences;
+}
+
+/**
+ * The pages a problem was found on, in a few words: "the home page and /rates";
+ * "every page" when it is on all of them (a header is); "/a, /b, /c and 7 other
+ * pages" when there are many.
+ */
+export function pagesListed(names: string[], checked: number): string {
+  if (names.length > 2 && names.length === checked) return "every page";
+  if (names.length > 4) return `${names.slice(0, 3).join(", ")} and ${names.length - 3} other pages`;
+  return listed(names);
 }
 
 /** "a", "a and b", "a, b and c". */

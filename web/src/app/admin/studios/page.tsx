@@ -5,7 +5,7 @@ import { Suspense } from "react";
 import { ChoosePictures } from "@/components/media/PictureChooser";
 import { getDb } from "@/db/client";
 import { ADDON_KINDS } from "@/lib/addon-kinds";
-import { centsToInput, MONEY_FIELD } from "@/lib/parse";
+import { centsToInput, PRICE_FIELD } from "@/lib/parse";
 import { listAddons, type AdminAddon } from "@/server/admin";
 import { loadCatalog, type CatalogStudio } from "@/server/catalog";
 import { requireOwner } from "@/server/session";
@@ -63,7 +63,7 @@ function AddonFields({ id, addon, studios }: { id: string; addon?: AdminAddon; s
             id={`addon-${id}-price`}
             name="price"
             className="form-control price-input"
-            {...MONEY_FIELD}
+            {...PRICE_FIELD}
             defaultValue={addon ? centsToInput(addon.priceCents) : ""}
             required
           />

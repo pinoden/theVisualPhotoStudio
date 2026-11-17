@@ -31,6 +31,20 @@ export async function siteUrl(): Promise<string> {
   return `${proto}://${host}`;
 }
 
+/**
+ * Every address this request knows the website by: the configured one
+ * (`SITE_URL`) and the one the request came in at, which a host can give the
+ * same site beside it. For telling a full address of the site from another
+ * site's.
+ */
+export async function siteOrigins(): Promise<string[]> {
+  const h = await headers();
+  const host = h.get("x-forwarded-host") ?? h.get("host");
+  const proto = h.get("x-forwarded-proto") ?? (host?.startsWith("localhost") ? "http" : "https");
+  const origins = [configuredSiteUrl(), host ? `${proto}://${host}` : null];
+  return [...new Set(origins.filter((origin): origin is string => origin !== null))];
+}
+
 /** Where refund notices go: OWNER_NOTIFY_EMAIL, else the first owner address. */
 export function ownerNotifyEmail(): string | null {
   return process.env.OWNER_NOTIFY_EMAIL?.trim().toLowerCase() || ownerEmails()[0] || null;

@@ -484,16 +484,19 @@ export async function unpublishPage(db: Db, viewer: AuthUser, id: string, now: D
   });
 }
 
-/** Throw away the changes that are waiting on a published page. A page that was never published has nothing to go back to. */
+/**
+ * Throw away the changes that are waiting on a published page. A page that
+ * was never published has nothing to go back to. The revision moves on even
+ * when no draft was stored, so that the editor starts again from what is
+ * published, without a change it had not saved yet.
+ */
 export async function discardPageDraft(db: Db, viewer: AuthUser, id: string): Promise<PageChangeResult> {
   if (!(await abilities(db, viewer)).edit) return { ok: false, message: CANNOT_EDIT };
   return db.transaction(async (tx): Promise<PageChangeResult> => {
     const row = await pageRow(tx, id, true);
     if (!row) return { ok: false, message: NOT_FOUND };
     if (row.published == null) return { ok: false, message: "This page is not published, so there is nothing to go back to. To be rid of it, delete the page." };
-    if (row.draft != null) {
-      await tx.update(siteDocuments).set({ draft: null, draftBy: null, draftAt: null, draftRevision: row.draftRevision + 1 }).where(eq(siteDocuments.id, row.id));
-    }
+    await tx.update(siteDocuments).set({ draft: null, draftBy: null, draftAt: null, draftRevision: row.draftRevision + 1 }).where(eq(siteDocuments.id, row.id));
     return { ok: true, path: pagePath(row.slug) };
   });
 }
@@ -546,9 +549,17 @@ export async function restorePageVersion(db: Db, viewer: AuthUser, id: string, v
 /**
  * Change a page's name and address. They change at once, not through a
  * draft. When a published page gets a new address, the old one is kept
- * working: a redirect is written from it to the new one.
+ * working: a redirect is written from it to the new one. `own` are the
+ * addresses the website is known by (`siteOrigins`), for old addresses
+ * written as a full address of the site.
  */
-export async function savePageSettings(db: Db, viewer: AuthUser, id: string, input: { title: string; slug: string }): Promise<PageChangeResult> {
+export async function savePageSettings(
+  db: Db,
+  viewer: AuthUser,
+  id: string,
+  input: { title: string; slug: string },
+  own: readonly string[] = [],
+): Promise<PageChangeResult> {
   const may = await abilities(db, viewer);
   if (!may.edit) return { ok: false, message: CANNOT_EDIT };
   const title = cleanLine(input.title, PAGE_LIMITS.title);
@@ -566,11 +577,18 @@ export async function savePageSettings(db: Db, viewer: AuthUser, id: string, inp
     if (moved) {
       const [from, to] = [pagePath(row.slug), pagePath(parsed.slug)];
       // Nothing may lead away from the address a published page now has (a draft leaves it leading on until it is
-      // published), and what led to the old address leads on to the new.
+      // published), and what led to the old address leads on to the new, however it was written.
       if (row.published != null) await tx.delete(siteRedirects).where(eq(siteRedirects.fromPath, to));
-      await tx.update(siteRedirects).set({ toPath: to }).where(eq(siteRedirects.toPath, from));
+      for (const redirect of await tx.select().from(siteRedirects)) {
+        if (pathOf(redirect.toPath, own) === from) await tx.update(siteRedirects).set({ toPath: to }).where(eq(siteRedirects.fromPath, redirect.fromPath));
+      }
       if (row.published != null) {
         await tx.insert(siteRedirects).values({ fromPath: from, toPath: to }).onConflictDoUpdate({ target: siteRedirects.fromPath, set: { toPath: to } });
+      } else {
+        // A draft's new address keeps leading on, unless that leads round to the page itself, which is now there:
+        // visitors would go round until their browser gave up. Then the page is where it led, once it is published.
+        const onward = await findRedirect(tx, to);
+        if (onward !== null && (await roundBack(tx, to, onward, own))) await tx.delete(siteRedirects).where(eq(siteRedirects.fromPath, to));
       }
     }
     return { ok: true, path: pagePath(parsed.slug) };
@@ -708,24 +726,62 @@ function oldPath(input: string): string | null {
  * website this one replaced, which other sites and search engines still name.
  */
 /**
+ * A host's name as the site compares it: without "www." or the dot a full
+ * name may end with, and with every name of the computer itself (localhost,
+ * 127.0.0.1, ::1) as one.
+ */
+function hostKey(hostname: string): string {
+  const name = hostname.toLowerCase().replace(/\.$/, "").replace(/^www\./, "");
+  return name === "localhost" || name === "[::1]" || name === "0.0.0.0" || /^127(\.\d{1,3}){3}$/.test(name) ? "localhost" : name;
+}
+
+/**
  * The page a link leads to on this site, as the public route finds it: by its
  * path alone (not what follows ? or #), and without a slash at the end, which
- * the website takes off. A web address of the site itself (`ownOrigin`, with
- * or without "www.") counts as its path. Null for a link elsewhere.
+ * the website takes off. A web address of the site itself counts as its
+ * path: one of the addresses it is known by (`own`), whatever the scheme, with
+ * or without "www.". Null for a link elsewhere.
  */
-function pathOf(href: string, ownOrigin: string | null): string | null {
+function pathOf(href: string, own: readonly string[]): string | null {
   let path: string | null = href.startsWith("/") && !href.startsWith("//") ? href : null;
-  if (path === null && ownOrigin) {
+  if (path === null && own.length > 0) {
+    let url: URL;
     try {
-      const url = new URL(href);
-      const own = new URL(ownOrigin);
-      const host = (name: string) => name.replace(/^www\./, "");
-      if (host(url.hostname) === host(own.hostname) && url.port === own.port) path = url.pathname;
+      url = new URL(href);
     } catch {
       return null;
     }
+    const ours = own.some((origin) => {
+      try {
+        const site = new URL(origin);
+        return hostKey(url.hostname) === hostKey(site.hostname) && url.port === site.port;
+      } catch {
+        return false;
+      }
+    });
+    if (ours) path = url.pathname;
   }
   return path === null ? null : normalPath(path);
+}
+
+/**
+ * Whether visitors sent from `from` to `to` come back round to `from`, through
+ * other old addresses: the address that sends them back, or null when they
+ * arrive somewhere (a page that answers, an address that leads nowhere,
+ * another site). A published page answers where it is, and stops them; a
+ * draft does not, so visitors are sent on.
+ */
+async function roundBack(db: DbLike, from: string, to: string, own: readonly string[]): Promise<{ via: string } | null> {
+  const start = normalPath(from);
+  let via = start;
+  for (let at = pathOf(to, own), steps = 0; at !== null && steps < 50; steps++) {
+    if (at === start) return { via };
+    if ((await rowBySlug(db, at.slice(1)))?.published != null) return null;
+    const onward = await findRedirect(db, at);
+    via = at;
+    at = onward === null ? null : pathOf(onward, own);
+  }
+  return null;
 }
 
 /**
@@ -753,12 +809,15 @@ function normalPath(path: string): string {
   return decoded.replace(/\/+$/, "") || "/";
 }
 
-/** `ownOrigin` is the website's own address ("https://..."), so that a full address of the site is known for what it is. */
+/**
+ * `own` are the addresses the website is known by ("https://...":
+ * `siteOrigins`), so that a full address of the site is known for what it is.
+ */
 export async function addRedirect(
   db: Db,
   viewer: AuthUser,
   input: { from: string; to: string },
-  ownOrigin: string | null = null,
+  own: readonly string[] = [],
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   if (!(await abilities(db, viewer)).publish) return { ok: false, message: CANNOT_PUBLISH };
   const from = oldPath(input.from);
@@ -766,17 +825,11 @@ export async function addRedirect(
   const to = parseHref(input.to);
   if (!to || to.startsWith("mailto:") || to.startsWith("tel:")) return { ok: false, message: "Give where it should lead: a page of this site (/rates) or a web address (https://...)." };
   const fromPath = normalPath(from);
-  if (pathOf(to, ownOrigin) === fromPath) return { ok: false, message: "An address cannot lead to itself." };
+  if (pathOf(to, own) === fromPath) return { ok: false, message: "An address cannot lead to itself." };
   if (await rowBySlug(db, from.slice(1))) return { ok: false, message: `${from} is the address of a page here. A page's own address cannot lead elsewhere.` };
   // Nor back to itself through other old addresses: a visitor's browser would go round until it gave up.
-  for (let at = pathOf(to, ownOrigin), steps = 0; at !== null && steps < 50; steps++) {
-    // A published page answers there. A draft does not: visitors are sent on.
-    if ((await rowBySlug(db, at.slice(1)))?.published != null) break;
-    const onward = await findRedirect(db, at);
-    const next = onward === null ? null : pathOf(onward, ownOrigin);
-    if (next === fromPath) return { ok: false, message: `That would send visitors round in a circle: ${at} already leads back to ${from}.` };
-    at = next;
-  }
+  const back = await roundBack(db, fromPath, to, own);
+  if (back) return { ok: false, message: `That would send visitors round in a circle: ${back.via} already leads back to ${from}.` };
   await db.insert(siteRedirects).values({ fromPath: from, toPath: to }).onConflictDoUpdate({ target: siteRedirects.fromPath, set: { toPath: to } });
   return { ok: true };
 }

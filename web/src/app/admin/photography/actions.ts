@@ -3,7 +3,9 @@
 import { updateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import { getDb } from "@/db/client";
+import { formatCents } from "@/lib/domain/pricing";
 import { dollarsToCents, formText, hhmmToMinutes } from "@/lib/parse";
+import { PRICE_MAX_CENTS } from "@/server/admin";
 import { CATALOG_TAG } from "@/server/cached";
 import { blockPhotographer, savePhotoPackage, savePhotographerHours, unblockPhotographer } from "@/server/photography";
 import { requireStaff } from "@/server/session";
@@ -67,6 +69,7 @@ export async function savePhotoPackageAction(formData: FormData): Promise<void> 
   const viewer = await requireStaff(PAGE);
   const priceCents = dollarsToCents(formText(formData.get("price")));
   if (priceCents === null) back("error", "Enter the price as an amount, for example 375 or 375.50.");
+  if (priceCents! > PRICE_MAX_CENTS) back("error", `A price can be at most ${formatCents(PRICE_MAX_CENTS)}.`);
   const saved = await savePhotoPackage(await getDb(), viewer, formText(formData.get("packageId")), {
     priceCents: priceCents!,
     includes: formText(formData.get("includes")),

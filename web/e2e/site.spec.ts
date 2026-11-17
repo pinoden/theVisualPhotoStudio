@@ -408,7 +408,9 @@ test("the released time is bookable again, and the code pays for a new booking w
   await fillDetails(page, jane);
   await byLabel(page, "Have a code?").fill(rescheduleCode);
   await page.getByRole("button", { name: "Apply" }).click();
-  await expect(byText(page, "That code has already been used.")).toBeVisible();
+  // Answered in a few milliseconds, but once, on the tester's busy machine, in 21 seconds (2026-11-16): the development
+  // server can stall for a moment, and every test after this one in the file waits on it.
+  await expect(byText(page, "That code has already been used.")).toBeVisible({ timeout: 60_000 });
 });
 
 test("a code only works for the person it was sent to", async ({ page }) => {

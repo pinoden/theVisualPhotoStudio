@@ -48,7 +48,7 @@ describe("a refund made by hand in Square", () => {
     const history = (await getAppointment(world.db, owner, ref, NOW))!.history.map((line) => [line.actor, line.note]);
     expect(history.slice(-2)).toEqual([
       ["the studio", "Refund $50 to the card: Lights failed for a while"],
-      ["system", "The refund of $50 did not go through (The card account is closed). It is tried again."],
+      ["system", "The refund of $50 did not go through, and is tried again. The processor's answer: The card account is closed."],
     ]);
     // Owed already: it counts against what the card holds, so it cannot be refunded a second time.
     expect(await netCardPaidCents(world.db, bookingId)).toBe(12600);

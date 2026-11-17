@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto
 import { and, desc, eq, gt, isNull, sql } from "drizzle-orm";
 import { loginCodes, sessions, users } from "@/db/schema";
 import type { Db, DbLike } from "@/db/client";
+import { EMAIL_RULE } from "@/lib/parse";
 import { loginCodeEmail, queueEmail } from "./email";
 
 /**
@@ -24,12 +25,11 @@ export const MAX_CODES_PER_WINDOW = 3;
 export const CODE_WINDOW_MINUTES = 15;
 export const SESSION_DAYS = 30;
 
-const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
-
+/** An email address as the site keeps it: trimmed and in small letters, by the rule every email field follows (`EMAIL_RULE`). */
 export function normalizeEmail(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
   const email = raw.trim().toLowerCase();
-  return email.length <= 200 && EMAIL.test(email) ? email : null;
+  return email.length <= 200 && EMAIL_RULE.test(email) ? email : null;
 }
 
 function sha256(value: string): string {

@@ -54,7 +54,10 @@ export type CancelOutcome =
       feeCents: number;
       /** The pet fee, returned as a code for studio credit instead of to the card. */
       creditCents: number;
-      /** Money taken at the studio that the terms say is refunded: the studio does that by hand. */
+      /**
+       * Money taken at the studio that the terms say is refunded, before the
+       * processing fee (`afterFee` gives what goes back): the studio does that by hand.
+       */
       byHandCents: number;
       /** The booking's pet fee, when it has one: `creditCents` can be less, when part of it was refunded already. */
       petFeeCents?: number;
@@ -64,6 +67,14 @@ export type CancelOutcome =
     };
 
 const HOUR = 3_600_000;
+
+/**
+ * What a refund of `cents` comes to once the processing fee is kept: for the
+ * card, and for money paid at the studio that the studio gives back by hand.
+ */
+export function afterFee(cents: number, feePercent: number): number {
+  return cents - Math.round((cents * feePercent) / 100);
+}
 
 function hoursUntil(startAt: Date, now: Date): number {
   return (startAt.getTime() - now.getTime()) / HOUR;
@@ -97,8 +108,8 @@ export function cancellationOutcome(booking: BookingFacts, now: Date, settings: 
   if (booking.cardPaidCents <= 0) return { ...nothing("paid_at_studio"), creditCents, byHandCents, ...pet };
 
   const refundable = booking.cardPaidCents - petOnCard;
-  const feeCents = Math.round((refundable * settings.refundFeePercent) / 100);
-  return { allowed: true, refundCents: refundable - feeCents, feeCents, creditCents, byHandCents, why: "refund", ...pet };
+  const refundCents = afterFee(refundable, settings.refundFeePercent);
+  return { allowed: true, refundCents, feeCents: refundable - refundCents, creditCents, byHandCents, why: "refund", ...pet };
 }
 
 export type RescheduleBlock =

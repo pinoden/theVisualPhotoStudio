@@ -74,14 +74,22 @@ export function hhmmToMinutes(raw: unknown): number | null {
 
 /** A whole number within [min, max], from a form field. */
 export function intInRange(raw: unknown, min: number, max: number): number | null {
-  // Whatever a number field lets through that is a whole number: "5", "5.0" and "1e3" too. Never "0x10" or "5.5".
-  if (typeof raw !== "string" || !/^-?\d{1,9}(\.\d*)?(e[+-]?\d{1,2})?$/i.test(raw.trim())) return null;
+  // Whatever a number field lets through that is a whole number: "5", "5.0", "1e3", ".5e2" and "0050" too. Never "0x10" or "5.5".
+  if (typeof raw !== "string" || raw.trim().length > 40 || !/^-?(\d+(\.\d*)?|\.\d+)(e[+-]?\d+)?$/i.test(raw.trim())) return null;
   const value = Number(raw.trim());
   return Number.isInteger(value) && value >= min && value <= max ? value : null;
 }
 
-/** What the server takes for an email address (src/server/auth.ts), as a pattern for a field. */
-export const EMAIL_PATTERN = String.raw`[^\s@]+@[^\s@]+\.[^\s@]{2,}`;
+/**
+ * What the site takes for an email address, wherever one is typed: at
+ * sign-in, in a booking, in the admin's forms. It is the rule of the booking's
+ * own check (`z.email()` in src/server/bookings.ts), and a test keeps the two
+ * in step: an address the browser lets through is never refused by the server.
+ */
+export const EMAIL_RULE = /^(?:[A-Za-z0-9_'+\-]+\.)*[A-Za-z0-9_'+\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\-]*\.)+[A-Za-z]{2,}$/;
+
+/** `EMAIL_RULE` as a field's pattern. A browser reads a pattern with the `v` flag, which wants "-" escaped inside [...]. */
+export const EMAIL_PATTERN = String.raw`(?:[A-Za-z0-9_'+\-]+\.)*[A-Za-z0-9_'+\-]*[A-Za-z0-9_+\-]@(?:[A-Za-z0-9][A-Za-z0-9\-]*\.)+[A-Za-z]{2,}`;
 
 /** Attributes for an email field, so the browser refuses before the form is sent what the server would refuse after. */
 export const EMAIL_FIELD = {

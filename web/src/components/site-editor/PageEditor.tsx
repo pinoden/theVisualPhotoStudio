@@ -108,7 +108,7 @@ function PageEditorBody({ initial, versions, collections, links, fontClasses, no
       <div className="site-editor page-editor">
         <EditorBar editor={editor} notice={notice} previewPath={initial.path} canDiscard={initial.isLive} />
         <p className="page-editor-narrow editor-hint">The page editor is made for a computer or a tablet. On a phone it works, but there is little room.</p>
-        <div className="page-editor-canvas">
+        <div className="page-editor-canvas" inert={editor.busy}>
           <Puck
             config={config}
             data={data}

@@ -2,8 +2,11 @@
 
 import { updateTag } from "next/cache";
 import { getDb } from "@/db/client";
+import { can } from "@/lib/abilities";
 import { WEBSITE_TAG } from "@/server/cached";
+import { websiteCheckPaths } from "@/server/pages";
 import { getCurrentUser } from "@/server/session";
+import { loadSettings } from "@/server/settings";
 import {
   DESIGN_DOC,
   discardDraft,
@@ -65,4 +68,18 @@ export async function restoreVersionAction(kind: DocumentKind, versionId: string
   const [user, spec] = [await getCurrentUser(), specOf(kind)];
   if (!user || !spec) return { ok: false, message: NOT_ALLOWED };
   return restoreVersion(await getDb(), user, spec, String(versionId), new Date());
+}
+
+/**
+ * The pages a change of the design, or of the header, menu and footer, is
+ * measured on before it is published: every published page as they are now,
+ * the booking screens and the account (`websiteCheckPaths`). Asked for at
+ * the moment of publishing, so that a page published meanwhile is measured.
+ */
+export async function checkPathsAction(kind: DocumentKind): Promise<{ ok: true; paths: string[] } | { ok: false; message: string }> {
+  const [user, spec] = [await getCurrentUser(), specOf(kind)];
+  if (!user || !spec) return { ok: false, message: NOT_ALLOWED };
+  const db = await getDb();
+  if (!can(user, spec.ability, await loadSettings(db))) return { ok: false, message: NOT_ALLOWED };
+  return { ok: true, paths: await websiteCheckPaths(db) };
 }

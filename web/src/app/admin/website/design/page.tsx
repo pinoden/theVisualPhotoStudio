@@ -5,7 +5,6 @@ import { Suspense } from "react";
 import { DesignEditor } from "@/components/site-editor/DesignEditor";
 import { getDb } from "@/db/client";
 import { loadCustomFonts } from "@/server/fonts";
-import { websiteCheckPaths } from "@/server/pages";
 import { requireManager } from "@/server/session";
 import { loadSettings } from "@/server/settings";
 import { DESIGN_DOC, listVersions, loadForEditing } from "@/server/website";
@@ -27,18 +26,17 @@ async function DesignPageBody({ searchParams }: Pick<PageProps<"/admin/website/d
   await connection();
   const viewer = await requireManager("/admin/website/design");
   const db = await getDb();
-  const [state, versions, settings, fonts, checkPaths] = await Promise.all([
+  const [state, versions, settings, fonts] = await Promise.all([
     loadForEditing(db, viewer, DESIGN_DOC),
     listVersions(db, viewer, DESIGN_DOC),
     loadSettings(db),
     loadCustomFonts(db),
-    websiteCheckPaths(db),
   ]);
   if (!state || !versions) notFound();
   return (
     <AdminFrame active="/admin/website" title="Design" query={await searchParams} viewer={viewer} settings={settings}>
       <WebsiteTabs active="/admin/website/design" viewer={viewer} />
-      <DesignEditor initial={state} versions={versions} fonts={fonts} checkPaths={checkPaths} />
+      <DesignEditor initial={state} versions={versions} fonts={fonts} />
     </AdminFrame>
   );
 }

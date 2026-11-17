@@ -963,7 +963,7 @@ test("a header that would be wider than a phone is not published, whatever other
   const refused = byText(page, /^Not published: on a phone, the website with this header, menu and footer would be hard to use\./);
   await expect(refused).toBeVisible({ timeout: 90_000 });
   // Measured with the published design, on every page, and said once for all of them: the header is the same everywhere.
-  await expect(refused).toContainText(/At 320px, on the home page, .+, the booking page, .+ and the account: "The Visuals Atelier[^"]*" reaches \d+px; "Menu" reaches \d+px\./);
+  await expect(refused).toContainText(/At 320px, on every page: "The Visuals Atelier[^"]*" reaches \d+px; "Menu" reaches \d+px\./);
   await shot(page, "53a-admin-header-phone-check");
   // Visitors still have the header as it was.
   const guest = await visitor(browser);
@@ -971,16 +971,30 @@ test("a header that would be wider than a phone is not published, whatever other
   await expect(guest.locator(".site-nav .site-logo")).toHaveText(/^The Visuals\s*Photo Studio$/);
   await guest.context().close();
 
-  // A page of the owners' at an address that starts like the booking screen's: the check measures it as any other page.
+  // A page of the owners' at an address that starts like the booking screen's, with nothing on it: the check measures it
+  // as any other page, and an empty page fits any phone.
   await page.goto("/admin/website/pages");
   await byLabel(page, "Name of a new page").fill("Book a Shoot");
   await page.getByRole("button", { name: "Make the page" }).click();
-  await expect(canvasOf(page).locator("h1")).toHaveText("Book a Shoot");
+  const canvas = canvasOf(page);
+  await expect(canvas.locator("h1")).toHaveText("Book a Shoot");
+  for (const block of [canvas.locator("h1"), canvas.locator(".blk-text")]) {
+    await block.click();
+    await canvas.locator('button[title="Delete"]').click();
+    await expect(block).toHaveCount(0);
+  }
+  await saved(page);
   await page.getByRole("button", { name: "Publish", exact: true }).click();
   await published(page);
 
   // The design is checked with the header as it is published, not with that draft, and on that page too: it is published.
   await page.goto("/admin/website/design");
+  // On a slow connection the editor, drawn again after the publish, arrives late: a change made as soon as "Published"
+  // shows is kept all the same, for the editor says so only once it has started again from what is stored.
+  await page.route("**/admin/website/design**", async (route) => {
+    if (route.request().method() === "GET" && route.request().headers()["rsc"] === "1") await new Promise((resolve) => setTimeout(resolve, 2_000));
+    await route.fallback();
+  });
   await page.getByRole("button", { name: "Publish", exact: true }).click();
   await published(page);
 
@@ -989,6 +1003,7 @@ test("a header that would be wider than a phone is not published, whatever other
   await saved(page);
   await page.getByRole("button", { name: "Publish", exact: true }).click();
   await published(page);
+  await page.unrouteAll({ behavior: "ignoreErrors" });
   await page.goto("/admin/website/navigation");
   await page.getByRole("button", { name: "Discard changes" }).click();
   await page.getByRole("button", { name: "Yes, discard them" }).click();

@@ -22,7 +22,7 @@ import {
   type PublishPageResult,
   type SavePageResult,
 } from "@/server/pages";
-import { siteUrl } from "@/server/runtime";
+import { siteOrigins } from "@/server/runtime";
 import { getCurrentUser, requireManager } from "@/server/session";
 
 /**
@@ -73,7 +73,7 @@ export async function restorePageAction(formData: FormData): Promise<void> {
 
 export async function addRedirectAction(formData: FormData): Promise<void> {
   const viewer = await requireManager(LIST);
-  const result = await addRedirect(await getDb(), viewer, { from: text(formData, "from"), to: text(formData, "to") }, await siteUrl());
+  const result = await addRedirect(await getDb(), viewer, { from: text(formData, "from"), to: text(formData, "to") }, await siteOrigins());
   if (!result.ok) failed(LIST, result.message);
   updateTag(WEBSITE_TAG);
   done(LIST, "Saved. That old address now leads there.");
@@ -99,7 +99,7 @@ async function afterChange(id: string, result: PageChangeResult, notice: string,
 export async function savePageSettingsAction(formData: FormData): Promise<void> {
   const viewer = await requireManager(LIST);
   const id = text(formData, "id");
-  const result = await savePageSettings(await getDb(), viewer, id, { title: text(formData, "title"), slug: text(formData, "slug") });
+  const result = await savePageSettings(await getDb(), viewer, id, { title: text(formData, "title"), slug: text(formData, "slug") }, await siteOrigins());
   await afterChange(id, result, result.ok ? `Saved. The page's address is ${result.path}.` : "");
 }
 

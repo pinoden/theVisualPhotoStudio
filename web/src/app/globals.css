@@ -1659,6 +1659,8 @@ button { font-family: inherit; }
 
 .editor-grid { display: grid; grid-template-columns: minmax(0, 27rem) minmax(0, 1fr); gap: 1.5rem; align-items: start; }
 .editor-form { min-width: 0; }
+/* While publishing, discarding or bringing a version back, until the editor starts again from what is stored: nothing can be changed. */
+.editor-form[inert], .page-editor-canvas[inert] { opacity: 0.6; }
 .editor-preview { position: sticky; top: calc(72px + 8.5rem); min-width: 0; }
 .editor-screen { height: clamp(320px, calc(100vh - 72px - 16rem), 720px); overflow: hidden; border: 1px solid var(--color-border); background: #fff; }
 .editor-screen iframe { display: block; margin: 0 auto; border: 0; transform-origin: top left; }

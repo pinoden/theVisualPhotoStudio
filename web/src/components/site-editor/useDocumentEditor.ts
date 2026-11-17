@@ -1,8 +1,8 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
-import { discardAction, publishAction, restoreVersionAction, saveDraftAction, type DocumentKind } from "@/app/admin/website/actions";
+import { useEffect, useRef, useState, useTransition } from "react";
+import { checkPathsAction, discardAction, publishAction, restoreVersionAction, saveDraftAction, type DocumentKind } from "@/app/admin/website/actions";
 import { checkWebsiteOnPhones } from "./phone-check";
 
 /** How long after the last change the draft is saved by itself. */
@@ -22,7 +22,11 @@ export interface DocumentEditor<T> {
   savedAt: string | null;
   /** Who changed the draft somewhere else, when a save was refused for that reason. */
   conflict: { by: string | null; at: string | null } | null;
-  /** True while publishing, discarding or restoring. */
+  /**
+   * True while publishing, discarding or restoring, until the editor has
+   * started again from what is stored. Nothing can be changed meanwhile: a
+   * change would be lost when it starts again, or published unchecked.
+   */
   busy: boolean;
   mayPublish: boolean;
   /** Counts the saves that went through, so a preview knows when to load again. */
@@ -79,17 +83,19 @@ const WEBSITE_SUBJECT: Record<DocumentKind, string> = {
   frame: "the website with this header, menu and footer",
 };
 
+/** The pages a change reaches, as they are when it is published: a page published meanwhile is among them. */
+async function pagesToCheck(kind: DocumentKind): Promise<string[]> {
+  const answer = await checkPathsAction(kind);
+  if (!answer.ok) throw new Error(answer.message);
+  return answer.paths;
+}
+
 /**
- * The editor of the design, or of the header, menu and footer. `checkPaths`
- * are the pages a change is measured on before it is published: the server's
- * `websiteCheckPaths`.
+ * The editor of the design, or of the header, menu and footer. Before a
+ * change is published it is measured on every page it reaches, which the
+ * server lists at that moment (`websiteCheckPaths`).
  */
-export function useDocumentEditor<T>(
-  kind: DocumentKind,
-  initial: DraftStart<T>,
-  report: (notice: string) => void,
-  checkPaths: readonly string[],
-): DocumentEditor<T> {
+export function useDocumentEditor<T>(kind: DocumentKind, initial: DraftStart<T>, report: (notice: string) => void): DocumentEditor<T> {
   return useDraftEditor(
     initial,
     {
@@ -97,7 +103,11 @@ export function useDocumentEditor<T>(
       publish: () => publishAction(kind),
       discard: () => discardAction(kind),
       restore: (versionId) => restoreVersionAction(kind, versionId),
-      check: { busy: "Checking the website at the width of a phone…", subject: WEBSITE_SUBJECT[kind], run: () => checkWebsiteOnPhones(kind, checkPaths) },
+      check: {
+        busy: "Checking the website at the width of a phone…",
+        subject: WEBSITE_SUBJECT[kind],
+        run: async () => checkWebsiteOnPhones(kind, await pagesToCheck(kind)),
+      },
     },
     report,
   );
@@ -113,7 +123,9 @@ export function useDocumentEditor<T>(
  * After a publish, a discard or a restore the page is rendered again by the
  * server, and the editor is given a `key` that changes with the revision, so
  * it starts again from what is stored. What went well is therefore told to
- * `report`, which belongs to something that stays: see `EditorFrame`.
+ * `report`, which belongs to something that stays: see `EditorFrame`. It is
+ * told together with that new rendering, and the editor stays busy until
+ * then: a change made in between would be thrown away with the old editor.
  */
 export function useDraftEditor<T>(initial: DraftStart<T>, actions: DraftActions<T>, report: (notice: string) => void): DocumentEditor<T> {
   const router = useRouter();
@@ -124,6 +136,8 @@ export function useDraftEditor<T>(initial: DraftStart<T>, actions: DraftActions<
   const [savedAt, setSavedAt] = useState(initial.draftAt);
   const [conflict, setConflict] = useState<DocumentEditor<T>["conflict"]>(null);
   const [busy, setBusy] = useState(false);
+  // True from a publish, a discard or a restore that went through until the page the server renders again is shown.
+  const [refreshing, startRefresh] = useTransition();
   const [saves, setSaves] = useState(0);
 
   // What the handlers need without waiting for a render: the newest content, what the server has, and the save in flight.
@@ -208,22 +222,34 @@ export function useDraftEditor<T>(initial: DraftStart<T>, actions: DraftActions<
     [],
   );
 
-  /** Run one of the three big actions: save first, then act, then let the server render the page again. */
-  const act = async (run: () => Promise<Outcome>, done: string, saveFirst: boolean) => {
+  /**
+   * Run one of the three big actions: save first, then act, then let the
+   * server render the page again. `doing` is what the editor says meanwhile;
+   * `done` is said with the page rendered again, when the editor has started
+   * again from what is stored.
+   */
+  const act = async (run: () => Promise<Outcome>, doing: string, done: string, saveFirst: boolean) => {
     setBusy(true);
     setProblem("");
-    report("");
+    report(doing);
     try {
       // Nothing may be saved behind the action's back: a draft just discarded would come back.
       if (timer.current) clearTimeout(timer.current);
       timer.current = null;
       while (running.current) await running.current;
-      if (saveFirst && !(await save(false))) return;
+      if (saveFirst && !(await save(false))) return report("");
       const result = await run();
-      if (!result.ok) return setProblem(result.message);
-      report(done);
-      router.refresh();
+      if (!result.ok) {
+        report("");
+        return setProblem(result.message);
+      }
+      // One transition: the notice, and the page as the server renders it now. Until it is shown the editor stays busy.
+      startRefresh(() => {
+        report(done);
+        router.refresh();
+      });
     } catch {
+      report("");
       setProblem("That did not go through. Check your connection and try again.");
     } finally {
       setBusy(false);
@@ -238,7 +264,7 @@ export function useDraftEditor<T>(initial: DraftStart<T>, actions: DraftActions<
     hasDraft,
     savedAt,
     conflict,
-    busy,
+    busy: busy || refreshing,
     mayPublish: initial.may.publish,
     saves,
     saveNow: () => save(false),
@@ -253,23 +279,27 @@ export function useDraftEditor<T>(initial: DraftStart<T>, actions: DraftActions<
             try {
               problems = await actions.check.run();
             } catch (error) {
-              report("");
-              return { ok: false, message: `Not published: ${error instanceof Error ? error.message : "the change could not be checked."} Try again.` };
+              return {
+                ok: false,
+                message: `Not published: ${error instanceof Error ? error.message : "the change could not be checked."} Look at it with Preview, then publish again.`,
+              };
             }
-            report("");
             if (problems.length > 0) {
               return {
                 ok: false,
                 message: `Not published: on a phone, ${actions.check.subject} would be hard to use. ${problems.join(" ")} Change it so it fits, then publish again.`,
               };
             }
+            report("Publishing…");
           }
           return actions.publish();
         },
+        "Publishing…",
         "Published. Visitors see it now.",
         true,
       ),
-    discard: () => act(actions.discard, "The changes were discarded.", false),
-    restore: (versionId) => act(() => actions.restore(versionId), "That version is now the draft. Look at it, then publish it or discard it.", false),
+    discard: () => act(actions.discard, "Discarding the changes…", "The changes were discarded.", false),
+    restore: (versionId) =>
+      act(() => actions.restore(versionId), "Bringing that version back…", "That version is now the draft. Look at it, then publish it or discard it.", false),
   };
 }

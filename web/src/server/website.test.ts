@@ -115,8 +115,11 @@ describe("a draft", () => {
     expect(state.content.colors.accent).toBe("#112233");
     expect(await publishedAccent()).toBe("#112233");
     expect(await listVersions(world.db, owner, DESIGN_DOC)).toHaveLength(1);
-    // Discarding when there is nothing to discard is not an error.
+    // Discarding when there is nothing to discard is not an error. It moves the revision on all the same, so that an
+    // editor holding a change it had not saved yet starts again from what is published.
+    const before = state.revision;
     expect(await discardDraft(world.db, owner, DESIGN_DOC)).toEqual({ ok: true });
+    expect((await loadForEditing(world.db, owner, DESIGN_DOC))!.revision).toBe(before + 1);
   });
 });
 

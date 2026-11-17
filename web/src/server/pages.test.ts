@@ -156,6 +156,10 @@ describe("a page's draft and what is published", () => {
     expectOk(await discardPageDraft(world.db, owner, id));
     expect(titleOf((await state(id)).content)).toBe("Gift Cards");
     expect((await state(id)).hasDraft).toBe(false);
+    // With no draft stored, a discard still moves the revision on: the editor starts again without a change it had not saved yet.
+    const before = (await state(id)).revision;
+    expectOk(await discardPageDraft(world.db, owner, id));
+    expect((await state(id)).revision).toBe(before + 1);
   });
 
   it("has nothing to discard while it was never published", async () => {
@@ -437,9 +441,9 @@ describe("old addresses", () => {
     // So does the website's own full address, with or without "www.".
     const own = "https://thevisuals.example";
     for (const to of ["https://thevisuals.example/old", "http://www.thevisuals.example/old/"]) {
-      expect((await addRedirect(world.db, owner, { from: "/old", to }, own)).ok, to).toBe(false);
+      expect((await addRedirect(world.db, owner, { from: "/old", to }, [own])).ok, to).toBe(false);
     }
-    expectOk(await addRedirect(world.db, owner, { from: "/old", to: "https://example.org/old" }, own));
+    expectOk(await addRedirect(world.db, owner, { from: "/old", to: "https://example.org/old" }, [own]));
     expectOk(await removeRedirect(world.db, owner, "/old"));
     expect(await listRedirects(world.db, owner)).toEqual([]);
   });
@@ -477,6 +481,40 @@ describe("old addresses", () => {
     // Published, the page answers there and the old address is dropped.
     expectOk(await publishPage(world.db, owner, id, NOW));
     expect(await findRedirect(world.db, "/legacy-z")).toBeNull();
+  });
+
+  it("never go round when a draft page moves onto an old address that led to it", async () => {
+    // In one step: /old-x led to the draft page, which now takes /old-x itself.
+    const one = await make("Draft X", "draft-x");
+    expectOk(await addRedirect(world.db, owner, { from: "/old-x", to: "/draft-x" }));
+    expectOk(await savePageSettings(world.db, owner, one, { title: "Draft X", slug: "old-x" }));
+    expect(await findRedirect(world.db, "/old-x")).toBeNull();
+    // In two steps: /c led to /a, which led to the draft page, which now takes /c.
+    const two = await make("Draft Two", "draft-two");
+    expectOk(await addRedirect(world.db, owner, { from: "/a", to: "/draft-two" }));
+    expectOk(await addRedirect(world.db, owner, { from: "/c", to: "/a" }));
+    expectOk(await savePageSettings(world.db, owner, two, { title: "Draft Two", slug: "c" }));
+    expect(await findRedirect(world.db, "/a")).toBe("/c");
+    expect(await findRedirect(world.db, "/c")).toBeNull();
+    // What led to the page's old address follows it, however it was written.
+    const three = await make("Draft Three", "draft-three");
+    expectOk(await addRedirect(world.db, owner, { from: "/to-three", to: "https://thevisuals.example/draft-three/" }, ["https://thevisuals.example"]));
+    expectOk(await savePageSettings(world.db, owner, three, { title: "Draft Three", slug: "three" }, ["https://thevisuals.example"]));
+    expect(await findRedirect(world.db, "/to-three")).toBe("/three");
+  });
+
+  it("know the site's own address written another way: with a dot at the end, or another name of the same computer", async () => {
+    const own = ["http://localhost:3213"];
+    for (const to of ["http://127.0.0.1:3213/own", "http://localhost.:3213/own", "http://LOCALHOST:3213/own/", "http://127.0.0.2:3213/./own"]) {
+      expect(await addRedirect(world.db, owner, { from: "/own", to }, own), to).toEqual({ ok: false, message: "An address cannot lead to itself." });
+    }
+    // Another port is another server.
+    expectOk(await addRedirect(world.db, owner, { from: "/own", to: "http://localhost:3000/own" }, own));
+    // Any of the addresses the site is known by counts: the configured one and the one the owner is using.
+    const both = ["https://thevisuals.example", "https://thevisuals-studio.vercel.app"];
+    for (const to of ["https://thevisuals-studio.vercel.app/away", "https://thevisuals.example./away"]) {
+      expect((await addRedirect(world.db, owner, { from: "/away", to }, both)).ok, to).toBe(false);
+    }
   });
 
   it("are dropped from a page's own address once it is published, so taking it off leaves no circle", async () => {

@@ -120,8 +120,6 @@ export interface FrameEditorProps {
   pages: { path: string; title: string }[];
   /** The pictures the draft names (the logo's, the sharing picture): the frame itself only holds their ids. */
   pictures: ChoosablePicture[];
-  /** The pages a change is measured on, at a phone's width, before it is published (`websiteCheckPaths`). */
-  checkPaths: string[];
 }
 
 /**
@@ -135,8 +133,8 @@ export function FrameEditor(props: FrameEditorProps) {
   return <FrameForm key={props.initial.revision} {...props} notice={notice} report={setNotice} />;
 }
 
-function FrameForm({ initial, versions, pictures, pages: madePages, checkPaths, notice, report }: FrameEditorProps & { notice: string; report: (notice: string) => void }) {
-  const editor = useDocumentEditor<SiteFrame>("frame", initial, report, checkPaths);
+function FrameForm({ initial, versions, pictures, pages: madePages, notice, report }: FrameEditorProps & { notice: string; report: (notice: string) => void }) {
+  const editor = useDocumentEditor<SiteFrame>("frame", initial, report);
   const frame = editor.value;
   const pages = useId();
   // The pictures this editor has seen, to show the ones the frame names by their ids.
@@ -158,7 +156,7 @@ function FrameForm({ initial, versions, pictures, pages: madePages, checkPaths, 
       </datalist>
       <EditorBar editor={editor} notice={notice} previewPath="/" />
       <div className="editor-grid">
-        <div className="editor-form">
+        <div className="editor-form" inert={editor.busy}>
           <Group title="The studio: name, address and phone" open>
             <p className="editor-hint">
               Shown in the footer and on the contact page, and printed in every email and on every receipt the site

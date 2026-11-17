@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-import { bookings, payments, promoCodes, refunds, settings, studioHolds } from "@/db/schema";
+import { bookingEvents, bookings, emailOutbox, payments, promoCodes, refunds, settings, studioHolds } from "@/db/schema";
 import {
   cancelBooking,
   cancelOutcomeText,
@@ -56,6 +56,40 @@ describe("cancelling", () => {
     const [toOwner] = await world.emails("owner_refund_notice");
     expect(toOwner.toEmail).toBe(OWNER_EMAIL);
     expect(toOwner.body).toContain(`An automatic refund of $167.20 was sent for booking ${booked.ref}`);
+  });
+
+  it("in time, with a card refund that does not go through: the email says it has not reached the card, as the screen does", async () => {
+    const booked = expectOk(await world.book({ date: FAR }));
+    world.failRefunds = "The card account is closed";
+    const result = expectOk(await cancelBooking(world.db, booked.ref, byToken(booked.manageToken), world.manageDeps()));
+    expect(result.refund).toBe("pending");
+    const [mail] = await world.emails("booking_cancelled");
+    expect(mail.body).toContain(
+      "A refund of $167.20 is due to your card ($8.80 processing fee kept), and has not reached it yet: it is tried again by itself, and the studio has been told.",
+    );
+    expect(mail.body).not.toContain("on its way");
+    expect(await world.emails("refund_not_yet")).toHaveLength(0);
+  });
+
+  it("with a card refund that fails after its email has left: a second email puts it right", async () => {
+    const booked = expectOk(await world.book({ date: FAR }));
+    const deps = world.manageDeps();
+    // The scheduled task takes the cancellation's email on its way while the processor is still answering, and the refund fails.
+    const payments = {
+      ...deps.payments!,
+      refund: async () => {
+        await world.db.update(emailOutbox).set({ attempts: 1 }).where(eq(emailOutbox.kind, "booking_cancelled"));
+        return { ok: false as const, message: "The card account is closed" };
+      },
+    };
+    expectOk(await cancelBooking(world.db, booked.ref, byToken(booked.manageToken), { ...deps, payments }));
+    expect((await world.emails("booking_cancelled"))[0].body).toContain("is on its way to your card");
+    const [followUp] = await world.emails("refund_not_yet");
+    expect(followUp.toEmail).toBe("jane@example.com");
+    expect(followUp.subject).toBe(`Your refund for booking ${booked.ref}`);
+    expect(followUp.body).toContain(
+      `About your cancelled booking ${booked.ref}: A refund of $167.20 is due to your card ($8.80 processing fee kept), and has not reached it yet: it is tried again by itself, and the studio has been told.`,
+    );
   });
 
   it("inside 14 days: cancels without a refund and says why", async () => {
@@ -261,12 +295,20 @@ describe("a refund the processor accepted without completing it", () => {
     expect((await world.db.select().from(payments))[0].refundedCents).toBe(0);
     const [alert] = await world.emails("owner_refund_failed");
     expect(alert.subject).toBe(`ACTION NEEDED: refund failed for ${booked.ref}`);
-    expect(alert.body).toContain("Square accepted the refund, then did not make it (Square marked the refund REJECTED).");
+    expect(alert.body).toContain("Square accepted the refund, then did not make it. Its answer: Square marked the refund REJECTED.");
+    // The booking's history says so, as it says a refund that fails at once.
+    const bookingId = (await bookingRow(booked.ref)).id;
+    const said = async () => (await world.db.select().from(bookingEvents).where(eq(bookingEvents.bookingId, bookingId))).map((event) => event.note);
+    expect(await said()).toContain("Square accepted the refund of $167.20, then did not make it, and it is tried again. Its answer: Square marked the refund REJECTED.");
     // Asked again, nothing more happens: it is a failed refund now, retried with the others.
     expect(await checkUnsettledRefunds(world.db, world.manageDeps())).toEqual({ settled: 0, rejected: 0 });
     world.pendingRefunds = false;
-    expect(await retryOpenRefunds(world.db, world.manageDeps())).toEqual({ succeeded: 1, failed: 0 });
+    const later = new Date(NOW.getTime() + 5 * 86_400_000);
+    expect(await retryOpenRefunds(world.db, world.manageDeps({ now: later }))).toEqual({ succeeded: 1, failed: 0 });
     expect((await world.db.select().from(payments))[0].refundedCents).toBe(16720);
+    // Made when it was tried again: dated that day, and its history says so.
+    expect((await world.db.select().from(refunds))[0].createdAt).toEqual(later);
+    expect((await said()).at(-1)).toBe("The refund of $167.20 went through when it was tried again");
   });
 
   it("is never asked about when the processor completed it at once, or when there is no processor", async () => {
@@ -485,6 +527,31 @@ describe("the owner", () => {
     expect((await world.db.select().from(refunds))[0]).toMatchObject({ amountCents: 17600, automatic: false, status: "succeeded" });
     expect((await world.emails("booking_cancelled"))[0].body).toContain("A refund of $176 is on its way");
     expect((await world.emails("owner_refund_notice"))[0].body).toContain("A refund of $176 was sent");
+  });
+
+  it("tells the client the whole outcome when there is a card refund: the studio cancelled, the code works again, whom to ask", async () => {
+    const promo = (await issuePromo(world.db, { kind: "percent", value: 10, source: "loyalty", email: "jane@example.com", expiresAt: daysAfter(NOW, 60) }))!;
+    const booked = expectOk(await world.book({ date: FAR, promoCode: promo.code }));
+    expectOk(await ownerCancelBooking(world.db, booked.ref, { refundCents: 2000 }, world.manageDeps()));
+    const [mail] = await world.emails("booking_cancelled");
+    expect(mail.body).toContain(`Your booking ${booked.ref} on`);
+    expect(mail.body).toContain("has been cancelled by the studio.");
+    expect(mail.body).toContain("A refund of $20 is on its way to your card.");
+    expect(mail.body).toContain("The code you used for this booking can be used again.");
+    expect(mail.body).toContain("Please contact us with any questions.");
+  });
+
+  it("puts the client's email right when the card refund does not go through", async () => {
+    const booked = expectOk(await world.book({ date: NEAR }));
+    world.failRefunds = "The card account is closed";
+    expect(await ownerCancelBooking(world.db, booked.ref, { refundCents: 3000 }, world.manageDeps())).toMatchObject({ ok: true, refund: "pending" });
+    const [mail] = await world.emails("booking_cancelled");
+    expect(mail.body).toContain("A refund of $30 is due to your card, and has not reached it yet: it is tried again by itself, and the studio has been told.");
+    expect(mail.body).not.toContain("on its way");
+    // The owner is told what to do, and not that the client was promised the money.
+    const [alert] = await world.emails("owner_refund_failed");
+    expect(alert.body).toContain("Refunded it in Square");
+    expect(alert.body).not.toContain("told a refund is coming");
   });
 
   it("cannot refund more than the card paid, or cancel twice", async () => {

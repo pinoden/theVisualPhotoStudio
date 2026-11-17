@@ -270,7 +270,7 @@ describe("money taken at the studio and the site's own refunds", () => {
     const choices = await getManageChoices(world.db, made.ref, { kind: "customer", email: "dana@example.com" }, NOW);
     expect(choices?.cancel).toEqual({
       allowed: true,
-      text: "Of what you paid at the studio, $176 is refunded, less the 5% processing fee: that cannot be sent back online, so please contact the studio about it.",
+      text: "Of what you paid at the studio, $167.20 is refunded ($176, less the 5% processing fee): that cannot be sent back online, so please contact the studio about it.",
     });
 
     const result = expectOk(await cancelBooking(world.db, made.ref, { kind: "customer", email: "dana@example.com" }, world.manageDeps()));
