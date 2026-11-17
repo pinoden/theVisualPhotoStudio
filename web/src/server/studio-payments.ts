@@ -7,7 +7,7 @@ import { isPaymentMethod, MANUAL_PROVIDER, PAYMENT_METHODS, type PaymentMethod }
 import { can } from "@/lib/abilities";
 import type { AuthUser } from "./auth";
 import { isBookingRef } from "./bookings";
-import { paymentReceivedEmail, queueEmail } from "./email";
+import { codeRefundEmail, paymentReceivedEmail, queueEmail } from "./email";
 import { recordEvent } from "./history";
 import { openPayLinkOf } from "./pay-links";
 import { netCardPaidCents, paidAtStudioCents } from "./money";
@@ -240,8 +240,11 @@ export async function voidStudioPayment(db: Db, viewer: AuthUser, paymentId: str
     const held = (await netCardPaidCents(tx, booking.id)) + (await paidAtStudioCents(tx, booking.id)) + booking.creditAppliedCents - payment.amountCents;
     if (credit && held < (await petFeeCentsOf(tx, booking.id))) {
       const standing = await codeStanding(tx, credit.id, now);
-      if (standing.spentCents > 0) {
-        return { ok: false, message: `The pet fee of this booking came back as studio credit (code ${standing.code}), which paid for a booking: this record cannot be taken back.` };
+      if (standing.usedCents > 0) {
+        return {
+          ok: false,
+          message: `The pet fee of this booking came back as studio credit (code ${standing.code}), and ${formatCents(standing.usedCents)} of it was used: this record cannot be taken back.`,
+        };
       }
       if (standing.usable) {
         return {
@@ -253,10 +256,10 @@ export async function voidStudioPayment(db: Db, viewer: AuthUser, paymentId: str
     const moved = await rescheduleCodeOf(tx, booking.id);
     if (moved) {
       const standing = await codeStanding(tx, moved.id, now);
-      if (standing.spentCents > 0) {
+      if (standing.usedCents > 0) {
         return {
           ok: false,
-          message: `This booking's money went into its reschedule code ${moved.code}, and ${formatCents(standing.spentCents)} of it paid for another booking: this record cannot be taken back.`,
+          message: `This booking's money went into its reschedule code ${moved.code}, and ${formatCents(standing.usedCents)} of it was used: this record cannot be taken back.`,
         };
       }
       if (standing.usable) {
@@ -316,7 +319,7 @@ export async function recordHandRefund(
         ...(back.petReturnedCents > 0
           ? [
               back.petReturnedCents < back.petFeeCents
-                ? `its pet fee was already returned as studio credit, ${formatCents(back.petReturnedCents)} of it from what was paid at the studio`
+                ? `${formatCents(back.petReturnedCents)} of what was paid at the studio was for the pet fee, which was returned as studio credit`
                 : `its pet fee (${formatCents(back.petFeeCents)}) was already returned as studio credit`,
             ]
           : []),
@@ -325,8 +328,22 @@ export async function recordHandRefund(
       return { ok: false as const, message: `At most ${formatCents(back.cents)} can be refunded by hand for this booking${why.length > 0 ? `: ${why.join("; ")}` : ""}.` };
     };
     if (input.amountCents > back.cents) return tooMuch();
-    // What a released booking gives back comes off its code.
+    // What a released booking gives back comes off its code, and the client is told.
     if (back.code && !(await takeOffRescheduleCode(tx, back.code.id, input.amountCents))) return tooMuch();
+    if (back.code) {
+      await queueEmail(
+        tx,
+        codeRefundEmail({
+          to: booking.customerEmail,
+          name: booking.customerName,
+          ref: booking.ref,
+          code: back.code.code,
+          cents: input.amountCents,
+          leftCents: back.code.valueCents - input.amountCents,
+          byHand: true,
+        }),
+      );
+    }
     const why = input.note.trim().slice(0, 180);
     await tx.insert(refunds).values({
       paymentId: payment.id,

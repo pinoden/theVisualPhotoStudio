@@ -46,19 +46,27 @@ export async function petCreditOf(db: DbLike, bookingId: string): Promise<{ code
 }
 
 /**
- * How much of a booking's pet fee was returned as studio credit: the fee, once
- * a code returned it, and 0 before. That money was given back once, so it is
- * neither refunded to the card nor carried by a reschedule code as well.
+ * How much of a booking's pet fee was returned as studio credit: what its
+ * code was issued for, which is only part of the fee when only part was paid
+ * or part was refunded to the card before; 0 before a code returned it. That
+ * money was given back once, so it is neither refunded to the card nor
+ * carried by a reschedule code as well.
  */
 export async function petFeeReturnedCents(db: DbLike, bookingId: string): Promise<number> {
-  return (await petCreditOf(db, bookingId)) ? petFeeCentsOf(db, bookingId) : 0;
+  const [credit] = await db
+    .select({ issued: promoCodes.issuedCents, value: promoCodes.value })
+    .from(promoCodes)
+    .where(and(eq(promoCodes.originBookingId, bookingId), eq(promoCodes.source, "pet_fee")))
+    .limit(1);
+  if (!credit) return 0;
+  return credit.issued ?? (await petFeeCentsOf(db, bookingId));
 }
 
 /**
  * What the studio can still give back by hand of the money it took for a
  * booking: what it holds, less the part of a pet fee returned as studio
- * credit that the card did not hold (`petReturnedCents` of a fee of
- * `petFeeCents`). The pet fee comes back once: as credit, not in cash as well.
+ * credit that the card did not hold (`petReturnedCents`, of a fee of
+ * `petFeeCents`; the credit itself may be only part of the fee). The pet fee comes back once: as credit, not in cash as well.
  * A booking released for a reschedule code gives back at most what is left on
  * the code (`code`), which the refund then comes off. (The card's side is
  * `ownerRefundable` in manage.ts.)
@@ -68,11 +76,17 @@ export async function studioRefundableCents(
   bookingId: string,
 ): Promise<{ cents: number; petReturnedCents: number; petFeeCents: number; code: { id: string; code: string; valueCents: number } | null }> {
   const atStudio = Math.max(0, await paidAtStudioCents(db, bookingId));
-  const petFeeCents = await petFeeReturnedCents(db, bookingId);
-  const onStudio = petFeeCents - Math.min(Math.max(0, await netCardPaidCents(db, bookingId)), petFeeCents);
+  // The pet fee's credit, which may be only part of the fee: what the card did not hold of it was paid at the studio.
+  const credit = await petFeeReturnedCents(db, bookingId);
+  const onStudio = credit - Math.min(Math.max(0, await netCardPaidCents(db, bookingId)), credit);
   const cents = Math.max(0, atStudio - onStudio);
   const code = atStudio > 0 ? await rescheduleCodeOf(db, bookingId) : null;
-  return { cents: code ? Math.min(cents, code.valueCents) : cents, petReturnedCents: Math.min(atStudio, onStudio), petFeeCents, code };
+  return {
+    cents: code ? Math.min(cents, code.valueCents) : cents,
+    petReturnedCents: Math.min(atStudio, onStudio),
+    petFeeCents: credit > 0 ? await petFeeCentsOf(db, bookingId) : 0,
+    code,
+  };
 }
 
 /**

@@ -6,7 +6,7 @@ import { BookingSummary } from "@/components/BookingSummary";
 import { bookings, paymentLinks, payments, promoCodes, refunds, settings, staffShifts } from "@/db/schema";
 import { createAdminBooking, getAppointment } from "./appointments";
 import type { AuthUser } from "./auth";
-import { cancelBooking, ownerCancelBooking, requestRescheduleCode } from "./manage";
+import { cancelBooking, ownerCancelBooking, requestRescheduleCode, retryOpenRefunds } from "./manage";
 import { netCardPaidCents } from "./money";
 import {
   cancelPayLink,
@@ -372,31 +372,62 @@ describe("a booking that stops being active", () => {
     expect(await checkOpenPayLinks(world.db, deps())).toEqual({ paid: 0, closed: 0 });
   });
 
-  it("records a payment the client made just before the booking was cancelled, and gives it back in full", async () => {
-    const made = await madeInAdmin();
+  it("counts a payment the client made just before cancelling: the terms of the cancellation apply to it", async () => {
+    const made = await madeInAdmin(); // four days ahead: inside the refund window
     expectOk(await sendPayLink(world.db, owner, made.ref, deps()));
     clientPays();
-    // Cancelled before anyone asked the processor: withdrawing the link finds it paid and records the payment, which
-    // the cancellation was worked out without: it is refunded to the card in full, and the client is told.
-    expectOk(await cancelBooking(world.db, made.ref, dana, world.manageDeps({ payments: square })));
+    // Paid on the processor's page, not seen yet: the cancellation asks first, and counts it.
+    const cancelled = expectOk(await cancelBooking(world.db, made.ref, dana, world.manageDeps({ payments: square })));
+    expect(cancelled.message).toBe("No refund is due, because the booking starts in less than 14 days.");
     expect((await links())[0].status).toBe("paid");
-    expect(await world.db.select().from(refunds)).toMatchObject([{ amountCents: 17600, automatic: true, status: "succeeded" }]);
-    expect(await netCardPaidCents(world.db, made.id)).toBe(0);
-    const [late] = await world.emails("late_payment_refunded");
-    expect(late.body).toContain(`Your payment of $176 for booking ${made.ref} arrived after the booking was cancelled, so it is refunded to your card in full.`);
-    expect(await world.emails("payment_received")).toHaveLength(0);
+    expect(await world.db.select().from(refunds)).toEqual([]);
+    expect(await netCardPaidCents(world.db, made.id)).toBe(17600);
+    expect(await world.emails("late_payment_refunded")).toHaveLength(0);
   });
 
-  it("gives back in full a payment that arrives after the booking was released for a reschedule code, which keeps what it was", async () => {
+  it("counts a payment the client made just before releasing the booking: the code holds it", async () => {
     const made = await madeInAdmin(FAR, h(9));
     expectOk(await recordStudioPayment(world.db, owner, made.ref, { amountCents: 7600, method: "cash", note: "" }, NOW));
     expectOk(await sendPayLink(world.db, owner, made.ref, deps()));
-    // Paid on the processor's page, and not seen yet when the client releases the booking: the code is the cash.
     clientPays();
     const moved = expectOk(await requestRescheduleCode(world.db, made.ref, dana, world.manageDeps({ payments: square })));
-    expect(moved.valueCents).toBe(7600);
-    expect(await world.db.select().from(refunds)).toMatchObject([{ amountCents: 10000, status: "succeeded" }]);
+    expect(moved.valueCents).toBe(17600);
+    expect(await world.db.select().from(refunds)).toEqual([]);
+  });
+
+  it("gives back in full a payment made after the booking ended, says so, and puts the email right when the refund fails", async () => {
+    const made = await madeInAdmin();
+    expectOk(await sendPayLink(world.db, owner, made.ref, deps()));
+    // The processor is down while the booking is cancelled: the link stays open, and the client pays it afterwards.
+    world.failLinks = "Could not reach the payment processor.";
+    expectOk(await cancelBooking(world.db, made.ref, dana, world.manageDeps({ payments: square })));
+    world.failLinks = null;
+    clientPays();
+    world.failRefunds = "The card account is closed";
+    expect(await checkOpenPayLinks(world.db, { ...deps(), ownerEmail: "owner@studio.test" })).toEqual({ paid: 1, closed: 0 });
+    expect(await world.db.select().from(refunds)).toMatchObject([{ amountCents: 17600, automatic: true, status: "failed", reason: `Paid after ${made.ref} was cancelled` }]);
+    const [late] = await world.emails("late_payment_refunded");
+    expect(late.body).toContain(`Your payment of $176 for booking ${made.ref} reached us after the booking was cancelled, so it is due back to your card in full. It has not reached your card yet`);
+    // Tried again by the scheduled task, it goes through; the money comes back once.
+    world.failRefunds = null;
+    expect(await retryOpenRefunds(world.db, world.manageDeps({ payments: square }))).toEqual({ succeeded: 1, failed: 0 });
     expect(await netCardPaidCents(world.db, made.id)).toBe(0);
+    // The page the client is sent back to says so.
+    const page = await getPayPage(world.db, (await links())[0].id, deps());
+    expect(page?.status).toBe("refunded");
+  });
+
+  it("says a booking released for a reschedule code when a payment comes after it", async () => {
+    const made = await madeInAdmin(FAR, h(9));
+    expectOk(await recordStudioPayment(world.db, owner, made.ref, { amountCents: 7600, method: "cash", note: "" }, NOW));
+    expectOk(await sendPayLink(world.db, owner, made.ref, deps()));
+    world.failLinks = "Could not reach the payment processor.";
+    const moved = expectOk(await requestRescheduleCode(world.db, made.ref, dana, world.manageDeps({ payments: square })));
+    world.failLinks = null;
+    clientPays();
+    expect(await checkOpenPayLinks(world.db, deps())).toEqual({ paid: 1, closed: 0 });
+    expect(await world.db.select().from(refunds)).toMatchObject([{ amountCents: 10000, status: "succeeded", reason: `Paid after ${made.ref} was released for a reschedule code` }]);
+    expect((await world.emails("late_payment_refunded"))[0].body).toContain("reached us after the booking was released for a reschedule code, so it is refunded to your card in full.");
     expect((await world.db.select().from(promoCodes).where(eq(promoCodes.code, moved.code)))[0].value).toBe(7600);
   });
 });

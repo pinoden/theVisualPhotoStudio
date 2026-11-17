@@ -216,7 +216,7 @@ describe("a payment record behind a code of studio credit", () => {
     await world.db.update(promoCodes).set({ voidedAt: NOW }).where(eq(promoCodes.code, moved.code));
     expect(await voidStudioPayment(world.db, owner, payment.id, "", NOW)).toEqual({
       ok: false,
-      message: `This booking's money went into its reschedule code ${moved.code}, and $88 of it paid for another booking: this record cannot be taken back.`,
+      message: `This booking's money went into its reschedule code ${moved.code}, and $88 of it was used: this record cannot be taken back.`,
     });
   });
 });

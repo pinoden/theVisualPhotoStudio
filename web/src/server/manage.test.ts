@@ -577,6 +577,10 @@ describe("a booking released for a reschedule code", () => {
     });
     expectOk(await ownerRefund(world.db, booked.ref, { amountCents: 5000, reason: "Asked for part back" }, world.manageDeps()));
     expect((await code()).value).toBe(12600);
+    // The client is told what is left on their code.
+    expect((await world.emails("reschedule_code_refund"))[0].body).toContain(
+      `A refund of $50 to your card for booking ${booked.ref} came off your reschedule code ${moved.code}, which now has $126 left.`,
+    );
     const bookingId = (await bookingRow(booked.ref)).id;
     const notes = (await world.db.select().from(bookingEvents).where(eq(bookingEvents.bookingId, bookingId))).map((event) => event.note);
     expect(notes.at(-1)).toBe(`Refund $50 to the card: Asked for part back; taken off the reschedule code ${moved.code}, which has $126 left`);
@@ -662,6 +666,17 @@ describe("the owner", () => {
     const [alert] = await world.emails("owner_refund_failed");
     expect(alert.body).toContain("Refunded it in Square");
     expect(alert.body).not.toContain("told a refund is coming");
+  });
+
+  it("does not cancel on figures that changed since its page was drawn, a payment received meanwhile", async () => {
+    const booked = expectOk(await world.book({ date: NEAR }));
+    expect(await ownerCancelBooking(world.db, booked.ref, { refundCents: 0, seenCardCents: 0 }, world.manageDeps())).toMatchObject({
+      ok: false,
+      code: "changed",
+      message: "Money was received for this booking after this page was opened: the card now holds $176. Look at it again, then cancel.",
+    });
+    expect((await bookingRow(booked.ref)).status).toBe("confirmed");
+    expectOk(await ownerCancelBooking(world.db, booked.ref, { refundCents: 0, seenCardCents: 17600 }, world.manageDeps()));
   });
 
   it("cannot refund more than the card paid, or cancel twice", async () => {

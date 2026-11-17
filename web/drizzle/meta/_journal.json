@@ -169,6 +169,13 @@
       "when": 1794837499947,
       "tag": "0023_studio_facts",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1794903040034,
+      "tag": "0024_code_issued_value",
+      "breakpoints": true
     }
   ]
 }

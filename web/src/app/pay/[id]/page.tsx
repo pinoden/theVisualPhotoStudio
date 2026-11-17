@@ -66,7 +66,7 @@ async function Pay({ params }: Pick<PageProps<"/pay/[id]">, "params">) {
         <strong>{page.when}</strong>
       </div>
       <div className="price-row total">
-        <span>{page.status === "paid" ? "Paid" : "To pay"}</span>
+        <span>{page.status === "paid" ? "Paid" : page.status === "refunded" ? "Refunded" : "To pay"}</span>
         <span>{amount}</span>
       </div>
     </div>
@@ -75,9 +75,15 @@ async function Pay({ params }: Pick<PageProps<"/pay/[id]">, "params">) {
   return (
     <div className="confirmation-card" style={{ textAlign: "left" }}>
       <div style={{ textAlign: "center" }}>
-        <div className="confirmation-icon">{page.status === "paid" ? "✓" : page.status === "cancelled" ? "×" : "$"}</div>
+        <div className="confirmation-icon">{page.status === "paid" ? "✓" : page.status === "cancelled" || page.status === "refunded" ? "×" : "$"}</div>
         <h1 style={{ fontSize: "2rem" }}>
-          {page.status === "paid" ? "Payment Received" : page.status === "cancelled" ? "This Link Is No Longer Valid" : "Pay for Your Booking"}
+          {page.status === "paid"
+            ? "Payment Received"
+            : page.status === "refunded"
+              ? "Payment Refunded"
+              : page.status === "cancelled"
+                ? "This Link Is No Longer Valid"
+                : "Pay for Your Booking"}
         </h1>
         <div className="divider" />
       </div>
@@ -85,6 +91,16 @@ async function Pay({ params }: Pick<PageProps<"/pay/[id]">, "params">) {
       {page.status === "paid" && (
         <>
           <p>Thank you. Your payment of {amount} has been received, and we have emailed you a confirmation.</p>
+          {details}
+        </>
+      )}
+
+      {page.status === "refunded" && (
+        <>
+          <p>
+            Your payment of {amount} reached us after booking {page.ref} was cancelled, so it is refunded to your card in full. We have
+            emailed you about it.
+          </p>
           {details}
         </>
       )}

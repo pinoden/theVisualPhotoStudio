@@ -436,19 +436,39 @@ export function paymentReceivedEmail(input: {
   };
 }
 
-/** A payment through a link that arrived after its booking was cancelled: it is given back. */
-export function latePaymentEmail(input: { to: string; name: string; ref: string; amountCents: number }): QueuedEmail {
+/** A refund of a booking released for a reschedule code: it came off the code, and the client is told what is left on it. */
+export function codeRefundEmail(input: { to: string; name: string; ref: string; code: string; cents: number; leftCents: number; byHand: boolean }): QueuedEmail {
+  const what = input.byHand ? `${money(input.cents)} given back to you at the studio` : `A refund of ${money(input.cents)} to your card`;
+  return {
+    to: input.to,
+    kind: "reschedule_code_refund",
+    subject: `A refund for booking ${input.ref}`,
+    body: [
+      `Hi ${input.name},`,
+      "",
+      `${what} for booking ${input.ref} came off your reschedule code ${input.code}, which now has ${money(input.leftCents)} left.`,
+      "",
+      SIGN_OFF,
+    ].join("\n"),
+  };
+}
+
+/**
+ * A payment through a link that reached the site after its booking was
+ * cancelled, or released for a reschedule code: it is given back in full.
+ * `state` says whether the refund went through, as a cancellation's email does.
+ */
+export function latePaymentEmail(input: { to: string; name: string; ref: string; amountCents: number; released: boolean; state: RefundState }): QueuedEmail {
+  const ended = input.released ? "was released for a reschedule code" : "was cancelled";
+  const back =
+    input.state === "sent"
+      ? "so it is refunded to your card in full. Banks usually show a refund within 5 to 10 business days."
+      : "so it is due back to your card in full. It has not reached your card yet: it is tried again by itself, and the studio has been told.";
   return {
     to: input.to,
     kind: "late_payment_refunded",
     subject: `Your payment for booking ${input.ref} is refunded`,
-    body: [
-      `Hi ${input.name},`,
-      "",
-      `Your payment of ${money(input.amountCents)} for booking ${input.ref} arrived after the booking was cancelled, so it is refunded to your card in full. Banks usually show a refund within 5 to 10 business days.`,
-      "",
-      SIGN_OFF,
-    ].join("\n"),
+    body: [`Hi ${input.name},`, "", `Your payment of ${money(input.amountCents)} for booking ${input.ref} reached us after the booking ${ended}, ${back}`, "", SIGN_OFF].join("\n"),
   };
 }
 
@@ -578,6 +598,8 @@ export function ownerRefundNotice(input: {
   amountCents: number;
   automatic: boolean;
   failedReason?: string;
+  /** What the refund is for, as recorded with it. */
+  reason?: string;
 }): QueuedEmail {
   const failed = input.failedReason !== undefined;
   return {
@@ -595,7 +617,9 @@ export function ownerRefundNotice(input: {
           "The site tries it again by itself. If it keeps failing, refund the payment in Square, then press \u201cRefunded it in Square\u201d beside it on the admin's overview, so that the site stops trying.",
         ].join("\n")
       : [
-          `${input.automatic ? "An automatic refund" : "A refund"} of ${money(input.amountCents)} was sent for booking ${input.ref} (${input.customer}).`,
+          `${input.automatic ? "An automatic refund" : "A refund"} of ${money(input.amountCents)} was sent for booking ${input.ref} (${input.customer})${
+            input.reason ? `: ${input.reason.replace(/[.!?]$/, "")}` : ""
+          }.`,
         ].join("\n"),
   };
 }

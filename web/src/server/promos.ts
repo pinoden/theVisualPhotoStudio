@@ -1,6 +1,6 @@
 import { randomInt } from "node:crypto";
-import { and, eq, gt, gte, inArray, isNull, lt, or, sql } from "drizzle-orm";
-import { bookings, promoCodes } from "@/db/schema";
+import { and, eq, gt, gte, isNull, lt, or, sql } from "drizzle-orm";
+import { promoCodes } from "@/db/schema";
 import type { DbLike } from "@/db/client";
 import type { PromoDef, PromoKind } from "@/lib/domain/pricing";
 
@@ -192,6 +192,7 @@ export async function issuePromo(tx: DbLike, given: IssuePromoInput): Promise<{ 
         code: randomCode(PREFIX[input.source]),
         kind: input.kind,
         value: input.value,
+        issuedCents: input.value,
         source: input.source,
         email,
         expiresAt: input.expiresAt,
@@ -252,17 +253,16 @@ export async function rescheduleCodeOf(
 }
 
 /**
- * What became of a code of studio credit: how much of it pays for bookings
- * that stand (`spentCents`), and whether what is left can still be spent.
+ * What became of a code of studio credit: how much of it was used
+ * (`usedCents`: what it was issued for less what is left, whatever became of
+ * the bookings it paid for, moved, cancelled after their visit, or refunded
+ * from), and whether what is left can still be spent.
  */
-export async function codeStanding(db: DbLike, codeId: string, now: Date): Promise<{ code: string; spentCents: number; usable: boolean }> {
+export async function codeStanding(db: DbLike, codeId: string, now: Date): Promise<{ code: string; usedCents: number; usable: boolean }> {
   const [code] = await db.select().from(promoCodes).where(eq(promoCodes.id, codeId)).limit(1);
-  const [spent] = await db
-    .select({ cents: sql<number>`coalesce(sum(${bookings.creditAppliedCents}), 0)::int` })
-    .from(bookings)
-    .where(and(eq(bookings.promoCodeId, codeId), inArray(bookings.status, ["pending_payment", "confirmed", "completed", "no_show"])));
-  const usable = !!code && code.voidedAt === null && code.value > 0 && (code.expiresAt === null || code.expiresAt.getTime() > now.getTime());
-  return { code: code?.code ?? "", spentCents: spent?.cents ?? 0, usable };
+  if (!code) return { code: "", usedCents: 0, usable: false };
+  const usable = code.voidedAt === null && code.value > 0 && (code.expiresAt === null || code.expiresAt.getTime() > now.getTime());
+  return { code: code.code, usedCents: Math.max(0, (code.issuedCents ?? code.value) - code.value), usable };
 }
 
 /**

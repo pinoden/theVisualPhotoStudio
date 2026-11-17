@@ -7,7 +7,7 @@ import { formatCents } from "@/lib/domain/pricing";
 import { can } from "@/lib/abilities";
 import type { AuthUser } from "./auth";
 import { isBookingRef } from "./bookings";
-import { latePaymentEmail, payLinkEmail, paymentReceivedEmail, queueEmail } from "./email";
+import { latePaymentEmail, payLinkEmail, paymentReceivedEmail, queueEmail, replaceQueuedEmail } from "./email";
 import { BY_CUSTOMER, BY_SYSTEM, recordEvent } from "./history";
 import { receivedCentsByBooking } from "./money";
 import type { PaymentProvider } from "./payments";
@@ -204,7 +204,9 @@ export async function sendPayLink(db: Db, viewer: AuthUser, ref: string, deps: P
  * cancellation, or the code, was worked out without it. Answers whether it
  * was recorded, and the refund to send when it is given back.
  */
-async function settle(db: Db, link: LinkRow, paid: { paymentId: string; amountCents: number }, now: Date): Promise<{ settled: boolean; refundId?: string }> {
+type LateRefund = { refundId: string; emailId: string; email: Omit<Parameters<typeof latePaymentEmail>[0], "state"> };
+
+async function settle(db: Db, link: LinkRow, paid: { paymentId: string; amountCents: number }, now: Date): Promise<{ settled: boolean; late?: LateRefund }> {
   return db.transaction(async (tx) => {
     const claimed = await tx
       .update(paymentLinks)
@@ -230,9 +232,11 @@ async function settle(db: Db, link: LinkRow, paid: { paymentId: string; amountCe
 
     const label = labelOf(booking);
     if (!ACTIVE.includes(booking.status)) {
+      const released = booking.cancelReason === "rescheduled";
+      const ended = released ? "was released for a reschedule code" : "was cancelled";
       const [refund] = await tx
         .insert(refunds)
-        .values({ paymentId: payment.id, amountCents: paid.amountCents, reason: `Paid after ${booking.ref} was cancelled`, automatic: true, status: "pending" })
+        .values({ paymentId: payment.id, amountCents: paid.amountCents, reason: `Paid after ${booking.ref} ${ended}`, automatic: true, status: "pending" })
         .returning({ id: refunds.id });
       await recordEvent(tx, {
         bookingId: booking.id,
@@ -240,13 +244,12 @@ async function settle(db: Db, link: LinkRow, paid: { paymentId: string; amountCe
         to: label,
         actor: BY_SYSTEM,
         at: now,
-        note: `Payment of ${formatCents(paid.amountCents)} received through the payment link after the booking was cancelled; it is refunded to the card in full`,
+        note: `Payment of ${formatCents(paid.amountCents)} received through the payment link after the booking ${ended}; it is refunded to the card in full`,
       });
-      await queueEmail(
-        tx,
-        latePaymentEmail({ to: booking.customerEmail, name: booking.customerName, ref: booking.ref, amountCents: paid.amountCents }),
-      );
-      return { settled: true, refundId: refund.id };
+      // Said as sent; put right if the refund does not go through (`giveBackLate`).
+      const email = { to: booking.customerEmail, name: booking.customerName, ref: booking.ref, amountCents: paid.amountCents, released };
+      const emailId = await queueEmail(tx, latePaymentEmail({ ...email, state: "sent" }));
+      return { settled: true, late: { refundId: refund.id, emailId, email } };
     }
 
     const dueCents = await dueCentsOf(tx, booking);
@@ -277,12 +280,39 @@ async function settle(db: Db, link: LinkRow, paid: { paymentId: string; amountCe
   });
 }
 
-/** Send the refund of a payment that arrived too late (`settle`). Left waiting, it is sent by the scheduled task. */
-async function giveBackLate(db: Db, refundId: string | undefined, deps: PayLinkDeps): Promise<void> {
-  if (!refundId) return;
+/**
+ * Send the refund of a payment that arrived too late (`settle`). When it does
+ * not go through, its email says so, as a cancellation's does; left waiting,
+ * it is sent by the scheduled task.
+ */
+async function giveBackLate(db: Db, late: LateRefund | undefined, deps: PayLinkDeps): Promise<void> {
+  if (!late) return;
   // Imported here: manage.ts withdraws a booking's link through this module.
   const { processRefund } = await import("./manage");
-  await processRefund(db, refundId, { now: deps.now, payments: deps.payments, ownerEmail: deps.ownerEmail ?? null, baseUrl: deps.baseUrl });
+  const status = await processRefund(db, late.refundId, { now: deps.now, payments: deps.payments, ownerEmail: deps.ownerEmail ?? null, baseUrl: deps.baseUrl });
+  if (status === "succeeded") return;
+  const notYet = latePaymentEmail({ ...late.email, state: "not_yet" });
+  if (!(await replaceQueuedEmail(db, late.emailId, notYet))) await queueEmail(db, notYet);
+}
+
+/**
+ * Before a booking is cancelled or released for a reschedule code: ask the
+ * processor whether its open link was paid, and record the payment while the
+ * booking is still active, so that what is decided counts it (the terms of a
+ * cancellation, a code's value). Changes nothing when the processor cannot be
+ * asked: the link is then withdrawn afterwards, as before.
+ */
+export async function noticePaidLink(db: Db, bookingId: string, deps: PayLinkDeps): Promise<void> {
+  try {
+    const [link] = await db
+      .select({ id: paymentLinks.id })
+      .from(paymentLinks)
+      .where(and(eq(paymentLinks.bookingId, bookingId), eq(paymentLinks.status, "open")))
+      .limit(1);
+    if (link) await checkPayLink(db, link.id, deps);
+  } catch (error) {
+    console.error("Could not ask whether the payment link of booking", bookingId, "was paid", error);
+  }
 }
 
 /**
@@ -299,8 +329,8 @@ export async function checkPayLink(db: Db, linkId: string, deps: PayLinkDeps): P
 
   const state = await deps.payments.payLinkState({ linkId: link.providerLinkId, orderId: link.providerOrderId });
   if (state.state === "paid") {
-    const { refundId } = await settle(db, link, state, deps.now);
-    await giveBackLate(db, refundId, deps);
+    const { late } = await settle(db, link, state, deps.now);
+    await giveBackLate(db, late, deps);
     return "paid";
   }
   if (state.state === "cancelled") {
@@ -370,7 +400,7 @@ export async function checkBookingPayLink(
   viewer: AuthUser,
   ref: string,
   deps: PayLinkDeps,
-): Promise<{ ok: true; status: "open" | "paid" | "cancelled" } | { ok: false; message: string }> {
+): Promise<{ ok: true; status: "open" | "paid" | "cancelled"; late?: boolean } | { ok: false; message: string }> {
   const settings = await loadSettings(db);
   if (!can(viewer, "recordPayments", settings) || !isBookingRef(ref)) return { ok: false, message: "Booking not found." };
   const [booking] = await db.select().from(bookings).where(eq(bookings.ref, ref)).limit(1);
@@ -378,7 +408,9 @@ export async function checkBookingPayLink(
   const open = await openPayLinkOf(db, booking.id);
   if (!open) return { ok: false, message: "This booking has no open payment link." };
   const status = await checkPayLink(db, open.id, deps);
-  return status === "unknown" ? { ok: false, message: "The payment link could not be checked." } : { ok: true, status };
+  if (status === "unknown") return { ok: false, message: "The payment link could not be checked." };
+  // Paid for a booking no longer active: `settle` gave it back.
+  return { ok: true, status, late: status === "paid" && !ACTIVE.includes(booking.status) };
 }
 
 /**
@@ -429,7 +461,8 @@ export async function checkOpenPayLinks(db: Db, deps: PayLinkDeps): Promise<{ pa
 /** What the page a client is emailed shows. Null for an address that is no link. */
 export interface PayPage {
   id: string;
-  status: "open" | "paid" | "cancelled";
+  /** `refunded`: paid after the booking had ended, and given back in full. */
+  status: "open" | "paid" | "cancelled" | "refunded";
   amountCents: number;
   ref: string;
   studios: string;
@@ -459,9 +492,15 @@ export async function getPayPage(db: Db, linkId: string, deps: PayLinkDeps): Pro
     .where(eq(paymentLinks.id, linkId))
     .limit(1);
   if (!row) return null;
+  // Paid for a booking that had ended: `settle` gave it back, and the page says so.
+  let shown: PayPage["status"] = row.link.status;
+  if (shown === "paid" && !ACTIVE.includes(row.booking.status) && row.link.paymentId) {
+    const [back] = await db.select({ id: refunds.id }).from(refunds).where(eq(refunds.paymentId, row.link.paymentId)).limit(1);
+    if (back) shown = "refunded";
+  }
   return {
     id: row.link.id,
-    status: row.link.status,
+    status: shown,
     amountCents: row.link.amountCents,
     ref: row.booking.ref,
     studios: await studioNamesOf(db, row.booking.id),

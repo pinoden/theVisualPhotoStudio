@@ -453,7 +453,9 @@ async function AppointmentDetails({
           <h3>Pet fee</h3>
           {appointment.petFee.creditCode ? (
             <p style={{ marginBottom: 0 }}>
-              The pet fee of {formatCents(appointment.petFee.cents)} was returned to the client as studio credit, code{" "}
+              {appointment.petFee.returnedCents < appointment.petFee.cents
+                ? `Of the pet fee of ${formatCents(appointment.petFee.cents)}, ${formatCents(appointment.petFee.returnedCents)} was returned to the client as studio credit, code `
+                : `The pet fee of ${formatCents(appointment.petFee.cents)} was returned to the client as studio credit, code `}
               <strong>{appointment.petFee.creditCode}</strong>.
             </p>
           ) : (

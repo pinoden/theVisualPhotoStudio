@@ -19,6 +19,7 @@ import type { AuthUser } from "./auth";
 import { isBookingRef, tokenMatches } from "./bookings";
 import {
   cancellationEmail,
+  codeRefundEmail,
   ownerHandRefundNotice,
   ownerRefundNotice,
   queueEmail,
@@ -30,7 +31,7 @@ import {
 import { BY_CUSTOMER, BY_STUDIO, BY_SYSTEM, recordEvent } from "./history";
 import { releaseHolds } from "./holds";
 import { netCardPaidCents, paidAtStudioCents } from "./money";
-import { closePayLinkOf } from "./pay-links";
+import { closePayLinkOf, noticePaidLink } from "./pay-links";
 import type { PaymentProvider } from "./payments";
 import { issuePetCredit, petCreditOf, petFeeCentsOf, petFeeReturnedCents, studioRefundableCents } from "./pet-fee";
 import { issuePromo, rescheduleCodeOf, restorePromo, takeOffRescheduleCode } from "./promos";
@@ -349,6 +350,7 @@ export async function processRefund(db: Db, refundId: string, deps: ManageDeps):
             customer: row.customer,
             amountCents: row.refund.amountCents,
             automatic: row.refund.automatic,
+            reason: row.refund.reason,
           }),
         );
       }
@@ -621,6 +623,16 @@ async function giveCodeBack(tx: DbLike, booking: BookingRow, cancelledBy: "custo
 
 const CODE_BACK = "The code you used for this booking can be used again.";
 
+/**
+ * A payment link paid that the site has not seen yet is recorded before a
+ * booking stops being active, so that what is decided counts that money
+ * (`noticePaidLink`). Only for someone who may act on the booking.
+ */
+async function countPaidLink(db: Db, ref: string, actor: Actor | null, deps: ManageDeps): Promise<void> {
+  const [booking] = await db.select().from(bookings).where(eq(bookings.ref, ref)).limit(1);
+  if (booking && (actor === null || mayAct(booking, actor))) await noticePaidLink(db, booking.id, deps);
+}
+
 /** A cancellation email before it is known whether its card refund goes through. */
 type CancellationNotice = Omit<Parameters<typeof cancellationEmail>[0], "refund"> & { refund?: { cents: number; feeCents: number } };
 
@@ -656,6 +668,7 @@ export type CancelResult =
 export async function cancelBooking(db: Db, ref: string, actor: Actor, deps: ManageDeps): Promise<CancelResult> {
   if (!isBookingRef(ref)) return { ok: false, status: 404, code: "not_found", message: "Booking not found." };
   const settings = await loadSettings(db);
+  await countPaidLink(db, ref, actor, deps);
 
   const outcome = await db.transaction(async (tx) => {
     // Lock the row so two cancellations at once cannot both refund.
@@ -773,6 +786,7 @@ export type RescheduleResult =
 export async function requestRescheduleCode(db: Db, ref: string, actor: Actor, deps: ManageDeps): Promise<RescheduleResult> {
   if (!isBookingRef(ref)) return { ok: false, status: 404, code: "not_found", message: "Booking not found." };
   const settings = await loadSettings(db);
+  await countPaidLink(db, ref, actor, deps);
 
   const outcome = await db.transaction(async (tx) => {
     const [booking] = await tx.select().from(bookings).where(eq(bookings.ref, ref)).for("update").limit(1);
@@ -845,7 +859,7 @@ export type OwnerRefundResult =
       /** Money taken at the studio for a booking the studio cancelled: the studio gives back by hand what it owes of it. */
       atStudioCents?: number;
     }
-  | { ok: false; status: number; code: "not_found" | "bad_amount" | "not_cancellable"; message: string };
+  | { ok: false; status: number; code: "not_found" | "bad_amount" | "not_cancellable" | "changed"; message: string };
 
 /**
  * What the owner can still send back to the card for a booking: what the card
@@ -856,8 +870,9 @@ async function ownerRefundable(
   bookingId: string,
 ): Promise<{ available: number; returned: number; petFee: number; code: { id: string; code: string; valueCents: number } | null }> {
   const held = await netCardPaidCents(db, bookingId);
-  const petFee = await petFeeReturnedCents(db, bookingId);
-  const returned = Math.min(held, petFee);
+  // The card's part of the pet fee's credit: the credit may be only part of the fee.
+  const returned = Math.min(held, await petFeeReturnedCents(db, bookingId));
+  const petFee = await petFeeCentsOf(db, bookingId);
   // Released for a reschedule code: its money is on the code, and a refund comes off it.
   const code = await rescheduleCodeOf(db, bookingId);
   const available = code ? Math.min(held - returned, code.valueCents) : held - returned;
@@ -870,7 +885,7 @@ function tooMuchText(outcome: { available: number; returned: number; petFee: num
     ...(outcome.returned > 0
       ? [
           outcome.returned < outcome.petFee
-            ? `its pet fee was already returned as studio credit, ${formatCents(outcome.returned)} of it from what the card paid`
+            ? `${formatCents(outcome.returned)} of what the card paid was for the pet fee, which was returned as studio credit`
             : `its pet fee (${formatCents(outcome.petFee)}) was already returned as studio credit`,
         ]
       : []),
@@ -887,18 +902,24 @@ function tooMuchText(outcome: { available: number; returned: number; petFee: num
 export async function ownerCancelBooking(
   db: Db,
   ref: string,
-  input: { refundCents: number },
+  /** `seenCardCents`: what the card held as the owner's page showed it; money received since refuses the cancel. */
+  input: { refundCents: number; seenCardCents?: number },
   deps: ManageDeps,
 ): Promise<OwnerRefundResult> {
   if (!isBookingRef(ref)) return { ok: false, status: 404, code: "not_found", message: "Booking not found." };
   if (!Number.isInteger(input.refundCents) || input.refundCents < 0) {
     return { ok: false, status: 400, code: "bad_amount", message: "Enter a refund amount of zero or more." };
   }
+  await countPaidLink(db, ref, null, deps);
 
   const outcome = await db.transaction(async (tx) => {
     const [booking] = await tx.select().from(bookings).where(eq(bookings.ref, ref)).for("update").limit(1);
     if (!booking) return { kind: "not_found" as const };
     if (!["confirmed", "completed", "no_show"].includes(booking.status)) return { kind: "not_cancellable" as const };
+    // Card money received since the owner's page was drawn (a payment link paid meanwhile): the refund they chose did
+    // not count it. They look again.
+    const held = await netCardPaidCents(tx, booking.id);
+    if (input.seenCardCents !== undefined && held !== input.seenCardCents) return { kind: "changed" as const, held };
     const refundable = await ownerRefundable(tx, booking.id);
     if (input.refundCents > refundable.available) return { kind: "bad_amount" as const, ...refundable };
 
@@ -955,6 +976,14 @@ export async function ownerCancelBooking(
     return { ok: false, status: 409, code: "not_cancellable", message: "This booking is already cancelled or was never confirmed." };
   }
   if (outcome.kind === "bad_amount") return { ok: false, status: 400, code: "bad_amount", message: tooMuchText(outcome) };
+  if (outcome.kind === "changed") {
+    return {
+      ok: false,
+      status: 409,
+      code: "changed",
+      message: `Money was received for this booking after this page was opened: the card now holds ${formatCents(outcome.held)}. Look at it again, then cancel.`,
+    };
+  }
   await closePayLinkOf(db, outcome.bookingId, deps);
   let refund: "sent" | "pending" | "none" = outcome.refundIds.length === 0 ? "none" : "sent";
   for (const id of outcome.refundIds) {
@@ -981,8 +1010,22 @@ export async function ownerRefund(
     const refundable = await ownerRefundable(tx, booking.id);
     if (input.amountCents > refundable.available) return { kind: "bad_amount" as const, ...refundable };
     const reason = input.reason.slice(0, 180);
-    // What a released booking refunds comes off the code its money went into: the money comes back once.
+    // What a released booking refunds comes off the code its money went into: the money comes back once. The client is told.
     if (refundable.code && !(await takeOffRescheduleCode(tx, refundable.code.id, input.amountCents))) return { kind: "bad_amount" as const, ...refundable };
+    if (refundable.code) {
+      await queueEmail(
+        tx,
+        codeRefundEmail({
+          to: booking.customerEmail,
+          name: booking.customerName,
+          ref: booking.ref,
+          code: refundable.code.code,
+          cents: input.amountCents,
+          leftCents: refundable.code.valueCents - input.amountCents,
+          byHand: false,
+        }),
+      );
+    }
     const refundIds = await recordRefunds(tx, booking.id, input.amountCents, reason || `Refund for ${booking.ref}`, false);
     const label = labelOf(booking);
     await recordEvent(tx, {

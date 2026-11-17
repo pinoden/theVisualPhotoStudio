@@ -275,7 +275,13 @@ export async function ownerCancelAction(formData: FormData): Promise<void> {
   await requireAbility("refund", "/admin/bookings");
   const refundCents = dollarsToCents(text(formData, "refund") || "0");
   if (refundCents === null) failed(back, "Enter the refund as an amount, for example 88 or 88.50.");
-  const result = await ownerCancelBooking(await getDb(), text(formData, "ref"), { refundCents }, await manageDeps());
+  const seen = Number(text(formData, "seenCard"));
+  const result = await ownerCancelBooking(
+    await getDb(),
+    text(formData, "ref"),
+    { refundCents, ...(Number.isInteger(seen) && text(formData, "seenCard") !== "" ? { seenCardCents: seen } : {}) },
+    await manageDeps(),
+  );
   flushEmailsSoon();
   if (!result.ok) failed(back, result.message);
   const atStudio = result.atStudioCents

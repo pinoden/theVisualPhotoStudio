@@ -121,9 +121,17 @@ export function brokenWords(doc: Document = document): string[] {
   const room = (start: Element): number => {
     let box: Element = start;
     while (box.parentElement && /^(inline|contents)$/.test(view.getComputedStyle(box).display)) box = box.parentElement;
-    while (box.parentElement && /(flex|grid)/.test(view.getComputedStyle(box.parentElement).display)) box = box.parentElement;
+    // A box in a flex or grid row could have had the row's width, less its own padding, border and margin (a button's).
+    let own = 0;
+    while (box.parentElement && /(flex|grid)/.test(view.getComputedStyle(box.parentElement).display)) {
+      const item = view.getComputedStyle(box);
+      for (const side of ["Left", "Right"] as const) {
+        own += parseFloat(item[`padding${side}`]) + parseFloat(item[`border${side}Width`]) + parseFloat(item[`margin${side}`]);
+      }
+      box = box.parentElement;
+    }
     const style = view.getComputedStyle(box);
-    return box.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+    return box.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) - own;
   };
   const walker = doc.createTreeWalker(doc.body, 4 /* NodeFilter.SHOW_TEXT */);
   const range = doc.createRange();

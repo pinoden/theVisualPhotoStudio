@@ -83,6 +83,7 @@ async function Fonts({ searchParams }: Pick<PageProps<"/admin/website/fonts">, "
           </p>
 
           {font.fileList.length > 0 && (
+            <div className="data-table-wrap">
             <table className="data-table" style={{ margin: "1rem 0" }}>
               <thead>
                 <tr>
@@ -112,6 +113,7 @@ async function Fonts({ searchParams }: Pick<PageProps<"/admin/website/fonts">, "
                 ))}
               </tbody>
             </table>
+            </div>
           )}
 
           {/* A plain form with a file: it posts to the upload address, which sends the browser back here. */}

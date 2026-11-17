@@ -135,6 +135,8 @@ async function Bookings({ searchParams }: Pick<PageProps<"/admin/bookings">, "se
                           <form action={ownerCancelAction} style={{ marginTop: ".5rem" }}>
                             <input type="hidden" name="ref" value={b.ref} />
                             <input type="hidden" name="back" value={back} />
+                            {/* What the card held as this page shows it: money received since refuses the cancel. */}
+                            <input type="hidden" name="seenCard" value={b.cardHeldCents} />
                             <label style={{ fontSize: ".8rem" }}>
                               Refund to card ($)
                               <br />

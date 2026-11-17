@@ -242,11 +242,11 @@ describe("cancelling a booking that has a pet fee", () => {
     const [cash] = await world.db.select().from(payments).where(and(eq(payments.bookingId, bookingId), eq(payments.provider, "manual")));
     expect(await recordHandRefund(world.db, owner, cash.id, { amountCents: 8800, note: "" }, NOW)).toEqual({
       ok: false,
-      message: "At most $78 can be refunded by hand for this booking: its pet fee was already returned as studio credit, $10 of it from what was paid at the studio.",
+      message: "At most $78 can be refunded by hand for this booking: $10 of what was paid at the studio was for the pet fee, which was returned as studio credit.",
     });
     expect(await ownerRefund(world.db, made.ref, { amountCents: 3000, reason: "" }, world.manageDeps())).toMatchObject({
       ok: false,
-      message: "At most $0 can be refunded to the card for this booking: its pet fee was already returned as studio credit, $30 of it from what the card paid.",
+      message: "At most $0 can be refunded to the card for this booking: $30 of what the card paid was for the pet fee, which was returned as studio credit.",
     });
     // Taking back the cash record would leave the credit standing for money nobody paid: not while it stands.
     expect(await voidStudioPayment(world.db, owner, cash.id, "", NOW)).toMatchObject({
@@ -280,7 +280,53 @@ describe("cancelling a booking that has a pet fee", () => {
     expectOk(await world.book({ date: FAR, startMinute: h(16), durationMinutes: 60, promoCode: spent.credit, customer: dana }));
     expect(await voidStudioPayment(world.db, owner, spent.cashId, "", NOW)).toEqual({
       ok: false,
-      message: `The pet fee of this booking came back as studio credit (code ${spent.credit}), which paid for a booking: this record cannot be taken back.`,
+      message: `The pet fee of this booking came back as studio credit (code ${spent.credit}), and $40 of it was used: this record cannot be taken back.`,
+    });
+  });
+
+  it("keeps the record behind a pet credit once the credit was used, also when the booking it paid for was then moved", async () => {
+    const dana = { name: "Dana Diaz", email: "dana@example.com", phone: "407-555-0133" };
+    const made = expectOk(
+      await createAdminBooking(
+        world.db,
+        owner,
+        { studioIds: [world.ids.dayglow], date: FAR, startMinute: h(10), durationMinutes: 60, addons: [{ addonId: petFeeId, quantity: 1 }], customer: dana },
+        { now: NOW, baseUrl: BASE_URL },
+      ),
+    );
+    expectOk(await recordStudioPayment(world.db, owner, made.ref, { amountCents: 11800, method: "cash", note: "" }, NOW));
+    const credit = expectOk(await givePetFeeCredit(world.db, owner, made.ref, deps()));
+    // The credit pays part of another booking, which the client then moves: its money goes on into a reschedule code.
+    const other = expectOk(await world.book({ date: FAR, startMinute: h(15), durationMinutes: 60, promoCode: credit.code, customer: dana }));
+    expectOk(await requestRescheduleCode(world.db, other.ref, byToken(other.manageToken), world.manageDeps()));
+    const [cash] = await world.db.select().from(payments).where(and(eq(payments.bookingId, (await row(made.ref)).id), eq(payments.provider, "manual")));
+    expect(await voidStudioPayment(world.db, owner, cash.id, "", NOW)).toEqual({
+      ok: false,
+      message: `The pet fee of this booking came back as studio credit (code ${credit.code}), and $40 of it was used: this record cannot be taken back.`,
+    });
+  });
+
+  it("returned as credit for only the part of the fee that was paid: everyone is told that part", async () => {
+    const dana = { name: "Dana Diaz", email: "dana@example.com", phone: "407-555-0133" };
+    const made = expectOk(
+      await createAdminBooking(
+        world.db,
+        owner,
+        { studioIds: [world.ids.dayglow], date: FAR, startMinute: h(10), durationMinutes: 60, addons: [{ addonId: petFeeId, quantity: 1 }], customer: dana },
+        { now: NOW, baseUrl: BASE_URL },
+      ),
+    );
+    // A deposit of $20, all of it the pet fee's by the rule (the fee comes first from what was paid), then cancelled in time.
+    expectOk(await recordStudioPayment(world.db, owner, made.ref, { amountCents: 2000, method: "cash", note: "" }, NOW));
+    expectOk(await cancelBooking(world.db, made.ref, { kind: "customer", email: dana.email }, world.manageDeps()));
+    const appointment = (await getAppointment(world.db, owner, made.ref, NOW))!;
+    expect(appointment.petFee).toMatchObject({ cents: 4000, returnedCents: 2000 });
+    const [listed] = await listBookings(world.db, { from: FAR, to: FAR }, { includeCancelled: true });
+    expect(listed).toMatchObject({ ref: made.ref, studioHeldCents: 0 });
+    const [cash] = await world.db.select().from(payments).where(eq(payments.bookingId, (await row(made.ref)).id));
+    expect(await recordHandRefund(world.db, owner, cash.id, { amountCents: 2000, note: "" }, NOW)).toEqual({
+      ok: false,
+      message: "At most $0 can be refunded by hand for this booking: $20 of what was paid at the studio was for the pet fee, which was returned as studio credit.",
     });
   });
 
@@ -317,7 +363,7 @@ describe("the pet did not come", () => {
   it("lets an owner return the fee as studio credit, once, and tells the client", async () => {
     const booked = expectOk(await withPet());
     const before = (await getAppointment(world.db, owner, booked.ref, AFTER))!;
-    expect(before.petFee).toEqual({ cents: 4000, creditCode: null, canReturn: true, why: "" });
+    expect(before.petFee).toEqual({ cents: 4000, creditCode: null, returnedCents: 0, canReturn: true, why: "" });
 
     const given = expectOk(await givePetFeeCredit(world.db, owner, booked.ref, { now: AFTER, baseUrl: BASE_URL }));
     expect(given.cents).toBe(4000);
@@ -333,7 +379,7 @@ describe("the pet did not come", () => {
     expect(mail.body).toContain(`Code: ${given.code}`);
 
     const after = (await getAppointment(world.db, owner, booked.ref, AFTER))!;
-    expect(after.petFee).toMatchObject({ creditCode: given.code, canReturn: false });
+    expect(after.petFee).toMatchObject({ creditCode: given.code, returnedCents: 4000, canReturn: false });
     expect(after.history.at(-1)).toMatchObject({
       actor: "owner@studio.test",
       note: "The pet did not come: the pet fee of $40 was returned as studio credit",

@@ -28,7 +28,7 @@ import { loadCatalog } from "./catalog";
 import { bookingMovedEmail, queueEmail } from "./email";
 import { listEvents, recordEvent, withoutAmounts, type BookingEvent } from "./history";
 import { openPayLinkOf, type PayLinkView } from "./pay-links";
-import { PET_CREDIT_BLOCK_TEXT, petCreditStanding } from "./pet-fee";
+import { PET_CREDIT_BLOCK_TEXT, petCreditStanding, petFeeReturnedCents } from "./pet-fee";
 import { loadSettings } from "./settings";
 import { canViewDay } from "./staff";
 import { moneyOf, type BookingMoney } from "./studio-payments";
@@ -72,7 +72,8 @@ export interface Appointment {
    * credit now. Null when there is none, and for staff: returning it is the
    * owners' decision.
    */
-  petFee: { cents: number; creditCode: string | null; canReturn: boolean; why: string } | null;
+  /** `returnedCents`: what its credit was issued for, which is part of the fee when only part was paid. */
+  petFee: { cents: number; creditCode: string | null; returnedCents: number; canReturn: boolean; why: string } | null;
   history: BookingEvent[];
   /** Each label that can be set by hand, and whether it can be set right now. */
   labelChoices: { key: SettableLabel; allowed: boolean; why: string }[];
@@ -121,6 +122,7 @@ export async function getAppointment(db: DbLike, viewer: AuthUser, ref: string, 
         ? {
             cents: pet.feeCents,
             creditCode: pet.given?.code ?? null,
+            returnedCents: pet.given ? await petFeeReturnedCents(db, booking.id) : 0,
             canReturn: pet.block === null,
             why: pet.block ? PET_CREDIT_BLOCK_TEXT[pet.block] : "",
           }

@@ -1672,6 +1672,10 @@ fieldset.editor-form { border: 0; padding: 0; margin: 0; min-inline-size: 0; }
 /* A fieldset is as wide as its longest word by the browser's own rule: one long word in it (an add-on's name) would
    push a form wider than a phone. */
 fieldset { min-inline-size: 0; }
+/* The admin's buttons often carry a name the owners typed ("Save Seamlesspaperbackdroprollwithstands", "Take Gift
+   Cards off the website"): on a phone such a button wraps, and breaks a word longer than the screen, rather than push the
+   page wider than it. */
+.admin-main .btn { white-space: normal; overflow-wrap: anywhere; max-width: 100%; }
 /* While publishing, discarding or bringing a version back, until the editor starts again from what is stored: nothing can be changed. */
 .editor-form[inert], .page-editor-canvas[inert] { opacity: 0.6; }
 .editor-preview { position: sticky; top: calc(72px + 8.5rem); min-width: 0; }

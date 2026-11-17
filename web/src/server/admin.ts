@@ -2,7 +2,6 @@ import { and, asc, desc, eq, gte, inArray, isNotNull, lt, ne, sql } from "drizzl
 import {
   addons,
   blocks,
-  bookingAddons,
   bookings,
   loyaltyLedger,
   payments,
@@ -368,18 +367,12 @@ export async function listBookings(
     .where(and(inArray(payments.bookingId, ids), eq(payments.status, "succeeded"), eq(payments.provider, MANUAL_PROVIDER)))
     .groupBy(payments.bookingId);
 
-  // The pet fees already returned as studio credit (see src/server/pet-fee.ts): not to be refunded to the card as well.
+  // The pet fees already returned as studio credit (see src/server/pet-fee.ts), for what each credit was issued for,
+  // which can be part of the fee: not to be refunded to the card or by hand as well.
   const petReturned = await db
-    .select({ bookingId: bookingAddons.bookingId, cents: sql<number>`coalesce(sum(${bookingAddons.unitCents} * ${bookingAddons.quantity}), 0)::int` })
-    .from(bookingAddons)
-    .where(
-      and(
-        inArray(bookingAddons.bookingId, ids),
-        eq(bookingAddons.kind, "pet"),
-        sql`exists (select 1 from ${promoCodes} where ${promoCodes.originBookingId} = ${bookingAddons.bookingId} and ${promoCodes.source} = 'pet_fee')`,
-      ),
-    )
-    .groupBy(bookingAddons.bookingId);
+    .select({ bookingId: promoCodes.originBookingId, cents: sql<number>`coalesce(${promoCodes.issuedCents}, ${promoCodes.value})::int` })
+    .from(promoCodes)
+    .where(and(inArray(promoCodes.originBookingId, ids), eq(promoCodes.source, "pet_fee")));
 
   const views = await toBookingViews(db, rows);
   return views.map((view, i) => {

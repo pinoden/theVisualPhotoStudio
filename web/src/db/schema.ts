@@ -269,6 +269,12 @@ export const promoCodes = pgTable("promo_codes", {
   loyaltySeq: integer("loyalty_seq"),
   /** Set when the owner cancels a code. */
   voidedAt: ts("voided_at"),
+  /**
+   * `value` when the code was issued. For a code of credit, what was used of
+   * it is this less what is left (`value`), whatever became of the bookings it
+   * paid for: a pet fee's credit can be only part of the fee.
+   */
+  issuedCents: integer("issued_cents"),
   note: text("note").notNull().default(""),
   createdAt: createdAt(),
 });

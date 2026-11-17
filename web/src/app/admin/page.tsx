@@ -76,6 +76,7 @@ async function Overview({ searchParams }: Pick<PageProps<"/admin">, "searchParam
             These are retried automatically. If one keeps failing, refund the payment in Square, then record it here: the
             site then stops trying, and the client&rsquo;s receipt shows the refund.
           </p>
+          <div className="data-table-wrap">
           <table className="data-table">
             <thead>
               <tr>
@@ -113,6 +114,7 @@ async function Overview({ searchParams }: Pick<PageProps<"/admin">, "searchParam
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
     </AdminFrame>

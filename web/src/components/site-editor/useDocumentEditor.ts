@@ -205,7 +205,7 @@ export function useDraftEditor<T>(initial: DraftStart<T>, actions: DraftActions<
               report(
                 result.waiting
                   ? `Not published: this was changed somewhere else${who} since you opened it. It is shown here now: look at it, then publish.`
-                  : "This was published or discarded somewhere else since you opened it. It is shown here as it is now.",
+                  : "This was published, discarded or set back to what is published somewhere else since you opened it. It is shown here as it is now.",
               );
               router.refresh();
             });

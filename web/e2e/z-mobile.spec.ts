@@ -422,9 +422,23 @@ test("the admin fits a phone: the calendar in its three views, an appointment, a
     expect(await hardToTouch(page), `${path}: hard to use by touch`).toEqual([]);
   }
 
-  // The smallest phone too, for the pages an administrator uses on the floor.
+  // The smallest phone too, for the pages an administrator uses on the floor, and the pages that show names the owners
+  // typed (the add-on of long words that the booking test above added is on Studios & add-ons and in a new booking).
   await page.setViewportSize({ width: 320, height: 568 });
-  for (const path of [`/admin/calendar?view=day&date=${day}`, `/admin/calendar?view=week&date=${day}`, `/staff?date=${day}`, "/admin/calendar/new"]) {
+  for (const path of [
+    `/admin/calendar?view=day&date=${day}`,
+    `/admin/calendar?view=week&date=${day}`,
+    `/staff?date=${day}`,
+    "/admin/calendar/new",
+    "/admin",
+    "/admin/bookings",
+    "/admin/prices",
+    "/admin/studios",
+    "/admin/hours",
+    "/admin/codes",
+    "/admin/website/fonts",
+    "/admin/website/pages",
+  ]) {
     await page.goto(path);
     await expect(page.locator("main h1").first()).toBeVisible();
     await expectFits(page, `${path} at 320px`);
