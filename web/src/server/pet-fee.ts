@@ -55,6 +55,20 @@ export async function petFeeReturnedCents(db: DbLike, bookingId: string): Promis
 }
 
 /**
+ * What the studio can still give back by hand of the money it took for a
+ * booking: what it holds, less the part of a pet fee returned as studio
+ * credit that the card did not hold. The pet fee comes back once: as credit,
+ * not in cash as well. (The card's side is `ownerRefundable` in manage.ts.)
+ */
+export async function studioRefundableCents(db: DbLike, bookingId: string): Promise<{ cents: number; petReturnedCents: number }> {
+  const atStudio = await paidAtStudioCents(db, bookingId);
+  const returned = await petFeeReturnedCents(db, bookingId);
+  if (atStudio <= 0 || returned <= 0) return { cents: Math.max(0, atStudio), petReturnedCents: 0 };
+  const onStudio = returned - Math.min(Math.max(0, await netCardPaidCents(db, bookingId)), returned);
+  return { cents: Math.max(0, atStudio - onStudio), petReturnedCents: Math.min(atStudio, onStudio) };
+}
+
+/**
  * Turn `cents` of a booking's pet fee into a code for studio credit, in the
  * caller's transaction. Returns null when this booking's fee was already
  * returned. The code is the customer's alone and lasts as long as a

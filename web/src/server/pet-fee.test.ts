@@ -1,12 +1,12 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-import { addons, bookingAddons, bookings, promoCodes, refunds, settings } from "@/db/schema";
+import { addons, bookingAddons, bookings, payments, promoCodes, refunds, settings } from "@/db/schema";
 import { createAdminBooking, getAppointment } from "./appointments";
 import type { AuthUser } from "./auth";
 import { listBookings } from "./admin";
 import { cancelBooking, getManageChoices, ownerCancelBooking, ownerRefund, requestRescheduleCode } from "./manage";
 import { givePetFeeCredit, petFeeCentsOf } from "./pet-fee";
-import { recordStudioPayment } from "./studio-payments";
+import { recordHandRefund, recordStudioPayment } from "./studio-payments";
 import { BASE_URL, createTestWorld, daysAfter, expectOk, FAR, h, NEAR, NOW, type TestWorld } from "./testing";
 
 /**
@@ -184,11 +184,44 @@ describe("cancelling a booking that has a pet fee", () => {
     const result = expectOk(await ownerCancelBooking(world.db, made.ref, { refundCents: 0 }, world.manageDeps()));
     expect(result).toMatchObject({ refund: "none", atStudioCents: 11800 });
     expect((await getAppointment(world.db, owner, made.ref, NOW))!.history.at(-1)?.note).toBe(
-      "No refund; $118 paid at the studio is for the studio to give back by hand",
+      "No refund; $118 of what was paid at the studio is for the studio to give back by hand",
     );
     const [mail] = await world.emails("booking_cancelled");
     expect(mail.body).toContain("has been cancelled by the studio.");
     expect(mail.body).toContain("What you paid at the studio ($118) cannot be sent back online: the studio will be in touch with you about it.");
+  });
+
+  it("cancelled by the studio after its pet fee came back as credit: the fee is not given back in cash as well", async () => {
+    const dana = { name: "Dana Diaz", email: "dana@example.com", phone: "407-555-0133" };
+    const made = expectOk(
+      await createAdminBooking(
+        world.db,
+        owner,
+        { studioIds: [world.ids.dayglow], date: FAR, startMinute: h(10), durationMinutes: 60, addons: [{ addonId: petFeeId, quantity: 1 }], customer: dana },
+        { now: NOW, baseUrl: BASE_URL },
+      ),
+    );
+    expectOk(await recordStudioPayment(world.db, owner, made.ref, { amountCents: 11800, method: "cash", note: "" }, NOW));
+    expectOk(await givePetFeeCredit(world.db, owner, made.ref, deps()));
+    const [listed] = await listBookings(world.db, { from: FAR, to: FAR });
+    expect(listed).toMatchObject({ ref: made.ref, studioHeldCents: 7800 });
+    const result = expectOk(await ownerCancelBooking(world.db, made.ref, { refundCents: 0 }, world.manageDeps()));
+    expect(result).toMatchObject({ atStudioCents: 7800 });
+    expect((await getAppointment(world.db, owner, made.ref, NOW))!.history.at(-1)?.note).toBe(
+      "No refund; $78 of what was paid at the studio is for the studio to give back by hand (its pet fee was returned as studio credit)",
+    );
+    const [mail] = await world.emails("booking_cancelled");
+    expect(mail.body).toContain(
+      "What you paid at the studio, less the pet fee that was already returned to you as studio credit ($78), cannot be sent back online",
+    );
+    // By hand, at most what is left once the pet fee is aside.
+    const [cash] = await world.db.select().from(payments).where(eq(payments.bookingId, (await row(made.ref)).id));
+    expect(await recordHandRefund(world.db, owner, cash.id, { amountCents: 11800, note: "" }, NOW)).toEqual({
+      ok: false,
+      message: "At most $78 can be refunded by hand for this booking: its pet fee of $40 was already returned as studio credit.",
+    });
+    expectOk(await recordHandRefund(world.db, owner, cash.id, { amountCents: 7800, note: "" }, NOW));
+    expect((await listBookings(world.db, { from: FAR, to: FAR }, { includeCancelled: true }))[0].studioHeldCents).toBe(0);
   });
 
   it("too late to be refunded: nothing comes back by itself, the pet fee included", async () => {

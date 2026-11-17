@@ -8,6 +8,9 @@ import { checkWebsiteOnPhones } from "./phone-check";
 /** How long after the last change the draft is saved by itself. */
 const AUTOSAVE_MS = 900;
 
+/** The keys that only move about a page, which a busy editor lets through: every other key it holds back. */
+const MOVES = /^(Tab|Escape|Arrow(Up|Down|Left|Right)|Page(Up|Down)|Home|End|F\d{1,2}|Shift|Control|Alt|Meta|CapsLock)$/;
+
 export type SaveStatus = "clean" | "waiting" | "saving" | "saved" | "error" | "conflict";
 
 export interface DocumentEditor<T> {
@@ -155,13 +158,19 @@ export function useDraftEditor<T>(initial: DraftStart<T>, actions: DraftActions<
   const already = useRef<string[]>([]);
   const running = useRef<Promise<boolean> | null>(null);
 
-  const save = async (force: boolean): Promise<boolean> => {
+  /**
+   * Save the newest content as the draft. `force` saves it over a draft
+   * changed somewhere else. `ask` asks the server even when nothing changed
+   * here, so that a draft changed somewhere else is noticed (before a
+   * publish, which would otherwise check that one).
+   */
+  const save = async (force: boolean, ask = false): Promise<boolean> => {
     if (timer.current) clearTimeout(timer.current);
     timer.current = null;
     // One save at a time: wait for the one in flight, then send whatever is newest.
     while (running.current) await running.current;
     const json = JSON.stringify(latest.current);
-    if (json === stored.current && !force) {
+    if (json === stored.current && !force && !ask) {
       setStatus((current) => (current === "waiting" ? "saved" : current));
       return true;
     }
@@ -170,13 +179,14 @@ export function useDraftEditor<T>(initial: DraftStart<T>, actions: DraftActions<
       try {
         const result = await actions.save(latest.current, revision.current, force);
         if (result.ok) {
+          // A save that changed nothing (asked only to know the draft is still this one) leaves the preview as it is.
+          if (result.revision !== revision.current) setSaves((count) => count + 1);
           revision.current = result.revision;
           stored.current = json;
           setHasDraft(result.hasDraft);
           setSavedAt(result.savedAt);
           setConflict(null);
           setProblem("");
-          setSaves((count) => count + 1);
           // More may have been typed while this was on its way: that is saved by the timer it set.
           setStatus(JSON.stringify(latest.current) === json ? "saved" : "waiting");
           return true;
@@ -239,8 +249,12 @@ export function useDraftEditor<T>(initial: DraftStart<T>, actions: DraftActions<
   // editor is busy they are not passed on.
   useEffect(() => {
     if (!locked) return;
+    // Puck's own keys: undo and redo, and Delete and Backspace, which delete the chosen block; and any key that types.
+    // What only moves about the page is let through.
     const swallow = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && (event.code === "KeyZ" || event.code === "KeyY")) {
+      const command = event.metaKey || event.ctrlKey;
+      const blocked = command ? event.code === "KeyZ" || event.code === "KeyY" : !MOVES.test(event.key);
+      if (blocked) {
         event.preventDefault();
         event.stopImmediatePropagation();
       }
@@ -269,6 +283,19 @@ export function useDraftEditor<T>(initial: DraftStart<T>, actions: DraftActions<
   }, [locked]);
 
   /**
+   * The page as the server draws it now. A notice it was opened with ("Page
+   * made.") is over once something is done with it: it is drawn without it.
+   */
+  const drawAgain = () => {
+    const url = new URL(window.location.href);
+    const said = url.searchParams.has("notice") || url.searchParams.has("error");
+    url.searchParams.delete("notice");
+    url.searchParams.delete("error");
+    if (said) router.replace(`${url.pathname}${url.search}${url.hash}`, { scroll: false });
+    else router.refresh();
+  };
+
+  /**
    * Run one of the three big actions: save first, then act, then let the
    * server render the page again. `doing` is what the editor says meanwhile;
    * `done` is said with the page rendered again, when the editor has started
@@ -283,7 +310,9 @@ export function useDraftEditor<T>(initial: DraftStart<T>, actions: DraftActions<
       if (timer.current) clearTimeout(timer.current);
       timer.current = null;
       while (running.current) await running.current;
-      if (saveFirst && !(await save(false))) return report("");
+      // Asked of the server even when nothing changed here: a draft changed somewhere else is said as such (the conflict),
+      // and is not checked and refused in this editor's name.
+      if (saveFirst && !(await save(false, true))) return report("");
       const result = await run();
       if (!result.ok) {
         report("");
@@ -293,7 +322,7 @@ export function useDraftEditor<T>(initial: DraftStart<T>, actions: DraftActions<
       const said = typeof done === "string" ? done : done();
       startRefresh(() => {
         report(said);
-        router.refresh();
+        drawAgain();
       });
     } catch {
       report("");
@@ -314,9 +343,12 @@ export function useDraftEditor<T>(initial: DraftStart<T>, actions: DraftActions<
     busy: locked,
     mayPublish: initial.may.publish,
     saves,
-    saveNow: () => save(false),
-    overwrite: () => save(true),
-    reload: () => router.refresh(),
+    // Nothing is saved, or loaded again, while the editor is busy: the publish, discard or restore would be undone.
+    saveNow: () => (locked ? Promise.resolve(false) : save(false)),
+    overwrite: () => (locked ? Promise.resolve(false) : save(true)),
+    reload: () => {
+      if (!locked) router.refresh();
+    },
     publish: () =>
       act(
         async () => {

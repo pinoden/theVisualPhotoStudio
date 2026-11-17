@@ -32,7 +32,7 @@ import { releaseHolds } from "./holds";
 import { netCardPaidCents, paidAtStudioCents } from "./money";
 import { closePayLinkOf } from "./pay-links";
 import type { PaymentProvider } from "./payments";
-import { issuePetCredit, petCreditOf, petFeeCentsOf, petFeeReturnedCents } from "./pet-fee";
+import { issuePetCredit, petCreditOf, petFeeCentsOf, petFeeReturnedCents, studioRefundableCents } from "./pet-fee";
 import { issuePromo, restorePromo } from "./promos";
 import { loadSettings, type Settings } from "./settings";
 import { formatInstant } from "./tz";
@@ -305,19 +305,30 @@ export async function processRefund(db: Db, refundId: string, deps: ManageDeps):
   const label = labelOf({ status: row.bookingStatus, label: row.bookingLabel });
   if (result.ok) {
     await db.transaction(async (tx) => {
-      // Dated when the processor took it: a refund that went through when it was tried again belongs to that day.
-      const updated = await tx
+      // Dated when the processor took it: a refund that went through when it was tried again belongs to that day. Made
+      // from failed (it was told as not gone through, perhaps by an attempt beside this one) or from waiting, as it
+      // stands now, not as it was read.
+      const made = { status: "succeeded" as const, providerRefundId: result.refundId, error: null, settledAt: result.settled ? deps.now : null, createdAt: deps.now };
+      const fromFailed = await tx
         .update(refunds)
-        .set({ status: "succeeded", providerRefundId: result.refundId, error: null, settledAt: result.settled ? deps.now : null, createdAt: deps.now })
-        .where(and(eq(refunds.id, refundId), inArray(refunds.status, ["pending", "failed"])))
+        .set(made)
+        .where(and(eq(refunds.id, refundId), eq(refunds.status, "failed")))
         .returning({ id: refunds.id });
-      if (updated.length === 0) return; // another worker finished it first
+      const fromWaiting =
+        fromFailed.length > 0
+          ? []
+          : await tx
+              .update(refunds)
+              .set(made)
+              .where(and(eq(refunds.id, refundId), eq(refunds.status, "pending")))
+              .returning({ id: refunds.id });
+      if (fromFailed.length + fromWaiting.length === 0) return; // another worker finished it first
       await tx
         .update(payments)
         .set({ refundedCents: sql`${payments.refundedCents} + ${row.refund.amountCents}` })
         .where(eq(payments.id, row.paymentId));
       // Its history said it did not go through: it says now that it did.
-      if (row.refund.status === "failed") {
+      if (fromFailed.length > 0) {
         await recordEvent(tx, {
           bookingId: row.bookingId,
           from: label,
@@ -878,8 +889,9 @@ export async function ownerCancelBooking(
       .where(eq(bookings.id, booking.id));
     await releaseHolds(tx, booking.id);
     const refundIds = await recordRefunds(tx, booking.id, input.refundCents, `Cancelled by the studio: ${booking.ref}`, false);
-    // Money taken at the studio cannot be sent back from here: the studio gives back by hand what it owes of it.
-    const atStudio = await paidAtStudioCents(tx, booking.id);
+    // Money taken at the studio cannot be sent back from here: the studio gives back by hand what it owes of it, the
+    // pet fee aside when it was already returned as studio credit.
+    const { cents: atStudio, petReturnedCents: petAside } = await studioRefundableCents(tx, booking.id);
     await recordEvent(tx, {
       bookingId: booking.id,
       from: labelOf(booking),
@@ -888,7 +900,9 @@ export async function ownerCancelBooking(
       at: deps.now,
       note: [
         input.refundCents > 0 ? `Refund ${formatCents(input.refundCents)}` : "No refund",
-        ...(atStudio > 0 ? [`${formatCents(atStudio)} paid at the studio is for the studio to give back by hand`] : []),
+        ...(atStudio > 0
+          ? [`${formatCents(atStudio)} of what was paid at the studio is for the studio to give back by hand${petAside > 0 ? " (its pet fee was returned as studio credit)" : ""}`]
+          : []),
       ].join("; "),
     });
     // A visit that has not started was taken from the customer, so the code that paid for it goes back to them.
@@ -902,7 +916,13 @@ export async function ownerCancelBooking(
       byStudio: true,
       ...(input.refundCents > 0 ? { refund: { cents: input.refundCents, feeCents: 0 } } : {}),
       lines: [
-        ...(atStudio > 0 ? [`What you paid at the studio (${formatCents(atStudio)}) cannot be sent back online: the studio will be in touch with you about it.`] : []),
+        ...(atStudio > 0
+          ? [
+              petAside > 0
+                ? `What you paid at the studio, less the pet fee that was already returned to you as studio credit (${formatCents(atStudio)}), cannot be sent back online: the studio will be in touch with you about it.`
+                : `What you paid at the studio (${formatCents(atStudio)}) cannot be sent back online: the studio will be in touch with you about it.`,
+            ]
+          : []),
         ...(codeBack ? [CODE_BACK] : []),
         "Please contact us with any questions.",
       ],

@@ -507,7 +507,11 @@ describe("bad input is refused", () => {
       ok: false,
       message: "Please check the email address: it does not look like one.",
     });
-    expect(await book({ customer: { name: "A B", email: "a@example.com", phone: "" } })).toMatchObject({ ok: false, message: "Please check the phone number." });
+    expect(await book({ customer: { name: "A B", email: "a@example.com", phone: "" } })).toMatchObject({
+      ok: false,
+      message: "Please check the phone number: from 7 to 40 characters.",
+    });
+    expect(await book({ notes: "x".repeat(2001) })).toMatchObject({ ok: false, message: "Please make the notes shorter: at most 2,000 characters." });
   });
 
   it("a character the database cannot store, which is dropped instead of failing the request", async () => {

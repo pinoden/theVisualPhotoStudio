@@ -381,7 +381,11 @@ export async function listBookings(
       notes: rows[i].notes,
       cardHeldCents,
       refundableCents: Math.max(0, cardHeldCents - asCredit),
-      studioHeldCents: atStudio.find((p) => p.bookingId === view.id)?.cents ?? 0,
+      // The pet fee returned as credit that the card did not hold comes off what the studio gives back by hand.
+      studioHeldCents: Math.max(
+        0,
+        (atStudio.find((p) => p.bookingId === view.id)?.cents ?? 0) - ((petReturned.find((p) => p.bookingId === view.id)?.cents ?? 0) - asCredit),
+      ),
       refundProblem: refundRows.some((b) => b.status === "failed"),
     };
   });

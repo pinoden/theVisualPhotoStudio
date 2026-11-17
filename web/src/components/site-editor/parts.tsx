@@ -133,10 +133,10 @@ export function EditorBar<T>({
           {editor.conflict.by && ` by ${editor.conflict.by}`}
           {editor.conflict.at && ` at ${clock.format(new Date(editor.conflict.at))}`} since you opened it, so your changes were
           not saved.{" "}
-          <button type="button" className="btn btn-outline btn-small" onClick={editor.reload}>
+          <button type="button" className="btn btn-outline btn-small" disabled={editor.busy} onClick={editor.reload}>
             Load that version
           </button>{" "}
-          <button type="button" className="btn btn-outline btn-small" onClick={() => void editor.overwrite()}>
+          <button type="button" className="btn btn-outline btn-small" disabled={editor.busy} onClick={() => void editor.overwrite()}>
             Save mine over it
           </button>
         </div>

@@ -134,15 +134,46 @@ async function checkOnce(url: string, width: number, drawn: Drawn, name: string)
   }
 }
 
+/** A problem without its numbers, its quoted words or their capitals: the same problem when a change only moves it or rewords it. */
+const kindOf = (problem: string) => problem.replace(/"[^"]*"/g, '"…"').replace(/\d+(\.\d+)?/g, "#").toLowerCase();
+
+/** How wide a page is when it scrolls sideways, from its problems; 0 when it does not. */
+const sidewaysOf = (problems: string[]) => Math.max(0, ...problems.map((problem) => Number(/scrolls sideways \((\d+)px wide/.exec(problem)?.[1] ?? 0)));
+
+/**
+ * What of the problems a page will have (`found`) a change brings, against
+ * the problems it has as visitors have it now (`before`). A page that had the
+ * same kinds of problem already, and is no wider than it was, is not the
+ * change's doing: what visitors have is said (`had`), in their numbers. One
+ * with a new kind of problem, or wider, is the change's: all of it is said
+ * (`brought`).
+ */
+export function broughtBy(found: string[], before: string[]): { brought: string[]; had: string[] } {
+  if (found.length === 0) return { brought: [], had: [] };
+  if (before.length === 0) return { brought: found, had: [] };
+  const kinds = new Set(before.map(kindOf));
+  const worse = found.some((problem) => !kinds.has(kindOf(problem))) || sidewaysOf(found) > sidewaysOf(before) + 2;
+  return worse ? { brought: found, had: [] } : { brought: [], had: before };
+}
+
 /**
  * What would be wrong with the page at `url` on a phone: a sentence for each
- * width with a problem, "At 320px: ...". Empty when nothing is wrong. A
- * check that cannot be made throws.
+ * width with a problem, "At 320px: ...". With `before`, the address of the
+ * page as visitors have it now, a problem it had already is not held against
+ * the change (`broughtBy`), and is said in `already`. A check that cannot be
+ * made throws.
  */
-export async function checkOnPhones(url: string): Promise<string[]> {
-  const sentences: string[] = [];
-  for (const width of CHECK_WIDTHS) sentences.push(...said(`At ${width}px`, await checkAt(url, width, draftDrawn)));
-  return sentences;
+export async function checkOnPhones(url: string, before?: string): Promise<{ problems: string[]; already: string[] }> {
+  const problems: string[] = [];
+  const already: string[] = [];
+  for (const width of CHECK_WIDTHS) {
+    const found = await checkAt(url, width, draftDrawn);
+    const was = found.length > 0 && before ? await checkAt(before, width, draftDrawn) : [];
+    const { brought, had } = broughtBy(found, was);
+    problems.push(...said(`At ${width}px`, brought));
+    already.push(...said(`At ${width}px`, had));
+  }
+  return { problems, already };
 }
 
 /** What the editor calls the pages that have a name of their own; any other is called by its address. */
@@ -177,9 +208,6 @@ export interface WebsiteCheck {
   already: string[];
 }
 
-/** A problem without its numbers: the same problem when a change only moves it a few pixels. */
-const kindOf = (problem: string) => problem.replace(/\d+(\.\d+)?/g, "#");
-
 /**
  * What would be wrong on a phone once this change of the design (`design`)
  * or of the header, menu and footer (`frame`) is published: a sentence for
@@ -189,7 +217,8 @@ const kindOf = (problem: string) => problem.replace(/\d+(\.\d+)?/g, "#");
  *
  * A page with a problem is measured again as visitors have it now: what it
  * had already is not the change's doing, and does not keep the change from
- * being published (`already`). Only what the change brings is in `problems`.
+ * being published (`already`, in visitors' numbers). Only what the change
+ * brings is in `problems` (`broughtBy`).
  */
 export async function checkWebsiteOnPhones(scope: "design" | "frame", paths: readonly string[]): Promise<WebsiteCheck> {
   const jobs = CHECK_WIDTHS.flatMap((width) => paths.filter((path) => width === CHECK_WIDTHS[0] || ALSO_WIDER.has(path)).map((path) => ({ width, path })));
@@ -204,8 +233,7 @@ export async function checkWebsiteOnPhones(scope: "design" | "frame", paths: rea
   const brought: string[][] = found.map(() => []);
   const had: string[][] = found.map(() => []);
   troubled.forEach(({ index }, at) => {
-    const kinds = new Set(before[at].map(kindOf));
-    for (const problem of found[index]) (kinds.has(kindOf(problem)) ? had : brought)[index].push(problem);
+    ({ brought: brought[index], had: had[index] } = broughtBy(found[index], before[at]));
   });
   return { problems: grouped(jobs, brought), already: grouped(jobs, had) };
 }

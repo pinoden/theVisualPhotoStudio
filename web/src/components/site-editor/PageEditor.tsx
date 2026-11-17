@@ -82,10 +82,15 @@ function PageEditorBody({ initial, versions, collections, links, fontClasses, no
         busy: "Checking the page at the width of a phone…",
         subject: "this page",
         // Drawn with the design and the header, menu and footer as published, whatever drafts of them are waiting.
-        run: async () => ({ problems: await checkOnPhones(`/admin/website/pages/${encodeURIComponent(initial.id)}/check?${WEBSITE_CHECK_PARAM}=page`) }),
+        run: () => {
+          const check = `/admin/website/pages/${encodeURIComponent(initial.id)}/check?${WEBSITE_CHECK_PARAM}=page`;
+          // A page on the website is compared with what visitors have: a problem it had before, made by the studio's data
+          // for one, is not held against this change.
+          return checkOnPhones(check, initial.isLive ? `${check}&as=published` : undefined);
+        },
       },
     }),
-    [initial.id],
+    [initial.id, initial.isLive],
   );
   const editor = useDraftEditor(initial, actions, report);
   const config = useMemo(() => buildPuckConfig({ collections, links }), [collections, links]);

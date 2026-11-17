@@ -10,6 +10,7 @@ import { isBookingRef } from "./bookings";
 import { paymentReceivedEmail, queueEmail } from "./email";
 import { recordEvent } from "./history";
 import { openPayLinkOf } from "./pay-links";
+import { studioRefundableCents } from "./pet-fee";
 import { loadSettings } from "./settings";
 import { canViewDay } from "./staff";
 import { formatInstant, localDateOf } from "./tz";
@@ -268,6 +269,14 @@ export async function recordHandRefund(
     const left = payment.amountCents - payment.refundedCents;
     if (input.amountCents > left) {
       return { ok: false, message: `At most ${formatCents(left)} of that payment can still be refunded.` };
+    }
+    // A pet fee already returned as studio credit is not given back in cash as well.
+    const back = await studioRefundableCents(tx, booking.id);
+    if (input.amountCents > back.cents) {
+      return {
+        ok: false,
+        message: `At most ${formatCents(back.cents)} can be refunded by hand for this booking: its pet fee of ${formatCents(back.petReturnedCents)} was already returned as studio credit.`,
+      };
     }
     const why = input.note.trim().slice(0, 180);
     await tx.insert(refunds).values({

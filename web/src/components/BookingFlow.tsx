@@ -901,6 +901,7 @@ export function BookingFlow({
                 id="customer-name"
                 className="form-control"
                 autoComplete="name"
+                maxLength={120}
                 value={name}
                 onChange={(event) => setName(event.target.value)}
               />
@@ -927,6 +928,7 @@ export function BookingFlow({
                 type="tel"
                 className="form-control"
                 autoComplete="tel"
+                maxLength={40}
                 value={phone}
                 onChange={(event) => setPhone(event.target.value)}
               />

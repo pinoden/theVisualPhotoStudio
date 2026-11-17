@@ -281,6 +281,32 @@ describe("a refund tried twice at once", () => {
     expect(notes.filter((note) => note.startsWith("The refund of $50 did not go through"))).toHaveLength(1);
     expect(await world.emails("owner_refund_failed")).toHaveLength(1);
   });
+
+  it("that fails once and goes through on the other attempt says, last, that it went through", async () => {
+    const booked = expectOk(await world.book({ date: FAR }));
+    expectOk(await ownerRefund(world.db, booked.ref, { amountCents: 5000, reason: "" }, world.manageDeps({ payments: null })));
+    const [refund] = await world.db.select().from(refunds);
+    const deps = world.manageDeps();
+    // One attempt is answered slowly and goes through; the other is refused at once.
+    let calls = 0;
+    const payments = {
+      ...deps.payments!,
+      refund: async (request: Parameters<NonNullable<typeof deps.payments>["refund"]>[0]) => {
+        calls += 1;
+        if (calls === 1) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          return deps.payments!.refund(request);
+        }
+        return { ok: false as const, message: "The card account is closed" };
+      },
+    };
+    const both = await Promise.all([processRefund(world.db, refund.id, { ...deps, payments }), processRefund(world.db, refund.id, { ...deps, payments })]);
+    expect(both.sort()).toEqual(["failed", "succeeded"]);
+    expect((await world.db.select().from(refunds))[0].status).toBe("succeeded");
+    const bookingId = (await bookingRow(booked.ref)).id;
+    const notes = (await world.db.select().from(bookingEvents).where(eq(bookingEvents.bookingId, bookingId))).map((event) => event.note);
+    expect(notes.at(-1)).toBe("The refund of $50 went through when it was tried again");
+  });
 });
 
 /** Square accepts most refunds as pending and completes them shortly after; it may still reject one then. */

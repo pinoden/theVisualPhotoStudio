@@ -46,6 +46,8 @@ const PUBLIC_PAGES = ["/", "/studios", "/rates", "/services", "/faq", "/policies
 
 // The owner addresses of site.spec.ts have each used the three sign-in codes an address may ask for.
 const OWNER = "owner4@studio.test";
+/** An add-on's name of one word as long as the field allows a word to be: longer than a line on the smallest phone. */
+const LONG_ADDON = "Seamlesspaperbackdroprollwithstands";
 const mia = { name: "Mia Mobile", email: "mia.mobile@example.com", phone: "407-555-0177" };
 
 let browserProblems: string[] = [];
@@ -152,8 +154,20 @@ for (const [index, size] of BOOKING_SIZES.entries()) {
 }
 
 test("the booking summary keeps its words and amounts whole on the smallest phone, however long it is", async ({ page }) => {
+  // An add-on with a name of one long word and a web address in its description: words longer than a phone's line.
+  // It stays, so every booking and account after this one is measured with it too.
+  await signIn(page, OWNER, "/admin/studios");
+  await onScreen(page.locator("#addon-new-name")).fill(LONG_ADDON);
+  await onScreen(page.locator("#addon-new-price")).fill("10");
+  await onScreen(page.locator("#addon-new-description")).fill("Choose yours first at https://www.thevisualsphotostudio.com/backdropcolours");
+  await page.getByRole("button", { name: "Add add-on" }).click();
+  await expect(byText(page, "Add-on added.")).toBeVisible();
+
   // Three studios for the longest time they share, with every add-on: the longest summary the booking screen draws.
   await page.setViewportSize({ width: 320, height: 568 });
+  await page.goto("/rates");
+  await expect(page.getByRole("cell", { name: new RegExp(LONG_ADDON) })).toBeVisible();
+  await expectFits(page, "/rates with an add-on of long words");
   await page.goto("/book");
   for (const studio of ["Studio Blanche", "Studio Dayglow", "Studio Paris"]) await pickStudio(page, studio);
   await next(page);
@@ -173,6 +187,10 @@ test("the booking summary keeps its words and amounts whole on the smallest phon
   await expect(totalRow(page)).toBeVisible();
   await expectFits(page, "the payment step of three studios with every add-on");
   await shot(page, "m-320-long-summary");
+  // Booked, for Mia: her booking page, and later her appointments and receipts, show it too.
+  await confirmAndGetRef(page, /^Confirm & pay/);
+  await expect(onScreen(page.locator(".price-row", { hasText: LONG_ADDON }))).toBeVisible();
+  await expectFits(page, "the booking page of three studios with every add-on");
 });
 
 test("a photographer can be booked on a phone", async ({ page }) => {

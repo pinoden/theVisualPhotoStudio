@@ -115,6 +115,19 @@ test("the owner changes the design as a draft, sees it in the preview, and visit
   await expect(byText(page, "Unpublished changes.")).toBeVisible();
   await page.getByRole("link", { name: "Edit the design" }).click();
   await expect(byLabel(page, "Accent, as a colour code")).toHaveValue("#336699");
+  // Changed in another window meanwhile: Publish says so, before anything is checked or published in this one's name.
+  const other = await page.context().newPage();
+  watch(other);
+  await other.goto("/admin/website/design");
+  await byLabel(other, "Accent, as a colour code").fill("#225588");
+  await saved(other);
+  await other.close();
+  await page.getByRole("button", { name: "Publish", exact: true }).click();
+  await expect(byText(page, /This was changed somewhere else by .+ since you opened it/)).toBeVisible();
+  await page.getByRole("button", { name: "Load that version" }).click();
+  await expect(byLabel(page, "Accent, as a colour code")).toHaveValue("#225588");
+  await byLabel(page, "Accent, as a colour code").fill("#336699");
+  await saved(page);
   await page.getByRole("button", { name: "Publish", exact: true }).click();
   await published(page);
   await nothingToPublish(page);
@@ -950,8 +963,10 @@ test("a page that would be wider than a phone is not published, and is once it f
   });
   await page.getByRole("button", { name: "Publish", exact: true }).click();
   await expect(byText(page, "Checking the page at the width of a phone…")).toBeVisible();
-  await page.keyboard.press("ControlOrMeta+z");
+  // Undo, and Delete and Backspace with the columns chosen: each would change the page in the editor's own hands.
+  for (const key of ["ControlOrMeta+z", "Delete", "Backspace"]) await page.keyboard.press(key);
   await published(page);
+  await expect(canvas.locator(".blk-columns")).toHaveCount(1);
   await page.unrouteAll({ behavior: "ignoreErrors" });
   expect((await guest.goto(path))?.status()).toBe(200);
   await expect(guest.locator(".blk-columns")).toHaveAttribute("data-phone", "stack");

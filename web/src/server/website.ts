@@ -220,7 +220,7 @@ export type PublishResult = { ok: true; version: number } | { ok: false; message
 
 /** Make the draft public, and keep a copy of it as a version. */
 /** What a publish answers when the draft is no longer the one the editor checked (`basedOn`). */
-export const DRAFT_CHANGED = "Not published: the draft was changed somewhere else while it was being checked, so what was checked is not what would be published. Reload the page to see the draft as it is now, then publish again.";
+export const DRAFT_CHANGED = "Not published: the draft was changed somewhere else, so what was checked is not what would be published. Reload the page to see the draft as it is now, then publish again.";
 
 /**
  * Make the draft what the public sees, and keep a copy as a version.

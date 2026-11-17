@@ -130,12 +130,12 @@ function fail<T extends string>(status: number, code: T, message: string) {
   return { ok: false as const, status, code, message };
 }
 
-/** The fields a customer types, by the names the screen gives them. */
+/** The fields a customer types, by the names the screen gives them. The limits are the schema's, and the screen's fields keep to them. */
 const FIELD_WORDS: Record<string, string> = {
   "customer.email": "Please check the email address: it does not look like one.",
-  "customer.name": "Please check your name.",
-  "customer.phone": "Please check the phone number.",
-  "customer.notes": "Please make the notes shorter.",
+  "customer.name": "Please check your name: from 2 to 120 characters.",
+  "customer.phone": "Please check the phone number: from 7 to 40 characters.",
+  notes: "Please make the notes shorter: at most 2,000 characters.",
 };
 
 function firstIssue(error: z.ZodError): string {

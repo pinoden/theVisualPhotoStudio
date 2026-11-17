@@ -279,7 +279,7 @@ export async function ownerCancelAction(formData: FormData): Promise<void> {
   flushEmailsSoon();
   if (!result.ok) failed(back, result.message);
   const atStudio = result.atStudioCents
-    ? ` ${formatCents(result.atStudioCents)} was paid at the studio: give back what is owed by hand, then record it on the appointment's page.`
+    ? ` ${formatCents(result.atStudioCents)} of what was paid at the studio can be given back: give back what is owed by hand, then record it on the appointment's page.`
     : "";
   done(back, `Booking cancelled. ${refundNote(result.refund, result.refundCents)}${atStudio}`);
 }
