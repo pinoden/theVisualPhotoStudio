@@ -204,6 +204,13 @@
       "when": 1794942268726,
       "tag": "0028_booking_money_kind",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1794955794681,
+      "tag": "0029_email_expires",
+      "breakpoints": true
     }
   ]
 }

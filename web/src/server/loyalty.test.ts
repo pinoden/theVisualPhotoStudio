@@ -10,6 +10,8 @@ import { cancelBooking, getManageOptions } from "./manage";
 import { issuePromo } from "./promos";
 import { DEFAULT_SETTINGS } from "./settings";
 import { completeVisits } from "./tasks";
+import { clearTestMode, moneyKindOfCode } from "./test-mode";
+import type { PaymentProvider } from "./payments";
 import { BASE_URL, createTestWorld, daysAfter, expectOk, FAR, h, hoursAfter, NEAR, NOW, type TestWorld } from "./testing";
 
 let world: TestWorld;
@@ -308,3 +310,36 @@ describe("using a free hour", () => {
     expect(await loyaltyStandingOf(world.db, JANE, DEFAULT_SETTINGS)).toMatchObject({ towardsNext: 0 });
   });
 });
+
+describe("a free hour earned with visits of test mode", () => {
+  it("is test mode's: a real booking refuses it, and clearing test mode removes it", async () => {
+    const live: PaymentProvider = { ...world.provider, name: "square" };
+    // Four visits that a server in test mode took beside the live one, and a fifth, real one, which completes the five.
+    expect(await visitOn(DAYS.slice(0, 4))).toEqual([0, 0, 0, 0]);
+    expectOk(await world.book({ date: DAYS[4] }, { payments: live }));
+    expect((await completeVisits(world.db, evening(DAYS[4]), BASE_URL)).codes).toBe(1);
+    const [freeHour] = await codes();
+    expect(await moneyKindOfCode(world.db, freeHour.id)).toBe("test");
+    // The live site does not take it.
+    expect(await world.book({ date: DAYS[5], promoCode: freeHour.code }, { payments: live })).toMatchObject({
+      ok: false,
+      code: "invalid_code",
+      message: "That code was issued in test mode, when no money moved, so it cannot pay for a real booking.",
+    });
+    // It goes with the visits of test mode; the real visit stays, one stamp of five.
+    await clearTestMode(world.db, NOW);
+    expect(await codes()).toEqual([]);
+    expect((await loyaltyStandingOf(world.db, JANE, DEFAULT_SETTINGS)).stamps).toBe(1);
+  });
+
+  it("is real when every visit it counted was real", async () => {
+    const live: PaymentProvider = { ...world.provider, name: "square" };
+    for (const date of DAYS.slice(0, 5)) {
+      expectOk(await world.book({ date }, { payments: live }));
+      await completeVisits(world.db, evening(date), BASE_URL);
+    }
+    const [freeHour] = await codes();
+    expect(await moneyKindOfCode(world.db, freeHour.id)).toBe("live");
+  });
+});
+

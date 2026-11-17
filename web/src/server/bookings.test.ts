@@ -605,3 +605,14 @@ describe("viewing a booking", () => {
     expect(await getBookingByToken(db, "'; drop table bookings; --", result.manageToken)).toBeNull();
   });
 });
+
+describe("a date far beyond the horizon", () => {
+  it("is too far ahead, as any date past the horizon, and not a failure of the database", async () => {
+    const catalog = await loadCatalog(db);
+    for (const date of ["9999-12-31", "9999-12-30", "2400-02-29"]) {
+      expect(await loadDayAvailability(db, catalog, date, NOW)).toMatchObject({ problem: "too_far" });
+    }
+    expect(await loadDayAvailability(db, catalog, "9999-12-31", NOW, { withPhotographer: true })).toMatchObject({ problem: "too_far" });
+    expect(await book({ date: "9999-12-31" })).toMatchObject({ ok: false, code: "not_bookable_date" });
+  });
+});

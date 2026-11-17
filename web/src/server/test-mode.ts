@@ -1,6 +1,6 @@
 import { and, asc, eq, inArray, isNotNull, isNull, notInArray, or, sql } from "drizzle-orm";
 import { bookings, emailOutbox, loyaltyLedger, paymentLinks, payments, promoCodes, refunds } from "@/db/schema";
-import type { Db, DbLike } from "@/db/client";
+import { together, type Db, type DbLike } from "@/db/client";
 import { labelOf, type LabelFacts } from "@/lib/domain/labels";
 import type { PromoKind } from "@/lib/domain/pricing";
 import { formatCents } from "@/lib/domain/pricing";
@@ -88,6 +88,14 @@ export const OTHER_MONEY_CODE: Record<MoneyKind, string> = {
   test: "That code is real credit, and this site is in test mode: it cannot be used here.",
 };
 
+/**
+ * Whether the card processor set up now can make a payment link for a booking of this kind of money: one is set up,
+ * and it moves the booking's own kind (`sendPayLink`, and the appointment's page, which offers a link only then).
+ */
+export function payLinkPossible(processor: string | null, kind: MoneyKind): boolean {
+  return processor !== null && moneyKindOf(processor) === kind;
+}
+
 /** Why no payment link is made by a card processor of the other kind of money than the booking's, by the booking's kind. */
 export const OTHER_MONEY_LINK: Record<MoneyKind, string> = {
   test: "This booking was made in test mode, when no money moved: it is not a real booking, and a payment link would charge a real card for it. Make the booking again here, then send the link for that one.",
@@ -142,14 +150,14 @@ export async function otherMoneyNotice(db: DbLike, processor: string | null): Pr
   }
   // Test mode's bookings, and what its card processor recorded for real ones.
   const tests: string[] = [...TEST_PROCESSORS];
-  const [[made], paid, linked] = await Promise.all([
-    db.select({ n: number }).from(bookings).where(eq(bookings.moneyKind, "test")),
-    db
+  const [[made], paid, linked] = await together(db, [
+    () => db.select({ n: number }).from(bookings).where(eq(bookings.moneyKind, "test")),
+    () => db
       .select({ id: payments.bookingId })
       .from(payments)
       .innerJoin(bookings, eq(bookings.id, payments.bookingId))
       .where(and(inArray(payments.provider, tests), eq(bookings.moneyKind, "live"))),
-    db
+    () => db
       .select({ id: paymentLinks.bookingId })
       .from(paymentLinks)
       .innerJoin(bookings, eq(bookings.id, paymentLinks.bookingId))
@@ -206,6 +214,8 @@ export interface MadeReal {
   startAt: Date;
   /** What the live account took for it. */
   cents: number;
+  /** What was recorded by hand for it, perhaps in test mode, when no money moved: it counts as real from now on. */
+  byHandCents: number;
 }
 
 /** A booking's reference where an email names it: "VS-" and six letters or digits. A code has more parts ("VS-AB12-CD34"). */
@@ -279,9 +289,9 @@ function gaveCodeBack(
 
 async function planClear(db: DbLike, now: Date): Promise<ClearPlan> {
   const tests: string[] = [...TEST_PROCESSORS];
-  const [marked, [all]] = await Promise.all([
-    db.select().from(bookings).where(eq(bookings.moneyKind, "test")).orderBy(asc(bookings.startAt)),
-    db.select({ n: sql<number>`count(*)::int` }).from(bookings),
+  const [marked, [all]] = await together(db, [
+    () => db.select().from(bookings).where(eq(bookings.moneyKind, "test")).orderBy(asc(bookings.startAt)),
+    () => db.select({ n: sql<number>`count(*)::int` }).from(bookings),
   ]);
 
   // A booking made in test mode for which the live account took money, or made a payment link that can be paid, is
@@ -289,35 +299,44 @@ async function planClear(db: DbLike, now: Date): Promise<ClearPlan> {
   const markedIds = marked.map((booking) => booking.id);
   const [realPaid, realLinked] =
     markedIds.length > 0
-      ? await Promise.all([
-          db
+      ? await together(db, [
+          () => db
             .select({ bookingId: payments.bookingId, status: payments.status, amountCents: payments.amountCents })
             .from(payments)
             .where(and(eq(payments.provider, LIVE_PROCESSOR), inArray(payments.bookingId, markedIds))),
-          db
+          () => db
             .select({ bookingId: paymentLinks.bookingId })
             .from(paymentLinks)
-            .where(and(eq(paymentLinks.provider, LIVE_PROCESSOR), inArray(paymentLinks.bookingId, markedIds))),
+            // A paid link has its payment above; one withdrawn unpaid moved nothing.
+            .where(and(eq(paymentLinks.provider, LIVE_PROCESSOR), eq(paymentLinks.status, "open"), inArray(paymentLinks.bookingId, markedIds))),
         ])
       : [[], []];
   const madeRealIds = new Set([...realPaid, ...realLinked].map((row) => row.bookingId));
   const madeReal = marked.filter((booking) => madeRealIds.has(booking.id));
   const removed = marked.filter((booking) => !madeRealIds.has(booking.id));
+  // Cash recorded for such a booking may have been recorded in test mode: it stays, named for the owners to look at.
+  const madeRealByHand =
+    madeReal.length > 0
+      ? await db
+          .select({ bookingId: payments.bookingId, amountCents: payments.amountCents })
+          .from(payments)
+          .where(and(eq(payments.provider, MANUAL_PROVIDER), eq(payments.status, "succeeded"), inArray(payments.bookingId, madeReal.map((booking) => booking.id))))
+      : [];
 
   const bookingIds = removed.map((booking) => booking.id);
   const some = bookingIds.length > 0;
   const ofTestMode = new Set(bookingIds);
   // The test bookings' payments and links, and those that test mode's processors made for other bookings.
-  const [paid, links, issued] = await Promise.all([
-    db
+  const [paid, links, issued] = await together(db, [
+    () => db
       .select({ id: payments.id, bookingId: payments.bookingId, provider: payments.provider, status: payments.status, amountCents: payments.amountCents })
       .from(payments)
       .where(some ? or(inArray(payments.bookingId, bookingIds), inArray(payments.provider, tests)) : inArray(payments.provider, tests)),
-    db
+    () => db
       .select({ id: paymentLinks.id, bookingId: paymentLinks.bookingId })
       .from(paymentLinks)
       .where(some ? or(inArray(paymentLinks.bookingId, bookingIds), inArray(paymentLinks.provider, tests)) : inArray(paymentLinks.provider, tests)),
-    some ? db.select({ id: promoCodes.id, code: promoCodes.code }).from(promoCodes).where(inArray(promoCodes.originBookingId, bookingIds)) : [],
+    () => some ? db.select({ id: promoCodes.id, code: promoCodes.code }).from(promoCodes).where(inArray(promoCodes.originBookingId, bookingIds)) : [],
   ]);
 
   // A real booking a server in test mode took a pretend payment for, or sent a pretend link for, stays: only what
@@ -365,12 +384,12 @@ async function planClear(db: DbLike, now: Date): Promise<ClearPlan> {
   const usedIds = [...new Set(removed.map((booking) => booking.promoCodeId).filter((id): id is string => id !== null && !removedCodeIds.has(id)))];
   const [usedCodes, alsoReal] =
     usedIds.length > 0
-      ? await Promise.all([
-          db
+      ? await together(db, [
+          () => db
             .select({ id: promoCodes.id, originBookingId: promoCodes.originBookingId, source: promoCodes.source })
             .from(promoCodes)
             .where(inArray(promoCodes.id, usedIds)),
-          db
+          () => db
             .select({ id: bookings.promoCodeId })
             .from(bookings)
             .where(and(inArray(bookings.promoCodeId, usedIds), notInArray(bookings.id, bookingIds))),
@@ -419,13 +438,13 @@ async function planClear(db: DbLike, now: Date): Promise<ClearPlan> {
     ...(keptIssued.size > 0 ? [inArray(promoCodes.id, [...keptIssued])] : []),
     ...(visitors.length > 0 ? [and(eq(promoCodes.source, "loyalty"), eq(promoCodes.kind, "free_hour"), inArray(promoCodes.email, visitors))] : []),
   ];
-  const [keptCodes, stampCorrections] = await Promise.all([
-    db
+  const [keptCodes, stampCorrections] = await together(db, [
+    () => db
       .select()
       .from(promoCodes)
       .where(and(or(...worthALook), removedCodeIds.size > 0 ? notInArray(promoCodes.id, [...removedCodeIds]) : undefined))
       .orderBy(asc(promoCodes.code)),
-    db
+    () => db
       .select({ email: loyaltyLedger.email, stamps: loyaltyLedger.stamps, reason: loyaltyLedger.reason })
       .from(loyaltyLedger)
       .where(eq(loyaltyLedger.kind, "stamps"))
@@ -452,6 +471,7 @@ async function planClear(db: DbLike, now: Date): Promise<ClearPlan> {
         customer: booking.customerName,
         startAt: booking.startAt,
         cents: realPaid.filter((payment) => payment.bookingId === booking.id && payment.status === "succeeded").reduce((sum, payment) => sum + payment.amountCents, 0),
+        byHandCents: madeRealByHand.filter((payment) => payment.bookingId === booking.id).reduce((sum, payment) => sum + payment.amountCents, 0),
       })),
       keptCodes: keptCodes.map((code) => ({
         code: code.code,
@@ -526,7 +546,7 @@ export function describeTestMode(contents: TestModeContents): string[] {
       lines.push(
         one
           ? "  It is still to come, and the client may think they have it:"
-          : `  ${count(contents.upcoming.length, "booking")} of them still to come, which the client may think they have:`,
+          : `  ${count(contents.upcoming.length, "booking")} of them still to come, which their clients may think they have:`,
       );
       lines.push(...listed(contents.upcoming, (booking) => `${booking.ref}, ${booking.customer}, ${formatInstant(booking.startAt)}`));
     }
@@ -550,7 +570,9 @@ export function describeTestMode(contents: TestModeContents): string[] {
     lines.push(
       ...listed(
         contents.madeReal,
-        (booking) => `${booking.ref}, ${booking.customer}, ${formatInstant(booking.startAt)}${booking.cents > 0 ? `: ${formatCents(booking.cents)} taken by the live account` : ""}`,
+        (booking) =>
+          `${booking.ref}, ${booking.customer}, ${formatInstant(booking.startAt)}${booking.cents > 0 ? `: ${formatCents(booking.cents)} taken by the live account` : ""}` +
+          `${booking.byHandCents > 0 ? `${booking.cents > 0 ? "," : ":"} ${formatCents(booking.byHandCents)} recorded by hand, perhaps in test mode, which counts as real from now on: look at it` : ""}`,
       ),
     );
   }

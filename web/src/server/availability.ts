@@ -156,17 +156,21 @@ export async function loadDayAvailability(
     return { date, dayType: "weekday", problem: window.problem, earliestStartMinute: 1440, days: [] };
   }
 
+  // A date that cannot be booked (past, or beyond the horizon) is answered with its problem, and its taken time is not
+  // read: nothing is offered on it, and a date far enough ahead (9999-12-31) ends in a year the database cannot read.
   const { start, end } = dayBoundsUtc(date);
-  const holds = await queryRows<{ studio_id: string; start_at: string | Date; end_at: string | Date }>(
-    db,
-    sql`
-      select studio_id, lower(occupied) as start_at, upper(occupied) as end_at
-      from studio_holds
-      where active
-        and occupied && tstzrange(${start.toISOString()}::timestamptz, ${end.toISOString()}::timestamptz, '[)')
-        and (${exclude}::uuid is null or booking_id is distinct from ${exclude}::uuid)
-    `,
-  );
+  const holds = window.problem
+    ? []
+    : await queryRows<{ studio_id: string; start_at: string | Date; end_at: string | Date }>(
+        db,
+        sql`
+          select studio_id, lower(occupied) as start_at, upper(occupied) as end_at
+          from studio_holds
+          where active
+            and occupied && tstzrange(${start.toISOString()}::timestamptz, ${end.toISOString()}::timestamptz, '[)')
+            and (${exclude}::uuid is null or booking_id is distinct from ${exclude}::uuid)
+        `,
+      );
 
   const weekday = isoWeekday(date);
   const days: StudioDay[] = catalog.studios.map((studio) => {
@@ -194,6 +198,6 @@ export async function loadDayAvailability(
     problem: window.problem,
     earliestStartMinute: window.earliestStartMinute,
     days,
-    ...(options.withPhotographer ? { photographer: await loadPhotographerDay(db, catalog, date, exclude) } : {}),
+    ...(options.withPhotographer && !window.problem ? { photographer: await loadPhotographerDay(db, catalog, date, exclude) } : {}),
   };
 }

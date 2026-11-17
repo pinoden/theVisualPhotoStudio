@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, isNotNull, isNull, lt, max, ne, sql } from "drizzle-orm";
 import { media, mediaCollections, siteDocuments, siteRedirects, siteVersions } from "@/db/schema";
-import type { Db, DbLike } from "@/db/client";
+import { together, type Db, type DbLike } from "@/db/client";
 import { can } from "@/lib/abilities";
 import type { SiteContext } from "@/lib/site/blocks/block";
 import { cleanLine, frameLinksTo, parseHref } from "@/lib/site/frame";
@@ -118,7 +118,7 @@ export async function pageSite(db: DbLike, content: PageContent, now: Date): Pro
     collections[id] = { name: collection.name, pictures: collection.pictures.map((picture) => picture.id), shows: collectionShows(collection, today) };
     for (const picture of collection.pictures) pictureIds.add(picture.id);
   }
-  const [pictures, catalog, business] = await Promise.all([loadPictures(db, [...pictureIds]), loadCatalog(db), loadBusiness(db)]);
+  const [pictures, catalog, business] = await together(db, [() => loadPictures(db, [...pictureIds]), () => loadCatalog(db), () => loadBusiness(db)]);
   const values = Object.fromEntries(liveValues(catalog, business).map((entry) => [entry.name, entry.value]));
   return { pictures: Object.fromEntries(pictures), collections, catalog, business, values, conditions: conditionsOf(catalog) };
 }
@@ -696,7 +696,7 @@ export async function linksToPage(db: DbLike, id: string): Promise<string[]> {
   const row = await pageRow(db, id);
   if (!row) return [];
   const path = pagePath(row.slug);
-  const [published, drafted] = await Promise.all([loadPublished(db, FRAME_DOC), loadDraftOrPublished(db, FRAME_DOC)]);
+  const [published, drafted] = await together(db, [() => loadPublished(db, FRAME_DOC), () => loadDraftOrPublished(db, FRAME_DOC)]);
   const found = new Set([...frameLinksTo(published, path), ...frameLinksTo(drafted, path)]);
   const others = await db.select().from(siteDocuments).where(and(isPage, notDeleted, ne(siteDocuments.id, row.id))).orderBy(asc(siteDocuments.title));
   for (const other of others) {

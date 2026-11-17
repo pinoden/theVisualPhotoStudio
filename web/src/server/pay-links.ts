@@ -13,7 +13,7 @@ import { owedCents } from "./money";
 import type { PaymentProvider } from "./payments";
 import { loadSettings } from "./settings";
 import { canViewDay } from "./staff";
-import { moneyKindOf, OTHER_MONEY_LINK } from "./test-mode";
+import { OTHER_MONEY_LINK, payLinkPossible } from "./test-mode";
 import { formatInstant, localDateOf } from "./tz";
 
 /**
@@ -137,7 +137,7 @@ export async function sendPayLink(db: Db, viewer: AuthUser, ref: string, deps: P
   }
   // A link takes the kind of money its card processor moves: real money is not charged for a booking made in test
   // mode, and a pretend payment does not mark a real booking paid (src/server/test-mode.ts).
-  if (deps.payments && moneyKindOf(deps.payments.name) !== booking.moneyKind) return refuse("other_money", OTHER_MONEY_LINK[booking.moneyKind]);
+  if (deps.payments && !payLinkPossible(deps.payments.name, booking.moneyKind)) return refuse("other_money", OTHER_MONEY_LINK[booking.moneyKind]);
   const dueCents = await dueCentsOf(db, booking, deps.now);
   if (dueCents <= 0) return refuse("nothing_due", "Nothing is owed for this booking.");
 

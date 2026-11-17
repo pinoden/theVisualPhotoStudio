@@ -16,7 +16,7 @@ import { BY_CUSTOMER, BY_SYSTEM } from "@/server/history";
 import { resolvePayments } from "@/server/payments";
 import { requireStaff } from "@/server/session";
 import { loadSettings } from "@/server/settings";
-import { moneyKindOf } from "@/server/test-mode";
+import { moneyKindOf, payLinkPossible } from "@/server/test-mode";
 import { formatInstant, formatRange, localDateOf } from "@/server/tz";
 import { AdminFrame, AdminLoading } from "../../frame";
 import {
@@ -77,6 +77,8 @@ async function AppointmentDetails({
   const ended = appointment.payments?.ended ?? null;
   // A booking of the other kind of money than this site's card processor moves: one a server in the other mode made.
   const otherMoney = processorName !== null && moneyKindOf(processorName) !== appointment.moneyKind ? appointment.moneyKind : null;
+  // A payment link can be made: a card processor is set up, and it moves the booking's own kind of money (sendPayLink).
+  const linkPossible = cardProcessor !== "disabled" && payLinkPossible(processorName, appointment.moneyKind);
 
   return (
     <AdminFrame
@@ -287,7 +289,7 @@ async function AppointmentDetails({
                 <strong>{formatCents(appointment.payments.dueCents)} is still to pay.</strong>{" "}
                 {appointment.payments.madeInAdmin
                   ? "This booking was made in the admin, so nothing was charged online."
-                  : `The amount its card held lapsed before it was taken, so the card was not charged: collect the price at the studio${cardProcessor !== "disabled" ? ", or with a payment link" : ""}.`}
+                  : `The amount its card held lapsed before it was taken, so the card was not charged: collect the price at the studio${linkPossible ? ", or with a payment link" : ""}.`}
               </>
             ) : appointment.payments.held && appointment.payments.ended ? (
               <>
@@ -297,6 +299,13 @@ async function AppointmentDetails({
                 The booking {appointment.payments.ended === "released" ? "was released for a reschedule code" : "was cancelled"}{" "}
                 first, so it is given back to the card: by the site, or by the card processor itself on{" "}
                 {formatInstant(new Date(appointment.payments.held.until))} at the latest. Nothing more is to pay.
+              </>
+            ) : appointment.payments.held && appointment.payments.held.provider !== processorName ? (
+              <>
+                <strong>{formatCents(appointment.payments.held.cents)} is held on the client&rsquo;s card, not taken yet.</strong>{" "}
+                It was reserved through another card processor than the one set up now, which the site does not ask: it is
+                not taken, and on {formatInstant(new Date(appointment.payments.held.until))} the card holds nothing, and the
+                booking owes its price.
               </>
             ) : appointment.payments.held ? (
               <>
@@ -504,7 +513,7 @@ async function AppointmentDetails({
             </form>
           )}
 
-          {appointment.may.recordPayment && !appointment.payLink && cardProcessor !== "disabled" && (
+          {appointment.may.recordPayment && !appointment.payLink && linkPossible && (
             <form action={sendPayLinkAction} className="payment-form">
               <input type="hidden" name="ref" value={appointment.ref} />
               <h4>Or let the client pay by card</h4>

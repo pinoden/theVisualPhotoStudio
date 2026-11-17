@@ -61,13 +61,10 @@ export async function requestLoginCode(db: DbLike, rawEmail: unknown, now: Date)
   if (count >= MAX_CODES_PER_WINDOW) return { ok: false, code: "too_many" };
 
   const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
-  await db.insert(loginCodes).values({
-    email,
-    codeHash: codeHash(email, code),
-    expiresAt: new Date(now.getTime() + CODE_TTL_MINUTES * 60_000),
-    createdAt: now,
-  });
-  await queueEmail(db, loginCodeEmail(email, code, CODE_TTL_MINUTES));
+  const expiresAt = new Date(now.getTime() + CODE_TTL_MINUTES * 60_000);
+  await db.insert(loginCodes).values({ email, codeHash: codeHash(email, code), expiresAt, createdAt: now });
+  // A code that could not be sent in its minutes (no email service set up yet) is not sent later: it no longer works.
+  await queueEmail(db, { ...loginCodeEmail(email, code, CODE_TTL_MINUTES), expiresAt });
   return { ok: true, email };
 }
 

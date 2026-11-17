@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { bookings, loyaltyLedger, promoCodes } from "@/db/schema";
 import type { DbLike } from "@/db/client";
 import { loyaltyStanding, type LoyaltyStanding } from "@/lib/domain/loyalty";
@@ -110,6 +110,29 @@ export async function sendEarnedFreeHours(
   const email = customer.email.trim().toLowerCase();
   const standing = await loyaltyStandingOf(tx, email, deps.settings);
   const alreadySent = await freeHoursSentTo(tx, email);
+  // A free hour that visits of test mode helped to earn (a server in test mode beside the live one) is test mode's: a
+  // code is of its booking's kind of money (`moneyKindOfCode`), so such a visit stands for it, a real booking refuses
+  // it, and clearing test mode removes it. Which visits a free hour counted: the days the milestones are taken from.
+  const visits = deps.settings.loyaltyVisits;
+  const kinds = new Map(
+    standing.days.length > 0
+      ? (
+          await tx
+            .select({ id: bookings.id, kind: bookings.moneyKind })
+            .from(bookings)
+            .where(inArray(bookings.id, standing.days.map((day) => day.bookingId)))
+        ).map((row) => [row.id, row.kind])
+      : [],
+  );
+  const testVisitOf = (index: number) =>
+    standing.days
+      .slice(Math.max(0, index * visits - standing.adjustment), Math.max(0, (index + 1) * visits - standing.adjustment))
+      .find((day) => kinds.get(day.bookingId) === "test");
+  // The visit that completed it, as always; a visit of test mode in its place only when the one that completed it is real.
+  const originOf = (index: number) => {
+    const milestone = standing.milestones[index];
+    return milestone && kinds.get(milestone) === "live" ? (testVisitOf(index)?.bookingId ?? milestone) : milestone;
+  };
 
   let sent = 0;
   for (let index = alreadySent; index < standing.earned; index++) {
@@ -120,7 +143,7 @@ export async function sendEarnedFreeHours(
       source: "loyalty",
       email,
       expiresAt,
-      originBookingId: standing.milestones[index],
+      originBookingId: originOf(index),
       loyaltySeq: index + 1,
       note: `Free hour for ${deps.settings.loyaltyVisits} visits`,
       issuedAt: deps.now,

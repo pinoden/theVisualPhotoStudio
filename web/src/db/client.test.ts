@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { createMemoryDb, openOnce, readyOrClosed } from "./client";
+import { createMemoryDb, isTransaction, openOnce, readyOrClosed, together, type DbLike } from "./client";
 
 describe("opening the database", () => {
   it("closes a database that was refused once opened, so that nothing of it stays open", async () => {
@@ -55,6 +55,35 @@ describe("the database scripts", () => {
       const code = readFileSync(path.join(process.cwd(), "scripts", script), "utf8");
       expect(code, script).toContain("openPostgres(url)");
       expect(code, script).not.toMatch(/\bgetDb\b(?!`)/);
+    }
+  });
+});
+
+describe("queries that do not depend on each other", () => {
+  /** Two queries that note when each starts and ends: whether the second waits for the first. */
+  async function overlap(db: DbLike): Promise<boolean> {
+    const events: string[] = [];
+    const query = (name: string) => async () => {
+      events.push(`${name} starts`);
+      await new Promise((done) => setTimeout(done, 20));
+      events.push(`${name} ends`);
+      return name;
+    };
+    expect(await together(db, [query("a"), query("b")])).toEqual(["a", "b"]);
+    return events.indexOf("b starts") < events.indexOf("a ends");
+  }
+
+  it("run at once on the database, and one after another on a transaction, which has one connection", async () => {
+    const opened = await createMemoryDb();
+    try {
+      expect(isTransaction(opened.db)).toBe(false);
+      expect(await overlap(opened.db)).toBe(true);
+      await opened.db.transaction(async (tx) => {
+        expect(isTransaction(tx)).toBe(true);
+        expect(await overlap(tx)).toBe(false);
+      });
+    } finally {
+      await opened.close();
     }
   });
 });

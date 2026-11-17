@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull, lt, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, lt, lte, sql } from "drizzle-orm";
 import { emailOutbox } from "@/db/schema";
 import type { DbLike } from "@/db/client";
 import { afterFee } from "@/lib/domain/policy";
@@ -24,6 +24,8 @@ export interface QueuedEmail {
   kind: string;
   /** Who a reply should reach, when that is not the site's own address. */
   replyTo?: string;
+  /** When the message is no longer any use (a sign-in code's email): one still waiting then is not sent. */
+  expiresAt?: Date;
 }
 
 /** Where `queueEmail` writes the studio's name, and its address on one line. */
@@ -47,6 +49,7 @@ export async function queueEmail(db: DbLike, message: QueuedEmail): Promise<stri
       replyTo: message.replyTo?.trim().toLowerCase() || null,
       ...(await filled(db, message)),
       kind: message.kind,
+      expiresAt: message.expiresAt ?? null,
     })
     .returning({ id: emailOutbox.id });
   return row.id;
@@ -127,7 +130,14 @@ export function resolveEmailTransport(env: Env = process.env): EmailTransport | 
 
 export const MAX_EMAIL_ATTEMPTS = 5;
 
-/** Send queued messages, oldest first. Safe to run from several places at once. */
+/** Why a message that waited past its use is not sent: what a person reading the outbox sees. */
+export const OUT_OF_DATE = "Not sent: it was out of date before it could be sent.";
+
+/**
+ * Send queued messages, oldest first. Safe to run from several places at once.
+ * One that is no longer any use (a sign-in code whose minutes are over, when
+ * no email service was set up yet) is not sent: it is marked out of date.
+ */
 export async function deliverPendingEmails(
   db: DbLike,
   transport: EmailTransport | null,
@@ -135,6 +145,10 @@ export async function deliverPendingEmails(
   limit = 25,
 ): Promise<{ sent: number; failed: number }> {
   if (!transport) return { sent: 0, failed: 0 };
+  await db
+    .update(emailOutbox)
+    .set({ attempts: MAX_EMAIL_ATTEMPTS, error: OUT_OF_DATE })
+    .where(and(isNull(emailOutbox.sentAt), lt(emailOutbox.attempts, MAX_EMAIL_ATTEMPTS), lte(emailOutbox.expiresAt, now)));
   const pending = await db
     .select()
     .from(emailOutbox)

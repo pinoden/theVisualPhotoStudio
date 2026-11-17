@@ -576,6 +576,11 @@ export const emailOutbox = pgTable("email_outbox", {
   sentAt: ts("sent_at"),
   /** Delivery attempts so far; a row is given up on after a few failures. */
   attempts: integer("attempts").notNull().default(0),
+  /**
+   * When the message is no longer any use, for one that is (a sign-in code, which lasts minutes): one still waiting
+   * then is not sent. Null for the others, which are sent however late.
+   */
+  expiresAt: ts("expires_at"),
   error: text("error"),
   createdAt: createdAt(),
 });

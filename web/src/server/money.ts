@@ -1,6 +1,6 @@
 import { and, eq, gt, inArray, ne, sql } from "drizzle-orm";
 import { payments, refunds } from "@/db/schema";
-import type { DbLike } from "@/db/client";
+import { together, type DbLike } from "@/db/client";
 import { MANUAL_PROVIDER } from "@/lib/payment-methods";
 import { RESERVE_HOURS } from "./payments";
 
@@ -63,7 +63,7 @@ export async function owedCentsByBooking(
   const standing = rows.filter((row) => STANDS.includes(row.status));
   if (standing.length === 0) return new Map(rows.map((row) => [row.id, 0]));
   const ids = standing.map((row) => row.id);
-  const [received, held] = await Promise.all([receivedCentsByBooking(db, ids), heldCentsByBooking(db, ids, now)]);
+  const [received, held] = await together(db, [() => receivedCentsByBooking(db, ids), () => heldCentsByBooking(db, ids, now)]);
   return new Map(
     rows.map((row) => [
       row.id,

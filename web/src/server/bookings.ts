@@ -8,6 +8,7 @@ import {
   PG_EXCLUSION_VIOLATION,
   PG_UNIQUE_VIOLATION,
   pgErrorCode,
+  together,
   type Db,
   type DbLike,
 } from "@/db/client";
@@ -676,23 +677,23 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[], now: Date =
   if (rows.length === 0) return [];
   const ids = rows.map((r) => r.id);
   const codeIds = rows.map((r) => r.promoCodeId).filter((id): id is string => id !== null);
-  const [holdRows, addonRows, codeRows, received, atStudio, owed, held] = await Promise.all([
-    db
+  const [holdRows, addonRows, codeRows, received, atStudio, owed, held] = await together(db, [
+    () => db
       .select({ bookingId: studioHolds.bookingId, name: studios.name, priceCents: studioHolds.priceCents, sort: studios.sortOrder })
       .from(studioHolds)
       .innerJoin(studios, eq(studios.id, studioHolds.studioId))
       .where(inArray(studioHolds.bookingId, ids)),
-    db.select().from(bookingAddons).where(inArray(bookingAddons.bookingId, ids)),
-    codeIds.length > 0
+    () => db.select().from(bookingAddons).where(inArray(bookingAddons.bookingId, ids)),
+    () => codeIds.length > 0
       ? db
           .select({ id: promoCodes.id, kind: promoCodes.kind, source: promoCodes.source })
           .from(promoCodes)
           .where(inArray(promoCodes.id, codeIds))
       : [],
-    receivedCentsByBooking(db, ids),
-    receivedCentsByBooking(db, ids, "at_studio"),
-    owedCentsByBooking(db, rows, now),
-    heldCentsByBooking(db, ids, now),
+    () => receivedCentsByBooking(db, ids),
+    () => receivedCentsByBooking(db, ids, "at_studio"),
+    () => owedCentsByBooking(db, rows, now),
+    () => heldCentsByBooking(db, ids, now),
   ]);
   return rows.map((booking) => ({
     id: booking.id,

@@ -141,6 +141,27 @@ export function getDb(): Promise<Db> {
   return globalForDb.__studioDbOpen();
 }
 
+/** Whether `db` is a transaction: drizzle's transaction can be rolled back, the database itself cannot. */
+export function isTransaction(db: DbLike): boolean {
+  return typeof (db as { rollback?: unknown }).rollback === "function";
+}
+
+/**
+ * Queries that do not depend on each other: at once on the database, and one after another on a transaction, which
+ * has a single connection. node-postgres runs a query given to a busy connection after the one before, with a warning
+ * that its next major version refuses it (seen by the tester on 2026-11-17, at a publish and at the clear of test mode).
+ */
+export async function together<const Q extends readonly (() => unknown)[]>(
+  db: DbLike,
+  queries: Q,
+): Promise<{ -readonly [K in keyof Q]: Awaited<ReturnType<Q[K]>> }> {
+  type Results = { -readonly [K in keyof Q]: Awaited<ReturnType<Q[K]>> };
+  if (!isTransaction(db)) return (await Promise.all(queries.map((query) => query()))) as Results;
+  const results: unknown[] = [];
+  for (const query of queries) results.push(await query());
+  return results as Results;
+}
+
 /** Postgres error code of a failed query, looking through driver wrappers. */
 export function pgErrorCode(error: unknown): string | undefined {
   let e: unknown = error;

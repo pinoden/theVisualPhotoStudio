@@ -3,7 +3,7 @@
  * PostgreSQL server in DATABASE_URL. Does nothing if studios already exist.
  * Usage: DATABASE_URL=postgres://... npm run db:seed
  */
-import { openPostgres } from "../src/db/client";
+import { openPostgres, pgErrorCode } from "../src/db/client";
 import { seed } from "../src/db/seed";
 
 async function main() {
@@ -24,6 +24,8 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(error);
+  // 42P01: a table that does not exist. The database was never migrated.
+  if (pgErrorCode(error) === "42P01") console.error("The database has no tables yet: run `npm run db:migrate` first, then this again.");
+  else console.error(error);
   process.exit(1);
 });

@@ -66,7 +66,7 @@ export interface BookingMoney {
    * What the card holds reserved, not taken yet, and when the reservation lapses if it is not taken: taking it did not
    * go through, and the scheduled task tries again (src/server/reserved.ts). Null when the card holds nothing.
    */
-  held: { cents: number; until: string } | null;
+  held: { cents: number; until: string; provider: string } | null;
   payments: PaymentLine[];
 }
 
@@ -106,6 +106,8 @@ export async function moneyOf(
         ? {
             cents: reserved.reduce((sum, row) => sum + row.amountCents, 0),
             until: new Date(Math.min(...reserved.map((row) => row.createdAt.getTime())) + RESERVE_HOURS * 3_600_000).toISOString(),
+            // The card processor that reserved it: one the site does not ask is not taken by it.
+            provider: reserved[0].provider,
           }
         : null,
     payments: rows.map((row) => ({

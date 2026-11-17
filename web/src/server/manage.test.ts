@@ -24,9 +24,9 @@ import { lapseReserved, settleReservedPayments } from "./reserved";
 import { listRefundProblems } from "./admin";
 import { createAdminBooking } from "./appointments";
 import { quoteSelection, toBookingViews } from "./bookings";
-import { checkPayLink, sendPayLink } from "./pay-links";
+import { cancelPayLink, checkPayLink, sendPayLink } from "./pay-links";
 import { moneyOf, recordStudioPayment } from "./studio-payments";
-import { assertOneKindOfMoney, clearTestMode, describeTestMode, LIVE_ON_TEST, moneyKindNow, otherMoneyNotice, TEST_ON_LIVE, testModeContents } from "./test-mode";
+import { assertOneKindOfMoney, clearTestMode, describeTestMode, LIVE_ON_TEST, moneyKindNow, otherMoneyNotice, payLinkPossible, TEST_ON_LIVE, testModeContents } from "./test-mode";
 import type { AuthUser } from "./auth";
 import { adjustStamps, cancelReward } from "./rewards";
 import { contactMessageEmail, loginCodeEmail, queueEmail } from "./email";
@@ -1043,11 +1043,11 @@ describe("test mode and the live account", () => {
     const other = expectOk(await world.book({ date: FAR, startMinute: h(14), durationMinutes: 60 }));
 
     const contents = await testModeContents(world.db, NOW);
-    expect(contents).toMatchObject({ bookings: 1, keptBookings: 1, madeReal: [{ ref: made.ref, cents: rest }], pretend: [] });
+    expect(contents).toMatchObject({ bookings: 1, keptBookings: 1, madeReal: [{ ref: made.ref, cents: rest, byHandCents: 2000 }], pretend: [] });
     const words = describeTestMode(contents).join("\n");
     expect(words).toContain("Kept, and counted as real from now on: 1 booking made in test mode for which Square's live account took money, or made a payment link.");
     expect(words).toContain(`${made.ref}, Dana Diaz, `);
-    expect(words).toContain(`: ${formatCents(rest)} taken by the live account`);
+    expect(words).toContain(`: ${formatCents(rest)} taken by the live account, $20 recorded by hand, perhaps in test mode, which counts as real from now on: look at it`);
     await clearTestMode(world.db, NOW);
     // The record of the real payment stays, with its booking, which is real now; the pretend booking is gone.
     expect(await world.db.select({ ref: bookings.ref, kind: bookings.moneyKind }).from(bookings)).toEqual([{ ref: made.ref, kind: "live" }]);
@@ -1059,6 +1059,31 @@ describe("test mode and the live account", () => {
     expect(notes).toContain("Made in test mode, and counted as a real booking from now on: Square's live account took money for it, or made a payment link for it");
     expect(await bookingRow(other.ref)).toBeUndefined();
     await expect(assertOneKindOfMoney(world.db, "square")).resolves.toBeUndefined();
+  });
+
+  it("removes a booking of test mode whose live payment link was withdrawn unpaid: no real money moved for it", async () => {
+    const owner = await world.addUser("owner@studio.test", "owner", "Olivia");
+    const made = await adminBookingPaidInCash(owner, "mock");
+    // The live site emailed a link for it, as it could before it refused to, and withdrew it before it was paid.
+    const real = { now: NOW, baseUrl: "https://studio.test", payments: live() };
+    await markAs(made.ref, "live");
+    expectOk(await sendPayLink(world.db, owner, made.ref, real));
+    expectOk(await cancelPayLink(world.db, owner, made.ref, real));
+    await markAs(made.ref, "test");
+    expect(await world.db.select({ provider: paymentLinks.provider, status: paymentLinks.status }).from(paymentLinks)).toEqual([{ provider: "square", status: "cancelled" }]);
+    expect(await testModeContents(world.db, NOW)).toMatchObject({ bookings: 1, madeReal: [] });
+    await clearTestMode(world.db, NOW);
+    expect(await world.db.select().from(bookings)).toEqual([]);
+    expect(await world.db.select().from(paymentLinks)).toEqual([]);
+  });
+
+  it("makes a payment link only where the card processor moves the booking's own kind of money", () => {
+    expect(payLinkPossible("square", "live")).toBe(true);
+    expect(payLinkPossible("mock", "test")).toBe(true);
+    expect(payLinkPossible("square-sandbox", "test")).toBe(true);
+    expect(payLinkPossible("square", "test")).toBe(false);
+    expect(payLinkPossible("mock", "live")).toBe(false);
+    expect(payLinkPossible(null, "live")).toBe(false);
   });
 
   it("names a free hour of a client whose visits of test mode go: it may not have been earned", async () => {
@@ -1246,7 +1271,7 @@ describe("an amount reserved on a card that lapsed before it was taken", () => {
     expect((await toBookingViews(world.db, [row], hoursAfter(NOW, 23)))[0]).toMatchObject({ dueCents: 0, heldCents: 17600, receivedCents: 0 });
     const held = await moneyOf(world.db, row, hoursAfter(NOW, 23));
     const reservedAt = (await world.db.select().from(payments))[0].createdAt;
-    expect(held).toMatchObject({ dueCents: 0, receivedCents: 0, held: { cents: 17600, until: hoursAfter(reservedAt, 24).toISOString() } });
+    expect(held).toMatchObject({ dueCents: 0, receivedCents: 0, held: { cents: 17600, until: hoursAfter(reservedAt, 24).toISOString(), provider: "mock" } });
     expect(held.payments).toMatchObject([{ held: true, how: "Card, online: held on the card, not taken yet" }]);
     // After it, the card holds nothing: the booking owes its price, before and after the scheduled task sees it.
     const later = hoursAfter(NOW, 25);

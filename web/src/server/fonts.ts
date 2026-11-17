@@ -47,7 +47,8 @@ const isUuid = (value: unknown): value is string => typeof value === "string" &&
 const isGroup = (value: unknown): value is FontGroup => value === "serif" || value === "sans" || value === "display" || value === "script";
 const oneLine = (value: string, limit: number) => value.replace(/\s+/g, " ").trim().slice(0, limit).trim();
 
-async function mayEdit(db: DbLike, viewer: { role: string }): Promise<boolean> {
+/** Who may add the owners' own fonts: whoever may change the website's design. */
+export async function mayEditFonts(db: DbLike, viewer: { role: string }): Promise<boolean> {
   return can(viewer, "editDesign", await loadSettings(db));
 }
 
@@ -109,7 +110,7 @@ async function designUses(db: DbLike, fontId: string): Promise<boolean> {
 
 /** The owners' fonts as the admin lists them. Null for someone who may not change the design. */
 export async function listFonts(db: DbLike, viewer: { role: string }): Promise<FontDetails[] | null> {
-  if (!(await mayEdit(db, viewer))) return null;
+  if (!(await mayEditFonts(db, viewer))) return null;
   return Promise.all(
     (await rows(db)).map(async ({ font, files }) => ({
       ...toCustomFont(font, files),
@@ -135,7 +136,7 @@ export async function addFont(
   input: { name: string; group: string; licence: string; holdsLicence: boolean },
   now: Date,
 ): Promise<FontResult> {
-  if (!(await mayEdit(db, viewer))) return { ok: false, message: CANNOT };
+  if (!(await mayEditFonts(db, viewer))) return { ok: false, message: CANNOT };
   const name = oneLine(input.name, FONT_LIMITS.name);
   const licence = oneLine(input.licence, FONT_LIMITS.licence);
   if (!name) return { ok: false, message: "Give the font its name." };
@@ -161,7 +162,7 @@ export async function addFontFile(
   input: { bytes: Uint8Array; weight: number; weightMax: number | null; italic: boolean },
   now: Date,
 ): Promise<FontResult> {
-  if (!(await mayEdit(db, viewer))) return { ok: false, message: CANNOT };
+  if (!(await mayEditFonts(db, viewer))) return { ok: false, message: CANNOT };
   if (!isUuid(fontId)) return { ok: false, message: NOT_FOUND };
   if (input.bytes.byteLength === 0) return { ok: false, message: "Choose a font file." };
   if (input.bytes.byteLength > FONT_LIMITS.fileBytes) {
@@ -201,7 +202,7 @@ export async function addFontFile(
 
 /** Take one file off a font. The last file of a font the design uses stays: the design would lose its font. */
 export async function removeFontFile(db: Db, viewer: AuthUser, fileId: string): Promise<FontResult> {
-  if (!(await mayEdit(db, viewer))) return { ok: false, message: CANNOT };
+  if (!(await mayEditFonts(db, viewer))) return { ok: false, message: CANNOT };
   if (!isUuid(fileId)) return { ok: false, message: "That file was not found." };
   return db.transaction(async (tx): Promise<FontResult> => {
     const [file] = await tx.select().from(siteFontFiles).where(eq(siteFontFiles.id, fileId)).for("update").limit(1);
@@ -218,7 +219,7 @@ export async function removeFontFile(db: Db, viewer: AuthUser, fileId: string): 
 
 /** Delete a font and its files. One the design uses, published or in a draft, stays. */
 export async function deleteFont(db: Db, viewer: AuthUser, fontId: string): Promise<FontResult> {
-  if (!(await mayEdit(db, viewer))) return { ok: false, message: CANNOT };
+  if (!(await mayEditFonts(db, viewer))) return { ok: false, message: CANNOT };
   if (!isUuid(fontId)) return { ok: false, message: NOT_FOUND };
   return db.transaction(async (tx): Promise<FontResult> => {
     const [font] = await tx.select().from(siteFonts).where(eq(siteFonts.id, fontId)).for("update").limit(1);

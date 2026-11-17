@@ -3,7 +3,7 @@ import { asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import sharp from "sharp";
 import { hasVisibleText } from "@/lib/visible-text";
 import { media, mediaCollectionItems, mediaCollections, siteDocuments, studioPhotos, studios } from "@/db/schema";
-import type { Db, DbLike } from "@/db/client";
+import { together, type Db, type DbLike } from "@/db/client";
 import { can } from "@/lib/abilities";
 import type { AuthUser } from "./auth";
 import { fileStore } from "./files";
@@ -91,7 +91,7 @@ const toPicture = (row: Row): Picture => ({ id: row.id, url: mediaUrl(row), widt
 const isUuid = (value: unknown): value is string => typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 
 /** Who may use the library: whoever may change the website's design or its pages. */
-async function mayEdit(db: DbLike, viewer: { role: string }): Promise<boolean> {
+export async function mayUseMediaLibrary(db: DbLike, viewer: { role: string }): Promise<boolean> {
   const settings = await loadSettings(db);
   return can(viewer, "editDesign", settings) || can(viewer, "editPages", settings);
 }
@@ -155,7 +155,7 @@ export type MediaResult = { ok: true; picture: Picture } | { ok: false; message:
 
 /** Add a picture to the library. */
 export async function uploadImage(db: Db, viewer: AuthUser, input: { bytes: Uint8Array; filename: string }, now: Date): Promise<MediaResult> {
-  if (!(await mayEdit(db, viewer))) return { ok: false, message: "You cannot add pictures to the website." };
+  if (!(await mayUseMediaLibrary(db, viewer))) return { ok: false, message: "You cannot add pictures to the website." };
   const prepared = await prepareImage(input.bytes);
   if (!prepared.ok) return prepared;
   const fileKey = `pictures/${randomUUID()}.${prepared.ext}`;
@@ -184,7 +184,7 @@ export async function uploadImage(db: Db, viewer: AuthUser, input: { bytes: Uint
  * everything that shows it: they all show the new file from now on.
  */
 export async function replaceImage(db: Db, viewer: AuthUser, id: string, input: { bytes: Uint8Array; filename: string }, now: Date): Promise<MediaResult> {
-  if (!(await mayEdit(db, viewer))) return { ok: false, message: "You cannot change the website's pictures." };
+  if (!(await mayUseMediaLibrary(db, viewer))) return { ok: false, message: "You cannot change the website's pictures." };
   if (!isUuid(id)) return { ok: false, message: "That picture was not found." };
   const prepared = await prepareImage(input.bytes);
   if (!prepared.ok) return prepared;
@@ -217,7 +217,7 @@ const oneLine = (value: string, max: number) => value.replace(/\s+/g, " ").trim(
 
 /** Say what a picture shows, and what is written under it in a gallery. */
 export async function describeMedia(db: Db, viewer: AuthUser, id: string, text: { alt: string; caption: string }, now: Date): Promise<MediaResult> {
-  if (!(await mayEdit(db, viewer))) return { ok: false, message: "You cannot change the website's pictures." };
+  if (!(await mayUseMediaLibrary(db, viewer))) return { ok: false, message: "You cannot change the website's pictures." };
   if (!isUuid(id)) return { ok: false, message: "That picture was not found." };
   // Characters that show nothing are no description: kept as none, which the library then says.
   const typed = oneLine(text.alt, MEDIA_LIMITS.alt);
@@ -245,14 +245,14 @@ export async function describeMedia(db: Db, viewer: AuthUser, id: string, text: 
 export async function mediaUses(db: DbLike, ids: string[]): Promise<Map<string, MediaUse[]>> {
   const uses = new Map<string, MediaUse[]>(ids.map((id) => [id, []]));
   if (ids.length === 0) return uses;
-  const [ofStudios, ofCollections, documents] = await Promise.all([
-    db.select({ mediaId: studioPhotos.mediaId, name: studios.name }).from(studioPhotos).innerJoin(studios, eq(studios.id, studioPhotos.studioId)).where(inArray(studioPhotos.mediaId, ids)),
-    db
+  const [ofStudios, ofCollections, documents] = await together(db, [
+    () => db.select({ mediaId: studioPhotos.mediaId, name: studios.name }).from(studioPhotos).innerJoin(studios, eq(studios.id, studioPhotos.studioId)).where(inArray(studioPhotos.mediaId, ids)),
+    () => db
       .select({ mediaId: mediaCollectionItems.mediaId, name: mediaCollections.name })
       .from(mediaCollectionItems)
       .innerJoin(mediaCollections, eq(mediaCollections.id, mediaCollectionItems.collectionId))
       .where(inArray(mediaCollectionItems.mediaId, ids)),
-    // Documents are few and small: each is read once as text and searched for every id.
+    () => // Documents are few and small: each is read once as text and searched for every id.
     db
       .select({ kind: siteDocuments.kind, title: siteDocuments.title, text: sql<string>`coalesce(${siteDocuments.draft}::text, '') || coalesce(${siteDocuments.published}::text, '')` })
       .from(siteDocuments)
@@ -285,7 +285,7 @@ export type DeleteMediaResult = { ok: true } | { ok: false; message: string; use
 
 /** Delete a picture that nothing shows. One that is shown somewhere is kept, and the answer says where. */
 export async function deleteMedia(db: Db, viewer: AuthUser, id: string): Promise<DeleteMediaResult> {
-  if (!(await mayEdit(db, viewer))) return { ok: false, message: "You cannot delete the website's pictures." };
+  if (!(await mayUseMediaLibrary(db, viewer))) return { ok: false, message: "You cannot delete the website's pictures." };
   if (!isUuid(id)) return { ok: false, message: "That picture was not found." };
   return db.transaction(async (tx): Promise<DeleteMediaResult> => {
     const [row] = await tx.select().from(media).where(eq(media.id, id)).for("update").limit(1);
@@ -307,7 +307,7 @@ export type MediaFilter = "all" | "undescribed" | "unused";
  * description contains it. Null for someone who may not change the website.
  */
 export async function listMedia(db: DbLike, viewer: { role: string }, options: { q?: string; filter?: MediaFilter } = {}): Promise<MediaItem[] | null> {
-  if (!(await mayEdit(db, viewer))) return null;
+  if (!(await mayUseMediaLibrary(db, viewer))) return null;
   const rows = await db.select().from(media).orderBy(desc(media.createdAt), asc(media.id)).limit(2000);
   const uses = await mediaUses(
     db,
