@@ -13,6 +13,7 @@ import { owedCents } from "./money";
 import type { PaymentProvider } from "./payments";
 import { loadSettings } from "./settings";
 import { canViewDay } from "./staff";
+import { moneyKindOf, OTHER_MONEY_LINK } from "./test-mode";
 import { formatInstant, localDateOf } from "./tz";
 
 /**
@@ -109,6 +110,8 @@ export type SendPayLinkBlock =
   | "no_processor"
   | "other_amount_open"
   | "other_processor_open"
+  /** The booking is of the other kind of money than the card processor set up now moves. */
+  | "other_money"
   | "processor_refused";
 
 export type SendPayLinkResult =
@@ -132,6 +135,9 @@ export async function sendPayLink(db: Db, viewer: AuthUser, ref: string, deps: P
   if (!["confirmed", "completed", "no_show"].includes(booking.status)) {
     return refuse("not_active", "A payment link can be sent for a booking that is confirmed or has taken place, not for a cancelled one.");
   }
+  // A link takes the kind of money its card processor moves: real money is not charged for a booking made in test
+  // mode, and a pretend payment does not mark a real booking paid (src/server/test-mode.ts).
+  if (deps.payments && moneyKindOf(deps.payments.name) !== booking.moneyKind) return refuse("other_money", OTHER_MONEY_LINK[booking.moneyKind]);
   const dueCents = await dueCentsOf(db, booking, deps.now);
   if (dueCents <= 0) return refuse("nothing_due", "Nothing is owed for this booking.");
 

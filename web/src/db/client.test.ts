@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { createMemoryDb, openOnce, readyOrClosed } from "./client";
 
@@ -42,5 +44,17 @@ describe("opening the database", () => {
     now = 1_000_000;
     await expect(open()).resolves.toBe("db");
     expect(attempts).toBe(2);
+  });
+});
+
+describe("the database scripts", () => {
+  it("open the database as it is, without the site's check of test mode: their shell has no card processor set up", () => {
+    // `getDb` checks the database against the card processor set up. A shell with only DATABASE_URL has the pretend
+    // one, which a database of real bookings refuses: migrating or seeding the live database would end in that refusal.
+    for (const script of ["migrate.ts", "seed.ts", "clear-test-mode.ts"]) {
+      const code = readFileSync(path.join(process.cwd(), "scripts", script), "utf8");
+      expect(code, script).toContain("openPostgres(url)");
+      expect(code, script).not.toMatch(/\bgetDb\b(?!`)/);
+    }
   });
 });

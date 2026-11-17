@@ -16,6 +16,7 @@ import { BY_CUSTOMER, BY_SYSTEM } from "@/server/history";
 import { resolvePayments } from "@/server/payments";
 import { requireStaff } from "@/server/session";
 import { loadSettings } from "@/server/settings";
+import { moneyKindOf } from "@/server/test-mode";
 import { formatInstant, formatRange, localDateOf } from "@/server/tz";
 import { AdminFrame, AdminLoading } from "../../frame";
 import {
@@ -74,6 +75,8 @@ async function AppointmentDetails({
   const foreignLink = appointment.payLink !== null && appointment.payLink.provider !== processorName;
   // How the booking ended, if it has: an amount its card still holds is given back, not taken.
   const ended = appointment.payments?.ended ?? null;
+  // A booking of the other kind of money than this site's card processor moves: one a server in the other mode made.
+  const otherMoney = processorName !== null && moneyKindOf(processorName) !== appointment.moneyKind ? appointment.moneyKind : null;
 
   return (
     <AdminFrame
@@ -83,6 +86,16 @@ async function AppointmentDetails({
       viewer={viewer}
       settings={settings}
     >
+      {otherMoney && (
+        <div className="admin-card">
+          <h3>{otherMoney === "test" ? "Made in test mode" : "A real booking"}</h3>
+          <p style={{ margin: 0 }}>
+            {otherMoney === "test"
+              ? "No money moved for this booking: it is not a real one. A server in test mode is using this database beside this site, which the overview says more about. Its bookings are removed with the rest of test mode."
+              : "This site is in test mode, and this booking is real: test mode must not use a database with real bookings. The overview says more."}
+          </p>
+        </div>
+      )}
       <div className="admin-card">
         <h3>
           {when.day} <StatusBadge label={appointment.label} />
@@ -282,7 +295,7 @@ async function AppointmentDetails({
                   {formatCents(appointment.payments.held.cents)} is still held on the client&rsquo;s card, not taken.
                 </strong>{" "}
                 The booking {appointment.payments.ended === "released" ? "was released for a reschedule code" : "was cancelled"}{" "}
-                first, so it is given back to the card: by the site, or by Square itself on{" "}
+                first, so it is given back to the card: by the site, or by the card processor itself on{" "}
                 {formatInstant(new Date(appointment.payments.held.until))} at the latest. Nothing more is to pay.
               </>
             ) : appointment.payments.held ? (

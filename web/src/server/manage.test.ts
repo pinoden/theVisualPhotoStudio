@@ -1,8 +1,9 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq, isNull, sql } from "drizzle-orm";
 import { bookingEvents, bookings, emailOutbox, loyaltyLedger, paymentLinks, payments, promoCodes, refunds, settings, studioHolds, studios, users } from "@/db/schema";
+import { formatCents } from "@/lib/domain/pricing";
 import type { PaymentProvider } from "./payments";
 import {
   cancelBooking,
@@ -22,10 +23,10 @@ import { issuePromo } from "./promos";
 import { lapseReserved, settleReservedPayments } from "./reserved";
 import { listRefundProblems } from "./admin";
 import { createAdminBooking } from "./appointments";
-import { toBookingViews } from "./bookings";
-import { sendPayLink } from "./pay-links";
+import { quoteSelection, toBookingViews } from "./bookings";
+import { checkPayLink, sendPayLink } from "./pay-links";
 import { moneyOf, recordStudioPayment } from "./studio-payments";
-import { assertOneKindOfMoney, clearTestMode, describeTestMode, LIVE_ON_TEST, otherMoneyNotice, TEST_ON_LIVE, testModeContents } from "./test-mode";
+import { assertOneKindOfMoney, clearTestMode, describeTestMode, LIVE_ON_TEST, moneyKindNow, otherMoneyNotice, TEST_ON_LIVE, testModeContents } from "./test-mode";
 import type { AuthUser } from "./auth";
 import { adjustStamps, cancelReward } from "./rewards";
 import { contactMessageEmail, loginCodeEmail, queueEmail } from "./email";
@@ -799,6 +800,12 @@ describe("test mode and the live account", () => {
     expect(await world.db.select({ kind: bookings.moneyKind }).from(bookings)).toEqual([{ kind: "live" }]);
   });
 
+  /**
+   * Marks a booking as the other kind of money, to build what a site could leave behind before it refused a code or a
+   * payment link of the other kind: the clear has to put such a database right all the same.
+   */
+  const markAs = (ref: string, kind: "test" | "live") => world.db.update(bookings).set({ moneyKind: kind }).where(eq(bookings.ref, ref));
+
   const adminBookingPaidInCash = async (owner: AuthUser, processor: string | null, start = h(10)) => {
     const made = expectOk(
       await createAdminBooking(
@@ -847,7 +854,7 @@ describe("test mode and the live account", () => {
     expect((await world.db.select().from(promoCodes).where(eq(promoCodes.id, shared.id)))[0].usedCount).toBe(2);
     // The live account's next start refuses the database, and the overview of the one still running says why.
     await expect(assertOneKindOfMoney(world.db, "square")).rejects.toThrow(LIVE_ON_TEST);
-    expect(await otherMoneyNotice(world.db, "square")).toContain("1 booking made in test mode is in this database");
+    expect(await otherMoneyNotice(world.db, "square")).toContain("It left 1 booking made in test mode: none of it is real money.");
     // The clear removes test mode's booking and what it took of the code, and nothing else: the live account opens it.
     expect(await clearTestMode(world.db, NOW)).toMatchObject({ bookings: 1, keptBookings: 1 });
     await expect(assertOneKindOfMoney(world.db, "square")).resolves.toBeUndefined();
@@ -855,6 +862,228 @@ describe("test mode and the live account", () => {
     expect(await world.db.select({ provider: payments.provider }).from(payments)).toEqual([{ provider: "square" }]);
     expect((await world.db.select().from(promoCodes).where(eq(promoCodes.id, shared.id)))[0].usedCount).toBe(1);
     expect(await otherMoneyNotice(world.db, "square")).toBeNull();
+  });
+
+  it("leaves what real bookings rely on: a test code they used, mail about them, and a shared code's uses", async () => {
+    const shared = (await issuePromo(world.db, { kind: "percent", value: 10, source: "manual", email: null, expiresAt: daysAfter(NOW, 90), maxUses: 3 }))!;
+    // A pretend booking moved for a reschedule code, which a real booking then spent.
+    const moved = expectOk(await world.book({ date: FAR, startMinute: h(9), durationMinutes: 60 }));
+    const moveCode = expectOk(await requestRescheduleCode(world.db, moved.ref, byToken(moved.manageToken), world.manageDeps())).code;
+    await markAs(moved.ref, "live");
+    const paidWithIt = expectOk(await world.book({ date: FAR, startMinute: h(11), durationMinutes: 60, promoCode: moveCode }, { payments: live() }));
+    await markAs(moved.ref, "test");
+    // A shared code of the owners': a pretend booking used it and was released for a reschedule code; a real one used it too.
+    const released = expectOk(await world.book({ date: FAR, startMinute: h(13), durationMinutes: 60, promoCode: shared.code }));
+    expectOk(await requestRescheduleCode(world.db, released.ref, byToken(released.manageToken), world.manageDeps()));
+    const real = expectOk(await world.book({ date: FAR, startMinute: h(15), durationMinutes: 60, promoCode: shared.code }, { payments: live() }));
+    expect((await world.db.select().from(promoCodes).where(eq(promoCodes.id, shared.id)))[0].usedCount).toBe(2);
+    // A message that names a pretend booking and a real one is about the real one too.
+    await queueEmail(world.db, { to: OWNER_EMAIL, kind: "owner_note", subject: `${moved.ref} and ${real.ref}`, body: "Both." });
+
+    const cleared = await clearTestMode(world.db, NOW);
+    expect(cleared).toMatchObject({ bookings: 2, keptBookings: 2, codes: 1 });
+    // The reschedule code the real booking spent stays, named for the owners; the real booking keeps it.
+    expect(cleared.keptCodes).toContainEqual(expect.objectContaining({ code: moveCode, issuedInTestMode: true }));
+    expect(describeTestMode(cleared).join("\n")).toContain(`${moveCode}: `);
+    expect((await bookingRow(paidWithIt.ref)).promoCodeId).not.toBeNull();
+    // The released pretend booking's use of the shared code is given back; the real one's stays.
+    expect((await world.db.select().from(promoCodes).where(eq(promoCodes.id, shared.id)))[0].usedCount).toBe(1);
+    // Mail about the real bookings stays; mail about the pretend ones alone goes.
+    const subjects = (await world.db.select({ subject: emailOutbox.subject }).from(emailOutbox)).map((row) => row.subject);
+    expect(subjects).toContain(`Booking confirmed: ${paidWithIt.ref}`);
+    expect(subjects).toContain(`Booking confirmed: ${real.ref}`);
+    expect(subjects).toContain(`${moved.ref} and ${real.ref}`);
+    expect(subjects).not.toContain(`Booking confirmed: ${moved.ref}`);
+    expect(subjects).not.toContain(`Booking confirmed: ${released.ref}`);
+  });
+
+  it("keeps a real booking that a server in test mode took a pretend payment for: only what was pretend goes", async () => {
+    const owner = await world.addUser("owner@studio.test", "owner", "Olivia");
+    // A real booking, made in the admin with the live account, part paid in cash.
+    const made = await adminBookingPaidInCash(owner, "square");
+    const row = await bookingRow(made.ref);
+    const rest = row.totalCents - 2000;
+    // A server left in test mode emailed a payment link for the rest, and the client "paid" it on the pretend page.
+    const pretend = { now: NOW, baseUrl: "https://studio.test", payments: world.provider };
+    await markAs(made.ref, "test");
+    expectOk(await sendPayLink(world.db, owner, made.ref, pretend));
+    await markAs(made.ref, "live");
+    const [link] = await world.db.select().from(paymentLinks);
+    world.links[0].state = { state: "paid", paymentId: "mock_pay_1", amountCents: rest };
+    expect(await checkPayLink(world.db, link.id, pretend)).toBe("paid");
+    expect(await owedCents(world.db, row, NOW)).toBe(0);
+    // The live account refuses the database, pretend money being in it, and its overview says what it is.
+    await expect(assertOneKindOfMoney(world.db, "square")).rejects.toThrow(LIVE_ON_TEST);
+    expect(await otherMoneyNotice(world.db, "square")).toContain("It left pretend payments or payment links for 1 real booking: none of it is real money.");
+
+    const contents = await testModeContents(world.db, NOW);
+    expect(contents).toMatchObject({ bookings: 0, keptBookings: 1, pretend: [{ ref: made.ref, payments: 1, cents: rest, links: 1 }] });
+    const what = `1 card payment (${formatCents(rest)}) and 1 payment link`;
+    expect(describeTestMode(contents).join("\n")).toContain(`${made.ref}, Dana Diaz: ${what}`);
+    await clearTestMode(world.db, NOW);
+    // The booking stays with its cash, owes the rest again, and its history says what was removed.
+    expect(await world.db.select({ ref: bookings.ref }).from(bookings)).toEqual([{ ref: made.ref }]);
+    expect(await world.db.select({ provider: payments.provider, amountCents: payments.amountCents }).from(payments)).toEqual([{ provider: "manual", amountCents: 2000 }]);
+    expect(await world.db.select().from(paymentLinks)).toEqual([]);
+    expect(await owedCents(world.db, row, NOW)).toBe(rest);
+    const notes = (await world.db.select().from(bookingEvents).where(eq(bookingEvents.bookingId, row.id))).map((event) => event.note);
+    expect(notes).toContain(`Removed what test mode's card processor had recorded for this booking, no money having moved: ${what}`);
+    await expect(assertOneKindOfMoney(world.db, "square")).resolves.toBeUndefined();
+    expect(describeTestMode(await testModeContents(world.db, NOW))[0]).toBe("Nothing of test mode is in this database: there is nothing to remove.");
+  });
+
+  it("gives a real code back what a pretend booking took of it, also when that booking was cancelled without it", async () => {
+    // Real credit: a booking of the live account, moved for a reschedule code worth $176.
+    const real = expectOk(await world.book({ date: FAR, startMinute: h(9) }, { payments: live() }));
+    const moved = expectOk(await requestRescheduleCode(world.db, real.ref, byToken(real.manageToken), world.manageDeps({ payments: live() })));
+    const code = async () => (await world.db.select().from(promoCodes).where(eq(promoCodes.code, moved.code)))[0];
+    expect(await code()).toMatchObject({ value: 17600, usedCount: 0 });
+    // A server in test mode took a booking paid with it, which the client then cancelled: a moved booking is not refunded.
+    const pretend = expectOk(await world.book({ date: FAR, startMinute: h(13), durationMinutes: 60, promoCode: moved.code }, { payments: live() }));
+    await markAs(pretend.ref, "test");
+    expectOk(await cancelBooking(world.db, pretend.ref, byToken(pretend.manageToken), world.manageDeps()));
+    expect((await code()).value).toBeLessThan(17600);
+    // The clear removes the pretend booking, and the real credit is whole again.
+    expect(await clearTestMode(world.db, NOW)).toMatchObject({ bookings: 1, keptBookings: 1, codes: 0 });
+    expect(await code()).toMatchObject({ value: 17600, usedCount: 0 });
+  });
+
+  it("numbers a customer's free hours anew when some of them go, so that the next one earned is still sent", async () => {
+    const visit = expectOk(await world.book({ date: FAR }));
+    const erin = { kind: "free_hour" as const, value: 60, source: "loyalty" as const, email: "erin@example.com", expiresAt: daysAfter(NOW, 90) };
+    // Her first free hour came from visits of test mode; her second from stamps an owner added by hand.
+    expect(await issuePromo(world.db, { ...erin, originBookingId: (await bookingRow(visit.ref)).id, loyaltySeq: 1 })).not.toBeNull();
+    const second = (await issuePromo(world.db, { ...erin, loyaltySeq: 2 }))!;
+    await clearTestMode(world.db, NOW);
+    // The one that stays is her first now: the next she earns is her second, and is not refused as sent already.
+    expect(await world.db.select({ id: promoCodes.id, seq: promoCodes.loyaltySeq }).from(promoCodes)).toEqual([{ id: second.id, seq: 1 }]);
+    expect(await issuePromo(world.db, { ...erin, loyaltySeq: 2 })).not.toBeNull();
+  });
+
+  it("counts a booking made with no card processor set up as what the database holds: a setting wrong for a while changes nothing for good", async () => {
+    const owner = await world.addUser("owner@studio.test", "owner", "Olivia");
+    const kinds = async () => (await world.db.select({ kind: bookings.moneyKind }).from(bookings).orderBy(bookings.startAt)).map((row) => row.kind);
+    // Square's sandbox takes a booking; then a deploy loses a key, and the owner books in the admin with no processor.
+    expectOk(await world.book({ date: FAR, startMinute: h(9), durationMinutes: 60 }, { payments: sandbox() }));
+    await adminBookingPaidInCash(owner, null, h(13));
+    expect(await kinds()).toEqual(["test", "test"]);
+    // The key is put back: the sandbox opens the database as before, and the live account still refuses it.
+    await expect(assertOneKindOfMoney(world.db, "square-sandbox")).resolves.toBeUndefined();
+    await expect(assertOneKindOfMoney(world.db, "square")).rejects.toThrow(LIVE_ON_TEST);
+    // Where the bookings are real, one made with no processor is real, and test mode stays refused.
+    await clearTestMode(world.db, NOW);
+    await adminBookingPaidInCash(owner, "square", h(9));
+    await adminBookingPaidInCash(owner, null, h(13));
+    expect(await kinds()).toEqual(["live", "live"]);
+    await expect(assertOneKindOfMoney(world.db, "square-sandbox")).rejects.toThrow(TEST_ON_LIVE);
+  });
+
+  it("counts the first booking of a database with no card processor as real on the live site, and as test mode's anywhere else", async () => {
+    expect(await world.db.select().from(bookings)).toEqual([]);
+    expect(await moneyKindNow(world.db, null)).toBe("test");
+    vi.stubEnv("NODE_ENV", "production");
+    try {
+      expect(await moneyKindNow(world.db, null)).toBe("live");
+      // A card processor says it by itself, wherever the site runs.
+      expect(await moneyKindNow(world.db, "mock")).toBe("test");
+      expect(await moneyKindNow(world.db, "square-sandbox")).toBe("test");
+      expect(await moneyKindNow(world.db, "square")).toBe("live");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("refuses a code of the other kind of money than the booking: test mode's credit never pays for a real booking", async () => {
+    // Credit of test mode: a pretend booking moved for a reschedule code.
+    const pretend = expectOk(await world.book({ date: FAR, startMinute: h(9), durationMinutes: 60 }));
+    const testCode = expectOk(await requestRescheduleCode(world.db, pretend.ref, byToken(pretend.manageToken), world.manageDeps())).code;
+    const withTestCode = { date: FAR, startMinute: h(13), durationMinutes: 60, promoCode: testCode };
+    const priced = { studioIds: [world.ids.blanche], date: FAR, durationMinutes: 60, addons: [], promoCode: testCode, email: "jane@example.com" };
+    // With the live account it is refused, when the price is asked and when the booking is made.
+    const notReal = { ok: false, code: "invalid_code", message: "That code was issued in test mode, when no money moved, so it cannot pay for a real booking." };
+    expect(await quoteSelection(world.db, priced, NOW, "square")).toMatchObject(notReal);
+    expect(await world.book(withTestCode, { payments: live() })).toMatchObject(notReal);
+    // With card payments off for a while, a booking is what the database holds, test mode's here: the code pays, as
+    // it does in test mode, and what it paid for goes with the rest of test mode.
+    expect(await quoteSelection(world.db, priced, NOW, null)).toMatchObject({ ok: true });
+    expect(await quoteSelection(world.db, priced, NOW, "mock")).toMatchObject({ ok: true });
+    const paidWithIt = expectOk(await world.book(withTestCode, { payments: null }));
+    expect((await bookingRow(paidWithIt.ref)).moneyKind).toBe("test");
+    expect(await clearTestMode(world.db, NOW)).toMatchObject({ bookings: 2, keptBookings: 0, codes: 1 });
+    expect(await world.db.select().from(promoCodes)).toEqual([]);
+
+    // Real credit, on a site in test mode: it is not used up on a pretend booking.
+    const real = expectOk(await world.book({ date: FAR, startMinute: h(9), durationMinutes: 60 }, { payments: live() }));
+    const realCode = expectOk(await requestRescheduleCode(world.db, real.ref, byToken(real.manageToken), world.manageDeps({ payments: live() }))).code;
+    expect(await world.book({ date: FAR, startMinute: h(13), durationMinutes: 60, promoCode: realCode })).toMatchObject({
+      ok: false,
+      code: "invalid_code",
+      message: "That code is real credit, and this site is in test mode: it cannot be used here.",
+    });
+    // A code no booking issued, the owners' own, is used wherever it is entered.
+    const own = (await issuePromo(world.db, { kind: "percent", value: 10, source: "manual", email: null, expiresAt: null, maxUses: 2 }))!;
+    expectOk(await world.book({ date: FAR, startMinute: h(13), durationMinutes: 60, promoCode: own.code }, { payments: live() }));
+  });
+
+  it("keeps a booking made in test mode that the live account took money for, and counts it as real from then on", async () => {
+    const owner = await world.addUser("owner@studio.test", "owner", "Olivia");
+    // Made in the admin of a server in test mode, part paid in pretend cash. The live site then emailed a payment link
+    // for the rest, as it could before it refused to, and the client paid it with a real card.
+    const made = await adminBookingPaidInCash(owner, "mock");
+    const row = await bookingRow(made.ref);
+    const rest = row.totalCents - 2000;
+    const real = { now: NOW, baseUrl: "https://studio.test", payments: live() };
+    await markAs(made.ref, "live");
+    expectOk(await sendPayLink(world.db, owner, made.ref, real));
+    await markAs(made.ref, "test");
+    const [link] = await world.db.select().from(paymentLinks);
+    world.links[0].state = { state: "paid", paymentId: "sq_pay_1", amountCents: rest };
+    expect(await checkPayLink(world.db, link.id, real)).toBe("paid");
+    // A pretend booking beside it, which goes.
+    const other = expectOk(await world.book({ date: FAR, startMinute: h(14), durationMinutes: 60 }));
+
+    const contents = await testModeContents(world.db, NOW);
+    expect(contents).toMatchObject({ bookings: 1, keptBookings: 1, madeReal: [{ ref: made.ref, cents: rest }], pretend: [] });
+    const words = describeTestMode(contents).join("\n");
+    expect(words).toContain("Kept, and counted as real from now on: 1 booking made in test mode for which Square's live account took money, or made a payment link.");
+    expect(words).toContain(`${made.ref}, Dana Diaz, `);
+    expect(words).toContain(`: ${formatCents(rest)} taken by the live account`);
+    await clearTestMode(world.db, NOW);
+    // The record of the real payment stays, with its booking, which is real now; the pretend booking is gone.
+    expect(await world.db.select({ ref: bookings.ref, kind: bookings.moneyKind }).from(bookings)).toEqual([{ ref: made.ref, kind: "live" }]);
+    expect(await world.db.select({ provider: payments.provider, status: payments.status, amountCents: payments.amountCents }).from(payments).orderBy(payments.amountCents)).toEqual([
+      { provider: "manual", status: "succeeded", amountCents: 2000 },
+      { provider: "square", status: "succeeded", amountCents: rest },
+    ]);
+    const notes = (await world.db.select().from(bookingEvents).where(eq(bookingEvents.bookingId, row.id))).map((event) => event.note);
+    expect(notes).toContain("Made in test mode, and counted as a real booking from now on: Square's live account took money for it, or made a payment link for it");
+    expect(await bookingRow(other.ref)).toBeUndefined();
+    await expect(assertOneKindOfMoney(world.db, "square")).resolves.toBeUndefined();
+  });
+
+  it("names a free hour of a client whose visits of test mode go: it may not have been earned", async () => {
+    // Four visits in test mode and a fifth with the live account earned Jane a free hour, which the real visit completed.
+    const visit = expectOk(await world.book({ date: FAR, startMinute: h(9), durationMinutes: 60 }));
+    await world.db.update(bookings).set({ status: "completed" }).where(eq(bookings.ref, visit.ref));
+    const fifth = expectOk(await world.book({ date: FAR, startMinute: h(13), durationMinutes: 60 }, { payments: live() }));
+    const freeHour = (await issuePromo(world.db, {
+      kind: "free_hour",
+      value: 60,
+      source: "loyalty",
+      email: "jane@example.com",
+      expiresAt: daysAfter(NOW, 90),
+      originBookingId: (await bookingRow(fifth.ref)).id,
+      loyaltySeq: 1,
+    }))!;
+    const contents = await testModeContents(world.db, NOW);
+    expect(contents.keptCodes).toEqual([expect.objectContaining({ code: freeHour.code, earnedWithTestVisits: true, issuedInTestMode: false, givenBack: false })]);
+    const words = describeTestMode(contents).join("\n");
+    expect(words).toContain("Kept: 1 code that test mode's bookings used, issued or helped to earn. Look at each, under Codes:");
+    expect(words).toContain(`${freeHour.code}: a free hour, for jane@example.com`);
+    expect(words).toContain("sent to a client whose visits of test mode go: it may not have been earned");
+    // It stays: it is the owners' to cancel.
+    await clearTestMode(world.db, NOW);
+    expect(await world.db.select({ code: promoCodes.code }).from(promoCodes)).toEqual([{ code: freeHour.code }]);
   });
 
   it("says what clearing would remove and keep before anything is removed, naming what the owners should look at", async () => {
@@ -874,7 +1103,7 @@ describe("test mode and the live account", () => {
     expect(words).toContain("2 bookings of them still to come");
     expect(words).toContain(booked.ref);
     expect(words).toContain("Removed: their 1 payment recorded by hand, $20 in all.");
-    expect(words).toContain("Kept, as real: 2 codes no booking issued. Cancel any that was only a try, under Codes:");
+    expect(words).toContain("Kept, as real: 2 codes. Cancel any that was only a try, under Codes:");
     expect(words).toContain(`${own.code}: 10% off, for jane@example.com`);
     expect(words).toContain(`${freeHour.code}: a free hour, for frank@example.com`);
     expect(words).toContain("frank@example.com: +5, Carried over from the old card, /admin/customers/frank%40example.com");
@@ -918,6 +1147,9 @@ describe("test mode and the live account", () => {
     await queueEmail(world.db, contactMessageEmail({ to: OWNER_EMAIL, name: "Gina", email: "gina@example.com", topic: "Studio rental", message: "Is Paris free in May?" }));
     await queueEmail(world.db, loginCodeEmail("gina@example.com", "123456", 10));
 
+    // The listing gives the owners' code what it will be worth: all of it, the pretend booking's $30 given back.
+    expect((await world.db.select().from(promoCodes).where(eq(promoCodes.id, own.id)))[0].value).toBe(0);
+    expect((await testModeContents(world.db, NOW)).keptCodes).toContainEqual(expect.objectContaining({ code: own.code, value: 3000, givenBack: true }));
     const cleared = await clearTestMode(world.db, NOW);
     expect(cleared).toMatchObject({ bookings: 4, stampCorrections: [{ email: "frank@example.com", stamps: 5 }] });
     for (const table of [bookings, payments, refunds, paymentLinks, bookingEvents]) expect(await world.db.select().from(table)).toEqual([]);

@@ -12,7 +12,7 @@
  * books afterwards is test mode's again.
  */
 import { openPostgres } from "../src/db/client";
-import { clearTestMode, describeTestMode, testModeContents } from "../src/server/test-mode";
+import { clearTestMode, describeTestMode, nothingOfTestMode, testModeContents } from "../src/server/test-mode";
 
 async function main() {
   const url = process.env.DATABASE_URL;
@@ -26,11 +26,11 @@ async function main() {
     if (!yes) {
       const contents = await testModeContents(db, new Date());
       console.log(["What clearing test mode would do:", "", ...describeTestMode(contents)].join("\n"));
-      if (contents.bookings > 0) console.log("\nNothing was changed. To do it, run: npm run db:clear-test-mode -- --yes");
+      if (!nothingOfTestMode(contents)) console.log("\nNothing was changed. To do it, run: npm run db:clear-test-mode -- --yes");
       return;
     }
     const cleared = await clearTestMode(db, new Date());
-    console.log([cleared.bookings > 0 ? "Test mode cleared." : "Nothing was changed.", "", ...describeTestMode(cleared)].join("\n"));
+    console.log([nothingOfTestMode(cleared) ? "Nothing was changed." : "Test mode cleared.", "", ...describeTestMode(cleared)].join("\n"));
   } finally {
     await close();
   }

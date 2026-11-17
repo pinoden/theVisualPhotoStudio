@@ -69,8 +69,12 @@ const clientPays = (index = 0, amountCents?: number) => {
   const link = world.links[index];
   link.state = { state: "paid", paymentId: `mock_pay_${link.linkId}`, amountCents: amountCents ?? link.request.amountCents };
 };
-/** A booking the owner makes for Dana: Blanche, two hours, $176 to pay at the studio. */
-async function madeInAdmin(date = NEAR, startMinute = h(14)) {
+/**
+ * A booking the owner makes for Dana: Blanche, two hours, $176 to pay at the studio. Made with Square's live account
+ * set up, as the links of these tests are; `processor` says otherwise for a booking of test mode, whose link the
+ * pretend processor makes (a link is of the same kind of money as its booking).
+ */
+async function madeInAdmin(date = NEAR, startMinute = h(14), processor = "square") {
   const made = expectOk(
     await createAdminBooking(
       world.db,
@@ -82,7 +86,7 @@ async function madeInAdmin(date = NEAR, startMinute = h(14)) {
         durationMinutes: 120,
         customer: { name: "Dana Diaz", email: "dana@example.com", phone: "407-555-0133" },
       },
-      { now: NOW, baseUrl: BASE_URL },
+      { now: NOW, baseUrl: BASE_URL, processor },
     ),
   );
   return { ...made, id: (await row(made.ref)).id };
@@ -154,7 +158,7 @@ describe("emailing a payment link", () => {
   });
 
   it("is refused when nothing is owed, for a cancelled booking, and without a card processor", async () => {
-    const online = expectOk(await world.book());
+    const online = expectOk(await world.book({}, { payments: square }));
     expect(await sendPayLink(world.db, owner, online.ref, deps())).toMatchObject({ ok: false, reason: "nothing_due" });
 
     const made = await madeInAdmin();
@@ -634,7 +638,7 @@ describe("when the processor cannot say whether a link was paid", () => {
 
   it("counts a link of another processor as asked about, so that the scheduled task moves on", async () => {
     const test = { ...deps(), payments: world.provider };
-    const made = await madeInAdmin();
+    const made = await madeInAdmin(NEAR, h(14), "mock");
     expectOk(await sendPayLink(world.db, owner, made.ref, test));
     expect(await checkOpenPayLinks(world.db, deps(minutesAfter(NOW, 1)))).toEqual({ paid: 0, closed: 0 });
     expect((await links())[0]).toMatchObject({ status: "open", checkedAt: minutesAfter(NOW, 1) });
@@ -812,7 +816,7 @@ describe("the page a client's link leads to", () => {
   it("offers a pretend payment in test mode only: never for a link a real processor made", async () => {
     // Test mode: the pretend processor, which has no payment page of its own.
     const test = { ...deps(), payments: world.provider };
-    const made = await madeInAdmin();
+    const made = await madeInAdmin(NEAR, h(14), "mock");
     expectOk(await sendPayLink(world.db, owner, made.ref, test));
     const [link] = await links();
     expect(await getPayPage(world.db, link.id, test)).toMatchObject({ status: "open", pretend: true, processorUrl: null });
@@ -830,37 +834,61 @@ describe("the page a client's link leads to", () => {
     expect((await moneyOf(world.db, await row(real.ref))).dueCents).toBe(17600);
   });
 
-  it("offers no pretend payment once a real processor is set up, for a link of test mode left behind", async () => {
+  it("offers no pretend payment once another processor is set up, for a link the pretend one left behind", async () => {
     const test = { ...deps(), payments: world.provider };
-    const made = await madeInAdmin();
+    const made = await madeInAdmin(NEAR, h(14), "mock");
     expectOk(await sendPayLink(world.db, owner, made.ref, test));
     const [link] = await links();
-    // The real keys go in: the test-mode link can no longer be paid, for pretend or otherwise.
-    expect(await getPayPage(world.db, link.id, deps())).toMatchObject({ status: "cancelled", pretend: false, processorUrl: null });
+    // Square's sandbox is set up in its place: the pretend processor's link can no longer be paid, for pretend or otherwise.
+    const sandboxProvider = { ...world.provider, name: "square-sandbox" as const };
+    const sandbox = { ...deps(), payments: sandboxProvider };
+    expect(await getPayPage(world.db, link.id, sandbox)).toMatchObject({ status: "cancelled", pretend: false, processorUrl: null });
+    expect(await pretendToPay(world.db, link.id, NOW, sandboxProvider)).toBe(false);
     expect(await pretendToPay(world.db, link.id, NOW, square)).toBe(false);
     expect(await pretendToPay(world.db, link.id, NOW, null)).toBe(false);
     expect(await world.db.select().from(payments)).toEqual([]);
     // It cannot be asked about, nor withdrawn the usual way: an owner closes it by hand.
-    expect(await checkBookingPayLink(world.db, owner, made.ref, deps())).toEqual({
+    expect(await checkBookingPayLink(world.db, owner, made.ref, sandbox)).toEqual({
       ok: false,
       message:
         "This link was made by another card processor than the one set up now (in test mode, or with Square's other account), which the site cannot ask. Look it up there: an owner can then close it here by hand.",
     });
-    expect(await cancelPayLink(world.db, owner, made.ref, deps())).toMatchObject({ ok: false });
-    // Nor emailed again, with the real processor or with none.
+    expect(await cancelPayLink(world.db, owner, made.ref, sandbox)).toMatchObject({ ok: false });
+    // Nor emailed again, with the processor set up now or with none.
     const resent = { ok: false, reason: "other_processor_open" };
-    expect(await sendPayLink(world.db, owner, made.ref, deps())).toMatchObject(resent);
+    expect(await sendPayLink(world.db, owner, made.ref, sandbox)).toMatchObject(resent);
     expect(await sendPayLink(world.db, owner, made.ref, { ...deps(), payments: null })).toMatchObject(resent);
     expect(await world.emails("payment_link")).toHaveLength(1);
-    expect(await closePayLinkByHand(world.db, owner, made.ref, deps())).toEqual({ ok: true, outcome: "cancelled" });
+    expect(await closePayLinkByHand(world.db, owner, made.ref, sandbox)).toEqual({ ok: true, outcome: "cancelled" });
     // Then a new one, of the processor set up now, can be emailed; or money taken at the studio recorded.
-    expect(await sendPayLink(world.db, owner, made.ref, deps())).toMatchObject({ ok: true, again: false });
-    expectOk(await cancelPayLink(world.db, owner, made.ref, deps()));
+    expect(await sendPayLink(world.db, owner, made.ref, sandbox)).toMatchObject({ ok: true, again: false });
+    expectOk(await cancelPayLink(world.db, owner, made.ref, sandbox));
     expectOk(await recordStudioPayment(world.db, owner, made.ref, { amountCents: 17600, method: "cash", note: "" }, NOW));
   });
 
+  it("is of the same kind of money as its booking: none is made with real money for a booking of test mode, nor a pretend one for a real booking", async () => {
+    // A booking made in test mode, and Square's live account set up: a link would charge a real card for it.
+    const pretend = await madeInAdmin(NEAR, h(14), "mock");
+    expect(await sendPayLink(world.db, owner, pretend.ref, deps())).toEqual({
+      ok: false,
+      reason: "other_money",
+      message:
+        "This booking was made in test mode, when no money moved: it is not a real booking, and a payment link would charge a real card for it. Make the booking again here, then send the link for that one.",
+    });
+    // A real booking, on a site in test mode: a link would take a pretend payment for it.
+    const real = await madeInAdmin(FAR, h(9));
+    expect(await sendPayLink(world.db, owner, real.ref, { ...deps(), payments: world.provider })).toEqual({
+      ok: false,
+      reason: "other_money",
+      message: "This is a real booking, and this site is in test mode: a payment link made here would take a pretend payment for it. Send the link from the live site.",
+    });
+    expect(world.links).toEqual([]);
+    expect(await links()).toEqual([]);
+    expect(await world.emails("payment_link")).toEqual([]);
+  });
+
   it("tells the client of a booking that ends to say whether they paid a link the site can never ask about", async () => {
-    const made = await madeInAdmin();
+    const made = await madeInAdmin(NEAR, h(14), "mock");
     expectOk(await sendPayLink(world.db, owner, made.ref, { ...deps(), payments: world.provider }));
     const cancelled = expectOk(await cancelBooking(world.db, made.ref, dana, world.manageDeps({ payments: square })));
     expect(cancelled.message).toContain("The site cannot check the payment link for this booking. If you paid it, please contact us, and we will refund it.");
@@ -870,7 +898,7 @@ describe("the page a client's link leads to", () => {
     const notes = (await world.db.select().from(bookingEvents).where(eq(bookingEvents.bookingId, made.id))).map((event) => event.note);
     expect(notes).toContain("The payment link for $176 was made by another card processor than the one set up now: the site cannot ask whether it was paid");
     // The studio's cancel says the same to the owner.
-    const other = await madeInAdmin(FAR, h(9));
+    const other = await madeInAdmin(FAR, h(9), "mock");
     expectOk(await sendPayLink(world.db, owner, other.ref, { ...deps(), payments: world.provider }));
     expect(await ownerCancelBooking(world.db, other.ref, { refundCents: 0 }, world.manageDeps({ payments: square }))).toMatchObject({ ok: true, unseenLink: "foreign" });
   });

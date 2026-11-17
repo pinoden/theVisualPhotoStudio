@@ -616,8 +616,36 @@ async function onCanvas(page: Page, element: Locator): Promise<{ x: number; y: n
  * Drag a block from the editor's list of blocks onto the page drawn in the
  * editor: at the bottom of `onto`, which puts it after that block, or in the
  * middle of `onto`, which puts it into an empty place for blocks.
+ *
+ * On a busy machine the editor can miss a drag altogether: no place to drop
+ * is ever shown, and the block stays in the air after the mouse lets go (the
+ * tester's run of 2026-11-17, twice, with the machine's load at 7 to 12). So
+ * the drag is judged by its outcome, a block more on the page, and one the
+ * editor missed is let go of and made again, more slowly.
  */
 async function dragBlock(page: Page, name: string, onto: Locator, where: "bottom" | "middle" = "bottom") {
+  const onPage = canvasOf(page).locator("[data-puck-component]");
+  const before = await onPage.count();
+  for (let attempt = 1; ; attempt++) {
+    await dragBlockOnce(page, name, onto, where, attempt);
+    const landed = await expect
+      .poll(() => onPage.count(), { timeout: 5_000 })
+      .toBeGreaterThan(before)
+      .then(
+        () => true,
+        () => false,
+      );
+    // The third time is left to the test's own check, which says what is missing.
+    if (landed || attempt === 3) return;
+    await page.keyboard.press("Escape");
+    await page.mouse.move(8, 8, { steps: 5 });
+    await page.mouse.up();
+    await page.waitForTimeout(500);
+  }
+}
+
+/** One drag of `dragBlock`; `slowly` is 1 the first time and more when the editor missed the drag before. */
+async function dragBlockOnce(page: Page, name: string, onto: Locator, where: "bottom" | "middle", slowly: number) {
   await page.locator(".page-editor-canvas").scrollIntoViewIfNeeded();
   const source = page.locator("[data-puck-drawer-item]").filter({ has: page.getByText(name, { exact: true }) }).first();
   await source.scrollIntoViewIfNeeded();
@@ -637,10 +665,14 @@ async function dragBlock(page: Page, name: string, onto: Locator, where: "bottom
   const to = { x: target.x + target.width / 2, y: where === "middle" ? target.y + target.height / 2 : target.y + target.height - 2 };
   await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
   await page.mouse.down();
-  await page.mouse.move(from.x + from.width / 2 + 20, from.y + from.height / 2, { steps: 5 });
-  await page.mouse.move(to.x, to.y, { steps: 30 });
-  await page.waitForTimeout(400);
+  // The editor takes the press for a drag once the mouse has moved a little: it is given the time to.
+  await page.waitForTimeout(100 * slowly);
+  await page.mouse.move(from.x + from.width / 2 + 20, from.y + from.height / 2, { steps: 5 * slowly });
+  await page.waitForTimeout(100 * slowly);
+  await page.mouse.move(to.x, to.y, { steps: 30 * slowly });
+  await page.waitForTimeout(400 * slowly);
   await page.mouse.move(to.x, to.y + 3, { steps: 5 });
+  await page.waitForTimeout(100 * slowly);
   await page.mouse.up();
 }
 

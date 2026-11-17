@@ -36,7 +36,7 @@ import {
   type UsablePromo,
 } from "./promos";
 import { loadAccessInstructions } from "./settings";
-import { moneyKindOf } from "./test-mode";
+import { moneyKindNow, moneyKindOfCode, OTHER_MONEY_CODE } from "./test-mode";
 import { formatInstant, localToUtc } from "./tz";
 
 const emailField = z.string().trim().toLowerCase().max(200).pipe(z.email());
@@ -114,8 +114,8 @@ export interface BookingDeps {
    */
   madeBy?: string;
   /**
-   * The name of the card processor set up now, for a booking it does not charge (one made in the admin): the kind
-   * of money the booking is (src/server/test-mode.ts). Left out, the kind of `payments`: test in test mode, else live.
+   * The name of the card processor set up now, for a booking it does not charge (one made in the admin): it says
+   * the kind of money the booking is (`moneyKindNow` in src/server/test-mode.ts). Left out, the name of `payments`.
    */
   processor?: string | null;
 }
@@ -220,7 +220,7 @@ export type QuoteResult =
  * The server's price for a selection, including a code. Used by the booking
  * screen to check a code before the customer pays. Changes nothing.
  */
-export async function quoteSelection(db: DbLike, rawInput: unknown, now: Date): Promise<QuoteResult> {
+export async function quoteSelection(db: DbLike, rawInput: unknown, now: Date, processor?: string | null): Promise<QuoteResult> {
   const parsed = quoteInput.safeParse(rawInput);
   if (!parsed.success) return fail(400, "invalid_input", firstIssue(parsed.error));
   const input = parsed.data;
@@ -233,6 +233,11 @@ export async function quoteSelection(db: DbLike, rawInput: unknown, now: Date): 
     const found = await findUsablePromo(db, input.promoCode, input.email, now);
     if (!found.ok) return fail(422, "invalid_code", PROMO_PROBLEM_TEXT[found.problem]);
     promo = found.promo;
+    // As the booking itself refuses it: a code of the other kind of money than a booking made now would be.
+    if (processor !== undefined) {
+      const [behind, kind] = [await moneyKindOfCode(db, promo.id), await moneyKindNow(db, processor)];
+      if (behind !== null && behind !== kind) return fail(422, "invalid_code", OTHER_MONEY_CODE[kind]);
+    }
   }
   const session = input.photography ? photoPackageFor(catalog, input.studioIds, input.durationMinutes) : null;
   if (input.photography && !session) return fail(422, "invalid_price", NO_SUCH_SESSION);
@@ -316,11 +321,18 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
     return fail(400, "not_bookable_date", text);
   }
 
+  // The kind of money this booking is (src/server/test-mode.ts): the card processor's, and for a booking it does not
+  // charge (one made in the admin), that of the processor set up now.
+  const moneyKind = await moneyKindNow(db, deps.processor !== undefined ? deps.processor : (deps.payments?.name ?? null));
+
   let promo: UsablePromo | null = null;
   if (input.promoCode) {
     const found = await findUsablePromo(db, input.promoCode, input.customer.email, now);
     if (!found.ok) return fail(422, "invalid_code", PROMO_PROBLEM_TEXT[found.problem]);
     promo = found.promo;
+    // Test mode's credit does not pay for a real booking, nor real credit for a pretend one.
+    const behind = await moneyKindOfCode(db, promo.id);
+    if (behind !== null && behind !== moneyKind) return fail(422, "invalid_code", OTHER_MONEY_CODE[moneyKind]);
   }
 
   let price: Quote;
@@ -432,7 +444,7 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
             rescheduledCount: spendsCode && promo!.source === "reschedule" ? promo!.rescheduleGeneration : 0,
             manageTokenHash: hashToken(manageToken),
             requestKey: deps.madeBy ? null : requestKey,
-            moneyKind: moneyKindOf(deps.processor !== undefined ? deps.processor : (deps.payments?.name ?? null)),
+            moneyKind,
             photographerId: photographer ? photographer.studioId : null,
             photoIncludes: session ? session.includes : null,
             madeBy: deps.madeBy ?? null,

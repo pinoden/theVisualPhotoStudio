@@ -465,7 +465,7 @@ describe("the pet did not come", () => {
     expectOk(await ownerCancelBooking(world.db, booked.ref, { refundCents: 11800 }, world.manageDeps()));
     expect((await getAppointment(world.db, owner, booked.ref, NOW))!.petFee).toMatchObject({
       canReturn: false,
-      why: "Less than the pet fee is held for this booking, so there is nothing to return.",
+      why: "Less than the pet fee is left of what was paid for this booking, so there is nothing to return.",
     });
     expect(await givePetFeeCredit(world.db, owner, booked.ref, deps())).toMatchObject({ ok: false, reason: "not_paid" });
   });

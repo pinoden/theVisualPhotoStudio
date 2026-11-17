@@ -43,6 +43,8 @@ import { formatInstant, localDateOf, localToUtc } from "./tz";
 
 export interface Appointment {
   ref: string;
+  /** The kind of money the booking is: test mode's, or real (src/server/test-mode.ts). */
+  moneyKind: "test" | "live";
   label: LabelKey;
   startAt: string;
   endAt: string;
@@ -103,6 +105,7 @@ export async function getAppointment(db: DbLike, viewer: AuthUser, ref: string, 
 
   return {
     ref: booking.ref,
+    moneyKind: booking.moneyKind,
     label: labelOf(booking),
     startAt: view.startAt,
     endAt: view.endAt,
@@ -403,7 +406,7 @@ export async function createAdminBooking(
   db: Db,
   viewer: AuthUser,
   input: Omit<BookingInput, "acceptTerms" | "paymentToken" | "expectedTotalCents">,
-  // `processor`: the one set up now, which says what kind of money the booking is. Left out: none, and so real.
+  // `processor`: the one set up now, which says what kind of money the booking is. Left out: none is set up.
   deps: Pick<BookingDeps, "now" | "baseUrl" | "processor">,
 ): Promise<CreateBookingResult | { ok: false; status: 403; code: "forbidden"; message: string }> {
   const settings = await loadSettings(db);

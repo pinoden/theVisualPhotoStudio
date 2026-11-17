@@ -123,7 +123,7 @@ export const PET_CREDIT_BLOCK_TEXT: Record<PetCreditBlock, string> = {
   no_pet_fee: "This booking has no pet fee.",
   already_given: "The pet fee of this booking was already returned as studio credit.",
   moved: "This booking was released for a reschedule code, which carries everything that was paid, the pet fee included.",
-  not_paid: "Less than the pet fee is held for this booking, so there is nothing to return.",
+  not_paid: "Less than the pet fee is left of what was paid for this booking, so there is nothing to return.",
   never_confirmed: "This booking was never confirmed.",
 };
 
