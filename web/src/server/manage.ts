@@ -1,5 +1,5 @@
-import { and, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
-import { bookings, payments, promoCodes, refunds } from "@/db/schema";
+import { and, eq, inArray, isNotNull, isNull, max, ne, sql } from "drizzle-orm";
+import { bookingEvents, bookings, payments, promoCodes, refunds } from "@/db/schema";
 import type { Db, DbLike } from "@/db/client";
 import { labelOf } from "@/lib/domain/labels";
 import { formatCents } from "@/lib/domain/pricing";
@@ -33,7 +33,7 @@ import { netCardPaidCents, paidAtStudioCents } from "./money";
 import { closePayLinkOf } from "./pay-links";
 import type { PaymentProvider } from "./payments";
 import { issuePetCredit, petCreditOf, petFeeCentsOf, petFeeReturnedCents, studioRefundableCents } from "./pet-fee";
-import { issuePromo, restorePromo } from "./promos";
+import { issuePromo, rescheduleCodeOf, restorePromo, takeOffRescheduleCode } from "./promos";
 import { loadSettings, type Settings } from "./settings";
 import { formatInstant } from "./tz";
 
@@ -327,14 +327,16 @@ export async function processRefund(db: Db, refundId: string, deps: ManageDeps):
         .update(payments)
         .set({ refundedCents: sql`${payments.refundedCents} + ${row.refund.amountCents}` })
         .where(eq(payments.id, row.paymentId));
-      // Its history said it did not go through: it says now that it did.
+      // Its history said it did not go through: it says now that it did, after that line, whatever clock the attempt
+      // that wrote it had (the scheduled task's and a request's are not the same).
       if (fromFailed.length > 0) {
+        const [last] = await tx.select({ at: max(bookingEvents.at) }).from(bookingEvents).where(eq(bookingEvents.bookingId, row.bookingId));
         await recordEvent(tx, {
           bookingId: row.bookingId,
           from: label,
           to: label,
           actor: BY_SYSTEM,
-          at: deps.now,
+          at: last?.at && last.at.getTime() >= deps.now.getTime() ? new Date(last.at.getTime() + 1) : deps.now,
           note: `The refund of ${formatCents(row.refund.amountCents)} went through when it was tried again`,
         });
       }
@@ -848,16 +850,27 @@ export type OwnerRefundResult =
  * What the owner can still send back to the card for a booking: what the card
  * holds, less a pet fee that was already returned as studio credit.
  */
-async function ownerRefundable(db: DbLike, bookingId: string): Promise<{ available: number; returned: number }> {
+async function ownerRefundable(
+  db: DbLike,
+  bookingId: string,
+): Promise<{ available: number; returned: number; petFee: number; code: { id: string; code: string; valueCents: number } | null }> {
   const held = await netCardPaidCents(db, bookingId);
-  const returned = Math.min(held, await petFeeReturnedCents(db, bookingId));
-  return { available: held - returned, returned };
+  const petFee = await petFeeReturnedCents(db, bookingId);
+  const returned = Math.min(held, petFee);
+  // Released for a reschedule code: its money is on the code, and a refund comes off it.
+  const code = await rescheduleCodeOf(db, bookingId);
+  const available = code ? Math.min(held - returned, code.valueCents) : held - returned;
+  return { available, returned, petFee, code };
 }
 
-function tooMuchText(outcome: { available: number; returned: number }): string {
-  return `At most ${formatCents(outcome.available)} can be refunded to the card for this booking.${
-    outcome.returned > 0 ? ` Its pet fee of ${formatCents(outcome.returned)} was already returned as studio credit.` : ""
-  }`;
+function tooMuchText(outcome: { available: number; returned: number; petFee: number; code: { code: string; valueCents: number } | null }): string {
+  const why = [
+    ...(outcome.returned > 0
+      ? [`its pet fee (${formatCents(outcome.petFee)}) was already returned as studio credit${outcome.returned < outcome.petFee ? `, ${formatCents(outcome.returned)} of it from what the card paid` : ""}`]
+      : []),
+    ...(outcome.code ? [`what was paid is on its reschedule code ${outcome.code.code}, which has ${formatCents(outcome.code.valueCents)} left`] : []),
+  ];
+  return `At most ${formatCents(outcome.available)} can be refunded to the card for this booking${why.length > 0 ? `: ${why.join("; ")}` : ""}.`;
 }
 
 /**
@@ -919,7 +932,7 @@ export async function ownerCancelBooking(
         ...(atStudio > 0
           ? [
               petAside > 0
-                ? `What you paid at the studio, less the pet fee that was already returned to you as studio credit (${formatCents(atStudio)}), cannot be sent back online: the studio will be in touch with you about it.`
+                ? `Of what you paid at the studio, ${formatCents(atStudio)} can be given back (the rest was for the pet fee, which was returned to you as studio credit): it cannot be sent back online, so the studio will be in touch with you about it.`
                 : `What you paid at the studio (${formatCents(atStudio)}) cannot be sent back online: the studio will be in touch with you about it.`,
             ]
           : []),
@@ -962,6 +975,8 @@ export async function ownerRefund(
     const refundable = await ownerRefundable(tx, booking.id);
     if (input.amountCents > refundable.available) return { kind: "bad_amount" as const, ...refundable };
     const reason = input.reason.slice(0, 180);
+    // What a released booking refunds comes off the code its money went into: the money comes back once.
+    if (refundable.code && !(await takeOffRescheduleCode(tx, refundable.code.id, input.amountCents))) return { kind: "bad_amount" as const, ...refundable };
     const refundIds = await recordRefunds(tx, booking.id, input.amountCents, reason || `Refund for ${booking.ref}`, false);
     const label = labelOf(booking);
     await recordEvent(tx, {
@@ -970,7 +985,11 @@ export async function ownerRefund(
       to: label,
       actor: BY_STUDIO,
       at: deps.now,
-      note: `Refund ${formatCents(input.amountCents)} to the card${reason ? `: ${reason}` : ""}`,
+      note: `Refund ${formatCents(input.amountCents)} to the card${reason ? `: ${reason}` : ""}${
+        refundable.code
+          ? `; taken off the reschedule code ${refundable.code.code}, which has ${formatCents(refundable.code.valueCents - input.amountCents)} left`
+          : ""
+      }`,
     });
     return { kind: "done" as const, refundIds };
   });

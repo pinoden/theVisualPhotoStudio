@@ -63,6 +63,17 @@ describe("what a change brings to a page that did not fit a phone before it", ()
     expect(broughtBy(after, before).brought).toEqual(after);
   });
 
+  it("is all of it when a thing of a kind the page had comes beside it, or gets worse", () => {
+    // Another button past the edge, beside the one that was.
+    expect(broughtBy([...before, '"SEE PRICES" reaches 334px'], before).brought).toHaveLength(3);
+    // Text smaller still, a control smaller still, a thing further off the screen.
+    expect(broughtBy(['"Small print" is 6px'], ['"Small print" is 10px']).brought).toHaveLength(1);
+    expect(broughtBy(['"Go" is 8px tall'], ['"Go" is 39px tall']).brought).toHaveLength(1);
+    expect(broughtBy(['<div class="x"> starts 300px left of the screen', '<div class="y"> starts 10px left of the screen'], ['<div class="y"> starts 10px left of the screen']).brought).toHaveLength(2);
+    // A field that makes an iPhone zoom, beside one that did.
+    expect(broughtBy(['"Name" has 14px text: an iPhone zooms in on it', '"Email" has 14px text: an iPhone zooms in on it'], ['"Name" has 14px text: an iPhone zooms in on it']).brought).toHaveLength(2);
+  });
+
   it("is all of it on a page that was fine, and nothing on a page that still is", () => {
     expect(broughtBy(before, [])).toEqual({ brought: before, had: [] });
     expect(broughtBy([], before)).toEqual({ brought: [], had: [] });

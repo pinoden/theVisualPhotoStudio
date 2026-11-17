@@ -962,12 +962,14 @@ export function BookingFlow({
                       )
                     }
                   />
-                  <span>
-                    <strong>{addon.name}</strong>
-                    <br />
-                    {addon.description}
+                  {/* The name and its price on one line, which puts the price under the name when both do not fit; the description below. */}
+                  <span className="addon-text">
+                    <span className="addon-head">
+                      <strong>{addon.name}</strong>
+                      <span className="addon-price">{formatCents(addon.priceCents)}</span>
+                    </span>
+                    {addon.description && <span className="addon-description">{addon.description}</span>}
                   </span>
-                  <span className="addon-price">{formatCents(addon.priceCents)}</span>
                 </label>
               ))}
             </div>

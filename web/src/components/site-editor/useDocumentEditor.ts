@@ -8,7 +8,9 @@ import { checkWebsiteOnPhones } from "./phone-check";
 /** How long after the last change the draft is saved by itself. */
 const AUTOSAVE_MS = 900;
 
-/** The keys that only move about a page, which a busy editor lets through: every other key it holds back. */
+const clock = new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" });
+
+/** The keys that only move about a page, which a busy editor lets through in a place that takes typing. */
 const MOVES = /^(Tab|Escape|Arrow(Up|Down|Left|Right)|Page(Up|Down)|Home|End|F\d{1,2}|Shift|Control|Alt|Meta|CapsLock)$/;
 
 export type SaveStatus = "clean" | "waiting" | "saving" | "saved" | "error" | "conflict";
@@ -156,6 +158,8 @@ export function useDraftEditor<T>(initial: DraftStart<T>, actions: DraftActions<
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // What the publish's check found wrong that was there before the change: said with "Published".
   const already = useRef<string[]>([]);
+  // Set when a publish found the draft changed somewhere else and the editor shows it instead: that notice stays.
+  const shownTheirs = useRef(false);
   const running = useRef<Promise<boolean> | null>(null);
 
   /**
@@ -192,6 +196,17 @@ export function useDraftEditor<T>(initial: DraftStart<T>, actions: DraftActions<
           return true;
         }
         if (result.reason === "conflict") {
+          // Asked only to know the draft is still this one, with nothing changed here: nothing of this window's can be
+          // lost, so the draft as it is stored now is shown, and nothing is offered to be saved over it.
+          if (ask && json === stored.current) {
+            const who = `${result.by ? ` by ${result.by}` : ""}${result.at ? ` at ${clock.format(new Date(result.at))}` : ""}`;
+            shownTheirs.current = true;
+            startRefresh(() => {
+              report(`Not published: this was changed somewhere else${who} since you opened it. It is shown here now: look at it, then publish.`);
+              router.refresh();
+            });
+            return false;
+          }
           setConflict({ by: result.by, at: result.at });
           setStatus("conflict");
           return false;
@@ -249,11 +264,15 @@ export function useDraftEditor<T>(initial: DraftStart<T>, actions: DraftActions<
   // editor is busy they are not passed on.
   useEffect(() => {
     if (!locked) return;
-    // Puck's own keys: undo and redo, and Delete and Backspace, which delete the chosen block; and any key that types.
-    // What only moves about the page is let through.
+    // Puck's own keys, on the whole document: undo and redo, and Delete and Backspace, which delete the chosen block. And,
+    // in a place that takes typing, any key that types. Enter and Space on a link or a button still work.
     const swallow = (event: KeyboardEvent) => {
       const command = event.metaKey || event.ctrlKey;
-      const blocked = command ? event.code === "KeyZ" || event.code === "KeyY" : !MOVES.test(event.key);
+      const target = event.target instanceof Element ? event.target : null;
+      const typing = !!target && ((target as HTMLElement).isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName));
+      const blocked = command
+        ? event.code === "KeyZ" || event.code === "KeyY"
+        : event.key === "Delete" || event.key === "Backspace" || (typing && !MOVES.test(event.key));
       if (blocked) {
         event.preventDefault();
         event.stopImmediatePropagation();
@@ -312,7 +331,10 @@ export function useDraftEditor<T>(initial: DraftStart<T>, actions: DraftActions<
       while (running.current) await running.current;
       // Asked of the server even when nothing changed here: a draft changed somewhere else is said as such (the conflict),
       // and is not checked and refused in this editor's name.
-      if (saveFirst && !(await save(false, true))) return report("");
+      if (saveFirst && !(await save(false, true))) {
+        if (!shownTheirs.current) report("");
+        return;
+      }
       const result = await run();
       if (!result.ok) {
         report("");

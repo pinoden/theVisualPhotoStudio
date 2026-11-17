@@ -8,7 +8,7 @@ import { isBookingRef } from "./bookings";
 import { petCreditEmail, queueEmail } from "./email";
 import { recordEvent } from "./history";
 import { netCardPaidCents, paidAtStudioCents } from "./money";
-import { issuePromo } from "./promos";
+import { issuePromo, rescheduleCodeOf } from "./promos";
 import { loadSettings } from "./settings";
 import { formatInstant } from "./tz";
 
@@ -57,15 +57,22 @@ export async function petFeeReturnedCents(db: DbLike, bookingId: string): Promis
 /**
  * What the studio can still give back by hand of the money it took for a
  * booking: what it holds, less the part of a pet fee returned as studio
- * credit that the card did not hold. The pet fee comes back once: as credit,
- * not in cash as well. (The card's side is `ownerRefundable` in manage.ts.)
+ * credit that the card did not hold (`petReturnedCents` of a fee of
+ * `petFeeCents`). The pet fee comes back once: as credit, not in cash as well.
+ * A booking released for a reschedule code gives back at most what is left on
+ * the code (`code`), which the refund then comes off. (The card's side is
+ * `ownerRefundable` in manage.ts.)
  */
-export async function studioRefundableCents(db: DbLike, bookingId: string): Promise<{ cents: number; petReturnedCents: number }> {
-  const atStudio = await paidAtStudioCents(db, bookingId);
-  const returned = await petFeeReturnedCents(db, bookingId);
-  if (atStudio <= 0 || returned <= 0) return { cents: Math.max(0, atStudio), petReturnedCents: 0 };
-  const onStudio = returned - Math.min(Math.max(0, await netCardPaidCents(db, bookingId)), returned);
-  return { cents: Math.max(0, atStudio - onStudio), petReturnedCents: Math.min(atStudio, onStudio) };
+export async function studioRefundableCents(
+  db: DbLike,
+  bookingId: string,
+): Promise<{ cents: number; petReturnedCents: number; petFeeCents: number; code: { id: string; code: string; valueCents: number } | null }> {
+  const atStudio = Math.max(0, await paidAtStudioCents(db, bookingId));
+  const petFeeCents = await petFeeReturnedCents(db, bookingId);
+  const onStudio = petFeeCents - Math.min(Math.max(0, await netCardPaidCents(db, bookingId)), petFeeCents);
+  const cents = Math.max(0, atStudio - onStudio);
+  const code = atStudio > 0 ? await rescheduleCodeOf(db, bookingId) : null;
+  return { cents: code ? Math.min(cents, code.valueCents) : cents, petReturnedCents: Math.min(atStudio, onStudio), petFeeCents, code };
 }
 
 /**

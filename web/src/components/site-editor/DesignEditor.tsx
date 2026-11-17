@@ -14,6 +14,7 @@ import {
 import { findFont, FONT_LIBRARY, fontFaceCss, fontStack, type CustomFont, type FontGroup } from "@/lib/site/fonts";
 import type { EditingState, VersionSummary } from "@/server/website";
 import { CheckField, ColorField, EditorBar, Group, History, PreviewPane, RangeField, SelectField } from "./parts";
+import { useStarted } from "@/components/use-started";
 import { useDocumentEditor } from "./useDocumentEditor";
 
 const COLORS: { key: keyof Design["colors"]; label: string; help: string }[] = [
@@ -83,6 +84,7 @@ export function DesignEditor(props: DesignEditorProps) {
 
 function DesignForm({ initial, versions, fonts, notice, report }: DesignEditorProps & { notice: string; report: (notice: string) => void }) {
   const editor = useDocumentEditor<Design>("design", initial, report);
+  const started = useStarted();
   const design = editor.value;
   // Every change goes through parseDesign: it keeps numbers in range and moves a weight the newly chosen font lacks to the nearest it has.
   const update = (next: Design) => editor.change(parseDesign(next, fonts));
@@ -103,7 +105,8 @@ function DesignForm({ initial, versions, fonts, notice, report }: DesignEditorPr
       {usable.length > 0 && <style>{usable.map(fontFaceCss).join("")}</style>}
       <EditorBar editor={editor} notice={notice} previewPath="/" />
       <div className="editor-grid">
-        <div className="editor-form" inert={editor.busy}>
+        {/* Its fields wait until the page has started: what is typed before would not reach the editor. */}
+        <fieldset className="editor-form" inert={editor.busy} disabled={!started}>
           <Group title="Colours" open>
             {COLORS.map((color) => (
               <ColorField
@@ -204,7 +207,7 @@ function DesignForm({ initial, versions, fonts, notice, report }: DesignEditorPr
           </Group>
 
           <History editor={editor} versions={versions} onOriginal={() => update(initial.original)} />
-        </div>
+        </fieldset>
         <PreviewPane path="/" css={designCss(design, fonts)} reload={0} />
       </div>
     </div>

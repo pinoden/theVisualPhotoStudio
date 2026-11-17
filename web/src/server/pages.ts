@@ -402,8 +402,9 @@ export async function savePageDraft(
         ok: false,
         reason: "conflict",
         message: "This was changed somewhere else since you opened it.",
-        by: row.draftBy ?? row.publishedBy,
-        at: (row.draftAt ?? row.publishedAt)?.toISOString() ?? null,
+        // Who saved the draft that waits. With none waiting it was published, discarded or set back, by whoever: nobody is named.
+        by: row.draft != null ? row.draftBy : null,
+        at: row.draft != null ? (row.draftAt?.toISOString() ?? null) : null,
       };
     }
     // A page that is not published is all draft. A published one has a draft only while it differs from what is published.

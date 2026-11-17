@@ -182,6 +182,12 @@ test("the booking summary keeps its words and amounts whole on the smallest phon
   await expect(addons.first()).toBeVisible();
   for (const addon of await addons.all()) await addon.check();
   await expectFits(page, "the details step with every add-on");
+  // On wider phones a long name fits its line: it is not broken there either.
+  for (const width of [390, 414, 430]) {
+    await page.setViewportSize({ width, height: 844 });
+    await expectFits(page, `the details step with every add-on at ${width}px`);
+  }
+  await page.setViewportSize({ width: 320, height: 568 });
   await agreeToPolicies(page);
   await next(page);
   await expect(totalRow(page)).toBeVisible();

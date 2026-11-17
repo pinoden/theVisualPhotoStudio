@@ -115,7 +115,8 @@ test("the owner changes the design as a draft, sees it in the preview, and visit
   await expect(byText(page, "Unpublished changes.")).toBeVisible();
   await page.getByRole("link", { name: "Edit the design" }).click();
   await expect(byLabel(page, "Accent, as a colour code")).toHaveValue("#336699");
-  // Changed in another window meanwhile: Publish says so, before anything is checked or published in this one's name.
+  // Changed in another window meanwhile, and nothing in this one: Publish says so and shows the draft as it is now,
+  // before anything is checked or published in this window's name, and offers nothing to save over it.
   const other = await page.context().newPage();
   watch(other);
   await other.goto("/admin/website/design");
@@ -123,9 +124,9 @@ test("the owner changes the design as a draft, sees it in the preview, and visit
   await saved(other);
   await other.close();
   await page.getByRole("button", { name: "Publish", exact: true }).click();
-  await expect(byText(page, /This was changed somewhere else by .+ since you opened it/)).toBeVisible();
-  await page.getByRole("button", { name: "Load that version" }).click();
+  await expect(byText(page, /^Not published: this was changed somewhere else by .+ since you opened it\. It is shown here now/)).toBeVisible();
   await expect(byLabel(page, "Accent, as a colour code")).toHaveValue("#225588");
+  await expect(page.getByRole("button", { name: "Save mine over it" })).toHaveCount(0);
   await byLabel(page, "Accent, as a colour code").fill("#336699");
   await saved(page);
   await page.getByRole("button", { name: "Publish", exact: true }).click();
@@ -626,6 +627,8 @@ async function dragBlock(page: Page, name: string, onto: Locator, where: "bottom
     let list = element.parentElement;
     while (list && list !== document.documentElement && list.scrollHeight <= list.clientHeight) list = list.parentElement;
     if (!list || list === document.documentElement) return;
+    // Room below the last block, so that it too can be brought to the middle ("Contact form" is last).
+    list.style.paddingBottom = `${Math.round(list.clientHeight / 2)}px`;
     const off = element.getBoundingClientRect().top - list.getBoundingClientRect().top;
     list.scrollTop += off - (list.clientHeight - element.clientHeight) / 2;
   });

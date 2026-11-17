@@ -134,26 +134,52 @@ async function checkOnce(url: string, width: number, drawn: Drawn, name: string)
   }
 }
 
-/** A problem without its numbers, its quoted words or their capitals: the same problem when a change only moves it or rewords it. */
-const kindOf = (problem: string) => problem.replace(/"[^"]*"/g, '"…"').replace(/\d+(\.\d+)?/g, "#").toLowerCase();
+/**
+ * A problem as a kind and a size: its words without what it quotes (the words
+ * of an element, which a change of capitals or wording changes) and without
+ * its numbers; and its first number outside the quotes, how far a thing
+ * reaches or how small it is.
+ */
+function measured(problem: string): { kind: string; size: number } {
+  const bare = problem.replace(/"[^"]*"/g, '"…"');
+  const size = /\d+(\.\d+)?/.exec(bare);
+  return { kind: bare.replace(/\d+(\.\d+)?/g, "#").toLowerCase(), size: size ? Number(size[0]) : 0 };
+}
 
-/** How wide a page is when it scrolls sideways, from its problems; 0 when it does not. */
-const sidewaysOf = (problems: string[]) => Math.max(0, ...problems.map((problem) => Number(/scrolls sideways \((\d+)px wide/.exec(problem)?.[1] ?? 0)));
+/** For these kinds a larger number is worse (it reaches further); for the others a smaller one (it is smaller to read or to touch). */
+const furtherIsWorse = (kind: string) => /reaches|starts|scrolls sideways/.test(kind);
 
 /**
  * What of the problems a page will have (`found`) a change brings, against
- * the problems it has as visitors have it now (`before`). A page that had the
- * same kinds of problem already, and is no wider than it was, is not the
- * change's doing: what visitors have is said (`had`), in their numbers. One
- * with a new kind of problem, or wider, is the change's: all of it is said
- * (`brought`).
+ * the problems it has as visitors have it now (`before`). A page that has no
+ * more problems of each kind than before, none of them worse (reaching
+ * further, or smaller), is not made worse by the change: what visitors have
+ * is said (`had`), in their numbers. One with another problem, or a worse
+ * one, is the change's doing: all of it is said (`brought`).
  */
 export function broughtBy(found: string[], before: string[]): { brought: string[]; had: string[] } {
   if (found.length === 0) return { brought: [], had: [] };
   if (before.length === 0) return { brought: found, had: [] };
-  const kinds = new Set(before.map(kindOf));
-  const worse = found.some((problem) => !kinds.has(kindOf(problem))) || sidewaysOf(found) > sidewaysOf(before) + 2;
-  return worse ? { brought: found, had: [] } : { brought: [], had: before };
+  const byKind = (problems: string[]) => {
+    const kinds = new Map<string, number[]>();
+    for (const problem of problems) {
+      const { kind, size } = measured(problem);
+      kinds.set(kind, [...(kinds.get(kind) ?? []), size]);
+    }
+    return kinds;
+  };
+  const was = byKind(before);
+  for (const [kind, sizes] of byKind(found)) {
+    const old = was.get(kind) ?? [];
+    if (sizes.length > old.length) return { brought: found, had: [] };
+    // Worst first, side by side with the worst it had: any one worse than its match is a change for the worse.
+    const further = furtherIsWorse(kind);
+    const order = (a: number, b: number) => (further ? b - a : a - b);
+    const now = [...sizes].sort(order);
+    const then = [...old].sort(order);
+    if (now.some((size, at) => (further ? size > then[at] + 2 : size < then[at] - 0.5))) return { brought: found, had: [] };
+  }
+  return { brought: [], had: before };
 }
 
 /**

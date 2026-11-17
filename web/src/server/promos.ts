@@ -232,3 +232,31 @@ export async function issuePromo(tx: DbLike, given: IssuePromoInput): Promise<{ 
   }
   throw new Error("Could not generate a unique code.");
 }
+
+/**
+ * The reschedule code a booking's money went into when its customer released
+ * it (`requestRescheduleCode`), while the owner has not cancelled it: what is
+ * left on it is that money still. Null for a booking never released so.
+ */
+export async function rescheduleCodeOf(db: DbLike, bookingId: string): Promise<{ id: string; code: string; valueCents: number } | null> {
+  const [code] = await db
+    .select({ id: promoCodes.id, code: promoCodes.code, valueCents: promoCodes.value })
+    .from(promoCodes)
+    .where(and(eq(promoCodes.originBookingId, bookingId), eq(promoCodes.source, "reschedule"), isNull(promoCodes.voidedAt)))
+    .limit(1);
+  return code ?? null;
+}
+
+/**
+ * Take a refund of a released booking off its reschedule code, in the
+ * caller's transaction: the money comes back once, on the code or as a
+ * refund. False when the code no longer holds that much (spent meanwhile).
+ */
+export async function takeOffRescheduleCode(tx: DbLike, codeId: string, cents: number): Promise<boolean> {
+  const taken = await tx
+    .update(promoCodes)
+    .set({ value: sql`${promoCodes.value} - ${cents}` })
+    .where(and(eq(promoCodes.id, codeId), gte(promoCodes.value, cents)))
+    .returning({ id: promoCodes.id });
+  return taken.length > 0;
+}

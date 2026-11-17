@@ -1,5 +1,5 @@
 import { and, asc, eq, inArray, isNotNull, sql } from "drizzle-orm";
-import { bookings, paymentLinks, payments, refunds } from "@/db/schema";
+import { bookings, paymentLinks, payments, promoCodes, refunds } from "@/db/schema";
 import type { Db, DbLike } from "@/db/client";
 import { labelOf } from "@/lib/domain/labels";
 import { formatCents } from "@/lib/domain/pricing";
@@ -10,7 +10,9 @@ import { isBookingRef } from "./bookings";
 import { paymentReceivedEmail, queueEmail } from "./email";
 import { recordEvent } from "./history";
 import { openPayLinkOf } from "./pay-links";
-import { studioRefundableCents } from "./pet-fee";
+import { netCardPaidCents, paidAtStudioCents } from "./money";
+import { petFeeCentsOf, studioRefundableCents } from "./pet-fee";
+import { takeOffRescheduleCode } from "./promos";
 import { loadSettings } from "./settings";
 import { canViewDay } from "./staff";
 import { formatInstant, localDateOf } from "./tz";
@@ -228,6 +230,21 @@ export async function voidStudioPayment(db: Db, viewer: AuthUser, paymentId: str
     if (payment.refundedCents > 0) {
       return { ok: false, message: "A refund is recorded against that payment, so it was really paid and cannot be taken back." };
     }
+    // A pet fee returned as studio credit was returned for money paid: that money is not taken back while the credit stands.
+    const [credit] = await tx
+      .select({ code: promoCodes.code, voidedAt: promoCodes.voidedAt })
+      .from(promoCodes)
+      .where(and(eq(promoCodes.originBookingId, booking.id), eq(promoCodes.source, "pet_fee")))
+      .limit(1);
+    if (credit && !credit.voidedAt) {
+      const held = (await netCardPaidCents(tx, booking.id)) + (await paidAtStudioCents(tx, booking.id)) + booking.creditAppliedCents - payment.amountCents;
+      if (held < (await petFeeCentsOf(tx, booking.id))) {
+        return {
+          ok: false,
+          message: `The pet fee of this booking was returned as studio credit (code ${credit.code}) for what was paid. Cancel that code under Codes first, then take this record back.`,
+        };
+      }
+    }
     const why = reason.trim().slice(0, 200);
     await tx
       .update(payments)
@@ -270,14 +287,22 @@ export async function recordHandRefund(
     if (input.amountCents > left) {
       return { ok: false, message: `At most ${formatCents(left)} of that payment can still be refunded.` };
     }
-    // A pet fee already returned as studio credit is not given back in cash as well.
+    // A pet fee already returned as studio credit is not given back in cash as well, nor what is on a reschedule code.
     const back = await studioRefundableCents(tx, booking.id);
-    if (input.amountCents > back.cents) {
-      return {
-        ok: false,
-        message: `At most ${formatCents(back.cents)} can be refunded by hand for this booking: its pet fee of ${formatCents(back.petReturnedCents)} was already returned as studio credit.`,
-      };
-    }
+    const tooMuch = () => {
+      const why = [
+        ...(back.petReturnedCents > 0
+          ? [
+              `its pet fee (${formatCents(back.petFeeCents)}) was already returned as studio credit${back.petReturnedCents < back.petFeeCents ? `, ${formatCents(back.petReturnedCents)} of it from what was paid at the studio` : ""}`,
+            ]
+          : []),
+        ...(back.code ? [`what was paid is on its reschedule code ${back.code.code}, which has ${formatCents(back.code.valueCents)} left`] : []),
+      ];
+      return { ok: false as const, message: `At most ${formatCents(back.cents)} can be refunded by hand for this booking${why.length > 0 ? `: ${why.join("; ")}` : ""}.` };
+    };
+    if (input.amountCents > back.cents) return tooMuch();
+    // What a released booking gives back comes off its code.
+    if (back.code && !(await takeOffRescheduleCode(tx, back.code.id, input.amountCents))) return tooMuch();
     const why = input.note.trim().slice(0, 180);
     await tx.insert(refunds).values({
       paymentId: payment.id,
@@ -300,7 +325,9 @@ export async function recordHandRefund(
       to: label,
       actor: viewer.email,
       at: now,
-      note: `Refund of ${formatCents(input.amountCents)} given by hand${why ? `: ${why}` : ""}`,
+      note: `Refund of ${formatCents(input.amountCents)} given by hand${why ? `: ${why}` : ""}${
+        back.code ? `; taken off the reschedule code ${back.code.code}, which has ${formatCents(back.code.valueCents - input.amountCents)} left` : ""
+      }`,
     });
     return { ok: true };
   });

@@ -282,6 +282,29 @@ describe("a refund tried twice at once", () => {
     expect(await world.emails("owner_refund_failed")).toHaveLength(1);
   });
 
+  it("that goes through on an attempt with an earlier clock still ends its history saying so", async () => {
+    const booked = expectOk(await world.book({ date: FAR }));
+    expectOk(await ownerRefund(world.db, booked.ref, { amountCents: 5000, reason: "" }, world.manageDeps({ payments: null })));
+    const [refund] = await world.db.select().from(refunds);
+    const deps = world.manageDeps();
+    // The request's attempt, at NOW, is answered slowly and goes through; the scheduled task's, a minute later, is refused at once.
+    const slow = {
+      ...deps.payments!,
+      refund: async (request: Parameters<NonNullable<typeof deps.payments>["refund"]>[0]) => {
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        return deps.payments!.refund(request);
+      },
+    };
+    const refused = { ...deps.payments!, refund: async () => ({ ok: false as const, message: "Idempotency key in use" }) };
+    await Promise.all([
+      processRefund(world.db, refund.id, { ...deps, payments: slow }),
+      processRefund(world.db, refund.id, { ...deps, payments: refused, now: hoursAfter(NOW, 1 / 60) }),
+    ]);
+    const bookingId = (await bookingRow(booked.ref)).id;
+    const events = await world.db.select().from(bookingEvents).where(eq(bookingEvents.bookingId, bookingId)).orderBy(bookingEvents.at);
+    expect(events.at(-1)?.note).toBe("The refund of $50 went through when it was tried again");
+  });
+
   it("that fails once and goes through on the other attempt says, last, that it went through", async () => {
     const booked = expectOk(await world.book({ date: FAR }));
     expectOk(await ownerRefund(world.db, booked.ref, { amountCents: 5000, reason: "" }, world.manageDeps({ payments: null })));
@@ -538,6 +561,31 @@ describe("the reschedule code", () => {
     const refunded = (await world.db.select().from(refunds)).length;
     const credited = (await world.db.select().from(promoCodes)).length;
     expect(refunded + credited).toBe(1);
+  });
+});
+
+describe("a booking released for a reschedule code", () => {
+  it("refunds only what is left on its code, and the refund comes off the code: the money comes back once", async () => {
+    const booked = expectOk(await world.book({ date: FAR })); // $176 by card
+    const moved = expectOk(await requestRescheduleCode(world.db, booked.ref, byToken(booked.manageToken), world.manageDeps()));
+    const code = async () => (await world.db.select().from(promoCodes).where(eq(promoCodes.code, moved.code)))[0];
+    expect((await code()).value).toBe(17600);
+    // All of it as well as the code: refused, and the reason named.
+    expect(await ownerRefund(world.db, booked.ref, { amountCents: 17601, reason: "" }, world.manageDeps())).toMatchObject({
+      ok: false,
+      message: `At most $176 can be refunded to the card for this booking: what was paid is on its reschedule code ${moved.code}, which has $176 left.`,
+    });
+    expectOk(await ownerRefund(world.db, booked.ref, { amountCents: 5000, reason: "Asked for part back" }, world.manageDeps()));
+    expect((await code()).value).toBe(12600);
+    const bookingId = (await bookingRow(booked.ref)).id;
+    const notes = (await world.db.select().from(bookingEvents).where(eq(bookingEvents.bookingId, bookingId))).map((event) => event.note);
+    expect(notes.at(-1)).toBe(`Refund $50 to the card: Asked for part back; taken off the reschedule code ${moved.code}, which has $126 left`);
+    // Spent on a new booking meanwhile: no more than is left can be refunded.
+    expectOk(await world.book({ date: FAR, startMinute: h(15), durationMinutes: 60, promoCode: moved.code, paymentToken: undefined })); // $88
+    expect((await code()).value).toBe(3800);
+    expect(await ownerRefund(world.db, booked.ref, { amountCents: 5000, reason: "" }, world.manageDeps())).toMatchObject({ ok: false, code: "bad_amount" });
+    expectOk(await ownerRefund(world.db, booked.ref, { amountCents: 3800, reason: "" }, world.manageDeps()));
+    expect((await code()).value).toBe(0);
   });
 });
 

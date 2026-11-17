@@ -189,12 +189,13 @@ async function NewBooking({ searchParams }: Pick<PageProps<"/admin/calendar/new"
                   {addons.map((addon) => (
                     <label className="addon-row" key={addon.id}>
                       <input type="checkbox" name="addon" value={addon.id} />
-                      <span>
-                        <strong>{addon.name}</strong>
-                        <br />
-                        {addon.description}
+                      <span className="addon-text">
+                        <span className="addon-head">
+                          <strong>{addon.name}</strong>
+                          <span className="addon-price">{formatCents(addon.priceCents)}</span>
+                        </span>
+                        {addon.description && <span className="addon-description">{addon.description}</span>}
                       </span>
-                      <span className="addon-price">{formatCents(addon.priceCents)}</span>
                     </label>
                   ))}
                 </fieldset>

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, inArray, isNotNull, lt, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, ne, sql } from "drizzle-orm";
 import {
   addons,
   blocks,
@@ -305,6 +305,8 @@ export interface AdminBooking extends BookingView {
   refundableCents: number;
   /** Money taken at the studio and not given back: the site cannot send it anywhere, the studio gives it back by hand. */
   studioHeldCents: number;
+  /** For a booking released for a reschedule code: the code its money went into, and what is left on it. A refund comes off it. */
+  rescheduleCode: { code: string; valueCents: number } | null;
   refundProblem: boolean;
 }
 
@@ -349,6 +351,12 @@ export async function listBookings(
     .where(and(inArray(payments.bookingId, ids), ne(payments.provider, MANUAL_PROVIDER)))
     .groupBy(payments.bookingId, refunds.status);
 
+  // The reschedule codes the money of released bookings went into, while the owner has not cancelled them.
+  const codes = await db
+    .select({ bookingId: promoCodes.originBookingId, code: promoCodes.code, valueCents: promoCodes.value })
+    .from(promoCodes)
+    .where(and(inArray(promoCodes.originBookingId, ids), eq(promoCodes.source, "reschedule"), isNull(promoCodes.voidedAt)));
+
   // Money taken at the studio, less what the studio gave back by hand.
   const atStudio = await db
     .select({ bookingId: payments.bookingId, cents: sql<number>`coalesce(sum(${payments.amountCents} - ${payments.refundedCents}), 0)::int` })
@@ -375,17 +383,20 @@ export async function listBookings(
     const returned = refundRows.reduce((sum, b) => sum + b.cents, 0);
     const cardHeldCents = (paid.find((p) => p.bookingId === view.id)?.paidCents ?? 0) - returned;
     const asCredit = Math.min(Math.max(0, cardHeldCents), petReturned.find((p) => p.bookingId === view.id)?.cents ?? 0);
+    const code = codes.find((row) => row.bookingId === view.id);
     return {
       ...view,
       customerPhone: rows[i].customerPhone,
       notes: rows[i].notes,
       cardHeldCents,
-      refundableCents: Math.max(0, cardHeldCents - asCredit),
+      // A released booking's money is on its code: no more than is left there can be refunded.
+      refundableCents: Math.min(Math.max(0, cardHeldCents - asCredit), code?.valueCents ?? Infinity),
       // The pet fee returned as credit that the card did not hold comes off what the studio gives back by hand.
-      studioHeldCents: Math.max(
-        0,
-        (atStudio.find((p) => p.bookingId === view.id)?.cents ?? 0) - ((petReturned.find((p) => p.bookingId === view.id)?.cents ?? 0) - asCredit),
+      studioHeldCents: Math.min(
+        Math.max(0, (atStudio.find((p) => p.bookingId === view.id)?.cents ?? 0) - ((petReturned.find((p) => p.bookingId === view.id)?.cents ?? 0) - asCredit)),
+        code?.valueCents ?? Infinity,
       ),
+      rescheduleCode: code ? { code: code.code, valueCents: code.valueCents } : null,
       refundProblem: refundRows.some((b) => b.status === "failed"),
     };
   });

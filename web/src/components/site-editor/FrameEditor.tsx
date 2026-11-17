@@ -18,6 +18,7 @@ import {
 } from "@/lib/site/frame";
 import type { EditingState, VersionSummary } from "@/server/website";
 import { CheckField, EditorBar, Group, History, PreviewPane, SelectField, TextArea, TextField } from "./parts";
+import { useStarted } from "@/components/use-started";
 import { useDocumentEditor } from "./useDocumentEditor";
 
 /** The site's own screens a link can lead to, offered as suggestions beside the pages of the admin. */
@@ -135,6 +136,7 @@ export function FrameEditor(props: FrameEditorProps) {
 
 function FrameForm({ initial, versions, pictures, pages: madePages, notice, report }: FrameEditorProps & { notice: string; report: (notice: string) => void }) {
   const editor = useDocumentEditor<SiteFrame>("frame", initial, report);
+  const started = useStarted();
   const frame = editor.value;
   const pages = useId();
   // The pictures this editor has seen, to show the ones the frame names by their ids.
@@ -156,7 +158,8 @@ function FrameForm({ initial, versions, pictures, pages: madePages, notice, repo
       </datalist>
       <EditorBar editor={editor} notice={notice} previewPath="/" />
       <div className="editor-grid">
-        <div className="editor-form" inert={editor.busy}>
+        {/* Its fields wait until the page has started: what is typed before would not reach the editor. */}
+        <fieldset className="editor-form" inert={editor.busy} disabled={!started}>
           <Group title="The studio: name, address and phone" open>
             <p className="editor-hint">
               Shown in the footer and on the contact page, and printed in every email and on every receipt the site
@@ -407,7 +410,7 @@ function FrameForm({ initial, versions, pictures, pages: madePages, notice, repo
           </Group>
 
           <History editor={editor} versions={versions} onOriginal={() => editor.change(initial.original)} />
-        </div>
+        </fieldset>
         <PreviewPane path="/" reload={editor.saves} />
       </div>
     </div>
