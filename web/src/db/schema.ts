@@ -633,6 +633,45 @@ export const emailOutbox = pgTable("email_outbox", {
   createdAt: createdAt(),
 });
 
+// ── Memberships ──────────────────────────────────────────────────────────────
+
+/**
+ * A membership the studio sells (follow-up 3): studio minutes each month for a monthly price, in one studio or in the
+ * studios of a bundle (`membership_plan_studios`). The owners add plans, change them and switch them on and off under
+ * Admin → Memberships. See src/server/memberships.ts.
+ */
+export const membershipPlans = pgTable(
+  "membership_plans",
+  {
+    id: id(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    /** The studio minutes it gives each month: 300 for 5 hours. */
+    minutes: integer("minutes").notNull(),
+    /** What it costs each month. */
+    priceCents: integer("price_cents").notNull(),
+    /** False when it is no longer offered. A plan is never deleted. */
+    active: boolean("active").notNull().default(true),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: createdAt(),
+  },
+  (t) => [check("membership_plans_minutes", sql`${t.minutes} > 0`), check("membership_plans_price", sql`${t.priceCents} > 0`)],
+);
+
+/** The studios a plan's minutes are for: one, or the studios of a bundle, each of which they can be spent in alone too. */
+export const membershipPlanStudios = pgTable(
+  "membership_plan_studios",
+  {
+    planId: uuid("plan_id")
+      .notNull()
+      .references(() => membershipPlans.id, { onDelete: "cascade" }),
+    studioId: uuid("studio_id")
+      .notNull()
+      .references(() => studios.id, { onDelete: "restrict" }),
+  },
+  (t) => [primaryKey({ columns: [t.planId, t.studioId] })],
+);
+
 /**
  * The owners' wording of an email the site sends to clients (Admin → Emails): a row for each email they have changed
  * or set back. No subject and text: the site's own wording again. `revision` goes up with each save, so that a save

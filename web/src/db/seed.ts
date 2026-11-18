@@ -1,4 +1,4 @@
-import { addons, photoPackages, photographerHours, photographers, priceRules, studioHours, studios } from "./schema";
+import { addons, membershipPlans, membershipPlanStudios, photoPackages, photographerHours, photographers, priceRules, studioHours, studios } from "./schema";
 import type { Db } from "./client";
 
 /**
@@ -7,6 +7,56 @@ import type { Db } from "./client";
  * Owners can change the prices in Admin.
  */
 const h = (hours: number) => Math.round(hours * 60);
+
+/**
+ * The memberships (follow-up 3): the owners' table of 2026-11-17, 5 or 10 hours a month in one studio or a bundle.
+ * The single studios' words are the live site's (its scheduling page, read 2026-11-18). Migration
+ * `0042_membership_plans` gives a database that already has the studios the same plans.
+ */
+export const STARTING_PLANS: readonly { studios: readonly ("blanche" | "dayglow" | "paris")[]; name: string; hours: number; dollars: number; description: string }[] = [
+  { studios: ["dayglow"], name: "Studio Dayglow, 5 hours a month", hours: 5, dollars: 330, description: "Get creative in Studio Dayglow, the perfect space for vibrant, high-energy shoots." },
+  {
+    studios: ["dayglow"],
+    name: "Studio Dayglow, 10 hours a month",
+    hours: 10,
+    dollars: 600,
+    description: "Enjoy flexible, affordable access to Studio Dayglow, where every session feels vibrant, modern, and full of energy.",
+  },
+  {
+    studios: ["paris"],
+    name: "Studio Paris, 5 hours a month",
+    hours: 5,
+    dollars: 300,
+    description: "Capture timeless, light-filled moments in Studio Paris, your go-to space for soft, elegant, and modern photography.",
+  },
+  {
+    studios: ["paris"],
+    name: "Studio Paris, 10 hours a month",
+    hours: 10,
+    dollars: 550,
+    description: "Enjoy the charm and versatility of Studio Paris, a beautifully curated space designed for elegant portraits and creative storytelling.",
+  },
+  {
+    studios: ["blanche"],
+    name: "Studio Blanche, 5 hours a month",
+    hours: 5,
+    dollars: 380,
+    description: "Create freely in Studio Blanche, a bright, modern space perfect for content, portraits, and inspiration.",
+  },
+  {
+    studios: ["blanche"],
+    name: "Studio Blanche, 10 hours a month",
+    hours: 10,
+    dollars: 700,
+    description: "Enjoy consistent, flexible access to Studio Blanche, the perfect space to create whenever inspiration strikes.",
+  },
+  { studios: ["paris", "dayglow"], name: "Paris and Dayglow, 5 hours a month", hours: 5, dollars: 520, description: "Use your hours in Studio Paris, in Studio Dayglow, or in both booked together." },
+  { studios: ["paris", "dayglow"], name: "Paris and Dayglow, 10 hours a month", hours: 10, dollars: 950, description: "Use your hours in Studio Paris, in Studio Dayglow, or in both booked together." },
+  { studios: ["paris", "blanche"], name: "Paris and Blanche, 5 hours a month", hours: 5, dollars: 660, description: "Use your hours in Studio Paris, in Studio Blanche, or in both booked together." },
+  { studios: ["paris", "blanche"], name: "Paris and Blanche, 10 hours a month", hours: 10, dollars: 1200, description: "Use your hours in Studio Paris, in Studio Blanche, or in both booked together." },
+  { studios: ["paris", "dayglow", "blanche"], name: "All three studios, 5 hours a month", hours: 5, dollars: 780, description: "Use your hours in any of the three studios, or in several booked together." },
+  { studios: ["paris", "dayglow", "blanche"], name: "All three studios, 10 hours a month", hours: 10, dollars: 1450, description: "Use your hours in any of the three studios, or in several booked together." },
+];
 
 /** What a photography session includes, by its length in hours. The same in every studio. */
 const SESSION_INCLUDES: Record<number, string> = {
@@ -164,6 +214,14 @@ export async function seed(db: Db): Promise<boolean> {
         sortOrder: 2,
       },
     ]);
+
+    for (const [index, plan] of STARTING_PLANS.entries()) {
+      const [row] = await tx
+        .insert(membershipPlans)
+        .values({ name: plan.name, description: plan.description, minutes: h(plan.hours), priceCents: plan.dollars * 100, sortOrder: index })
+        .returning({ id: membershipPlans.id });
+      await tx.insert(membershipPlanStudios).values(plan.studios.map((slug) => ({ planId: row.id, studioId: ids[slug] })));
+    }
   });
   return true;
 }

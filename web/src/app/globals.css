@@ -2220,3 +2220,8 @@ fieldset { min-inline-size: 0; }
   background: #f6f1ec; border: 1px solid var(--color-border); padding: .15rem .45rem; margin: 0 .5rem .3rem 0; cursor: pointer;
 }
 .email-part:hover, .email-part:focus-visible { border-color: var(--color-rose); }
+
+/* ── Admin: memberships (Admin → Memberships) ── */
+.membership-plan { border-top: 1px solid var(--color-border); padding-top: 1rem; margin-top: 1rem; }
+.membership-plan-studios { font-size: .9rem; margin: 0 0 .75rem; overflow-wrap: anywhere; }
+.membership-plan-studios .badge { margin-left: .5rem; }

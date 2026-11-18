@@ -49,7 +49,7 @@ const SECOND_OWNER = "owner2@studio.test";
 const THIRD_OWNER = "owner3@studio.test";
 // And the third. This one looks customers up.
 const FIFTH_OWNER = "owner5@studio.test";
-// This one rewords an email.
+// This one rewords an email and changes a membership plan.
 const EMAILS_OWNER = "owner13@studio.test";
 const STAFF = "sam.e2e@studio.test";
 const MANAGER = "mia.e2e@studio.test";
@@ -931,6 +931,30 @@ test("the owners change an email's wording, and the next one is written in it un
   await expect(text).toHaveValue(original);
   await page.goto("/admin/emails");
   await expect(page.getByRole("row", { name: /Booking confirmed/ })).toContainText("The site's wording");
+});
+
+test("the owners change a membership plan, and stop offering it and offer it again", async ({ page }) => {
+  const NAME = "Studio Paris, 5 hours a month";
+  const plan = () => page.locator("form.membership-plan", { hasText: `Save ${NAME}` });
+  await signIn(page, EMAILS_OWNER, "/admin/memberships");
+  await expect(plan()).toContainText("Studio Paris: $300 a month for 5 hours");
+  await byLabel(plan(), "Hours a month").fill("5.5");
+  await byLabel(plan(), "Price a month ($)").fill("310");
+  await plan().getByRole("button", { name: `Save ${NAME}` }).click();
+  await expect(byText(page, "Plan saved. A new price or number of hours applies to members who join after it.")).toBeVisible();
+  await expect(plan()).toContainText("Studio Paris: $310 a month for 5.5 hours");
+
+  await plan().getByRole("button", { name: `Stop offering ${NAME}` }).click();
+  await expect(byText(page, "The plan is no longer offered. Its members keep it.")).toBeVisible();
+  await expect(plan()).toContainText("Not offered");
+  await plan().getByRole("button", { name: `Offer ${NAME} again` }).click();
+  await expect(byText(page, "The plan is offered again.")).toBeVisible();
+
+  // Back as it was, for the tests after this one.
+  await byLabel(plan(), "Hours a month").fill("5");
+  await byLabel(plan(), "Price a month ($)").fill("300");
+  await plan().getByRole("button", { name: `Save ${NAME}` }).click();
+  await expect(plan()).toContainText("Studio Paris: $300 a month for 5 hours");
 });
 
 test("the owner changes an add-on's price and a studio's guest number, and customers see both", async ({ page }) => {
