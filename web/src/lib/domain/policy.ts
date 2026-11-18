@@ -137,6 +137,8 @@ export type RescheduleOutcome =
       discountCents: number;
       /** The fee for a move after the free ones, already taken off `creditCents`. 0 for a free move. */
       feeCents: number;
+      /** What the move after this one would cost: 0 while free moves are left. */
+      nextFeeCents: number;
     };
 
 /**
@@ -169,5 +171,6 @@ export function rescheduleOutcome(booking: BookingFacts, now: Date, settings: Po
   const feeCents = free ? 0 : settings.rescheduleFeeCents;
   const creditCents = paidCents + discountCents - feeCents;
   if (creditCents <= 0) return { allowed: false, reason: "fee_not_covered" };
-  return { allowed: true, creditCents, discountCents, feeCents };
+  const nextFeeCents = booking.rescheduledCount + 1 < settings.maxReschedules ? 0 : settings.rescheduleFeeCents;
+  return { allowed: true, creditCents, discountCents, feeCents, nextFeeCents };
 }

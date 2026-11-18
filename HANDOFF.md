@@ -2,7 +2,7 @@
 
 Where the work stands. A snapshot, rewritten at each checkpoint by whichever tool worked last (see `AGENTS.md`). The history is in `git log` and in the decision log of `ProjectLibrary.md`.
 
-**Last updated:** 2026-11-17, evening, by Claude Code.
+**Last updated:** 2026-11-18, by Claude Code.
 
 ## State of the tree
 
@@ -19,13 +19,15 @@ Nothing. No tool has unfinished changes in the tree.
 On the tree of this commit, 2026-11-17:
 
 - `npm run typecheck` and `npm run lint`: clean.
-- `npm test`: 902 tests pass (locally, and in UTC as CI runs them).
-- `npm run test:e2e`: the whole browser suite, 59 cases, passes.
+- `npm test`: 903 tests pass.
+- `npm run test:e2e`: the whole browser suite, 59 cases, passes (rerun on this commit, 2026-11-18).
 - Migrations `0035` and `0036` were each tried on copies of two browser-test databases. `0030` to `0033` were checked against older data by Codex.
 - CI on GitHub: the first run (commit `ae4cc99`, Node 24, UTC) passed both jobs: `checks` in 3 minutes, `browser` (59 cases) in 14 minutes. The run on `58007de`, the first with Node 26 from `web/.nvmrc`, passed both jobs too (`browser` in 10 minutes).
 - Branch protection on `master` requires the CI jobs `checks` and `browser` to pass, for everyone, and refuses direct pushes (set 2026-11-17).
 
-Not yet through an independent tester pass: the follow-ups built on 2026-11-17 (1, 4, 6, 7, 8, 9, 12, 15), the 7-day refund window and the food rule.
+Tester pass (2026-11-18, `.claude/agents/tester.md`) on follow-ups 6 and 9, the 7-day refund window, the food rule, the Settings fee field and `/api/health`: four low defects, all fixed in this commit (see the decision log). Not covered by it: the 503 answer of `/api/health` in a production build, migrations `0035` and `0036` on an older database (checked by hand earlier), photography reschedule fees, staff-role views, keyboard and screen-reader use.
+
+Not yet through an independent tester pass: follow-ups 1, 4, 7, 8, 12 and 15.
 
 ## Done from the owner's 16 follow-up answers
 
@@ -69,7 +71,7 @@ Agreed with the owner on 2026-11-17. Each item is done once it is checked off he
 - [x] One Node version everywhere: `web/.nvmrc` (26), read by CI. The host must use the same, or `.nvmrc` changes to the host's.
 - [x] A scheduler heartbeat: each scheduled run is recorded. `GET /api/health` answers 503 when the database does not answer or, in production, the scheduler has not run for 15 minutes. The admin overview says when the scheduler stopped.
 - [x] Security alerts looked at (2026-11-17): `npm audit --omit=dev` finds nothing in what the live site runs. Two medium alerts stay open, both in development tools only: `esbuild` 0.18 inside `drizzle-kit`'s old loader (the flaw is in esbuild's development server, which it does not use), and `minimatch` inside ESLint (the patched version has another API and would break ESLint). Both go once `drizzle-kit` and ESLint move on; Dependabot will offer it.
-- [ ] A tester pass over everything built since 2026-11-17 (follow-ups 1, 4, 6, 7, 8, 9, 12, 15, the refund window, the food rule, the heartbeat).
+- [ ] A tester pass over everything built since 2026-11-17. Done for follow-ups 6 and 9, the refund window, the food rule and the heartbeat (2026-11-18); still to do for follow-ups 1, 4, 7, 8, 12 and 15.
 - [ ] A one-page runbook for the owners: who to call, how to roll back, how to restore.
 
 **Needs the hosting choice first**
@@ -101,6 +103,7 @@ Agreed with the owner on 2026-11-17. Each item is done once it is checked off he
 ## Waiting on the owners
 
 - **Follow-up 14:** the Instagram account has to be connected by an owner.
+- **Policies wording:** the line "Cancellations made less than {refund window} before the appointment are non-refundable, but may be rescheduled at no additional charge until {reschedule cutoff} before the appointment" now sits above the $20 line for further reschedules, and reads as if every reschedule were free. It is the owners' text: they choose the new wording (for example "…may be rescheduled until …, the first time at no charge").
 - **To go live:** hosting, the web address, the email service, live Square keys, a privacy policy and the sales-tax answer. Questions 1 to 6 of "Questions for the owners" in `ProjectLibrary.md`.
 
 ## Before deploying

@@ -353,6 +353,7 @@ describe("using a free hour", () => {
       creditCents: 13200,
       discountCents: 8800,
       feeCents: 0,
+      nextFeeCents: 2000,
     });
   });
 

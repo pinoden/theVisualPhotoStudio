@@ -1200,14 +1200,14 @@ test("the owners look a customer up, see what they paid, and correct their stamp
   await page.getByRole("button", { name: "Save settings" }).click();
   await expect(byText(page, "Settings saved.")).toBeVisible();
   await page.goto(janesPage);
-  await expect(onScreen(page.locator("#loyalty"))).toContainText("Loyalty is switched off in Settings, so no stamps are counted.");
+  await expect(onScreen(page.locator("#loyalty"))).toContainText("Loyalty is switched off in Settings, so no stamps are counted and none can be changed.");
   await page.goto("/admin/settings");
   await expect(loyaltySwitch).not.toBeChecked();
   await expect(byText(page, /Stamps are counted from/)).toHaveCount(0);
   await loyaltySwitch.check();
   await page.getByRole("button", { name: "Save settings" }).click();
   await expect(byText(page, "Settings saved.")).toBeVisible();
-  await expect(byText(page, /Free hours already\s+sent stay valid\. Stamps are counted from \w+ \d+, \d{4}\./)).toBeVisible();
+  await expect(byText(page, /Free hours already\s+sent stay valid\. Stamps are counted from \w+, \w+ \d+, \d{4}, \d+:\d\d [AP]M\./)).toBeVisible();
   await expect(byLabel(page, "Fee for each further reschedule ($)")).toHaveValue("20");
   await page.goto(janesPage);
   const loyalty = onScreen(page.locator("#loyalty"));

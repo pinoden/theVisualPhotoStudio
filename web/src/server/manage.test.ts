@@ -233,7 +233,7 @@ describe("cancelling", () => {
     const early = expectOk(await world.book({ date: FAR }));
     expect(await getManageOptions(world.db, early.ref, byToken(early.manageToken), NOW)).toEqual({
       cancel: { allowed: true, refundCents: 16720, feeCents: 880, creditCents: 0, byHandCents: 0, why: "refund" },
-      reschedule: { allowed: true, creditCents: 17600, discountCents: 0, feeCents: 0 },
+      reschedule: { allowed: true, creditCents: 17600, discountCents: 0, feeCents: 0, nextFeeCents: 2000 },
     });
     const late = expectOk(await world.book({ date: NEAR }));
     expect(await getManageOptions(world.db, late.ref, byToken(late.manageToken), NOW)).toMatchObject({
@@ -455,7 +455,7 @@ describe("the reschedule code", () => {
     expect(choices?.reschedule).toEqual({
       allowed: true,
       offered: true,
-      text: "This booking will be released and you will get a code worth $176, valid for 90 days, to book a new time. That is what you paid plus the $17.60 your discount code took off. A booking made with the code cannot be refunded.",
+      text: "This booking will be released and you will get a code worth $176, valid for 90 days, to book a new time. That is what you paid plus the $17.60 your discount code took off. A booking made with the code cannot be refunded. Moving the new booking again would cost $20.",
     });
     const moved = expectOk(await requestRescheduleCode(world.db, first.ref, byToken(first.manageToken), world.manageDeps()));
     expect(moved.valueCents).toBe(17600);
@@ -497,7 +497,7 @@ describe("the reschedule code", () => {
     // 25 days ahead would normally be refundable. A moved booking is not. It can be moved again, for the fee.
     expect(await getManageOptions(world.db, second.ref, byToken(second.manageToken), NOW)).toEqual({
       cancel: { allowed: true, refundCents: 0, feeCents: 0, creditCents: 0, byHandCents: 0, why: "rescheduled" },
-      reschedule: { allowed: true, creditCents: 15600, discountCents: 0, feeCents: 2000 },
+      reschedule: { allowed: true, creditCents: 15600, discountCents: 0, feeCents: 2000, nextFeeCents: 2000 },
     });
     const cancelled = expectOk(await cancelBooking(world.db, second.ref, byToken(second.manageToken), world.manageDeps()));
     expect(cancelled).toMatchObject({ refundCents: 0, refund: "none" });
@@ -544,6 +544,7 @@ describe("the reschedule code", () => {
       creditCents: 15600,
       discountCents: 0,
       feeCents: 2000,
+      nextFeeCents: 2000,
     });
   });
 

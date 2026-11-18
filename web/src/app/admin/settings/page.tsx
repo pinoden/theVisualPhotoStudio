@@ -2,10 +2,10 @@ import type { Metadata } from "next";
 import { connection } from "next/server";
 import { Suspense } from "react";
 import { getDb } from "@/db/client";
-import { centsToInput, MONEY_FIELD } from "@/lib/parse";
+import { centsToInput, FEE_FIELD } from "@/lib/parse";
 import { requireOwner } from "@/server/session";
 import { ACCESS_INSTRUCTIONS_MAX, loadAccessInstructions, loadSettings, NUMBER_SETTING_RANGES } from "@/server/settings";
-import { formatDay } from "@/server/tz";
+import { formatInstant } from "@/server/tz";
 import { saveAccessInstructionsAction, saveSettingsAction } from "../actions";
 import { AdminFrame, AdminLoading } from "../frame";
 import { SETTING_GROUPS } from "./fields";
@@ -64,7 +64,7 @@ async function SettingsForm({ searchParams }: Pick<PageProps<"/admin/settings">,
                 <p style={{ fontSize: ".78rem", margin: "0 0 1rem" }}>
                   Switching this off and on again starts every customer&rsquo;s stamps from nothing. Free hours already
                   sent stay valid.
-                  {settings.loyaltyStartedAt && <> Stamps are counted from {formatDay(new Date(settings.loyaltyStartedAt))}.</>}
+                  {settings.loyaltyStartedAt && <> Stamps are counted from {formatInstant(new Date(settings.loyaltyStartedAt))}.</>}
                 </p>
               </>
             )}
@@ -81,7 +81,7 @@ async function SettingsForm({ searchParams }: Pick<PageProps<"/admin/settings">,
                       className="form-control"
                       defaultValue={centsToInput(settings[field.key])}
                       maxLength={12}
-                      {...MONEY_FIELD}
+                      {...FEE_FIELD}
                       required
                     />
                   ) : (

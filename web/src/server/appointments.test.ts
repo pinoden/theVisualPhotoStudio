@@ -326,13 +326,13 @@ describe("moving a booking to a new time", () => {
     // Moved, not made with a reschedule code: the client is told so, and why.
     expect(options?.cancel).toMatchObject({ allowed: true, refundCents: 0, why: "moved" });
     // It was their free reschedule: moving it again online costs the fee.
-    expect(options?.reschedule).toEqual({ allowed: true, creditCents: 15600, discountCents: 0, feeCents: 2000 });
+    expect(options?.reschedule).toEqual({ allowed: true, creditCents: 15600, discountCents: 0, feeCents: 2000, nextFeeCents: 2000 });
     expect((await getManageChoices(world.db, nextDayRef, { kind: "owner" }, NOW))?.cancel.text).toBe(
       "No refund is due, because this booking was moved at your request: a moved booking is not refunded.",
     );
     const [mail] = await world.emails("booking_moved");
     expect(mail.body).toContain(
-      "As you asked for this change, it counts as your reschedule under the rental terms: if the booking is cancelled now, it is not refunded. Moving it again online costs $20.",
+      "As you asked for this change, it counts as a reschedule under the rental terms: if the booking is cancelled now, it is not refunded. Moving it again online costs $20.",
     );
   });
 
@@ -342,7 +342,7 @@ describe("moving a booking to a new time", () => {
     expect((await getManageOptions(world.db, nextDayRef, { kind: "owner" }, NOW))?.reschedule).toEqual({ allowed: false, reason: "limit_reached" });
     const [mail] = await world.emails("booking_moved");
     expect(mail.body).toContain(
-      "As you asked for this change, it counts as your reschedule under the rental terms: if the booking is cancelled now, it is not refunded, and it cannot be moved again online.",
+      "As you asked for this change, it counts as a reschedule under the rental terms: if the booking is cancelled now, it is not refunded, and it cannot be moved again online.",
     );
   });
 
@@ -353,7 +353,7 @@ describe("moving a booking to a new time", () => {
     // Still refunded as the terms say: 7 days or more ahead.
     expect((await getManageOptions(world.db, nextDayRef, { kind: "owner" }, NOW))?.cancel).toMatchObject({ allowed: true, why: "refund" });
     const [mail] = await world.emails("booking_moved");
-    expect(mail.body).not.toContain("counts as your reschedule");
+    expect(mail.body).not.toContain("counts as a reschedule");
   });
 
   it("is only for a booking that is still to come", async () => {

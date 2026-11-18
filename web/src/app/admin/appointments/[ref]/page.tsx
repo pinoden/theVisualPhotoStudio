@@ -255,7 +255,7 @@ async function AppointmentDetails({
                   counts as a reschedule of theirs: the booking is then no longer refunded automatically, as the rental
                   terms say
                   {settings.rescheduleFeeCents > 0
-                    ? `, and once their free ${settings.maxReschedules === 1 ? "reschedule is" : "reschedules are"} used, moving it online costs them ${formatCents(settings.rescheduleFeeCents)}`
+                    ? `, and each move beyond their ${settings.maxReschedules === 1 ? "free one" : `${settings.maxReschedules} free ones`} costs them ${formatCents(settings.rescheduleFeeCents)} online`
                     : ""}
                   . Untick it when the studio needs the change.
                 </label>

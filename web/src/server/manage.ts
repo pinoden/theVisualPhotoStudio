@@ -184,7 +184,9 @@ export function rescheduleOfferText(
       : fee
         ? ` That is what you paid ${fee}.`
         : "";
-  return `This booking will be released and you will get a code worth ${formatCents(outcome.creditCents)}, valid for ${count(settings.creditValidDays, "day")}, to book a new time.${discount} A booking made with the code cannot be refunded.`;
+  // A free move tells the client, before they use it, that the next one will cost the fee.
+  const next = outcome.feeCents === 0 && outcome.nextFeeCents > 0 ? ` Moving the new booking again would cost ${formatCents(outcome.nextFeeCents)}.` : "";
+  return `This booking will be released and you will get a code worth ${formatCents(outcome.creditCents)}, valid for ${count(settings.creditValidDays, "day")}, to book a new time.${discount} A booking made with the code cannot be refunded.${next}`;
 }
 
 /** What cancelling or moving would do, in words. A page asks `noticeBookingPayments` first, so that this counts a link just paid. */

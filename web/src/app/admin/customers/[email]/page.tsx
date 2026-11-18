@@ -162,8 +162,8 @@ async function Customer({ params, searchParams }: Pick<PageProps<"/admin/custome
             </dl>
             {customer.stampsCountedFrom && (
               <p style={{ fontSize: ".85rem" }}>
-                Stamps are counted from {formatDay(new Date(customer.stampsCountedFrom))}, when loyalty was switched on
-                again. Visits and changes from before that day do not count. Free hours already sent stay valid.
+                Stamps are counted from {formatInstant(new Date(customer.stampsCountedFrom))}, when loyalty was switched on
+                again. Visits and changes from before that moment do not count. Free hours already sent stay valid.
               </p>
             )}
             {customer.standing.days.length > 0 && (
@@ -173,10 +173,13 @@ async function Customer({ params, searchParams }: Pick<PageProps<"/admin/custome
             )}
           </>
         ) : (
-          <p>Loyalty is switched off in Settings, so no stamps are counted.</p>
+          <p>
+            Loyalty is switched off in Settings, so no stamps are counted and none can be changed. Switching it on starts
+            every customer&apos;s stamps from that moment.
+          </p>
         )}
 
-        {correctLoyalty && (
+        {correctLoyalty && customer.standing && (
         <form action={adjustStampsAction} className="payment-form">
           <input type="hidden" name="email" value={customer.email} />
           <h4>Correct the stamps</h4>

@@ -317,7 +317,7 @@ export function bookingMovedEmail(input: {
       "",
       ...(input.clientAsked
         ? [
-            `As you asked for this change, it counts as your reschedule under the rental terms: if the booking is cancelled now, it is not refunded${
+            `As you asked for this change, it counts as a reschedule under the rental terms: if the booking is cancelled now, it is not refunded${
               !input.clientAsked.canMoveAgain
                 ? ", and it cannot be moved again online."
                 : (input.clientAsked.againFeeCents ?? 0) > 0
