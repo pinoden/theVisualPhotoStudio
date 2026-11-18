@@ -7,7 +7,7 @@ Where the work stands. A snapshot, rewritten at each checkpoint by whichever too
 ## State of the tree
 
 - Branch `rebuild`, pushed. The commit that holds this file is the state described here. Nothing is uncommitted.
-- `master` is at pull request #7 (2026-11-17). Everything after it is on `rebuild` only and waits for the owner's word to merge.
+- `master` is at pull request #8 (2026-11-17), which holds everything up to the commit before this one. Anything newer on `rebuild` waits for the owner's word to merge.
 - Migrations run from `0000` to `0036`. No deployment and no production migration has ever been run.
 
 ## In progress
