@@ -32,7 +32,7 @@ test.afterEach(() => {
   expect(browserProblems, "errors reported by the browser").toEqual([]);
 });
 
-const PUBLIC_PAGES = ["/", "/studios", "/rates", "/services", "/faq", "/policies", "/contact", "/book", "/book/photography", "/account/sign-in"];
+const PUBLIC_PAGES = ["/", "/studios", "/rates", "/services", "/faq", "/policies", "/memberships", "/contact", "/book", "/book/photography", "/account/sign-in"];
 
 test("the public pages can be used with a screen reader and a keyboard", async ({ page }) => {
   test.setTimeout(180_000);
@@ -71,7 +71,7 @@ test("every step of a booking can be used with a screen reader and a keyboard", 
   await check("the summary and the payment");
 });
 
-const ACCOUNT_PAGES = ["/account", "/account/appointments", "/account/rewards", "/account/receipts"];
+const ACCOUNT_PAGES = ["/account", "/account/appointments", "/account/rewards", "/account/membership", "/account/receipts"];
 /**
  * Every page of the admin with nothing to choose first, and the day sheet. The
  * pages that need something chosen first (a booking, an appointment, a

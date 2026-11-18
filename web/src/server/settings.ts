@@ -51,6 +51,12 @@ export interface Settings {
    */
   reminderHours: number;
 
+  /**
+   * How many hours before its start a booking paid with membership minutes can be cancelled with its minutes given
+   * back (the owner's answer of 2026-11-18: 48). Later, they are used.
+   */
+  memberReturnHours: number;
+
   // ── Guests ──
   /**
    * The most guests in all, those included and the extra ones, for two studios booked together, and for all three
@@ -131,6 +137,7 @@ export const DEFAULT_SETTINGS: Settings = {
   creditValidDays: 90,
 
   reminderHours: 24,
+  memberReturnHours: 48,
   twoStudioGuestLimit: 10,
   threeStudioGuestLimit: 20,
 
@@ -184,6 +191,7 @@ export const NUMBER_SETTING_RANGES = {
   maxReschedules: [0, 20],
   creditValidDays: [1, 730],
   reminderHours: [0, 24 * 7],
+  memberReturnHours: [0, 24 * 30],
   twoStudioGuestLimit: [1, 200],
   threeStudioGuestLimit: [1, 200],
   loyaltyVisits: [1, 100],
@@ -232,6 +240,7 @@ const VALIDATORS: { [K in Exclude<keyof Settings, "multiStudioPercent">]: (v: un
   rescheduleFeeCents: int(MONEY_SETTING_RANGES.rescheduleFeeCents),
   creditValidDays: int(NUMBER_SETTING_RANGES.creditValidDays),
   reminderHours: int(NUMBER_SETTING_RANGES.reminderHours),
+  memberReturnHours: int(NUMBER_SETTING_RANGES.memberReturnHours),
   twoStudioGuestLimit: int(NUMBER_SETTING_RANGES.twoStudioGuestLimit),
   threeStudioGuestLimit: int(NUMBER_SETTING_RANGES.threeStudioGuestLimit),
   loyaltyEnabled: bool,

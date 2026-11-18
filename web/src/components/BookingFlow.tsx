@@ -35,6 +35,7 @@ import { count, hoursInWords } from "@/lib/words";
 import type { DayAvailability } from "@/server/availability";
 import type { Catalog } from "@/server/catalog";
 import type { PaymentClientConfig } from "@/server/payments";
+import { loadScript, squareScript, type SquareCard } from "./square-card";
 
 type Mode = "studio" | "time";
 type Step = "studios" | "when" | "time" | "details" | "pay";
@@ -74,28 +75,6 @@ interface AppliedCode {
   /** Where the code came from: "reschedule" for a moved booking's money. */
   source?: string;
   email: string;
-}
-
-interface SquareCard {
-  attach(selector: string): Promise<void>;
-  tokenize(): Promise<{ status: string; token?: string; errors?: { message: string }[] }>;
-  destroy(): Promise<void>;
-}
-declare global {
-  interface Window {
-    Square?: { payments(appId: string, locationId: string): { card(): Promise<SquareCard> } };
-  }
-}
-
-function loadScript(src: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (document.querySelector(`script[src="${src}"]`)) return resolve();
-    const el = document.createElement("script");
-    el.src = src;
-    el.onload = () => resolve();
-    el.onerror = () => reject(new Error("script failed"));
-    document.head.appendChild(el);
-  });
 }
 
 /** Today's date is only known in the browser, on the studio's clock wherever the device is; the server renders without it. */
@@ -314,11 +293,7 @@ export function BookingFlow({
     if (step !== "pay" || config?.mode !== "square" || !needsCard) return;
     let cancelled = false;
     (async () => {
-      await loadScript(
-        config.squareEnvironment === "production"
-          ? "https://web.squarecdn.com/v1/square.js"
-          : "https://sandbox.web.squarecdn.com/v1/square.js",
-      );
+      await loadScript(squareScript(config));
       if (cancelled || !window.Square) return;
       const card = await window.Square.payments(config.squareApplicationId!, config.squareLocationId!).card();
       if (cancelled) return void card.destroy();

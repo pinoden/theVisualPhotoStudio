@@ -8,7 +8,7 @@ Where the work stands. A snapshot, rewritten at each checkpoint by whichever too
 
 - Branch `rebuild`, pushed. The commit that holds this file is the state described here. Nothing is uncommitted.
 - `master` is at pull request #8 (2026-11-17). Everything newer on `rebuild` waits for the owner's word to merge.
-- Migrations run from `0000` to `0042`. No deployment and no production migration has ever been run.
+- Migrations run from `0000` to `0043`. No deployment and no production migration has ever been run.
 
 ## In progress
 
@@ -19,18 +19,19 @@ Nothing. No tool has unfinished changes in the tree.
 On the tree of this commit, 2026-11-18:
 
 - `npm run typecheck` and `npm run lint`: clean.
-- `npm test`: 963 tests pass.
-- `npm run test:e2e`: the whole browser suite, 61 cases, passes (11 minutes), with the new cases for the emails' templates and the membership plans, and the new pages in the accessibility scan and the phone checks of the admin.
+- `npm test`: 974 tests pass.
+- `npm run test:e2e`: the whole browser suite, 62 cases, passes (11 minutes), with the new cases for the emails' templates, the membership plans and buying a membership (the old address, the plans, the checkout, the code by email, the account, cancelling), and the new pages in the accessibility scan and the phone checks.
+- Memberships, step 2 (buying online, cancelling): every call to Square in its sandbox through the site's own code (`npm run check:square`, all steps pass): a customer, the first month, its card kept, a plan and a second price, a subscription from next month (pending, cancelled before billing) and one from today (Square charged the kept card by itself, read back as paid, cancelled to the end of the month). Then in a real browser with Square's own card form on a server holding the sandbox keys in its environment only (port 3216): a membership bought, seen in the account, cancelled; the site's database and Square agree (Square: pending until December 18, cancelled on that day, so it never bills). A booking through `/book` with Square's card form also went through after the card form's loader was changed. The pages used on a separate server at 1280 and 390 pixels wide: nothing wider than the screen, no browser errors.
 - Memberships, step 1 (the plans): Admin → Memberships used in a real browser on a separate server (port 3215) at 1280 and 390 pixels wide: the twelve plans, a plan added for Paris, the six choices of studios (no Blanche with Dayglow without Paris); nothing wider than the screen, no browser errors.
 - The emails' templates: every email to a client was compared word for word with the builders of commit `29e6202` over every branch of each (about 500 combinations), by a check written for the purpose and removed afterwards: identical. The two pages of Admin → Emails were used in a real browser on a separate server (port 3215), at 1280 and 390 pixels wide: a part put in where the cursor was, a part the email does not have refused as it was typed, a save, the list showing whose wording, and going back to the site's; nothing wider than the screen, no browser errors. The accessibility scan covers both pages.
-- Migration `0042` (the membership plans) on a copy of a browser-test database holding 26 bookings: the twelve plans of the owners' table with their 20 studios, zero minutes refused, and a second run changes nothing. Migration `0041` (the emails' templates) on a copy of a browser-test database holding 25 bookings: the table is added empty, a subject without a text is refused, and a second run changes nothing. Earlier: `0035` and `0036` on copies of two browser-test databases; `0037` on a copy with 25 bookings; `0038` on a copy whose owners had changed Paris's guests and renamed a tier (kept); `0039` on a copy with 25 bookings; `0035` to `0040` together on an older database (at `0034`, 16 bookings). `0030` to `0033` were checked against older data by Codex.
+- Migration `0043` (memberships) on a copy of a browser-test database with 26 bookings: the four tables added empty, `/studio-memberships` redirected to `/memberships` while an owner's own redirect stays, an unknown status, a repeated code, zero minutes and deleting a plan with members refused, and a second run changes nothing. Migration `0042` (the membership plans) on a copy of a browser-test database holding 26 bookings: the twelve plans of the owners' table with their 20 studios, zero minutes refused, and a second run changes nothing. Migration `0041` (the emails' templates) on a copy of a browser-test database holding 25 bookings: the table is added empty, a subject without a text is refused, and a second run changes nothing. Earlier: `0035` and `0036` on copies of two browser-test databases; `0037` on a copy with 25 bookings; `0038` on a copy whose owners had changed Paris's guests and renamed a tier (kept); `0039` on a copy with 25 bookings; `0035` to `0040` together on an older database (at `0034`, 16 bookings). `0030` to `0033` were checked against older data by Codex.
 - One browser run on 2026-11-18 failed once at the header editor's "Discard changes" (`website.spec.ts`, the font and logo case): the discard was still running when the 20-second wait ran out, with the dev server busy. Every run since has passed. If it comes back, look at how long a discard takes under load.
 - Follow-up 13 (extra charges) was used in a real browser with a booking moved into the past; the browser suite has no case for it, because it cannot reach an appointment that has started (it runs on the real clock).
-- CI on GitHub passed both jobs on every push of 2026-11-18, the last checked being `b1a3a86` (the emails' templates). Branch protection on `master` requires both jobs, for everyone, and refuses direct pushes.
+- CI on GitHub passed both jobs on every push of 2026-11-18, the last checked being `fa79dd2` (the membership plans). Branch protection on `master` requires both jobs, for everyone, and refuses direct pushes.
 
 Tester pass (2026-11-18, `.claude/agents/tester.md`) on follow-ups 6 and 9, the 7-day refund window, the food rule, the Settings fee field and `/api/health`: four low defects, all fixed in commit `3a76abc`.
 
-Not yet through an independent tester pass: follow-ups 1, 2, 4, 7, 8, 12, 13 and 15, the reminder email, bookings keeping their terms, asking the studio to move a booking, and the emails' templates.
+Not yet through an independent tester pass: follow-ups 1, 2, 4, 7, 8, 12, 13 and 15, the reminder email, bookings keeping their terms, asking the studio to move a booking, the emails' templates, and memberships so far (the plans, buying, cancelling).
 
 ## Done from the owner's 16 follow-up answers
 
@@ -40,7 +41,7 @@ Details and status of each are under "Katya's answers to the 16 follow-up questi
 | --- | --- | --- |
 | 1 | Weekend prices for longer bookings | Built |
 | 2 | Extra people, $5 each with a quantity | Built; the bundle limit confirmed 2026-11-18 (question 37) |
-| 3 | Memberships | **Being built.** Rules answered 2026-11-18; the plan is under follow-up 3. Step 1 (the plans) done; step 2 (buying online) next; questions 41 to 44 open |
+| 3 | Memberships | **Being built.** Rules answered 2026-11-18; the plan is under follow-up 3. Steps 1 (the plans) and 2 (buying online, cancelling) done; step 3 (spending minutes) next; questions 41 to 45 open |
 | 4 | Unused pet fee as credit, issued by hand | Built |
 | 5 | Changes made by the studio: repricing, payment section | Repricing on a new time only, as confirmed 2026-11-17. The payment section is **to build** |
 | 6 | $20 for each reschedule after the free one | Built |
@@ -63,7 +64,7 @@ Agreed with the owner on 2026-11-17. Each item is done once it is checked off he
 
 **Already in place**
 
-- [x] 963 unit and integration tests and 61 browser tests.
+- [x] 974 unit and integration tests and 62 browser tests.
 - [x] CI on GitHub (`.github/workflows/ci.yml`): type check, lint, unit tests and the browser suite on every pull request and every push to `rebuild`.
 - [x] Branch protection on `master`: pull requests only, both CI jobs must pass, no exception for administrators, no force-push or deletion.
 - [x] Payments that cannot be charged twice, prices recomputed on the server, double bookings refused by the database, background jobs safe to run late or twice, an email queue that retries.
@@ -95,13 +96,13 @@ Agreed with the owner on 2026-11-17. Each item is done once it is checked off he
 
 ## Next, in this order
 
-1. **Follow-up 3: memberships**, by the plan under follow-up 3 in `ProjectLibrary.md`, in five steps, each verified and committed. Step 1, the plans, is done. Next, step 2, buying online: the first month charged at sign-up, the card kept at Square from that payment (Cards API, `source_id` the payment), and Square's subscription billing from the same day of the next month (one monthly STATIC phase per plan variation; a new price is a new variation, so members keep theirs); the public Memberships page, the membership's code, its email and the account's view. Try it in the sandbox with `npm run check:square`. Then spending minutes at checkout, each month's payment and cancelling, and the member's and the owners' pages. Steps 3 and 4 follow the builder's suggestions in questions 41 to 43 until the owners answer, recorded under "Rules built on the builder's reading".
+1. **Follow-up 3: memberships**, by the plan under follow-up 3 in `ProjectLibrary.md`, in five steps, each verified and committed. Steps 1 (the plans) and 2 (buying online, cancelling) are done. Next, step 3, spending minutes: the membership's code at checkout (and offered to a signed-in member), for a booking whose studios its plan covers; the minutes taken off (`membership_minutes`, kind `booking`), the price lowered by what they cover (questions 41 and 42: until answered, the builder's suggestions, recorded as readings), add-ons and extra guests paid as usual, no other code with it, no card when nothing is left to pay; a cancellation at least `memberReturnHours` (48) ahead gives the minutes back (a booking keeps that term, as it keeps the others: add it to `BookingTerms`); moving one by question 43; loyalty as any visit. Then step 4, each month (the scheduled task asks Square about memberships whose `paid_through` has come, records the month and adds its minutes, takes no month after `ends_on`, carries on a membership left `starting`), and step 5, the owners' members' pages.
 2. A tester pass over the work not yet through one (see "Verified").
 3. The owners' runbook.
 
 ## Waiting on the owners
 
-- **Questions 41 to 44 (memberships):** whether a weekend booking still pays the difference to the weekend price; what the rest of a longer booking costs (the builder suggests the share the minutes do not cover); whether moving a member's booking gives the minutes back, also 24 to 48 hours ahead; and whether Blanche's plans are $380 and $700 (the owners' table, which the site starts with) or $370 and $670 (the live site).
+- **Questions 41 to 45 (memberships):** whether a weekend booking still pays the difference to the weekend price; what the rest of a longer booking costs (the builder suggests the share the minutes do not cover); whether moving a member's booking gives the minutes back, also 24 to 48 hours ahead; whether Blanche's plans are $380 and $700 (the owners' table, which the site starts with) or $370 and $670 (the live site); and the readings of buying one (no account needed, more than one per client, the studio not emailed for each new member, the Memberships page not put into the menu, which is theirs).
 - **Question 40 (the emails' templates):** built on readings: only the emails to clients can be changed (the studio's notices keep the site's wording), only by owners, and the site still writes the parts that state money, codes and refunds. An "OK" settles it.
 - **Follow-up 14:** the Instagram account has to be connected by an owner. It blocks nothing else and can wait until go-live.
 - **Policies wording:** the line "Cancellations made less than {refund window} before the appointment are non-refundable, but may be rescheduled at no additional charge until {reschedule cutoff} before the appointment" sits above the $20 line for further reschedules, and reads as if every reschedule were free. It is the owners' text: they choose the new wording.
@@ -109,6 +110,7 @@ Agreed with the owner on 2026-11-17. Each item is done once it is checked off he
 
 ## Before deploying
 
-- Apply migrations `0030` through `0042`. Keep the owners' customised prices when the weekend-price migration runs.
+- Apply migrations `0030` through `0043`. Keep the owners' customised prices when the weekend-price migration runs.
 - Set up the scheduled task and the email service: reminders, review requests, free hours and refund retries depend on them.
+- Put the Memberships page into the site's menu if the owners want it there (Website → Header, menu & footer).
 - Run the whole browser suite once more.

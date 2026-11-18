@@ -263,6 +263,43 @@ export const AddonPrices = defineBlock({
   },
 });
 
+export const MembershipPlans = defineBlock({
+  label: "Memberships on sale",
+  group: "site",
+  fields: {
+    joinLabel: { kind: "text", label: "Words on the button that buys one", max: 30, start: "Join" },
+    descriptions: { kind: "toggle", label: "Show each plan's description", start: true },
+  },
+  render: ({ joinLabel, descriptions, site, editing }) => {
+    const catalog = site.catalog;
+    if (!catalog) return <EditorNote editing={editing}>{MISSING}</EditorNote>;
+    if (catalog.membershipPlans.length === 0) {
+      return <EditorNote editing={editing}>No membership is offered at the moment, so visitors see nothing here.</EditorNote>;
+    }
+    const names = new Map(catalog.studios.map((studio) => [studio.id, studio.name]));
+    return (
+      <div className="blk rates-grid membership-plans">
+        {catalog.membershipPlans.map((plan) => (
+          <div className="rate-card" key={plan.id}>
+            <h3>{plan.name}</h3>
+            <div className="rate-price">{formatCents(plan.priceCents)}</div>
+            <div className="rate-unit">a month</div>
+            <hr className="rate-divider" />
+            <p className="membership-plan-hours">{durationLabel(plan.minutes)} of studio time each month</p>
+            <p className="membership-plan-where">{plan.studioIds.map((id) => names.get(id)).join(" + ")}</p>
+            {descriptions && plan.description && <p className="membership-plan-description">{plan.description}</p>}
+            {joinLabel && (
+              <SiteAnchor href={`/book/membership?plan=${plan.id}`} className="btn btn-primary mt-2 rate-book" editing={editing}>
+                {joinLabel}
+              </SiteAnchor>
+            )}
+          </div>
+        ))}
+      </div>
+    );
+  },
+});
+
 export const ContactDetails = defineBlock({
   label: "Address, phone and hours",
   group: "site",

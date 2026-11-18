@@ -2,6 +2,7 @@ import { and, asc, eq, isNull, lt, lte, sql } from "drizzle-orm";
 import { emailOutbox } from "@/db/schema";
 import type { DbLike } from "@/db/client";
 import { afterFee } from "@/lib/domain/policy";
+import { durationLabel, longDateLabel } from "@/lib/domain/time";
 import { EMAIL_TEMPLATES, firstNameOf, renderEmail, type TemplateKey } from "@/lib/email-templates";
 import { ownersWording } from "./email-templates";
 import { formatInstant } from "./tz";
@@ -816,6 +817,80 @@ export function reservationLapsedEmail(input: { to: string; name: string; ref: s
     { to: input.to, kind: "reservation_lapsed" },
     { name: input.name, reference: input.ref, when: input.when, due: money(input.dueCents) },
   );
+}
+
+/** A membership bought on the site (follow-up 3): its code, and how it is billed and cancelled. */
+export function membershipStartedEmail(input: {
+  to: string;
+  name: string;
+  planName: string;
+  /** The studio minutes each month. */
+  minutes: number;
+  priceCents: number;
+  code: string;
+  /** The day the next month is billed, `YYYY-MM-DD`. */
+  nextBilling: string;
+  bookUrl: string;
+  accountUrl: string;
+}): QueuedEmail {
+  return written(
+    "membership_started",
+    { to: input.to, kind: "membership_started" },
+    {
+      name: input.name,
+      plan: input.planName,
+      hours: durationLabel(input.minutes),
+      price: money(input.priceCents),
+      code: input.code,
+      book_link: input.bookUrl,
+      next_billing: longDateLabel(input.nextBilling),
+      account_link: input.accountUrl,
+    },
+  );
+}
+
+/** A membership cancelled (follow-up 3): no more payments, and the hours left stay usable. */
+export function membershipCancelledEmail(input: {
+  to: string;
+  name: string;
+  planName: string;
+  code: string;
+  /** The day the month paid for ends, `YYYY-MM-DD`, when it runs on after the cancellation. */
+  endsOn: string | null;
+  minutesLeft: number;
+  bookUrl: string;
+}): QueuedEmail {
+  return written(
+    "membership_cancelled",
+    { to: input.to, kind: "membership_cancelled" },
+    {
+      name: input.name,
+      plan: input.planName,
+      ends: input.endsOn ? `The month you paid for runs until ${longDateLabel(input.endsOn)}.` : "No month you paid for runs on after it.",
+      code: input.code,
+      hours_left: input.minutesLeft > 0 ? durationLabel(input.minutesLeft) : "none at the moment",
+      book_link: input.bookUrl,
+    },
+  );
+}
+
+/**
+ * A membership was paid for and could not be set up, and the refund of its first month did not go through: the studio
+ * refunds it by hand. The client was told the studio would.
+ */
+export function ownerMembershipRefundNotice(input: { to: string; code: string; customer: string; amountCents: number; reason: string }): QueuedEmail {
+  return {
+    to: input.to,
+    kind: "owner_membership_refund",
+    subject: `ACTION NEEDED: refund the first month of membership ${input.code}`,
+    body: [
+      `${input.customer} paid ${money(input.amountCents)} for the first month of membership ${input.code}, but the monthly payments could not be set up with the card, so the membership was not started.`,
+      "",
+      `The refund of that payment did not go through either: ${input.reason}`,
+      "",
+      "Refund the payment in Square by hand. The client was told that the studio will refund it.",
+    ].join("\n"),
+  };
 }
 
 /** A visitor's message from the contact page, sent to the owner. Replying reaches the visitor. */

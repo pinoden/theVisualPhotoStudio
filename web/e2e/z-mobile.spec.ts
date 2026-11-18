@@ -42,7 +42,7 @@ const SIZES = [
   { name: "iPad, and a foldable opened", width: 768, height: 1024 },
 ] as const;
 
-const PUBLIC_PAGES = ["/", "/studios", "/rates", "/services", "/faq", "/policies", "/contact", "/book", "/book/photography", "/account/sign-in"];
+const PUBLIC_PAGES = ["/", "/studios", "/rates", "/services", "/faq", "/policies", "/memberships", "/contact", "/book", "/book/photography", "/account/sign-in"];
 
 // The owner addresses of site.spec.ts have each used the three sign-in codes an address may ask for.
 const OWNER = "owner4@studio.test";

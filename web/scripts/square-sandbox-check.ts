@@ -224,8 +224,87 @@ async function main() {
     report(twice.ok, "withdrawing it a second time is not an error", twice.ok ? "already gone" : twice.message);
   }
 
+  await checkMemberships(square);
+
   console.log(failures === 0 ? "\nAll steps behaved as expected." : `\n${failures} step(s) did not behave as expected.`);
   process.exit(failures === 0 ? 0 : 1);
+}
+
+/**
+ * A membership's billing (follow-up 3): a customer, the first month charged and its card kept, a plan with a price, a
+ * subscription that starts billing a month later, and cancelling it. A second subscription starts at once, to see
+ * Square charge the kept card by itself. The customer's address is on the studio's own domain: Square stops a
+ * subscription whose customer has an address it refuses (an example.com one, on 2026-11-18), and the sandbox sends no
+ * email.
+ */
+async function checkMemberships(square: ReturnType<typeof squareProvider>) {
+  const billing = square.memberships;
+  const key = randomUUID();
+  const customer = await billing.createCustomer({ email: "sandbox-member@thevisualsphotostudio.com", name: "Sandbox Member", idempotencyKey: `${key}-customer` });
+  report(customer.ok, "a membership: a customer is made", customer.ok ? `customer ${customer.customerId}` : customer.message);
+  if (!customer.ok) return;
+
+  const first = await square.charge({
+    amountCents: 30000,
+    token: "cnon:card-nonce-ok",
+    idempotencyKey: `${key}-first`,
+    reference: "MEMBER-CHECK",
+    note: "Membership sandbox check: the first month",
+    buyerEmail: "sandbox-member@thevisualsphotostudio.com",
+    customerId: customer.customerId,
+  });
+  report(first.ok, "the first month, $300.00, is charged", first.ok ? `payment ${first.paymentId}` : first.message);
+  if (!first.ok) return;
+
+  const card = await billing.saveCard({ paymentId: first.paymentId, customerId: customer.customerId, idempotencyKey: `${key}-card` });
+  report(card.ok, "the card of that payment is kept by Square", card.ok ? `card ${card.cardId}` : card.message);
+  const price = await billing.createPlanPrice({ planName: "Sandbox check: Paris, 5 hours a month", processorPlanId: null, priceCents: 30000, idempotencyKey: `${key}-price` });
+  report(price.ok, "a plan is made with a price of $300.00 a month", price.ok ? `plan ${price.processorPlanId}, price ${price.variationId}` : price.message);
+  if (!card.ok || !price.ok) return;
+  const raised = await billing.createPlanPrice({ planName: "Sandbox check: Paris, 5 hours a month", processorPlanId: price.processorPlanId, priceCents: 31000, idempotencyKey: `${key}-raised` });
+  report(
+    raised.ok && raised.processorPlanId === price.processorPlanId && raised.variationId !== price.variationId,
+    "a new price of the same plan is a new price at Square, under the same plan",
+    raised.ok ? `price ${raised.variationId}` : raised.message,
+  );
+
+  const nextMonth = new Date(Date.now() + 31 * 86_400_000).toISOString().slice(0, 10);
+  const later = await billing.subscribe({ customerId: customer.customerId, cardId: card.cardId, variationId: price.variationId, startDate: nextMonth, idempotencyKey: `${key}-later` });
+  report(later.ok, `a subscription is made that starts billing on ${nextMonth}`, later.ok ? `subscription ${later.subscriptionId}` : later.message);
+  if (later.ok) {
+    const again = await billing.subscribe({ customerId: customer.customerId, cardId: card.cardId, variationId: price.variationId, startDate: nextMonth, idempotencyKey: `${key}-later` });
+    report(again.ok && again.subscriptionId === later.subscriptionId, "asking for it again does not make a second one", again.ok ? `same subscription: ${again.subscriptionId === later.subscriptionId}` : again.message);
+    const pending = await billing.subscriptionState(later.subscriptionId);
+    report(pending.state === "pending", "it is pending until its first day, with nothing billed", JSON.stringify(pending));
+    const cancelled = await billing.cancelSubscription(later.subscriptionId);
+    report(cancelled.ok && cancelled.endsOn === nextMonth, "cancelled, it ends on its first day, before billing anything", cancelled.ok ? `ends on ${cancelled.endsOn}` : cancelled.message);
+    const twice = await billing.cancelSubscription(later.subscriptionId);
+    report(twice.ok, "cancelling it a second time is not an error", twice.ok ? `ends on ${twice.endsOn}` : twice.message);
+    const after = await billing.subscriptionState(later.subscriptionId);
+    report(after.state === "cancelled", "and it is read back as cancelled", JSON.stringify(after));
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  const now = await billing.subscribe({ customerId: customer.customerId, cardId: card.cardId, variationId: price.variationId, startDate: today, idempotencyKey: `${key}-now` });
+  report(now.ok, "a subscription is made that starts billing today", now.ok ? `subscription ${now.subscriptionId}` : now.message);
+  if (now.ok) {
+    let state = await billing.subscriptionState(now.subscriptionId);
+    for (let wait = 0; wait < 6 && !(state.state === "active" && state.invoices.some((invoice) => invoice.paid)); wait++) {
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      state = await billing.subscriptionState(now.subscriptionId);
+    }
+    report(
+      state.state === "active" && state.invoices.length === 1 && state.invoices[0].paid && state.invoices[0].amountCents === 30000 && state.paidThrough !== null,
+      "Square charges the kept card by itself, and the month is read back as paid",
+      JSON.stringify(state),
+    );
+    const cancelled = await billing.cancelSubscription(now.subscriptionId);
+    report(cancelled.ok && cancelled.endsOn !== null && cancelled.endsOn > today, "cancelled, it runs to the end of the month paid for", cancelled.ok ? `ends on ${cancelled.endsOn}` : cancelled.message);
+    const after = await billing.subscriptionState(now.subscriptionId);
+    report(after.state === "cancelled" && after.endsOn === (cancelled.ok ? cancelled.endsOn : null), "and it is read back as cancelled, with that day", JSON.stringify(after));
+  }
+  const nowhere = await billing.subscriptionState("no-such-subscription");
+  report(nowhere.state === "unknown", "an unknown subscription is read as unknown", JSON.stringify(nowhere));
 }
 
 main().catch((error) => {

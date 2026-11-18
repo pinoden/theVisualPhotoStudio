@@ -302,6 +302,13 @@
       "when": 1795011697959,
       "tag": "0042_membership_plans",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1795013299867,
+      "tag": "0043_memberships",
+      "breakpoints": true
     }
   ]
 }

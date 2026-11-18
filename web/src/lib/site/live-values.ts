@@ -40,6 +40,7 @@ export function liveValues(catalog: Catalog, business: Business): LiveValue[] {
     value("reschedules allowed", "How often one booking can be moved free of charge", s.maxReschedules === 1 ? "once" : `up to ${s.maxReschedules} times`),
     value("reschedule fee", "What moving a booking again costs, after the free times", formatCents(s.rescheduleFeeCents)),
     value("reschedule code valid", "How long a reschedule code can be used", count(s.creditValidDays, "day")),
+    value("member hours back", "How long before the start a cancelled booking gives its membership hours back", hoursInWords(s.memberReturnHours)),
     value("free hour visits", "Visits, on separate days, that earn a free hour", count(s.loyaltyVisits, "time")),
     value("free hour valid", "How long a free hour can be used", count(s.loyaltyValidDays, "day")),
     value("photography notice", "How far ahead a photography session is booked at the latest", hoursInWords(noticeHours(s, true))),

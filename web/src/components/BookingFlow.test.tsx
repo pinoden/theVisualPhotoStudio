@@ -66,6 +66,7 @@ const catalog: Catalog = {
     { id: "pack-p-60", studioId: P, durationMinutes: 60, priceCents: 31500, includes: "1–2 outfits, 20 edited images" },
   ],
   accessInfoSent: false,
+  membershipPlans: [],
 };
 
 /** Taken time per studio that the fake server reports. */

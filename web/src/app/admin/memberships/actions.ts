@@ -1,14 +1,18 @@
 "use server";
 
+import { updateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import { getDb } from "@/db/client";
 import { dollarsToCents, formText } from "@/lib/parse";
+import { CATALOG_TAG } from "@/server/cached";
 import { addPlan, savePlan, setPlanActive, type PlanInput } from "@/server/memberships";
 import { requireOwner } from "@/server/session";
 
 const PATH = "/admin/memberships";
 
+/** Back to the page with a message. The plans on sale travel with the public catalog, which is made again. */
 function done(notice: string): never {
+  updateTag(CATALOG_TAG);
   redirect(`${PATH}?notice=${encodeURIComponent(notice)}`);
 }
 

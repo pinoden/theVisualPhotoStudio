@@ -42,9 +42,9 @@ import { termsAtBooking } from "./terms";
 import { moneyKindNow, moneyKindOfCode, OTHER_MONEY_CODE } from "./test-mode";
 import { formatInstant, localToUtc } from "./tz";
 
-const emailField = z.string().trim().toLowerCase().max(200).pipe(z.email());
+export const emailField = z.string().trim().toLowerCase().max(200).pipe(z.email());
 /** Text a person typed: trimmed, line breaks made single, and without the NUL character the database refuses. */
-const textField = (min: number, max: number) => z.string().transform(formText).pipe(z.string().min(min).max(max));
+export const textField = (min: number, max: number) => z.string().transform(formText).pipe(z.string().min(min).max(max));
 const addonsField = z
   .array(z.object({ addonId: z.uuid(), quantity: z.number().int().min(1).max(20) }))
   .max(20)

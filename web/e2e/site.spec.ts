@@ -957,6 +957,45 @@ test("the owners change a membership plan, and stop offering it and offer it aga
   await expect(plan()).toContainText("Studio Paris: $300 a month for 5 hours");
 });
 
+test("a client buys a membership, gets its code, sees it in their account and cancels it", async ({ page }) => {
+  const max = { name: "Max Member", email: "max.member.e2e@example.com", phone: "407-555-0133" };
+  // The live site's address for memberships leads to the new page.
+  await page.goto("/studio-memberships");
+  await page.waitForURL((url) => url.pathname === "/memberships");
+  await expect(page.getByRole("heading", { name: "Studio Memberships" })).toBeVisible();
+  const plan = page.locator(".rate-card", { hasText: "Studio Paris, 5 hours a month" });
+  await expect(plan).toContainText("$300");
+  await expect(plan).toContainText("5 hours of studio time each month");
+  await plan.getByRole("link", { name: "Join" }).click();
+
+  await expect(page.getByRole("heading", { name: "Studio Paris, 5 hours a month" })).toBeVisible();
+  await byLabel(page, "Full name *").fill(max.name);
+  await byLabel(page, "Email address *").fill(max.email);
+  await byLabel(page, "Phone number *").fill(max.phone);
+  await expect(byText(page, /No card processor is connected/)).toBeVisible();
+  await page.getByRole("checkbox", { name: /membership terms/ }).check();
+  expect(await accessibilityProblems(page)).toEqual([]);
+  await page.getByRole("button", { name: "Pay $300 and join" }).click();
+  await expect(page.getByRole("heading", { name: "Welcome! Your membership has started." })).toBeVisible();
+  const code = (await onScreen(page.locator(".copy-code-text")).innerText()).trim();
+  expect(code).toMatch(/^MEMBER-[0-9A-Z]{4}-[0-9A-Z]{4}$/);
+  const welcome = await latestEmail(page, "membership_started", max.email);
+  expect(welcome.subject).toBe("Your membership: Studio Paris, 5 hours a month");
+  expect(welcome.body).toContain(`Your membership code: ${code}`);
+
+  await signIn(page, max.email, "/account/membership");
+  const card = page.locator(".membership-card", { hasText: "Studio Paris, 5 hours a month" });
+  await expect(card).toContainText("Active. The next month is billed on");
+  await expect(card).toContainText(code);
+  await expect(card.locator(".reward-facts dd").first()).toHaveText("5 hours");
+  await card.getByRole("button", { name: "Cancel membership" }).click();
+  await card.getByRole("button", { name: "Yes, cancel it" }).click();
+  await expect(card).toContainText("Cancelled: no more monthly payments.");
+  await expect(card.getByRole("button", { name: "Cancel membership" })).toHaveCount(0);
+  const goodbye = await latestEmail(page, "membership_cancelled", max.email);
+  expect(goodbye.body).toContain(`The hours left on your code ${code} stay yours to use: 5 hours.`);
+});
+
 test("the owner changes an add-on's price and a studio's guest number, and customers see both", async ({ page }) => {
   await signIn(page, SECOND_OWNER, "/admin/studios");
   await expect(page.getByRole("heading", { name: "Studios & add-ons" })).toBeVisible();

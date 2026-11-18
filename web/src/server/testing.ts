@@ -13,6 +13,7 @@ import type { ManageDeps } from "./manage";
 import {
   MOCK_TOKEN_OK,
   mockProvider,
+  monthsAfter,
   type ChargeRequest,
   type PayLinkRequest,
   type PayLinkState,
@@ -29,6 +30,27 @@ export interface TestPayLink {
   /** What the processor answers when asked about it. A test sets this to say "the client paid". */
   state: PayLinkState;
 }
+
+/**
+ * A membership's subscription at the test processor (follow-up 3). It bills nothing by itself: a test bills its
+ * months (`world.billMonth`), paid or not, and says when it was stopped.
+ */
+export interface TestSubscription {
+  id: string;
+  customerId: string;
+  cardId: string;
+  variationId: string;
+  startDate: string;
+  idempotencyKey: string;
+  /** The day it ends, once cancelled. */
+  endsOn: string | null;
+  stopped: boolean;
+  /** The months billed, oldest first. */
+  invoices: { id: string; paid: boolean; amountCents: number; day: string }[];
+}
+
+/** Which step of a membership's billing the test processor refuses, while `failMembership` is set. */
+export type MembershipStep = "customer" | "card" | "price" | "subscribe" | "cancel" | "state";
 
 /** Saturday 2026-11-14, 10:00 in Winter Park (EST, UTC-5). */
 export const NOW = new Date("2026-11-14T15:00:00Z");
@@ -66,6 +88,14 @@ export interface TestWorld {
   links: TestPayLink[];
   /** While set, the processor refuses to make or cancel a link, with this message. */
   failLinks: string | null;
+  /** Memberships' subscriptions, oldest first. */
+  subscriptions: TestSubscription[];
+  /** Prices made for plans, by their idempotency key. */
+  planPrices: Map<string, { processorPlanId: string; variationId: string; priceCents: number }>;
+  /** While set, the processor refuses this step of a membership's billing, with the message. */
+  failMembership: { step: MembershipStep; message: string } | null;
+  /** Bill a subscription's next month, at its variation's price: paid unless `paid` is false. */
+  billMonth(subscriptionId: string, paid?: boolean): TestSubscription;
   provider: PaymentProvider;
   /** Wipe all data and restore the starting catalog. */
   reset(): Promise<void>;
@@ -94,8 +124,68 @@ export async function createTestWorld(): Promise<TestWorld> {
     failCaptures: null,
     links: [],
     failLinks: null,
+    subscriptions: [],
+    planPrices: new Map(),
+    failMembership: null,
+    billMonth(subscriptionId, paid = true) {
+      const subscription = world.subscriptions.find((candidate) => candidate.id === subscriptionId);
+      if (!subscription) throw new Error(`No subscription ${subscriptionId}`);
+      const price = [...world.planPrices.values()].find((made) => made.variationId === subscription.variationId)?.priceCents ?? 0;
+      const day = monthsAfter(subscription.startDate, subscription.invoices.length);
+      subscription.invoices.push({ id: `${subscriptionId}_invoice_${subscription.invoices.length + 1}`, paid, amountCents: price, day });
+      return subscription;
+    },
     provider: {
       name: "mock",
+      memberships: {
+        async createCustomer(input) {
+          if (world.failMembership?.step === "customer") return { ok: false, message: world.failMembership.message };
+          return { ok: true, customerId: `customer_${input.idempotencyKey}` };
+        },
+        async saveCard(input) {
+          if (world.failMembership?.step === "card") return { ok: false, message: world.failMembership.message };
+          if (!world.charges.some((charge) => `mock_${charge.idempotencyKey}` === input.paymentId)) return { ok: false, message: "No such payment." };
+          return { ok: true, cardId: `card_${input.idempotencyKey}` };
+        },
+        async createPlanPrice(input) {
+          if (world.failMembership?.step === "price") return { ok: false, message: world.failMembership.message };
+          const made = world.planPrices.get(input.idempotencyKey) ?? {
+            processorPlanId: input.processorPlanId ?? `plan_${world.planPrices.size + 1}`,
+            variationId: `price_${world.planPrices.size + 1}`,
+            priceCents: input.priceCents,
+          };
+          world.planPrices.set(input.idempotencyKey, made);
+          return { ok: true, processorPlanId: made.processorPlanId, variationId: made.variationId };
+        },
+        async subscribe(input) {
+          if (world.failMembership?.step === "subscribe") return { ok: false, message: world.failMembership.message };
+          const again = world.subscriptions.find((subscription) => subscription.idempotencyKey === input.idempotencyKey);
+          if (again) return { ok: true, subscriptionId: again.id };
+          const subscription: TestSubscription = { id: `sub_${world.subscriptions.length + 1}`, ...input, endsOn: null, stopped: false, invoices: [] };
+          world.subscriptions.push(subscription);
+          return { ok: true, subscriptionId: subscription.id };
+        },
+        async cancelSubscription(subscriptionId) {
+          if (world.failMembership?.step === "cancel") return { ok: false, message: world.failMembership.message };
+          const subscription = world.subscriptions.find((candidate) => candidate.id === subscriptionId);
+          if (!subscription) return { ok: false, message: "No such subscription." };
+          // As Square does: the month paid for runs to its end, and one that has not started ends on its first day.
+          subscription.endsOn ??= monthsAfter(subscription.startDate, subscription.invoices.filter((invoice) => invoice.paid).length);
+          return { ok: true, endsOn: subscription.endsOn };
+        },
+        async subscriptionState(subscriptionId) {
+          if (world.failMembership?.step === "state") return { state: "unknown", message: world.failMembership.message };
+          const subscription = world.subscriptions.find((candidate) => candidate.id === subscriptionId);
+          if (!subscription) return { state: "unknown", message: "No such subscription." };
+          const paid = subscription.invoices.filter((invoice) => invoice.paid).length;
+          return {
+            state: subscription.stopped ? "stopped" : subscription.endsOn ? "cancelled" : subscription.invoices.length > 0 ? "active" : "pending",
+            paidThrough: paid > 0 ? monthsAfter(subscription.startDate, paid) : null,
+            endsOn: subscription.endsOn,
+            invoices: [...subscription.invoices].reverse(),
+          };
+        },
+      },
       async charge(request) {
         const result = await mockProvider.charge(request);
         if (result.ok) world.charges.push(request);
@@ -160,6 +250,9 @@ export async function createTestWorld(): Promise<TestWorld> {
       world.failCaptures = null;
       world.links.length = 0;
       world.failLinks = null;
+      world.subscriptions.length = 0;
+      world.planPrices.clear();
+      world.failMembership = null;
     },
 
     book(overrides = {}, deps = {}) {

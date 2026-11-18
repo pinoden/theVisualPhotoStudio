@@ -48,6 +48,8 @@ export const TEMPLATE_KEYS = [
   "pet_credit",
   "loyalty_code",
   "login_code",
+  "membership_started",
+  "membership_cancelled",
 ] as const;
 
 export type TemplateKey = (typeof TEMPLATE_KEYS)[number];
@@ -71,7 +73,7 @@ export interface EmailTemplateSpec {
   readonly parts: readonly EmailPart[];
 }
 
-export const TEMPLATE_GROUPS = ["Bookings", "Moving and cancelling", "Payments", "Codes and signing in"] as const;
+export const TEMPLATE_GROUPS = ["Bookings", "Moving and cancelling", "Payments", "Codes and signing in", "Memberships"] as const;
 
 /** Parts every email has: the studio's name and address as the website publishes them, filled in when it is queued. */
 export const STUDIO_PARTS: readonly EmailPart[] = [
@@ -612,6 +614,69 @@ const TEMPLATES: readonly EmailTemplateSpec[] = [
       { key: "minutes", label: "How many minutes the code works", sample: "15" },
     ],
   },
+  {
+    key: "membership_started",
+    title: "Membership started",
+    group: "Memberships",
+    when: "When a client buys a membership on the site, once its first month is paid.",
+    subject: "Your membership: {{plan}}",
+    body: lines(
+      "Hi {{name}},",
+      "",
+      "Thank you for joining {{studio_name}}. Your membership is {{plan}}: {{hours}} of studio time each month, for {{price}} a month.",
+      "",
+      "Your membership code: {{code}}",
+      "",
+      "Book at {{book_link}} and enter the code at checkout, with this email address. Each month paid adds its hours to the code, and the hours you do not use carry over.",
+      "",
+      "The first month is paid. The next is billed to the same card on {{next_billing}}, then each month on the same day, until you cancel. You can cancel at any time in your account: {{account_link}}",
+      "",
+      ...SIGN_OFF,
+    ),
+    parts: [
+      NAME,
+      FIRST_NAME,
+      { key: "plan", label: "The membership's name", sample: "Studio Paris, 5 hours a month" },
+      { key: "hours", label: "The studio time each month", sample: "5 hours" },
+      { key: "price", label: "What it costs a month", sample: "$300" },
+      { key: "code", label: "The membership code the member books with", required: true, sample: "MEMBER-4K7P-2XQ9" },
+      BOOK_LINK,
+      { key: "next_billing", label: "The day the next month is billed", sample: "Friday, December 18, 2026" },
+      { key: "account_link", label: "The link to the member's account, where they see their hours and cancel", link: true, sample: "/account/membership" },
+    ],
+  },
+  {
+    key: "membership_cancelled",
+    title: "Membership cancelled",
+    group: "Memberships",
+    when: "When a member cancels their membership in their account, or the studio cancels it for them.",
+    subject: "Your membership is cancelled: {{plan}}",
+    body: lines(
+      "Hi {{name}},",
+      "",
+      "Your membership {{plan}} is cancelled, and no more monthly payments will be taken.",
+      "",
+      "{{ends}}",
+      "",
+      "The hours left on your code {{code}} stay yours to use: {{hours_left}}. Book at {{book_link}} and enter the code at checkout, as before.",
+      "",
+      ...SIGN_OFF,
+    ),
+    parts: [
+      NAME,
+      FIRST_NAME,
+      { key: "plan", label: "The membership's name", sample: "Studio Paris, 5 hours a month" },
+      {
+        key: "ends",
+        label: "Until when the month paid for runs, or that none was paid for after it",
+        required: true,
+        sample: "The month you paid for runs until Monday, December 14, 2026.",
+      },
+      { key: "code", label: "The membership code", required: true, sample: "MEMBER-4K7P-2XQ9" },
+      { key: "hours_left", label: "The studio time left on the code", sample: "3 hours 30 minutes" },
+      BOOK_LINK,
+    ],
+  },
 ];
 
 export const EMAIL_TEMPLATES: Readonly<Record<TemplateKey, EmailTemplateSpec>> = Object.fromEntries(
@@ -632,6 +697,7 @@ export const STUDIO_NOTICES: readonly { title: string; when: string }[] = [
   { title: "A card payment not taken yet", when: "When the amount reserved on a client's card could not be taken yet. The site keeps trying." },
   { title: "A reserved amount lapsed", when: "When the amount reserved on a card lapsed before it could be taken, and the booking is still to pay." },
   { title: "A payment link to check", when: "When a booking ends while the site cannot tell whether its payment link was paid." },
+  { title: "A membership's first month to refund", when: "When a membership could not be set up after its first month was paid, and the refund did not go through." },
 ];
 
 // ── Filling a template in ────────────────────────────────────────────────────

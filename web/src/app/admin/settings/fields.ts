@@ -35,6 +35,11 @@ export const SETTING_GROUPS: { title: string; fields: SettingField[] }[] = [
       { key: "rescheduleCutoffHours", label: "Reschedule cut-off (hours before start)", help: "After this, customers must call." },
       { key: "maxReschedules", label: "Free reschedules per booking", help: "0 switches reschedule codes off." },
       {
+        key: "memberReturnHours",
+        label: "Membership hours given back (hours before start)",
+        help: "48 is two days. A booking made with membership hours and cancelled at least this long before it starts gives its hours back.",
+      },
+      {
         key: "rescheduleFeeCents",
         label: "Fee for each further reschedule ($)",
         help: "Taken off the reschedule code. With 0, a booking cannot be moved online again after the free ones.",

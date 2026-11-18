@@ -73,14 +73,14 @@ const idOf = async (slug: string) => (await world.db.select({ id: siteDocuments.
 describe("the pages the website was built with", () => {
   it("are put into a database once, published, each with its first version", async () => {
     const pages = await listPages(world.db, owner);
-    expect(pages!.map((page) => page.path).sort()).toEqual(["/", "/contact", "/faq", "/policies", "/rates", "/services", "/studios"]);
+    expect(pages!.map((page) => page.path).sort()).toEqual(["/", "/contact", "/faq", "/memberships", "/policies", "/rates", "/services", "/studios"]);
     expect(pages!.every((page) => page.state === "live" && page.builtIn)).toBe(true);
     expect(pages!.find((page) => page.home)!.title).toBe("Home");
     const versions = await listPageVersions(world.db, owner, await idOf("faq"));
     expect(versions).toMatchObject([{ number: 1, publishedBy: AS_BUILT, current: true }]);
     // A second time, nothing is added.
     expect(await ensureBuiltInPages(world.db, NOW)).toBe(0);
-    expect(await world.db.select().from(siteDocuments)).toHaveLength(7);
+    expect(await world.db.select().from(siteDocuments)).toHaveLength(8);
   });
 
   it("are stored exactly as written: every block and value is one the site knows", async () => {
@@ -228,7 +228,12 @@ describe("the pages the website was built with", () => {
 
   it("say where the website links to one, before it leaves the website", async () => {
     expect(await linksToPage(world.db, await idOf("faq"))).toEqual(["the menu (Info, Guest Information)", "the footer (Guest Information)", "the page \u201cContact\u201d"]);
-    expect(await linksToPage(world.db, await idOf("policies"))).toEqual(["the menu (Info, Policies)", "the footer (Policies)", "the page \u201cGuest Information\u201d"]);
+    expect(await linksToPage(world.db, await idOf("policies"))).toEqual([
+      "the menu (Info, Policies)",
+      "the footer (Policies)",
+      "the page \u201cGuest Information\u201d",
+      "the page \u201cMemberships\u201d",
+    ]);
     // A page nothing links to.
     const made = expectOk(await createPage(world.db, owner, { title: "Gift Cards" }, NOW)).id;
     expect(await linksToPage(world.db, made)).toEqual([]);

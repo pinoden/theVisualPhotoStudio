@@ -1,5 +1,5 @@
 import { asc, eq } from "drizzle-orm";
-import { addons, photoPackages, photographers, priceRules, specialDates, studioHours, studios } from "@/db/schema";
+import { addons, membershipPlans, membershipPlanStudios, photoPackages, photographers, priceRules, specialDates, studioHours, studios } from "@/db/schema";
 import { together, type DbLike } from "@/db/client";
 import type { AddonKind } from "@/lib/addon-kinds";
 import type { AddonDef, PriceRule } from "@/lib/domain/pricing";
@@ -48,6 +48,17 @@ export interface CatalogPhotoPackage {
   includes: string;
 }
 
+/** A membership on sale (follow-up 3): studio minutes each month in its studios, for a monthly price. */
+export interface CatalogMembershipPlan {
+  id: string;
+  name: string;
+  description: string;
+  minutes: number;
+  priceCents: number;
+  /** One studio, or the studios of a bundle, in the studios' order. */
+  studioIds: string[];
+}
+
 /** Everything public about what can be booked. Safe to send to the browser. */
 export interface Catalog {
   studios: CatalogStudio[];
@@ -63,10 +74,12 @@ export interface Catalog {
    * is public: the text itself (it can hold the door code) never enters the catalog.
    */
   accessInfoSent: boolean;
+  /** The memberships on sale, in the owners' order: plans that are offered, all of whose studios are open. */
+  membershipPlans: CatalogMembershipPlan[];
 }
 
 export async function loadCatalog(db: DbLike): Promise<Catalog> {
-  const [studioRows, hourRows, ruleRows, addonRows, specialRows, settings, access, packageRows, photographerRows, photos] = await together(db, [
+  const [studioRows, hourRows, ruleRows, addonRows, specialRows, settings, access, packageRows, photographerRows, photos, planRows, planStudioRows] = await together(db, [
     () => db.select().from(studios).where(eq(studios.active, true)).orderBy(asc(studios.sortOrder), asc(studios.name)),
     () => db.select().from(studioHours),
     () => db.select().from(priceRules),
@@ -77,6 +90,8 @@ export async function loadCatalog(db: DbLike): Promise<Catalog> {
     () => db.select().from(photoPackages).where(eq(photoPackages.active, true)).orderBy(asc(photoPackages.durationMinutes)),
     () => db.select({ id: photographers.id }).from(photographers).where(eq(photographers.active, true)).limit(1),
     () => loadStudioPhotos(db),
+    () => db.select().from(membershipPlans).where(eq(membershipPlans.active, true)).orderBy(asc(membershipPlans.sortOrder), asc(membershipPlans.createdAt)),
+    () => db.select().from(membershipPlanStudios),
   ]);
 
   const activeIds = new Set(studioRows.map((s) => s.id));
@@ -138,6 +153,16 @@ export async function loadCatalog(db: DbLike): Promise<Catalog> {
               includes: row.includes,
             })),
     accessInfoSent: access !== "",
+    membershipPlans: planRows
+      .map((plan) => ({
+        id: plan.id,
+        name: plan.name,
+        description: plan.description,
+        minutes: plan.minutes,
+        priceCents: plan.priceCents,
+        studioIds: studioRows.filter((studio) => planStudioRows.some((link) => link.planId === plan.id && link.studioId === studio.id)).map((studio) => studio.id),
+      }))
+      .filter((plan) => plan.studioIds.length > 0 && plan.studioIds.length === planStudioRows.filter((link) => link.planId === plan.id).length),
   };
 }
 

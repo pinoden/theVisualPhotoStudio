@@ -673,6 +673,132 @@ export const membershipPlanStudios = pgTable(
 );
 
 /**
+ * A plan's price at the card processor (Square's subscription plan and its variation): made the first time a
+ * membership is bought at that price, and reused after. A new price is a new variation, so members keep theirs.
+ */
+export const membershipPlanPrices = pgTable(
+  "membership_plan_prices",
+  {
+    planId: uuid("plan_id")
+      .notNull()
+      .references(() => membershipPlans.id, { onDelete: "restrict" }),
+    /** Which processor, as `payments.provider`: a price made in the sandbox is unknown to the live account. */
+    provider: text("provider").notNull(),
+    priceCents: integer("price_cents").notNull(),
+    processorPlanId: text("processor_plan_id").notNull(),
+    variationId: text("variation_id").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.planId, t.provider, t.priceCents] })],
+);
+
+export const MEMBERSHIP_STATUSES = ["starting", "active", "cancelled", "stopped", "failed"] as const;
+
+/**
+ * A membership a client bought (follow-up 3). Its first month is paid when it is bought; the processor's subscription
+ * bills the same card each month after, from the same day of the next month. The member keeps the plan's name, minutes
+ * and price as they were when they joined.
+ *
+ * `status`: `starting` while it is being bought (the card form was sent: the first month and the subscription are
+ * being set up, and pressing again finds it); `active`, billed each month; `cancelled`, billed no more, the month paid
+ * for running to `ends_on`; `stopped`, the processor stopped billing it; `failed`, never bought (the card was refused,
+ * or the billing could not be set up, and the first month was given back). The minutes stay usable in every state but
+ * `failed`. See src/server/memberships.ts.
+ */
+export const memberships = pgTable(
+  "memberships",
+  {
+    id: id(),
+    /** The client, by their email address, always lowercase, as their bookings are. */
+    email: text("email").notNull(),
+    name: text("name").notNull(),
+    phone: text("phone").notNull().default(""),
+    planId: uuid("plan_id")
+      .notNull()
+      .references(() => membershipPlans.id, { onDelete: "restrict" }),
+    planName: text("plan_name").notNull(),
+    minutesPerMonth: integer("minutes_per_month").notNull(),
+    priceCents: integer("price_cents").notNull(),
+    /** What the member books with. */
+    code: text("code").notNull().unique(),
+    status: text("status", { enum: MEMBERSHIP_STATUSES }).notNull(),
+    /** The buying page's own key: pressing again finds this membership instead of buying a second. */
+    requestKey: text("request_key").notNull().unique(),
+    /** Which processor bills it, as `payments.provider`. */
+    provider: text("provider").notNull(),
+    customerId: text("customer_id"),
+    cardId: text("card_id"),
+    subscriptionId: text("subscription_id"),
+    /** The day it was bought, the studio's day. */
+    startedOn: date("started_on", { mode: "string" }).notNull(),
+    /** The first day not paid for yet: the day the next month is billed while it is active. */
+    paidThrough: date("paid_through", { mode: "string" }),
+    cancelledAt: ts("cancelled_at"),
+    /** Once cancelled: the day the month paid for ends, with no charge after it. */
+    endsOn: date("ends_on", { mode: "string" }),
+    /** Why it failed or was stopped, for the owners. */
+    problem: text("problem"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("memberships_email_idx").on(t.email),
+    check("memberships_status", sql`${t.status} in ('starting', 'active', 'cancelled', 'stopped', 'failed')`),
+    check("memberships_minutes", sql`${t.minutesPerMonth} > 0`),
+    check("memberships_price", sql`${t.priceCents} > 0`),
+  ],
+);
+
+/** A month a membership paid: the first, paid when it was bought, then each the processor billed. */
+export const membershipPayments = pgTable(
+  "membership_payments",
+  {
+    id: id(),
+    membershipId: uuid("membership_id")
+      .notNull()
+      .references(() => memberships.id, { onDelete: "restrict" }),
+    /** The processor's payment (the first month) or invoice (a month it billed): each is recorded once. */
+    processorId: text("processor_id").notNull().unique(),
+    amountCents: integer("amount_cents").notNull(),
+    /** The first day of the month it pays for. */
+    periodStart: date("period_start", { mode: "string" }).notNull(),
+    paidAt: ts("paid_at").notNull(),
+    /** Set when it was given back: a first month whose membership could not be set up. */
+    refundedAt: ts("refunded_at"),
+  },
+  (t) => [check("membership_payments_amount", sql`${t.amountCents} > 0`)],
+);
+
+/**
+ * Every change to a membership's minutes: the balance is their sum. `month`: a paid month's minutes; `booking`: spent
+ * on a booking (negative); `returned`: given back by a cancellation; `correction`: an owner's, with a note.
+ */
+export const membershipMinutes = pgTable(
+  "membership_minutes",
+  {
+    id: id(),
+    membershipId: uuid("membership_id")
+      .notNull()
+      .references(() => memberships.id, { onDelete: "restrict" }),
+    minutes: integer("minutes").notNull(),
+    kind: text("kind", { enum: ["month", "booking", "returned", "correction"] }).notNull(),
+    /** The month that added them: at most once each. */
+    paymentId: uuid("payment_id")
+      .unique()
+      .references(() => membershipPayments.id, { onDelete: "restrict" }),
+    bookingId: uuid("booking_id").references(() => bookings.id, { onDelete: "restrict" }),
+    note: text("note").notNull().default(""),
+    /** Who: "the site", or the owner who corrected them. */
+    actor: text("actor").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("membership_minutes_membership_idx").on(t.membershipId),
+    check("membership_minutes_kind", sql`${t.kind} in ('month', 'booking', 'returned', 'correction')`),
+    check("membership_minutes_not_zero", sql`${t.minutes} <> 0`),
+  ],
+);
+
+/**
  * The owners' wording of an email the site sends to clients (Admin → Emails): a row for each email they have changed
  * or set back. No subject and text: the site's own wording again. `revision` goes up with each save, so that a save
  * from an editor opened before someone else's is noticed. See src/server/email-templates.ts.
