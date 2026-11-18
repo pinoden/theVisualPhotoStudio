@@ -15,6 +15,11 @@ export interface Settings {
   minLeadHours: number;
   /** Bookings can be made at most this many days ahead. */
   maxAdvanceDays: number;
+  /**
+   * A photography session must be booked at least this many hours ahead. The
+   * owner's rule (2026-11-15): the photographer is available from two weeks out.
+   */
+  photoMinLeadHours: number;
   /** Minutes an unpaid booking keeps its slot while the card is charged. */
   holdMinutes: number;
   /** Discount percent by number of studios booked together. */
@@ -44,7 +49,7 @@ export interface Settings {
   /** Hours after a visit ends before it counts as completed. */
   loyaltyDelayHours: number;
 
-  // ── Staff: what the second level of the admin can do (see src/lib/staff-abilities.ts) ──
+  // ── Studio Attendants (the role `staff`): what the owners have switched on for them (see src/lib/abilities.ts) ──
   /** Whether staff see customers' phone number and email. */
   staffSeesContact: boolean;
   /** Whether staff can change the status label of an appointment. */
@@ -57,18 +62,41 @@ export interface Settings {
   staffMovesBookings: boolean;
   /** Whether staff can make a booking for a client. */
   staffCreatesBookings: boolean;
+  /** Whether staff can record a payment taken at the studio ("mark as paid"). */
+  staffRecordsPayments: boolean;
   /** Whether staff can set the photographer's working hours and block their time. */
   staffSetsPhotographerTimes: boolean;
+
+  // ── Studio Managers: the switches of their own. What running the calendar needs, a manager can always do. ──
+  /** Whether managers see what bookings cost, and customers' payments and receipts. */
+  managerSeesPrices: boolean;
+  /** Whether managers can record a payment taken at the studio and email a payment link. */
+  managerRecordsPayments: boolean;
+  /** Whether managers can cancel a booking and refund a card payment. */
+  managerRefunds: boolean;
+  /** Whether managers can open the customers list and a customer's page. */
+  managerSeesCustomers: boolean;
+  /** Whether managers can correct loyalty stamps and reward statuses. */
+  managerCorrectsLoyalty: boolean;
+  /** Whether managers can block time in a studio. */
+  managerBlocksTime: boolean;
+  /** Whether managers can change the website's design and its header, menu and footer, as a draft. */
+  managerEditsDesign: boolean;
+  /** Whether managers can add and edit the website's pages, as a draft. */
+  managerEditsPages: boolean;
+  /** Whether managers can publish changes to the website and restore an earlier version. */
+  managerPublishesWebsite: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
   slotIncrementMinutes: 15,
   minLeadHours: 24,
   maxAdvanceDays: 180,
+  photoMinLeadHours: 336, // two weeks, the owner's rule of 2026-11-15
   holdMinutes: 10,
   multiStudioPercent: { 2: 20, 3: 22 },
 
-  refundWindowHours: 168,
+  refundWindowHours: 336, // 14 days: the owner's answer of 2026-11-15 (it was 7 days)
   photoRefundWindowHours: 336, // 14 days, as on the live site
   refundFeePercent: 5,
   rescheduleCutoffHours: 24,
@@ -77,20 +105,58 @@ export const DEFAULT_SETTINGS: Settings = {
 
   loyaltyEnabled: true,
   loyaltyVisits: 5,
-  loyaltyValidDays: 60,
+  loyaltyValidDays: 90, // the owner's answer of 2026-11-15 (it was 60)
   loyaltyDelayHours: 2,
 
-  staffSeesContact: false,
+  staffSeesContact: true, // the owner's answer of 2026-11-15: shown by default, the switch stays
   staffSetsLabels: true, // the owner, 2026-11-15: "Staff should be able to change all the labels"
   staffSeesAllDays: false,
   staffSeesPrices: false,
   staffMovesBookings: false,
   staffCreatesBookings: false,
+  staffRecordsPayments: false,
   staffSetsPhotographerTimes: false,
+
+  // A manager runs the day: taking payments, looking a client up and blocking time are on. What moves money
+  // back, changes a client's rewards or shows the studio's income is off until the owners switch it on.
+  managerSeesPrices: false,
+  managerRecordsPayments: true,
+  managerRefunds: false,
+  managerSeesCustomers: true,
+  managerCorrectsLoyalty: false,
+  managerBlocksTime: true,
+  // The website is the owners' until they give a manager part of it.
+  managerEditsDesign: false,
+  managerEditsPages: false,
+  managerPublishesWebsite: false,
 };
 
-const int = (min: number, max: number) => (v: unknown) =>
+const int = ([min, max]: readonly [number, number]) => (v: unknown) =>
   typeof v === "number" && Number.isInteger(v) && v >= min && v <= max;
+
+/**
+ * The whole numbers the owners set under Settings, each with the lowest and
+ * highest it may be. The server keeps to them, and the form gives its fields
+ * the same `min` and `max`, so the browser stops a value before it is sent.
+ */
+export const NUMBER_SETTING_RANGES = {
+  slotIncrementMinutes: [5, 240],
+  minLeadHours: [0, 24 * 60],
+  maxAdvanceDays: [1, 730],
+  photoMinLeadHours: [0, 24 * 365],
+  holdMinutes: [1, 60],
+  refundWindowHours: [0, 24 * 365],
+  photoRefundWindowHours: [0, 24 * 365],
+  refundFeePercent: [0, 100],
+  rescheduleCutoffHours: [0, 24 * 365],
+  maxReschedules: [0, 20],
+  creditValidDays: [1, 730],
+  loyaltyVisits: [1, 100],
+  loyaltyValidDays: [1, 730],
+  loyaltyDelayHours: [0, 24 * 14],
+} as const satisfies Partial<Record<keyof Settings, readonly [number, number]>>;
+
+export type NumberSettingKey = keyof typeof NUMBER_SETTING_RANGES;
 const bool = (v: unknown) => typeof v === "boolean";
 
 function discountTable(v: unknown): Record<number, number> | null {
@@ -107,27 +173,38 @@ function discountTable(v: unknown): Record<number, number> | null {
 
 /** Which values are acceptable for each simple setting. Anything else is ignored. */
 const VALIDATORS: { [K in Exclude<keyof Settings, "multiStudioPercent">]: (v: unknown) => boolean } = {
-  slotIncrementMinutes: int(5, 240),
-  minLeadHours: int(0, 24 * 60),
-  maxAdvanceDays: int(1, 730),
-  holdMinutes: int(1, 60),
-  refundWindowHours: int(0, 24 * 365),
-  photoRefundWindowHours: int(0, 24 * 365),
-  refundFeePercent: int(0, 100),
-  rescheduleCutoffHours: int(0, 24 * 365),
-  maxReschedules: int(0, 20),
-  creditValidDays: int(1, 730),
+  slotIncrementMinutes: int(NUMBER_SETTING_RANGES.slotIncrementMinutes),
+  minLeadHours: int(NUMBER_SETTING_RANGES.minLeadHours),
+  maxAdvanceDays: int(NUMBER_SETTING_RANGES.maxAdvanceDays),
+  photoMinLeadHours: int(NUMBER_SETTING_RANGES.photoMinLeadHours),
+  holdMinutes: int(NUMBER_SETTING_RANGES.holdMinutes),
+  refundWindowHours: int(NUMBER_SETTING_RANGES.refundWindowHours),
+  photoRefundWindowHours: int(NUMBER_SETTING_RANGES.photoRefundWindowHours),
+  refundFeePercent: int(NUMBER_SETTING_RANGES.refundFeePercent),
+  rescheduleCutoffHours: int(NUMBER_SETTING_RANGES.rescheduleCutoffHours),
+  maxReschedules: int(NUMBER_SETTING_RANGES.maxReschedules),
+  creditValidDays: int(NUMBER_SETTING_RANGES.creditValidDays),
   loyaltyEnabled: bool,
-  loyaltyVisits: int(1, 100),
-  loyaltyValidDays: int(1, 730),
-  loyaltyDelayHours: int(0, 24 * 14),
+  loyaltyVisits: int(NUMBER_SETTING_RANGES.loyaltyVisits),
+  loyaltyValidDays: int(NUMBER_SETTING_RANGES.loyaltyValidDays),
+  loyaltyDelayHours: int(NUMBER_SETTING_RANGES.loyaltyDelayHours),
   staffSeesContact: bool,
   staffSetsLabels: bool,
   staffSeesAllDays: bool,
   staffSeesPrices: bool,
   staffMovesBookings: bool,
   staffCreatesBookings: bool,
+  staffRecordsPayments: bool,
   staffSetsPhotographerTimes: bool,
+  managerSeesPrices: bool,
+  managerRecordsPayments: bool,
+  managerRefunds: bool,
+  managerSeesCustomers: bool,
+  managerCorrectsLoyalty: bool,
+  managerBlocksTime: bool,
+  managerEditsDesign: bool,
+  managerEditsPages: bool,
+  managerPublishesWebsite: bool,
 };
 
 export type SettingKey = keyof Settings;

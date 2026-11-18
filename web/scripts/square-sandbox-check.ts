@@ -1,6 +1,7 @@
 /**
  * Runs the site's own Square code against Square's SANDBOX: a charge, the
- * same charge sent twice, declined cards, and refunds. No money moves.
+ * same charge sent twice, declined cards, refunds, and a payment link that is
+ * made, read and withdrawn. No money moves.
  * Usage: npm run check:square
  *
  * The keys come from the environment or, when they are not set there, from
@@ -104,6 +105,52 @@ async function main() {
     );
   }
 
+  // ── Reserving, then taking or giving back ──
+  // How a booking is paid: the amount is reserved, the booking is confirmed, then the amount is taken.
+  const reserve = (idempotencyKey: string) =>
+    square.charge({
+      amountCents: 6800,
+      token: "cnon:card-nonce-ok",
+      idempotencyKey,
+      reference: "VS-CHECK2",
+      note: "VS-CHECK2 sandbox check",
+      buyerEmail: "sandbox-check@example.com",
+      reserve: true,
+    });
+  const held = await reserve(randomUUID());
+  report(held.ok, "$68.00 is reserved on a good card, not taken", held.ok ? `payment ${held.paymentId}` : held.message);
+  if (held.ok) {
+    const taken = await square.capture(held.paymentId);
+    report(taken.ok, "the reserved amount is taken", taken.ok ? "Square completed the payment" : taken.message);
+    const takenAgain = await square.capture(held.paymentId);
+    report(takenAgain.ok, "taking it again changes nothing and is not an error", takenAgain.ok ? "counted as done" : takenAgain.message);
+    const late = await square.release(held.paymentId);
+    report(!late.ok, "an amount already taken cannot be given back (a refund is needed)", late.ok ? "it was given back" : late.message);
+    const refunded = await square.refund({ paymentId: held.paymentId, amountCents: 6800, idempotencyKey: randomUUID(), reason: "Sandbox check" });
+    report(refunded.ok, "an amount taken that way is refunded like any payment", refunded.ok ? `refund ${refunded.refundId}` : refunded.message);
+  }
+  const heldThenFreed = await reserve(randomUUID());
+  if (heldThenFreed.ok) {
+    const freed = await square.release(heldThenFreed.paymentId);
+    report(freed.ok, "a reserved amount is given back", freed.ok ? "Square cancelled the payment" : freed.message);
+    const freedAgain = await square.release(heldThenFreed.paymentId);
+    report(freedAgain.ok, "giving it back again changes nothing and is not an error", freedAgain.ok ? "counted as done" : freedAgain.message);
+    const tooLate = await square.capture(heldThenFreed.paymentId);
+    report(!tooLate.ok, "an amount given back can no longer be taken", tooLate.ok ? "it was taken" : tooLate.message);
+  } else {
+    report(false, "a second amount is reserved", heldThenFreed.message);
+  }
+  const declinedHold = await square.charge({
+    amountCents: 6800,
+    token: "cnon:card-nonce-declined",
+    idempotencyKey: randomUUID(),
+    reference: "VS-CHECK3",
+    note: "VS-CHECK3 sandbox check",
+    buyerEmail: "sandbox-check@example.com",
+    reserve: true,
+  });
+  report(!declinedHold.ok && !declinedHold.unknown, "a declined card is refused when reserving too", declinedHold.ok ? "it was reserved" : declinedHold.message);
+
   // ── Refunding ──
   if (paid.ok) {
     const refund = (amountCents: number, idempotencyKey: string, paymentId = paid.paymentId) =>
@@ -111,7 +158,15 @@ async function main() {
 
     const firstKey = randomUUID();
     const half = await refund(4400, firstKey);
-    report(half.ok, "half of the payment is refunded", half.ok ? `refund ${half.refundId}` : half.message);
+    report(half.ok, "half of the payment is refunded", half.ok ? `refund ${half.refundId}, ${half.settled ? "completed at once" : "accepted as pending"}` : half.message);
+
+    // What the scheduled task asks about a refund Square accepted without completing it.
+    if (half.ok) {
+      const state = await square.refundState(half.refundId);
+      report(state.state === "pending" || state.state === "completed", "the refund is read back from Square", JSON.stringify(state));
+    }
+    const nowhere = await square.refundState("no-such-refund");
+    report(nowhere.state === "unknown", "an unknown refund is read as unknown, not as rejected", JSON.stringify(nowhere));
 
     const halfAgain = await refund(4400, firstKey);
     report(
@@ -128,6 +183,45 @@ async function main() {
 
     const unknown = await refund(100, randomUUID(), "no-such-payment");
     report(!unknown.ok, "refunding an unknown payment is refused", unknown.ok ? "it was refunded" : unknown.message);
+  }
+
+  // ── A payment link ──
+  // Paying one needs a person, or a browser, on the sandbox's own test page. That was done by hand on
+  // 2026-11-15: the order became OPEN with one tender, whose payment the Refunds API then refunded.
+  const linkKey = randomUUID();
+  const link = await square.createPayLink({
+    amountCents: 6800,
+    idempotencyKey: linkKey,
+    title: "Booking VS-CHECK1: sandbox check",
+    note: "VS-CHECK1 sandbox check",
+    returnUrl: "https://example.com/pay/sandbox-check",
+  });
+  report(link.ok, "a payment link for $68.00 is made", link.ok ? `link ${link.linkId}, at ${link.url}` : link.message);
+  if (link.ok) {
+    const sameLink = await square.createPayLink({
+      amountCents: 6800,
+      idempotencyKey: linkKey,
+      title: "Booking VS-CHECK1: sandbox check",
+      note: "VS-CHECK1 sandbox check",
+      returnUrl: "https://example.com/pay/sandbox-check",
+    });
+    report(
+      sameLink.ok && sameLink.linkId === link.linkId,
+      "asking for the same link again does not make a second one",
+      sameLink.ok ? `same link returned: ${sameLink.linkId === link.linkId}` : sameLink.message,
+    );
+
+    const unpaid = await square.payLinkState(link);
+    report(unpaid.state === "open", "a link nobody has paid is reported as open", `state: ${unpaid.state}`);
+
+    const withdrawn = await square.cancelPayLink(link.linkId);
+    report(withdrawn.ok, "the link is withdrawn", withdrawn.ok ? "Square deleted it" : withdrawn.message);
+
+    const afterwards = await square.payLinkState(link);
+    report(afterwards.state === "cancelled", "a withdrawn link is reported as cancelled", `state: ${afterwards.state}`);
+
+    const twice = await square.cancelPayLink(link.linkId);
+    report(twice.ok, "withdrawing it a second time is not an error", twice.ok ? "already gone" : twice.message);
   }
 
   console.log(failures === 0 ? "\nAll steps behaved as expected." : `\n${failures} step(s) did not behave as expected.`);

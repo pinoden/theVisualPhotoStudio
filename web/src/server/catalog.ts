@@ -1,10 +1,13 @@
 import { asc, eq } from "drizzle-orm";
 import { addons, photoPackages, photographers, priceRules, specialDates, studioHours, studios } from "@/db/schema";
-import type { DbLike } from "@/db/client";
+import { together, type DbLike } from "@/db/client";
 import type { AddonKind } from "@/lib/addon-kinds";
 import type { AddonDef, PriceRule } from "@/lib/domain/pricing";
 import { defaultDayType, type DayType, type IsoDate } from "@/lib/domain/time";
+import { parseStudioFacts, type StudioFacts } from "@/lib/studio-facts";
+import { loadPictures, type Picture } from "./media";
 import { loadAccessInstructions, loadSettings, type Settings } from "./settings";
+import { loadStudioPhotos } from "./studio-photos";
 
 export interface CatalogStudio {
   id: string;
@@ -18,6 +21,12 @@ export interface CatalogStudio {
   color: string;
   /** weekday (1-7) -> opening hours; a missing weekday means closed. */
   hours: Record<number, { openMinute: number; closeMinute: number }>;
+  /** Its photos from the media library, in the owners' order. Empty until they add some: a tinted box stands in. */
+  photos: Picture[];
+  /** Its size, ceiling, light, cyclorama and what comes with it, as the owners wrote them: empty ones are not shown. */
+  facts: StudioFacts;
+  /** The picture of its floor plan, when the owners chose one that is in the library. */
+  floorPlan: Picture | null;
 }
 
 export interface CatalogAddon extends AddonDef {
@@ -55,19 +64,23 @@ export interface Catalog {
 }
 
 export async function loadCatalog(db: DbLike): Promise<Catalog> {
-  const [studioRows, hourRows, ruleRows, addonRows, specialRows, settings, access, packageRows, photographerRows] = await Promise.all([
-    db.select().from(studios).where(eq(studios.active, true)).orderBy(asc(studios.sortOrder), asc(studios.name)),
-    db.select().from(studioHours),
-    db.select().from(priceRules),
-    db.select().from(addons).where(eq(addons.active, true)).orderBy(asc(addons.sortOrder), asc(addons.name)),
-    db.select().from(specialDates),
-    loadSettings(db),
-    loadAccessInstructions(db),
-    db.select().from(photoPackages).where(eq(photoPackages.active, true)).orderBy(asc(photoPackages.durationMinutes)),
-    db.select({ id: photographers.id }).from(photographers).where(eq(photographers.active, true)).limit(1),
+  const [studioRows, hourRows, ruleRows, addonRows, specialRows, settings, access, packageRows, photographerRows, photos] = await together(db, [
+    () => db.select().from(studios).where(eq(studios.active, true)).orderBy(asc(studios.sortOrder), asc(studios.name)),
+    () => db.select().from(studioHours),
+    () => db.select().from(priceRules),
+    () => db.select().from(addons).where(eq(addons.active, true)).orderBy(asc(addons.sortOrder), asc(addons.name)),
+    () => db.select().from(specialDates),
+    () => loadSettings(db),
+    () => loadAccessInstructions(db),
+    () => db.select().from(photoPackages).where(eq(photoPackages.active, true)).orderBy(asc(photoPackages.durationMinutes)),
+    () => db.select({ id: photographers.id }).from(photographers).where(eq(photographers.active, true)).limit(1),
+    () => loadStudioPhotos(db),
   ]);
 
   const activeIds = new Set(studioRows.map((s) => s.id));
+  const facts = new Map(studioRows.map((s) => [s.id, parseStudioFacts(s.facts)]));
+  const plans = [...facts.values()].map((entry) => entry.floorPlan).filter((id) => id !== "");
+  const planPictures = plans.length > 0 ? await loadPictures(db, plans) : new Map<string, Picture>();
   return {
     studios: studioRows.map((s) => ({
       id: s.id,
@@ -83,6 +96,9 @@ export async function loadCatalog(db: DbLike): Promise<Catalog> {
           .filter((h) => h.studioId === s.id)
           .map((h) => [h.weekday, { openMinute: h.openMinute, closeMinute: h.closeMinute }]),
       ),
+      photos: photos.get(s.id) ?? [],
+      facts: facts.get(s.id)!,
+      floorPlan: planPictures.get(facts.get(s.id)!.floorPlan) ?? null,
     })),
     rules: ruleRows
       .filter((r) => activeIds.has(r.studioId))

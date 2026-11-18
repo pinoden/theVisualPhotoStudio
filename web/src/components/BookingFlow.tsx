@@ -6,10 +6,11 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import {
   availabilityGrid,
   combinedStarts,
+  noticeHours,
   studiosFreeAt,
   type SlotOptions,
 } from "@/lib/domain/availability";
-import { multiStudioOffer } from "@/lib/catalog-view";
+import { multiStudioOffer, studioCombinationError } from "@/lib/catalog-view";
 import {
   bookableDurations,
   findPrice,
@@ -23,10 +24,13 @@ import {
   addDays,
   defaultDayType,
   durationLabel,
+  isIsoDate,
   longDateLabel,
   minutesToLabel,
+  studioToday,
   type DayType,
 } from "@/lib/domain/time";
+import { EMAIL_FIELD, EMAIL_RULE } from "@/lib/parse";
 import { count, hoursInWords } from "@/lib/words";
 import type { DayAvailability } from "@/server/availability";
 import type { Catalog } from "@/server/catalog";
@@ -50,11 +54,25 @@ const STEP_LABEL: Record<Step, string> = {
 
 const MOCK_TOKEN = "mock-card-ok";
 
+/** A random id for one attempt to book (see `requestId` in src/server/bookings.ts). */
+function newRequestId(): string {
+  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  // An address that is not https (a phone trying the site on the local network) has no randomUUID: the same, by hand.
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 /** A code the server accepted for one email address. */
 interface AppliedCode {
   code: string;
   kind: PromoKind;
   value: number;
+  photographyOnly?: boolean;
+  /** Where the code came from: "reschedule" for a moved booking's money. */
+  source?: string;
   email: string;
 }
 
@@ -80,12 +98,8 @@ function loadScript(src: string): Promise<void> {
   });
 }
 
-function localToday(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-/** Today's date is only known in the browser; the server renders without it. */
+/** Today's date is only known in the browser, on the studio's clock wherever the device is; the server renders without it. */
+const browserToday = () => studioToday();
 const subscribeNever = () => () => {};
 const serverToday = () => "";
 
@@ -123,7 +137,10 @@ export function BookingFlow({
     const match = catalog.studios.find((s) => s.slug === slug);
     return match ? [match.id] : [];
   });
-  const [date, setDate] = useState("");
+  /** What the date field holds. While a date is typed it passes through values such as 0002-12-28. */
+  const [dateInput, setDateInput] = useState("");
+  /** The date chosen: what the field holds, once that is a real date. */
+  const date = isIsoDate(dateInput) ? dateInput : "";
   const [durationChoice, setDuration] = useState(0);
   const [start, setStart] = useState<number | null>(null);
   const [addonIds, setAddonIds] = useState<string[]>([]);
@@ -137,7 +154,7 @@ export function BookingFlow({
   const [codeError, setCodeError] = useState("");
   const [checkingCode, setCheckingCode] = useState(false);
 
-  const today = useSyncExternalStore(subscribeNever, localToday, serverToday);
+  const today = useSyncExternalStore(subscribeNever, browserToday, serverToday);
   const [availability, setAvailability] = useState<DayAvailability | null>(null);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [config, setConfig] = useState<PaymentClientConfig | null>(null);
@@ -145,6 +162,13 @@ export function BookingFlow({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const cardRef = useRef<SquareCard | null>(null);
+  /**
+   * The id of the attempt to book on its way. Sent again with a retry that
+   * follows no answer at all (the connection dropped), so that a booking that
+   * was made and paid is found and not made again; any answer, and any step
+   * back, ends the attempt.
+   */
+  const requestIdRef = useRef<string | null>(null);
   const topRef = useRef<HTMLDivElement>(null);
 
   const steps = ORDER[mode];
@@ -152,6 +176,10 @@ export function BookingFlow({
   const { settings, rules } = catalog;
 
   const dayType: DayType = date ? (catalog.specialDates[date] ?? defaultDayType(date)) : "weekday";
+  /** How far ahead this kind of booking has to be made. A session with the photographer needs more notice. */
+  const leadHours = noticeHours(settings, photography);
+  /** The first date that can have a free time at all: whole days of notice from today. */
+  const firstDate = today ? addDays(today, Math.floor(leadHours / 24)) : "";
 
   // ── What can be chosen ─────────────────────────────────────────────────────
   /** The session packages of the chosen studio, shortest first. Only in the photography flow. */
@@ -219,13 +247,14 @@ export function BookingFlow({
 
   const availableAddons = catalog.addons.filter((a) => a.studioId === null || studioIds.includes(a.studioId));
   const studioOffer = multiStudioOffer(catalog);
+  const combinationError = studioCombinationError(catalog.studios, studioIds);
 
   // A code is tied to an email address, so it stops applying if the address changes.
   const normalizedEmail = email.trim().toLowerCase();
   const promo = applied && applied.email === normalizedEmail ? applied : null;
 
   const price: Quote | null = useMemo(() => {
-    if (studioIds.length === 0 || duration <= 0) return null;
+    if (studioIds.length === 0 || duration <= 0 || combinationError) return null;
     if (photography && !session) return null;
     try {
       return quote({
@@ -238,7 +267,7 @@ export function BookingFlow({
         addons: addonIds
           .filter((id) => availableAddons.some((a) => a.id === id))
           .map((addonId) => ({ addonId, quantity: 1 })),
-        promo: promo ? { kind: promo.kind, value: promo.value } : null,
+        promo,
         photoPackage: session ? { priceCents: session.priceCents } : null,
       });
     } catch {
@@ -246,7 +275,7 @@ export function BookingFlow({
     }
     // availableAddons is derived from studioIds and the catalog.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [studioIds, dayType, duration, rules, settings.multiStudioPercent, catalog.addons, addonIds, promo, photography, session]);
+  }, [studioIds, dayType, duration, rules, settings.multiStudioPercent, catalog.addons, addonIds, promo, photography, session, combinationError]);
 
   const needsCard = price !== null && price.totalCents > 0;
 
@@ -324,7 +353,7 @@ export function BookingFlow({
       const data = (await response.json().catch(() => ({}))) as {
         ok?: boolean;
         message?: string;
-        promo?: { code: string; kind: PromoKind; value: number } | null;
+        promo?: Omit<AppliedCode, "email"> | null;
       };
       if (response.ok && data.ok && data.promo) {
         setApplied({ ...data.promo, email: normalizedEmail });
@@ -341,6 +370,7 @@ export function BookingFlow({
 
   // ── Navigation ─────────────────────────────────────────────────────────────
   function go(index: number, options: { refetch?: boolean } = {}) {
+    requestIdRef.current = null;
     setError("");
     setStepIndex(index);
     // Availability is read fresh whenever the customer reaches a step that shows it.
@@ -361,6 +391,7 @@ export function BookingFlow({
   }
 
   function toggleStudio(id: string) {
+    setError("");
     if (photography) {
       // A session is in one studio: choosing another replaces the choice.
       setStudioIds([id]);
@@ -376,7 +407,7 @@ export function BookingFlow({
   }
 
   function chooseDate(value: string) {
-    setDate(value);
+    setDateInput(value);
     setStart(null);
     setAvailability(null);
     if (mode === "time") setStudioIds([]);
@@ -396,7 +427,7 @@ export function BookingFlow({
   function validate(current: Step): string {
     switch (current) {
       case "studios":
-        return studioIds.length === 0 ? "Please select at least one studio." : "";
+        return studioIds.length === 0 ? "Please select at least one studio." : (combinationError ?? "");
       case "when":
         if (!date) return "Please select a date.";
         if (!duration) return "Please select a duration.";
@@ -405,7 +436,8 @@ export function BookingFlow({
         return start === null ? "Please select a time." : "";
       case "details":
         if (name.trim().length < 2) return "Please enter your name.";
-        if (!/^\S+@\S+\.\S+$/.test(email.trim())) return "Please enter a valid email address.";
+        // The booking's own rule (src/lib/parse.ts): an address taken here is never refused at "Confirm & pay".
+        if (!EMAIL_RULE.test(email.trim())) return "Please enter a valid email address.";
         if (phone.trim().length < 7) return "Please enter your phone number.";
         if (!terms) return "Please agree to the studio policies to continue.";
         return "";
@@ -460,6 +492,7 @@ export function BookingFlow({
           acceptTerms: true,
           paymentToken,
           expectedTotalCents: price.totalCents,
+          requestId: (requestIdRef.current ??= newRequestId()),
         }),
       });
       const data = (await response.json().catch(() => ({}))) as {
@@ -475,6 +508,8 @@ export function BookingFlow({
         navigate(`/booking/${data.ref}?t=${encodeURIComponent(data.manageToken)}`);
         return;
       }
+      // An answer: this attempt is over, and the next press is a new one. Unless it is still on its way.
+      if (data.code !== "in_progress") requestIdRef.current = null;
       if (data.code === "slot_taken") {
         setStart(null);
         go(steps.indexOf("time"), { refetch: true });
@@ -494,7 +529,10 @@ export function BookingFlow({
           : data.message || "Something went wrong. Please try again.",
       );
     } catch {
-      setError("Network error. Please check your connection and try again. If you are unsure whether the booking went through, check your email before retrying.");
+      // No answer at all: the attempt may have gone through. It keeps its id, so pressing again finds it if it did.
+      setError(
+        "We could not reach the studio's server, so we cannot tell whether your booking went through. Check your connection and press the button again: if it went through, you will see it, and your card is not charged twice.",
+      );
     } finally {
       if (!leaving) setSubmitting(false);
     }
@@ -543,10 +581,12 @@ export function BookingFlow({
         <div className="price-row price-discount">
           <span>
             {promo.kind === "percent"
-              ? `Code ${promo.code} (${promo.value}% off rental)`
+              ? `Code ${promo.code} (${promo.value}% off ${photography ? "session" : "rental"})`
               : promo.kind === "free_hour"
                 ? `Free hour, code ${promo.code}`
-                : `Reschedule code ${promo.code}`}
+                : promo.source === "reschedule" || promo.source === undefined
+                  ? `Reschedule code ${promo.code}`
+                  : `Studio credit, code ${promo.code}`}
           </span>
           <span>{formatCents(-price.promoDiscountCents)}</span>
         </div>
@@ -646,7 +686,7 @@ export function BookingFlow({
               ? "Your session takes place in one studio. The price of a session includes the studio."
               : mode === "time" && start !== null
                 ? `${longDateLabel(date)}, ${minutesToLabel(start)} – ${minutesToLabel(start + duration)}. Choose one or more.`
-                : "Choose one studio, or any combination for the same time."}
+                : "Choose one studio or a bundle for the same time."}
           </p>
           {mode === "time" && loadingSlots && <p>Checking availability…</p>}
           <div className="studio-selector">
@@ -691,7 +731,11 @@ export function BookingFlow({
               );
             })}
           </div>
-          {studioOffer && !photography && <p style={{ fontSize: ".85rem" }}>Booking several studios together: {studioOffer}.</p>}
+          {!photography && (
+            <p style={{ fontSize: ".85rem" }}>
+              Paris is included in every bundle. {studioOffer && `${studioOffer}.`}
+            </p>
+          )}
           {actions(nextLabelFor("studios"))}
         </div>
       )}
@@ -702,8 +746,8 @@ export function BookingFlow({
           <h3 style={{ fontSize: "1.6rem", marginBottom: ".5rem" }}>{photography ? "Select date & session" : "Select date & duration"}</h3>
           <p className="text-muted mb-3">
             {mode === "studio" && chosenNames ? `${chosenNames}. ` : ""}
-            {settings.minLeadHours > 0
-              ? `Bookings open ${count(settings.minLeadHours, "hour")} to ${count(settings.maxAdvanceDays, "day")} ahead.`
+            {leadHours > 0
+              ? `${photography ? "Sessions" : "Bookings"} open ${hoursInWords(leadHours)} to ${count(settings.maxAdvanceDays, "day")} ahead.`
               : `Bookings open up to ${count(settings.maxAdvanceDays, "day")} ahead.`}
           </p>
           <div className="form-grid">
@@ -715,8 +759,8 @@ export function BookingFlow({
                 id="booking-date"
                 type="date"
                 className="form-control"
-                value={date}
-                min={today || undefined}
+                value={dateInput}
+                min={firstDate || undefined}
                 max={today ? addDays(today, settings.maxAdvanceDays) : undefined}
                 onChange={(event) => chooseDate(event.target.value)}
               />
@@ -838,9 +882,11 @@ export function BookingFlow({
                     ? "That date has already passed."
                     : availability.problem === "too_far"
                       ? `Bookings open ${count(settings.maxAdvanceDays, "day")} ahead.`
-                      : mode === "studio" && studioIds.length > 1
-                        ? "These studios are not free together on this date. Try another day, or fewer studios."
-                        : "No times are available on this date. Please try another day."}
+                      : firstDate && date < firstDate
+                        ? `${photography ? "Photography sessions" : "Bookings"} are made at least ${hoursInWords(leadHours)} ahead. Please choose a later date.`
+                        : mode === "studio" && studioIds.length > 1
+                          ? "These studios are not free together on this date. Try another day, or fewer studios."
+                          : "No times are available on this date. Please try another day."}
                 </div>
               )}
             </>
@@ -862,6 +908,7 @@ export function BookingFlow({
                 id="customer-name"
                 className="form-control"
                 autoComplete="name"
+                maxLength={120}
                 value={name}
                 onChange={(event) => setName(event.target.value)}
               />
@@ -872,7 +919,7 @@ export function BookingFlow({
               </label>
               <input
                 id="customer-email"
-                type="email"
+                {...EMAIL_FIELD}
                 className="form-control"
                 autoComplete="email"
                 value={email}
@@ -888,6 +935,7 @@ export function BookingFlow({
                 type="tel"
                 className="form-control"
                 autoComplete="tel"
+                maxLength={40}
                 value={phone}
                 onChange={(event) => setPhone(event.target.value)}
               />
@@ -921,12 +969,14 @@ export function BookingFlow({
                       )
                     }
                   />
-                  <span>
-                    <strong>{addon.name}</strong>
-                    <br />
-                    {addon.description}
+                  {/* The name and its price on one line, which puts the price under the name when both do not fit; the description below. */}
+                  <span className="addon-text">
+                    <span className="addon-head">
+                      <strong>{addon.name}</strong>
+                      <span className="addon-price">{formatCents(addon.priceCents)}</span>
+                    </span>
+                    {addon.description && <span className="addon-description">{addon.description}</span>}
                   </span>
-                  <span className="addon-price">{formatCents(addon.priceCents)}</span>
                 </label>
               ))}
             </div>
@@ -950,7 +1000,7 @@ export function BookingFlow({
                 <input
                   id="promo-code"
                   className="form-control"
-                  placeholder="Loyalty or reschedule code"
+                  placeholder={photography ? "Photography code" : "Discount, reward or credit code"}
                   autoCapitalize="characters"
                   autoComplete="off"
                   value={codeInput}

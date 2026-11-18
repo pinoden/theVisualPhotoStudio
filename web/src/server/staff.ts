@@ -1,6 +1,7 @@
 import { and, asc, eq, gte, inArray, lt } from "drizzle-orm";
 import { bookingAddons, bookings, staffShifts, studioHolds, studios } from "@/db/schema";
 import type { DbLike } from "@/db/client";
+import { can } from "@/lib/abilities";
 import { labelOf, type LabelKey } from "@/lib/domain/labels";
 import { isIsoDate, type IsoDate } from "@/lib/domain/time";
 import type { AuthUser } from "./auth";
@@ -45,8 +46,9 @@ export async function listShiftDays(db: DbLike, userId: string, from: IsoDate): 
 export async function canViewDay(db: DbLike, viewer: AuthUser, date: string): Promise<boolean> {
   if (!isIsoDate(date)) return false;
   if (viewer.role === "owner") return true;
+  // A manager sees every day, and so does an attendant once the owners allow it. Otherwise: their assigned days.
+  if (can(viewer, "seeAllDays", await loadSettings(db))) return true;
   if (viewer.role !== "staff") return false;
-  if ((await loadSettings(db)).staffSeesAllDays) return true;
   const rows = await db
     .select({ day: staffShifts.day })
     .from(staffShifts)
@@ -65,7 +67,7 @@ export async function getDaySheet(db: DbLike, viewer: AuthUser, date: string): P
   if (!(await canViewDay(db, viewer, date))) return { ok: false, reason: "forbidden" };
 
   const settings = await loadSettings(db);
-  const showContact = viewer.role === "owner" || settings.staffSeesContact;
+  const showContact = can(viewer, "seeContact", settings);
   const { start, end } = dayBoundsUtc(date);
   const rows = await db
     .select()

@@ -1,28 +1,39 @@
 import { and, asc, eq, lt, sql } from "drizzle-orm";
 import { bookings, photographerHours, photographers } from "@/db/schema";
 import { queryRows, type DbLike } from "@/db/client";
-import type { StudioDay } from "@/lib/domain/availability";
+import { noticeHours, type StudioDay } from "@/lib/domain/availability";
 import { daysBetween, isIsoDate, isoWeekday, type DayType, type IsoDate } from "@/lib/domain/time";
 import { dayTypeFor, type Catalog } from "./catalog";
 import { releaseHolds } from "./holds";
-import { dayBoundsUtc, localDateOf, localMinuteOn, localMinuteOnFloor } from "./tz";
+import { giveBackUnmade } from "./promos";
+import { clockChangeOn, dayBoundsUtc, localDateOf, localMinuteOn, localMinuteOnFloor } from "./tz";
 
 /**
- * Free the slots of bookings whose payment never completed. Runs before every
- * availability read and every booking attempt, so no scheduler is needed.
+ * Free the slots of bookings whose payment never completed (the server
+ * stopped while the card was answering), and give back the codes they spent:
+ * the booking was never made. Runs before every availability read and every
+ * booking attempt, so no scheduler is needed.
  */
 export async function releaseExpiredHolds(db: DbLike, now: Date): Promise<number> {
-  const expired = await db
-    .update(bookings)
-    .set({ status: "expired" })
-    .where(and(eq(bookings.status, "pending_payment"), lt(bookings.holdExpiresAt, now)))
-    .returning({ id: bookings.id });
-  if (expired.length === 0) return 0;
-  await releaseHolds(
-    db,
-    expired.map((b) => b.id),
-  );
-  return expired.length;
+  return db.transaction(async (tx) => {
+    const expired = await tx
+      .update(bookings)
+      .set({ status: "expired" })
+      .where(and(eq(bookings.status, "pending_payment"), lt(bookings.holdExpiresAt, now)))
+      .returning({
+        id: bookings.id,
+        promoCodeId: bookings.promoCodeId,
+        promoDiscountCents: bookings.promoDiscountCents,
+        creditAppliedCents: bookings.creditAppliedCents,
+      });
+    if (expired.length === 0) return 0;
+    await releaseHolds(
+      tx,
+      expired.map((b) => b.id),
+    );
+    for (const booking of expired) await giveBackUnmade(tx, booking);
+    return expired.length;
+  });
 }
 
 export type WindowProblem = "invalid_date" | "past" | "too_far";
@@ -117,9 +128,16 @@ async function loadPhotographerDay(
         end: localMinuteOn(new Date(hold.end_at), date),
       }))
       .filter((span) => span.end > span.start)
+      .concat(clockChange(date))
       .sort((a, b) => a.start - b.start),
     anyStart: true,
   };
+}
+
+/** The hour the clocks skip or repeat on `date`, as taken time; nothing on any other day. */
+function clockChange(date: IsoDate): { start: number; end: number }[] {
+  const change = clockChangeOn(date);
+  return change ? [change] : [];
 }
 
 /** Opening hours and taken time for every active studio on one date. */
@@ -130,23 +148,29 @@ export async function loadDayAvailability(
   now: Date,
   options: AvailabilityOptions = {},
 ): Promise<DayAvailability> {
-  const window = bookingWindow(date, now, options.asAdmin ? { ...catalog.settings, minLeadHours: 0 } : catalog.settings);
+  // The notice customers give: none for an administrator, and longer for a session with the photographer.
+  const minLeadHours = options.asAdmin ? 0 : noticeHours(catalog.settings, Boolean(options.withPhotographer));
+  const window = bookingWindow(date, now, { ...catalog.settings, minLeadHours });
   const exclude = options.excludeBookingId ?? null;
   if (window.problem === "invalid_date") {
     return { date, dayType: "weekday", problem: window.problem, earliestStartMinute: 1440, days: [] };
   }
 
+  // A date that cannot be booked (past, or beyond the horizon) is answered with its problem, and its taken time is not
+  // read: nothing is offered on it, and a date far enough ahead (9999-12-31) ends in a year the database cannot read.
   const { start, end } = dayBoundsUtc(date);
-  const holds = await queryRows<{ studio_id: string; start_at: string | Date; end_at: string | Date }>(
-    db,
-    sql`
-      select studio_id, lower(occupied) as start_at, upper(occupied) as end_at
-      from studio_holds
-      where active
-        and occupied && tstzrange(${start.toISOString()}::timestamptz, ${end.toISOString()}::timestamptz, '[)')
-        and (${exclude}::uuid is null or booking_id is distinct from ${exclude}::uuid)
-    `,
-  );
+  const holds = window.problem
+    ? []
+    : await queryRows<{ studio_id: string; start_at: string | Date; end_at: string | Date }>(
+        db,
+        sql`
+          select studio_id, lower(occupied) as start_at, upper(occupied) as end_at
+          from studio_holds
+          where active
+            and occupied && tstzrange(${start.toISOString()}::timestamptz, ${end.toISOString()}::timestamptz, '[)')
+            and (${exclude}::uuid is null or booking_id is distinct from ${exclude}::uuid)
+        `,
+      );
 
   const weekday = isoWeekday(date);
   const days: StudioDay[] = catalog.studios.map((studio) => {
@@ -162,7 +186,9 @@ export async function loadDayAvailability(
           start: localMinuteOnFloor(new Date(hold.start_at), date),
           end: localMinuteOn(new Date(hold.end_at), date),
         }))
-        .filter((span) => span.end > span.start),
+        .filter((span) => span.end > span.start)
+        .concat(clockChange(date))
+        .sort((a, b) => a.start - b.start),
     };
   });
 
@@ -172,6 +198,6 @@ export async function loadDayAvailability(
     problem: window.problem,
     earliestStartMinute: window.earliestStartMinute,
     days,
-    ...(options.withPhotographer ? { photographer: await loadPhotographerDay(db, catalog, date, exclude) } : {}),
+    ...(options.withPhotographer && !window.problem ? { photographer: await loadPhotographerDay(db, catalog, date, exclude) } : {}),
   };
 }

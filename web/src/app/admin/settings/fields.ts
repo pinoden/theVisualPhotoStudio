@@ -1,0 +1,43 @@
+import type { NumberSettingKey } from "@/server/settings";
+
+/** The numbers of the Settings page, in its groups, with the words the page shows for each. */
+export const SETTING_GROUPS: { title: string; fields: { key: NumberSettingKey; label: string; help: string }[] }[] = [
+  {
+    title: "Booking",
+    fields: [
+      { key: "minLeadHours", label: "Minimum notice (hours)", help: "How far ahead a booking must be made." },
+      { key: "maxAdvanceDays", label: "Booking horizon (days)", help: "How far ahead the calendar is open." },
+      { key: "photoMinLeadHours", label: "Minimum notice for photography (hours)", help: "336 is two weeks. A session with the photographer cannot be booked closer than this." },
+      { key: "slotIncrementMinutes", label: "Start times every (minutes)", help: "15 offers 9:00, 9:15, 9:30 and so on." },
+      { key: "holdMinutes", label: "Hold while paying (minutes)", help: "How long a slot is kept for a customer at checkout." },
+    ],
+  },
+  {
+    title: "Cancelling and rescheduling",
+    fields: [
+      { key: "refundWindowHours", label: "Refund window (hours before start)", help: "336 is 14 days. Earlier cancellations are refunded automatically." },
+      { key: "photoRefundWindowHours", label: "Refund window for photography (hours before start)", help: "336 is 14 days." },
+      { key: "refundFeePercent", label: "Processing fee kept (%)", help: "0 refunds in full." },
+      { key: "rescheduleCutoffHours", label: "Reschedule cut-off (hours before start)", help: "After this, customers must call." },
+      { key: "maxReschedules", label: "Reschedules allowed per booking", help: "0 switches reschedule codes off." },
+      { key: "creditValidDays", label: "Reschedule code valid for (days)", help: "" },
+    ],
+  },
+  {
+    title: "Loyalty: a free hour for regular visitors",
+    fields: [
+      { key: "loyaltyVisits", label: "Visits that earn a free hour", help: "Counted on separate days. A visit made with a free hour does not count." },
+      { key: "loyaltyValidDays", label: "Free hour valid for (days)", help: "" },
+      { key: "loyaltyDelayHours", label: "A visit counts after (hours)", help: "Time after the visit ends, so staff can mark a no-show first." },
+    ],
+  },
+];
+
+/** What the Settings page calls a number, for a message about it. */
+export function settingLabel(key: NumberSettingKey): string {
+  for (const group of SETTING_GROUPS) {
+    const field = group.fields.find((entry) => entry.key === key);
+    if (field) return field.label;
+  }
+  return key;
+}

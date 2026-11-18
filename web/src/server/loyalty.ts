@@ -1,5 +1,5 @@
-import { and, eq, sql } from "drizzle-orm";
-import { bookings, promoCodes } from "@/db/schema";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { bookings, loyaltyLedger, promoCodes } from "@/db/schema";
 import type { DbLike } from "@/db/client";
 import { loyaltyStanding, type LoyaltyStanding } from "@/lib/domain/loyalty";
 import { freeHourEmail, queueEmail } from "./email";
@@ -23,30 +23,63 @@ export const FREE_HOUR_MINUTES = 60;
 
 const DAY = 86_400_000;
 
+/** The stamps an administrator added or took away for a customer, in total. */
+export async function stampAdjustmentOf(db: DbLike, email: string): Promise<number> {
+  const [row] = await db
+    .select({ total: sql<number>`coalesce(sum(${loyaltyLedger.stamps}), 0)::int` })
+    .from(loyaltyLedger)
+    .where(and(eq(loyaltyLedger.email, email.trim().toLowerCase()), eq(loyaltyLedger.kind, "stamps")));
+  return row.total;
+}
+
 /**
- * Where a customer stands: the days that count, and the free hours earned.
- * Customers are told apart by email address. Only completed visits count, so
- * a cancelled booking or a no-show adds nothing.
+ * Where a customer stands: the days that count, the stamps an administrator
+ * changed by hand, and the free hours earned. Customers are told apart by
+ * email address. Only completed visits count, so a cancelled booking or a
+ * no-show adds nothing, and photography sessions do not count (the rule is in
+ * the domain function).
  */
 export async function loyaltyStandingOf(
   db: DbLike,
   email: string,
   settings: Pick<Settings, "loyaltyVisits">,
 ): Promise<LoyaltyStanding> {
+  const address = email.trim().toLowerCase();
   const rows = await db
-    .select({ id: bookings.id, startAt: bookings.startAt, codeKind: promoCodes.kind })
+    .select({ id: bookings.id, startAt: bookings.startAt, codeKind: promoCodes.kind, photographerId: bookings.photographerId })
     .from(bookings)
     .leftJoin(promoCodes, eq(promoCodes.id, bookings.promoCodeId))
-    .where(and(eq(bookings.customerEmail, email.trim().toLowerCase()), eq(bookings.status, "completed")));
+    .where(and(eq(bookings.customerEmail, address), eq(bookings.status, "completed")));
   return loyaltyStanding(
     rows.map((row) => ({
       bookingId: row.id,
       day: localDateOf(row.startAt),
       startAt: row.startAt.getTime(),
       usedFreeHour: row.codeKind === "free_hour",
+      photography: row.photographerId !== null,
     })),
     settings.loyaltyVisits,
+    await stampAdjustmentOf(db, address),
   );
+}
+
+export interface StampChange {
+  at: string;
+  /** Stamps added (positive) or taken away (negative). */
+  stamps: number;
+  reason: string;
+  /** The administrator who made the change. */
+  actor: string;
+}
+
+/** The changes an administrator made to a customer's stamps by hand, newest first. */
+export async function listStampChanges(db: DbLike, email: string): Promise<StampChange[]> {
+  const rows = await db
+    .select()
+    .from(loyaltyLedger)
+    .where(and(eq(loyaltyLedger.email, email.trim().toLowerCase()), eq(loyaltyLedger.kind, "stamps")))
+    .orderBy(desc(loyaltyLedger.createdAt));
+  return rows.map((row) => ({ at: row.createdAt.toISOString(), stamps: row.stamps, reason: row.reason, actor: row.actor }));
 }
 
 /** Free hours ever sent to this address for its visits. Used, expired and cancelled ones count too. */
@@ -65,8 +98,9 @@ async function freeHoursSentTo(db: DbLike, email: string): Promise<number> {
  * Safe to repeat, and safe to run twice at once. What is owed is the number
  * earned less the number ever sent, so a visit that stops counting later (a
  * late no-show) cannot lead to a second reward for the same five days. And
- * each free hour belongs to the visit that completed it, of which the
- * database allows one, so two runs cannot both send it.
+ * each free hour is numbered (a customer's first, second, third), and the
+ * database allows each number once per customer, so two runs cannot both
+ * send it.
  */
 export async function sendEarnedFreeHours(
   tx: DbLike,
@@ -76,6 +110,29 @@ export async function sendEarnedFreeHours(
   const email = customer.email.trim().toLowerCase();
   const standing = await loyaltyStandingOf(tx, email, deps.settings);
   const alreadySent = await freeHoursSentTo(tx, email);
+  // A free hour that visits of test mode helped to earn (a server in test mode beside the live one) is test mode's: a
+  // code is of its booking's kind of money (`moneyKindOfCode`), so such a visit stands for it, a real booking refuses
+  // it, and clearing test mode removes it. Which visits a free hour counted: the days the milestones are taken from.
+  const visits = deps.settings.loyaltyVisits;
+  const kinds = new Map(
+    standing.days.length > 0
+      ? (
+          await tx
+            .select({ id: bookings.id, kind: bookings.moneyKind })
+            .from(bookings)
+            .where(inArray(bookings.id, standing.days.map((day) => day.bookingId)))
+        ).map((row) => [row.id, row.kind])
+      : [],
+  );
+  const testVisitOf = (index: number) =>
+    standing.days
+      .slice(Math.max(0, index * visits - standing.adjustment), Math.max(0, (index + 1) * visits - standing.adjustment))
+      .find((day) => kinds.get(day.bookingId) === "test");
+  // The visit that completed it, as always; a visit of test mode in its place only when the one that completed it is real.
+  const originOf = (index: number) => {
+    const milestone = standing.milestones[index];
+    return milestone && kinds.get(milestone) === "live" ? (testVisitOf(index)?.bookingId ?? milestone) : milestone;
+  };
 
   let sent = 0;
   for (let index = alreadySent; index < standing.earned; index++) {
@@ -86,8 +143,10 @@ export async function sendEarnedFreeHours(
       source: "loyalty",
       email,
       expiresAt,
-      originBookingId: standing.milestones[index],
+      originBookingId: originOf(index),
+      loyaltySeq: index + 1,
       note: `Free hour for ${deps.settings.loyaltyVisits} visits`,
+      issuedAt: deps.now,
     });
     if (!promo) continue; // another run sent this one
     await queueEmail(

@@ -1,11 +1,11 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
-import { bookings, settings, staffShifts, studioHolds } from "@/db/schema";
+import { addons, bookingAddons, bookings, settings, staffShifts, studioHolds } from "@/db/schema";
 import { createAdminBooking, getAppointment, moveBooking, moveOptions, setLabel } from "./appointments";
 import type { AuthUser } from "./auth";
 import { loadCalendar } from "./calendar";
 import { loadCatalog } from "./catalog";
-import { cancelBooking, getManageOptions } from "./manage";
+import { cancelBooking, getManageChoices, getManageOptions } from "./manage";
 import { getDaySheet } from "./staff";
 import { completeVisits } from "./tasks";
 import { BASE_URL, createTestWorld, expectOk, h, hoursAfter, NEAR, NOW, type TestWorld } from "./testing";
@@ -179,21 +179,24 @@ describe("the two levels of the admin", () => {
     ]);
   });
 
-  it("gives staff the appointment without contact details or prices, and lets them change its label", async () => {
+  it("gives staff the appointment with contact details and without prices, and lets them change its label", async () => {
     const appointment = (await getAppointment(world.db, sam, morningRef, NOW))!;
     expect(appointment).toMatchObject({
       customerName: "Bob Brown",
-      customerPhone: null,
-      customerEmail: null,
+      customerPhone: "407-555-0111", // shown by default since the owner's answer of 2026-11-15
+      customerEmail: "bob@example.com",
       money: null,
       may: { setLabels: true, move: false },
     });
-    expect(JSON.stringify(appointment)).not.toContain("bob@example.com");
     expect(JSON.stringify(appointment)).not.toContain("7800");
+
+    await allow("staffSeesContact", false);
+    const hidden = (await getAppointment(world.db, sam, morningRef, NOW))!;
+    expect(hidden).toMatchObject({ customerPhone: null, customerEmail: null });
+    expect(JSON.stringify(hidden)).not.toContain("bob@example.com");
   });
 
   it("follows the owners' switches at once, with nothing redeployed", async () => {
-    await allow("staffSeesContact");
     await allow("staffSeesPrices");
     await allow("staffMovesBookings");
     expect(await getAppointment(world.db, sam, morningRef, NOW)).toMatchObject({
@@ -290,6 +293,21 @@ describe("moving a booking to a new time", () => {
     expect((await world.book({ studioIds: [world.ids.paris], startMinute: h(14), durationMinutes: 60 })).ok).toBe(true);
   });
 
+  it("lets the studio move a Blanche and Dayglow booking made before the bundle rule", async () => {
+    const booking = await row(morningRef);
+    // An existing Dayglow booking also held Blanche under the previous rules.
+    await world.db.execute(sql`
+      insert into studio_holds (studio_id, occupied, booking_id)
+      select ${world.ids.blanche}, occupied, booking_id from studio_holds where booking_id = ${booking.id}
+    `);
+
+    const options = expectOk(await moveOptions(world.db, owner, morningRef, NEXT_DAY, NOW));
+    expect(options.starts).toContain(h(14));
+    expect(await moveBooking(world.db, owner, morningRef, to(h(14), NEXT_DAY), NOW)).toMatchObject({ ok: true });
+    const holds = await world.db.select().from(studioHolds).where(eq(studioHolds.bookingId, booking.id));
+    expect(holds.map((hold) => hold.studioId)).toEqual(expect.arrayContaining([world.ids.blanche, world.ids.dayglow]));
+  });
+
   it("offers only the start times that are free for this booking", async () => {
     expectOk(await world.book({ studioIds: [world.ids.dayglow], startMinute: h(14), durationMinutes: 60 }));
     const options = await moveOptions(world.db, owner, morningRef, NEAR, NOW);
@@ -305,8 +323,26 @@ describe("moving a booking to a new time", () => {
     await moveBooking(world.db, owner, nextDayRef, to(h(14), "2026-12-09", true), NOW);
     expect(await row(nextDayRef)).toMatchObject({ rescheduledCount: 1 });
     const options = await getManageOptions(world.db, nextDayRef, { kind: "owner" }, NOW);
-    expect(options?.cancel).toMatchObject({ allowed: true, refundCents: 0, why: "rescheduled" });
+    // Moved, not made with a reschedule code: the client is told so, and why.
+    expect(options?.cancel).toMatchObject({ allowed: true, refundCents: 0, why: "moved" });
     expect(options?.reschedule).toEqual({ allowed: false, reason: "limit_reached" });
+    expect((await getManageChoices(world.db, nextDayRef, { kind: "owner" }, NOW))?.cancel.text).toBe(
+      "No refund is due, because this booking was moved at your request: a moved booking is not refunded.",
+    );
+    const [mail] = await world.emails("booking_moved");
+    expect(mail.body).toContain(
+      "As you asked for this change, it counts as your reschedule under the rental terms: if the booking is cancelled now, it is not refunded, and it cannot be moved again online.",
+    );
+  });
+
+  it("does not count against the client while moving is switched off, which the rental terms then do not mention", async () => {
+    await world.db.insert(settings).values({ key: "maxReschedules", value: 0 }).onConflictDoUpdate({ target: settings.key, set: { value: 0 } });
+    await moveBooking(world.db, owner, nextDayRef, to(h(14), "2026-12-09", true), NOW);
+    expect(await row(nextDayRef)).toMatchObject({ rescheduledCount: 0 });
+    // Still refunded as the terms say: 14 days or more ahead.
+    expect((await getManageOptions(world.db, nextDayRef, { kind: "owner" }, NOW))?.cancel).toMatchObject({ allowed: true, why: "refund" });
+    const [mail] = await world.emails("booking_moved");
+    expect(mail.body).not.toContain("counts as your reschedule");
   });
 
   it("is only for a booking that is still to come", async () => {
@@ -328,11 +364,11 @@ describe("a booking made in the admin for a client", () => {
     const made = expectOk(await createAdminBooking(world.db, owner, { ...request, studioIds: [world.ids.blanche] }, deps));
     expect(world.charges).toHaveLength(chargedBefore); // no card was charged for it
     const booking = await row(made.ref);
-    expect(booking).toMatchObject({ status: "confirmed", madeBy: "owner@studio.test", totalCents: 17600, customerEmail: "dana@example.com", termsAcceptedAt: null });
+    expect(booking).toMatchObject({ status: "confirmed", madeBy: "owner@studio.test", totalCents: 19000, customerEmail: "dana@example.com", termsAcceptedAt: null });
 
     const mail = (await world.emails("booking_confirmation")).at(-1)!;
     expect(mail.toEmail).toBe("dana@example.com");
-    expect(mail.body).toContain("To pay at the studio: $176");
+    expect(mail.body).toContain("To pay at the studio: $190");
     const appointment = (await getAppointment(world.db, owner, made.ref, NOW))!;
     expect(appointment.history).toEqual([
       { at: NOW.toISOString(), from: "new", to: "confirmed", actor: "owner@studio.test", note: "Booked in the admin for the client" },
@@ -341,6 +377,23 @@ describe("a booking made in the admin for a client", () => {
 
     // A customer cannot book the same afternoon online: they have to give a day's notice.
     expect(await world.book({ studioIds: [world.ids.paris], date: TODAY, startMinute: h(14) })).toMatchObject({ ok: false });
+  });
+
+  it("takes the add-ons the client wants, at their price, to be paid at the studio", async () => {
+    const offered = await world.db.select().from(addons);
+    const people = offered.find((addon) => addon.kind === "people" && addon.studioId === null)!;
+    const pet = offered.find((addon) => addon.kind === "pet")!; // for bookings that include Dayglow
+    const made = expectOk(
+      await createAdminBooking(world.db, owner, { ...request, studioIds: [world.ids.dayglow], addons: [{ addonId: people.id, quantity: 1 }, { addonId: pet.id, quantity: 1 }] }, deps),
+    );
+    const booking = await row(made.ref);
+    expect(booking.addonsCents).toBe(people.priceCents + pet.priceCents);
+    expect(booking.totalCents).toBe(16400 + people.priceCents + pet.priceCents);
+    const kinds = (await world.db.select().from(bookingAddons).where(eq(bookingAddons.bookingId, booking.id))).map((line) => line.kind).sort();
+    expect(kinds).toEqual(["people", "pet"]);
+    expect((await world.emails("booking_confirmation")).at(-1)!.body).toContain(`To pay at the studio: $${(16400 + people.priceCents + pet.priceCents) / 100}`);
+    // An add-on of another studio is not for this booking.
+    expect(await createAdminBooking(world.db, owner, { ...request, studioIds: [world.ids.paris], startMinute: h(17), durationMinutes: 60, addons: [{ addonId: pet.id, quantity: 1 }] }, deps)).toMatchObject({ ok: false });
   });
 
   it("obeys the same availability rules as a booking made online", async () => {
@@ -353,6 +406,16 @@ describe("a booking made in the admin for a client", () => {
     expect(await again(h(9))).toMatchObject({ ok: false, code: "slot_taken" }); // earlier today: already past
     expect(await again(h(16) + 15)).toMatchObject({ ok: true }); // 15 minutes after
     expect(await again(h(15), world.ids.paris)).toMatchObject({ ok: true }); // another studio's calendar
+  });
+
+  it("refuses a new Blanche and Dayglow booking without Paris even in the admin", async () => {
+    const studioIds = [world.ids.blanche, world.ids.dayglow];
+    expect(await createAdminBooking(world.db, owner, { ...request, studioIds }, deps)).toMatchObject({
+      ok: false,
+      code: "invalid_price",
+      message: "To book Blanche and Dayglow together, add Paris or choose a different combination.",
+    });
+    expect(await createAdminBooking(world.db, owner, { ...request, studioIds: [...studioIds, world.ids.paris] }, deps)).toMatchObject({ ok: true });
   });
 
   it("is the owners' to do, and staff's only once the owners switch it on", async () => {

@@ -5,12 +5,14 @@ import { redirect } from "next/navigation";
 import { getDb } from "@/db/client";
 import { isAddonKind } from "@/lib/addon-kinds";
 import { dollarsToCents, formText, hhmmToMinutes, intInRange } from "@/lib/parse";
-import { STAFF_ABILITY_KEYS } from "@/lib/staff-abilities";
+import { ADMIN_LEVELS, ATTENDANT_SWITCH_KEYS, isAdminLevel, MANAGER_SWITCH_KEYS } from "@/lib/abilities";
 import { formatCents } from "@/lib/domain/pricing";
+import { durationLabel } from "@/lib/domain/time";
 import {
   addStaff,
   createBlock,
   createManualCode,
+  PRICE_MAX_CENTS,
   removeBlock,
   removeStaff,
   saveAddon,
@@ -20,18 +22,27 @@ import {
   setAddonActive,
   setShift,
   setSpecialDate,
+  setStaffLevel,
   voidCode,
 } from "@/server/admin";
 import { CATALOG_TAG } from "@/server/cached";
 import { FREE_HOUR_MINUTES } from "@/server/loyalty";
-import { ownerCancelBooking, ownerRefund } from "@/server/manage";
+import { ownerCancelBooking, ownerRefund, recordRefundMadeInSquare, type RefundsState } from "@/server/manage";
+import { resolvePayments } from "@/server/payments";
 import { flushEmailsSoon, manageDeps } from "@/server/runtime";
-import { requireOwner } from "@/server/session";
-import { ACCESS_INSTRUCTIONS_MAX, saveAccessInstructions, saveSetting } from "@/server/settings";
+import { notFound } from "next/navigation";
+import { can, type Ability } from "@/lib/abilities";
+import { requireManager, requireOwner } from "@/server/session";
+import { ACCESS_INSTRUCTIONS_MAX, loadSettings, NUMBER_SETTING_RANGES, saveAccessInstructions, saveSetting, type NumberSettingKey } from "@/server/settings";
+import { settingLabel } from "./settings/fields";
+import { addStudioPhotos, moveStudioPhoto, removeStudioPhoto, setStudioFloorPlan } from "@/server/studio-photos";
+import { includedList } from "@/lib/studio-facts";
 
 /**
- * Everything the owner can change. Every action starts with `requireOwner`:
- * server actions can be called directly, so the page's own check is not enough.
+ * Everything the owners can change. Every action starts with `requireOwner`:
+ * server actions can be called directly, so the page's own check is not
+ * enough. Four of them (blocking time, cancelling and refunding) start with
+ * `requireAbility` instead, because the owners can give those to managers.
  * Each finishes by redirecting back with a short message in the address.
  */
 function done(path: string, notice: string): never {
@@ -44,6 +55,15 @@ function failed(path: string, error: string): never {
 
 const text = (formData: FormData, name: string) => formText(formData.get(name));
 
+/**
+ * For the few things here that a manager can be given: an owner, or a manager
+ * for whom the owners have switched `ability` on. Anyone else gets "not found".
+ */
+async function requireAbility(ability: Ability, next: string): Promise<void> {
+  const viewer = await requireManager(next);
+  if (!can(viewer, ability, await loadSettings(await getDb()))) notFound();
+}
+
 /** Where to return after a bookings action. Only the bookings list itself is accepted. */
 function bookingsBack(formData: FormData): string {
   const back = text(formData, "back");
@@ -54,20 +74,43 @@ function bookingsBack(formData: FormData): string {
 
 export async function addStaffAction(formData: FormData): Promise<void> {
   await requireOwner("/admin/staff");
-  const result = await addStaff(await getDb(), text(formData, "email"), text(formData, "name"));
+  const level = text(formData, "level") || "staff";
+  if (!isAdminLevel(level)) failed("/admin/staff", "Choose Studio Manager or Studio Attendant.");
+  const result = await addStaff(await getDb(), text(formData, "email"), text(formData, "name"), level);
   if (!result.ok) failed("/admin/staff", result.message);
-  done("/admin/staff", "Staff member added. They sign in with their email address.");
+  done("/admin/staff", `Staff member added as ${ADMIN_LEVELS[level]}. They sign in with their email address.`);
 }
 
-/** The owners' switches for the second level of the admin. A box that is not ticked switches the ability off. */
+/** Make an attendant a manager, or a manager an attendant. It applies at their next request. */
+export async function setStaffLevelAction(formData: FormData): Promise<void> {
+  await requireOwner("/admin/staff");
+  const level = text(formData, "level");
+  if (!isAdminLevel(level) || !(await setStaffLevel(await getDb(), text(formData, "userId"), level))) {
+    failed("/admin/staff", "That could not be changed.");
+  }
+  done("/admin/staff", `Saved: ${ADMIN_LEVELS[level]} from now on.`);
+}
+
+/** The owners' switches for attendants. A box that is not ticked switches the ability off. */
 export async function saveStaffAbilitiesAction(formData: FormData): Promise<void> {
   await requireOwner("/admin/staff");
   const db = await getDb();
-  for (const ability of STAFF_ABILITY_KEYS) {
+  for (const ability of ATTENDANT_SWITCH_KEYS) {
     if (!(await saveSetting(db, ability, formData.get(ability) !== null))) failed("/admin/staff", "That could not be saved.");
   }
   updateTag(CATALOG_TAG); // the settings travel with the catalog
-  done("/admin/staff", "Saved. It applies to every member of staff from now on.");
+  done("/admin/staff", "Saved. It applies to every Studio Attendant from now on.");
+}
+
+/** The owners' switches for managers. A box that is not ticked switches the ability off. */
+export async function saveManagerAbilitiesAction(formData: FormData): Promise<void> {
+  await requireOwner("/admin/staff");
+  const db = await getDb();
+  for (const ability of MANAGER_SWITCH_KEYS) {
+    if (!(await saveSetting(db, ability, formData.get(ability) !== null))) failed("/admin/staff", "That could not be saved.");
+  }
+  updateTag(CATALOG_TAG);
+  done("/admin/staff", "Saved. It applies to every Studio Manager from now on.");
 }
 
 export async function removeStaffAction(formData: FormData): Promise<void> {
@@ -98,9 +141,24 @@ export async function savePricesAction(formData: FormData): Promise<void> {
     if (value.trim() !== "" && priceCents === null) failed("/admin/prices", `"${value}" is not a valid price.`);
     changes.push({ dayType: match[1] as "weekday" | "weekend", durationMinutes: Number(match[2]), priceCents });
   }
+  // Checked whole before anything is saved, and saved together: a form is never half saved.
   for (const change of changes) {
-    if (!(await savePrice(db, { studioId, ...change }))) failed("/admin/prices", "A price could not be saved.");
+    if (change.priceCents !== null && change.priceCents > PRICE_MAX_CENTS) {
+      failed(
+        "/admin/prices",
+        `Not saved: the price for ${durationLabel(change.durationMinutes)} ${change.dayType === "weekday" ? "Mon–Fri" : "Sat–Sun"} is more than ${formatCents(PRICE_MAX_CENTS)}, the most a price can be. Nothing was changed.`,
+      );
+    }
   }
+  let saved = true;
+  try {
+    await db.transaction(async (tx) => {
+      for (const change of changes) if (!(await savePrice(tx, { studioId, ...change }))) throw new Error("A price was refused.");
+    });
+  } catch {
+    saved = false;
+  }
+  if (!saved) failed("/admin/prices", "The prices could not be saved, and none was changed. Check that each is an amount in dollars.");
   updateTag(CATALOG_TAG);
   done("/admin/prices", "Prices saved.");
 }
@@ -108,17 +166,25 @@ export async function savePricesAction(formData: FormData): Promise<void> {
 export async function addDurationAction(formData: FormData): Promise<void> {
   await requireOwner("/admin/prices");
   const minutes = intInRange(text(formData, "minutes"), 15, 1440);
+  if (minutes === null || minutes % 15 !== 0) failed("/admin/prices", "Enter the duration in minutes, from 15 to 1440, in steps of 15: 90 is an hour and a half.");
   const weekday = dollarsToCents(text(formData, "weekday"));
   const weekendRaw = text(formData, "weekend");
   const weekend = weekendRaw === "" ? weekday : dollarsToCents(weekendRaw);
-  if (minutes === null || weekday === null || weekend === null) {
-    failed("/admin/prices", "Enter a duration and a price. Durations are in steps of 15 minutes.");
-  }
+  if (weekday === null || weekend === null) failed("/admin/prices", "Enter each price as an amount in dollars, for example 88 or 88.50.");
+  if (weekday > PRICE_MAX_CENTS || weekend > PRICE_MAX_CENTS) failed("/admin/prices", `A price can be at most ${formatCents(PRICE_MAX_CENTS)}.`);
   const db = await getDb();
   const studioId = text(formData, "studioId");
-  const a = await savePrice(db, { studioId, dayType: "weekday", durationMinutes: minutes, priceCents: weekday });
-  const b = await savePrice(db, { studioId, dayType: "weekend", durationMinutes: minutes, priceCents: weekend });
-  if (!a || !b) failed("/admin/prices", "That duration could not be added. Durations are in steps of 15 minutes.");
+  let added = true;
+  try {
+    await db.transaction(async (tx) => {
+      const a = await savePrice(tx, { studioId, dayType: "weekday", durationMinutes: minutes, priceCents: weekday });
+      const b = await savePrice(tx, { studioId, dayType: "weekend", durationMinutes: minutes, priceCents: weekend });
+      if (!a || !b) throw new Error("A price was refused.");
+    });
+  } catch {
+    added = false;
+  }
+  if (!added) failed("/admin/prices", "That duration could not be added: the studio was not found.");
   updateTag(CATALOG_TAG);
   done("/admin/prices", "Duration added.");
 }
@@ -175,7 +241,7 @@ export async function saveHoursAction(formData: FormData): Promise<void> {
 }
 
 export async function createBlockAction(formData: FormData): Promise<void> {
-  await requireOwner("/admin/hours");
+  await requireAbility("blockTime", "/admin/hours");
   const startMinute = hhmmToMinutes(text(formData, "start"));
   const endMinute = hhmmToMinutes(text(formData, "end"));
   if (startMinute === null || endMinute === null) failed("/admin/hours", "Enter a start and an end time.");
@@ -191,34 +257,61 @@ export async function createBlockAction(formData: FormData): Promise<void> {
 }
 
 export async function removeBlockAction(formData: FormData): Promise<void> {
-  await requireOwner("/admin/hours");
+  await requireAbility("blockTime", "/admin/hours");
   await removeBlock(await getDb(), text(formData, "blockId"));
   done("/admin/hours", "Block removed.");
 }
 
 // ── Bookings ─────────────────────────────────────────────────────────────────
 
-const refundNote = (refund: "sent" | "pending" | "none", cents: number) =>
+const refundNote = (refund: RefundsState, cents: number) =>
   refund === "none"
     ? "No refund."
     : refund === "sent"
       ? `${formatCents(cents)} refunded to the card.`
-      : `${formatCents(cents)} refund recorded; it has not gone through yet and will be retried.`;
+      : refund === "waiting"
+        ? `${formatCents(cents)} refund recorded, not sent: ${resolvePayments().provider ? "the card processor set up now cannot send it" : "no card processor is set up now"}, so it waits, listed on the overview with the reason.`
+        : `${formatCents(cents)} refund recorded; it has not gone through yet and will be retried.`;
 
 export async function ownerCancelAction(formData: FormData): Promise<void> {
   const back = bookingsBack(formData);
-  await requireOwner("/admin/bookings");
+  await requireAbility("refund", "/admin/bookings");
   const refundCents = dollarsToCents(text(formData, "refund") || "0");
   if (refundCents === null) failed(back, "Enter the refund as an amount, for example 88 or 88.50.");
-  const result = await ownerCancelBooking(await getDb(), text(formData, "ref"), { refundCents }, await manageDeps());
+  const seen = Number(text(formData, "seenCard"));
+  const result = await ownerCancelBooking(
+    await getDb(),
+    text(formData, "ref"),
+    { refundCents, ...(Number.isInteger(seen) && text(formData, "seenCard") !== "" ? { seenCardCents: seen } : {}) },
+    await manageDeps(),
+  );
   flushEmailsSoon();
   if (!result.ok) failed(back, result.message);
-  done(back, `Booking cancelled. ${refundNote(result.refund, result.refundCents)}`);
+  const atStudio = result.atStudioCents
+    ? ` ${formatCents(result.atStudioCents)} of what was paid at the studio can be given back: give back what is owed by hand, then record it on the appointment's page.`
+    : "";
+  const unseen =
+    result.unseenLink === "foreign"
+      ? " Its payment link was made by another card processor than the one set up now, which the site cannot ask: look the link up there, then close it on the appointment's page."
+      : result.unseenLink === "none"
+        ? " No card processor is set up now, so the site could not ask whether its payment link was paid: look the link up in Square, then close it on the appointment's page."
+        : result.unseenLink === "unseen"
+          ? " The card processor could not say whether its payment link was paid: if it was, that payment is refunded to the card in full once the processor tells the site. Look the link up in Square."
+          : "";
+  done(back, `Booking cancelled. ${refundNote(result.refund, result.refundCents)}${atStudio}${unseen}`);
+}
+
+/** The owner refunded a payment by hand in Square after the site could not: the site stops trying, and counts it as made. */
+export async function recordRefundMadeInSquareAction(formData: FormData): Promise<void> {
+  const owner = await requireOwner("/admin");
+  const result = await recordRefundMadeInSquare(await getDb(), owner, text(formData, "refundId"), new Date());
+  if (!result.ok) failed("/admin", result.message);
+  done("/admin", "Recorded: the refund was made in Square. The site no longer tries to make it.");
 }
 
 export async function ownerRefundAction(formData: FormData): Promise<void> {
   const back = bookingsBack(formData);
-  await requireOwner("/admin/bookings");
+  await requireAbility("refund", "/admin/bookings");
   const amountCents = dollarsToCents(text(formData, "amount"));
   if (amountCents === null) failed(back, "Enter the refund as an amount, for example 25 or 25.50.");
   const result = await ownerRefund(
@@ -252,7 +345,7 @@ export async function createCodeAction(formData: FormData): Promise<void> {
   }
   const result = await createManualCode(
     await getDb(),
-    { kind, value, email: text(formData, "email") || null, validDays, maxUses, note: text(formData, "note") },
+    { kind, value, email: text(formData, "email") || null, validDays, maxUses, note: text(formData, "note"), photographyOnly: chosen === "photo_percent" },
     new Date(),
   );
   if (!result.ok) failed("/admin/codes", result.message);
@@ -260,28 +353,14 @@ export async function createCodeAction(formData: FormData): Promise<void> {
 }
 
 export async function voidCodeAction(formData: FormData): Promise<void> {
-  await requireOwner("/admin/codes");
-  await voidCode(await getDb(), text(formData, "codeId"), new Date());
+  const owner = await requireOwner("/admin/codes");
+  await voidCode(await getDb(), text(formData, "codeId"), new Date(), owner.email);
   done("/admin/codes", "Code cancelled. It can no longer be used.");
 }
 
 // ── Settings ─────────────────────────────────────────────────────────────────
 
-const NUMBER_SETTINGS = [
-  "slotIncrementMinutes",
-  "minLeadHours",
-  "maxAdvanceDays",
-  "holdMinutes",
-  "refundWindowHours",
-  "photoRefundWindowHours",
-  "refundFeePercent",
-  "rescheduleCutoffHours",
-  "maxReschedules",
-  "creditValidDays",
-  "loyaltyVisits",
-  "loyaltyValidDays",
-  "loyaltyDelayHours",
-] as const;
+const NUMBER_SETTINGS = Object.keys(NUMBER_SETTING_RANGES) as NumberSettingKey[];
 // What staff can do is set on the Staff page (saveStaffAbilitiesAction), not here.
 const SWITCH_SETTINGS = ["loyaltyEnabled"] as const;
 
@@ -291,14 +370,17 @@ export async function saveSettingsAction(formData: FormData): Promise<void> {
   const rejected: string[] = [];
   for (const key of NUMBER_SETTINGS) {
     const value = intInRange(text(formData, key), 0, 100000);
-    if (value === null || !(await saveSetting(db, key, value))) rejected.push(key);
+    if (value === null || !(await saveSetting(db, key, value))) {
+      const [min, max] = NUMBER_SETTING_RANGES[key];
+      rejected.push(`${settingLabel(key)} is a whole number from ${min} to ${max}`);
+    }
   }
   for (const key of SWITCH_SETTINGS) {
     if (!(await saveSetting(db, key, formData.get(key) !== null))) rejected.push(key);
   }
   updateTag(CATALOG_TAG);
   if (rejected.length > 0) {
-    failed("/admin/settings", `Not saved, value out of range: ${rejected.join(", ")}. Everything else was saved.`);
+    failed("/admin/settings", `Not saved: ${rejected.join("; ")}. Everything else was saved.`);
   }
   done("/admin/settings", "Settings saved.");
 }
@@ -332,10 +414,67 @@ export async function saveStudioDetailsAction(formData: FormData): Promise<void>
     description: text(formData, "description"),
     includedGuests,
     bufferMinutes,
+    facts: {
+      size: text(formData, "size"),
+      ceiling: text(formData, "ceiling"),
+      light: text(formData, "light"),
+      cyclorama: text(formData, "cyclorama"),
+      included: includedList(formText(formData.get("included"))),
+    },
   });
   if (!saved) failed("/admin/studios", "Not saved: the tagline or the description is too long.");
   updateTag(CATALOG_TAG);
   done("/admin/studios", "Studio saved.");
+}
+
+/** Choose a studio's floor plan: the first of `mediaIds`, as the chooser sends them. */
+export async function setStudioFloorPlanAction(formData: FormData): Promise<void> {
+  const viewer = await requireOwner("/admin/studios");
+  const result = await setStudioFloorPlan(await getDb(), viewer, text(formData, "studioId"), text(formData, "mediaIds").split(",")[0] ?? "");
+  if (!result.ok) failed("/admin/studios", result.message);
+  updateTag(CATALOG_TAG);
+  done("/admin/studios", "Floor plan chosen. Customers see it now.");
+}
+
+export async function removeStudioFloorPlanAction(formData: FormData): Promise<void> {
+  const viewer = await requireOwner("/admin/studios");
+  const result = await setStudioFloorPlan(await getDb(), viewer, text(formData, "studioId"), "");
+  if (!result.ok) failed("/admin/studios", result.message);
+  updateTag(CATALOG_TAG);
+  done("/admin/studios", "Floor plan taken away.");
+}
+
+/** Add pictures of the media library to a studio's photos. `mediaIds` is their ids with commas between, as the chooser sends them. */
+export async function addStudioPhotosAction(formData: FormData): Promise<void> {
+  const viewer = await requireOwner("/admin/studios");
+  const result = await addStudioPhotos(await getDb(), viewer, text(formData, "studioId"), text(formData, "mediaIds").split(","));
+  if (!result.ok) failed("/admin/studios", result.message);
+  updateTag(CATALOG_TAG);
+  done("/admin/studios", "Photos added. Customers see them now.");
+}
+
+export async function removeStudioPhotoAction(formData: FormData): Promise<void> {
+  const viewer = await requireOwner("/admin/studios");
+  const result = await removeStudioPhoto(await getDb(), viewer, text(formData, "studioId"), text(formData, "mediaId"));
+  if (!result.ok) failed("/admin/studios", result.message);
+  updateTag(CATALOG_TAG);
+  done("/admin/studios", "The photo was taken off the studio. It is still in the media library.");
+}
+
+async function moveStudioPhotoBy(formData: FormData, by: -1 | 1): Promise<void> {
+  const viewer = await requireOwner("/admin/studios");
+  const result = await moveStudioPhoto(await getDb(), viewer, text(formData, "studioId"), text(formData, "mediaId"), by);
+  if (!result.ok) failed("/admin/studios", result.message);
+  updateTag(CATALOG_TAG);
+  redirect("/admin/studios");
+}
+
+export async function moveStudioPhotoEarlierAction(formData: FormData): Promise<void> {
+  await moveStudioPhotoBy(formData, -1);
+}
+
+export async function moveStudioPhotoLaterAction(formData: FormData): Promise<void> {
+  await moveStudioPhotoBy(formData, 1);
 }
 
 export async function saveAddonAction(formData: FormData): Promise<void> {
@@ -343,6 +482,7 @@ export async function saveAddonAction(formData: FormData): Promise<void> {
   const priceCents = dollarsToCents(text(formData, "price"));
   const kind = text(formData, "kind");
   if (priceCents === null) failed("/admin/studios", "Enter the price as an amount, for example 40 or 40.50.");
+  if (priceCents > PRICE_MAX_CENTS) failed("/admin/studios", `A price can be at most ${formatCents(PRICE_MAX_CENTS)}.`);
   if (!isAddonKind(kind)) failed("/admin/studios", "Choose what the add-on is for.");
   const addonId = text(formData, "addonId") || null;
   const result = await saveAddon(await getDb(), addonId, {

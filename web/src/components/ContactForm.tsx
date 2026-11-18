@@ -1,8 +1,9 @@
 "use client";
 
 import { useActionState } from "react";
-import { sendMessageAction, type ContactState } from "@/app/contact/actions";
+import { sendMessageAction, type ContactState } from "./contact-actions";
 import { CONTACT_LIMITS, CONTACT_TOPICS } from "@/lib/contact";
+import { EMAIL_FIELD } from "@/lib/parse";
 
 const START: ContactState = {
   status: "idle",
@@ -75,7 +76,7 @@ export function ContactForm() {
           <input
             id="contact-email"
             name="email"
-            type="email"
+            {...EMAIL_FIELD}
             className="form-control"
             autoComplete="email"
             maxLength={CONTACT_LIMITS.email}

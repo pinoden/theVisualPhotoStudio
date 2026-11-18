@@ -10,6 +10,8 @@ import { cancelBooking, getManageOptions } from "./manage";
 import { issuePromo } from "./promos";
 import { DEFAULT_SETTINGS } from "./settings";
 import { completeVisits } from "./tasks";
+import { clearTestMode, moneyKindOfCode } from "./test-mode";
+import type { PaymentProvider } from "./payments";
 import { BASE_URL, createTestWorld, daysAfter, expectOk, FAR, h, hoursAfter, NEAR, NOW, type TestWorld } from "./testing";
 
 let world: TestWorld;
@@ -67,7 +69,7 @@ describe("earning a free hour", () => {
       originBookingId: fifth.id, // the visit that completed the five
     });
     expect(code.code).toMatch(/^THANKS-[0-9A-Z]{4}-[0-9A-Z]{4}$/);
-    expect(code.expiresAt).toEqual(daysAfter(evening(DAYS[4]), 60));
+    expect(code.expiresAt).toEqual(daysAfter(evening(DAYS[4]), 90)); // the owner's answer of 2026-11-15: 90 days
 
     const [mail] = await world.emails("loyalty_code");
     expect(mail).toMatchObject({ toEmail: JANE, subject: "You have earned a free hour in the studio" });
@@ -119,9 +121,9 @@ describe("earning a free hour", () => {
     expect(await visitOn(DAYS.slice(0, 10))).toEqual([0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
     const [first, second] = await codes();
     expect([first.usedCount, second.usedCount]).toEqual([0, 0]);
-    // Each lasts 60 days from the day it was earned.
-    expect(first.expiresAt).toEqual(daysAfter(evening(DAYS[4]), 60));
-    expect(second.expiresAt).toEqual(daysAfter(evening(DAYS[9]), 60));
+    // Each lasts 90 days from the day it was earned.
+    expect(first.expiresAt).toEqual(daysAfter(evening(DAYS[4]), 90));
+    expect(second.expiresAt).toEqual(daysAfter(evening(DAYS[9]), 90));
     expect(first.code).not.toBe(second.code);
   });
 
@@ -137,6 +139,20 @@ describe("earning a free hour", () => {
     // Four more paid days are not enough. The fifth is.
     expect(await visitOn(DAYS.slice(6, 10))).toEqual([0, 0, 0, 0]);
     expect(await visitOn([DAYS[10]])).toEqual([1]);
+  });
+
+  it("does not count a photography session with the in-house photographer (the owner, 2026-11-15)", async () => {
+    // Five sessions on five days, each more than two weeks ahead, as a session has to be.
+    const sessions = ["2026-11-30", "2026-12-01", "2026-12-02", "2026-12-03", "2026-12-04"];
+    expect(await visitOn(sessions, { photography: true, durationMinutes: 60 })).toEqual([0, 0, 0, 0, 0]);
+    expect(await codes()).toHaveLength(0);
+    expect(await loyaltyStandingOf(world.db, JANE, DEFAULT_SETTINGS)).toMatchObject({ earned: 0, towardsNext: 0, days: [] });
+
+    // Renting a studio counts as before, also on a day that had a session.
+    expect(await visitOn(["2026-12-07"])).toEqual([0]);
+    expectOk(await world.book({ date: "2026-12-08", photography: true, durationMinutes: 60 }));
+    expect(await visitOn(["2026-12-08"], { studioIds: [world.ids.paris], startMinute: h(14) })).toEqual([0]);
+    expect((await loyaltyStandingOf(world.db, JANE, DEFAULT_SETTINGS)).days.map((entry) => entry.day)).toEqual(["2026-12-07", "2026-12-08"]);
   });
 
   it("does not send a second free hour for the same visits when one of them becomes a no-show afterwards", async () => {
@@ -294,3 +310,36 @@ describe("using a free hour", () => {
     expect(await loyaltyStandingOf(world.db, JANE, DEFAULT_SETTINGS)).toMatchObject({ towardsNext: 0 });
   });
 });
+
+describe("a free hour earned with visits of test mode", () => {
+  it("is test mode's: a real booking refuses it, and clearing test mode removes it", async () => {
+    const live: PaymentProvider = { ...world.provider, name: "square" };
+    // Four visits that a server in test mode took beside the live one, and a fifth, real one, which completes the five.
+    expect(await visitOn(DAYS.slice(0, 4))).toEqual([0, 0, 0, 0]);
+    expectOk(await world.book({ date: DAYS[4] }, { payments: live }));
+    expect((await completeVisits(world.db, evening(DAYS[4]), BASE_URL)).codes).toBe(1);
+    const [freeHour] = await codes();
+    expect(await moneyKindOfCode(world.db, freeHour.id)).toBe("test");
+    // The live site does not take it.
+    expect(await world.book({ date: DAYS[5], promoCode: freeHour.code }, { payments: live })).toMatchObject({
+      ok: false,
+      code: "invalid_code",
+      message: "That code was issued in test mode, when no money moved, so it cannot pay for a real booking.",
+    });
+    // It goes with the visits of test mode; the real visit stays, one stamp of five.
+    await clearTestMode(world.db, NOW);
+    expect(await codes()).toEqual([]);
+    expect((await loyaltyStandingOf(world.db, JANE, DEFAULT_SETTINGS)).stamps).toBe(1);
+  });
+
+  it("is real when every visit it counted was real", async () => {
+    const live: PaymentProvider = { ...world.provider, name: "square" };
+    for (const date of DAYS.slice(0, 5)) {
+      expectOk(await world.book({ date }, { payments: live }));
+      await completeVisits(world.db, evening(date), BASE_URL);
+    }
+    const [freeHour] = await codes();
+    expect(await moneyKindOfCode(world.db, freeHour.id)).toBe("live");
+  });
+});
+

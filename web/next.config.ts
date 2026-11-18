@@ -10,6 +10,12 @@ const nextConfig: NextConfig = {
   // processes sharing one build folder corrupt its cache and every page then
   // reloads in a loop.
   distDir: process.env.NEXT_DIST_DIR || ".next",
+  images: {
+    // The only pictures the site resizes are those of the media library, at their own addresses
+    // (/media/<id>/<version>/<name>, src/server/media.ts), never with anything after a question mark.
+    localPatterns: [{ pathname: "/media/**", search: "" }],
+    qualities: [75, 85],
+  },
 };
 
 export default nextConfig;

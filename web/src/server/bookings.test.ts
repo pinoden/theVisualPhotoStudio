@@ -13,7 +13,7 @@ import {
   studioHours,
   studios,
 } from "@/db/schema";
-import { createBooking, getBookingByToken, hashToken, type BookingInput } from "./bookings";
+import { createBooking, getBookingByToken, hashToken, quoteSelection, type BookingInput } from "./bookings";
 import { loadDayAvailability } from "./availability";
 import { loadCatalog } from "./catalog";
 import { MOCK_TOKEN_DECLINED, MOCK_TOKEN_OK, mockProvider, type PaymentProvider } from "./payments";
@@ -31,6 +31,7 @@ let ids: Record<string, string>;
 let charges: { amountCents: number; idempotencyKey: string }[];
 
 const countingProvider: PaymentProvider = {
+  ...mockProvider,
   name: "mock",
   async charge(request) {
     const result = await mockProvider.charge(request);
@@ -107,14 +108,22 @@ describe("creating a booking", () => {
     expect(mail.body).toContain("Wed, Nov 18, 2026, 10:00 AM");
   });
 
-  it("books any combination of studios in one booking with the multi-studio discount", async () => {
-    // Blanche + Dayglow does not exist as a bundle on the current site.
-    const result = await book({ studioIds: [ids.blanche, ids.dayglow], durationMinutes: 60 });
-    expect(result).toMatchObject({ ok: true, totalCents: 13280 }); // ($88 + $78) less 20%
+  it("quotes and books only the studio bundles that include Paris", async () => {
+    const selection = { studioIds: [ids.dayglow, ids.blanche], durationMinutes: 60, date: WED };
+    const refusal = { ok: false, status: 422, code: "invalid_price", message: "To book Blanche and Dayglow together, add Paris or choose a different combination." };
+    expect(await quoteSelection(db, selection, NOW)).toEqual(refusal);
+    expect(await book(selection)).toEqual(refusal);
+    expect(charges).toHaveLength(0);
+    expect(await db.select().from(studioHolds)).toHaveLength(0);
+
+    const result = await book({ studioIds: [ids.blanche, ids.paris], durationMinutes: 60 });
+    expect(result).toMatchObject({ ok: true, totalCents: 12480 }); // ($88 + $68) less 20%
     const holds = await db.select().from(studioHolds);
-    expect(holds.map((x) => x.studioId).sort()).toEqual([ids.blanche, ids.dayglow].sort());
+    expect(holds.map((x) => x.studioId).sort()).toEqual([ids.blanche, ids.paris].sort());
     expect(holds.every((x) => x.active)).toBe(true);
 
+    const dayglowAndParis = await book({ studioIds: [ids.dayglow, ids.paris], durationMinutes: 60, startMinute: h(12) });
+    expect(dayglowAndParis).toMatchObject({ ok: true, totalCents: 11680 }); // ($78 + $68) less 20%
     const all = await book({ studioIds: [ids.blanche, ids.dayglow, ids.paris], durationMinutes: 60, startMinute: h(14) });
     expect(all).toMatchObject({ ok: true, totalCents: 23400 - Math.round(23400 * 0.22) });
   });
@@ -146,17 +155,11 @@ describe("creating a booking", () => {
 });
 
 describe("weekday and weekend prices", () => {
-  it("charges the weekend price on Saturday and the weekday price on Wednesday", async () => {
-    await db
-      .update(priceRules)
-      .set({ priceCents: 11000 })
-      .where(and(eq(priceRules.studioId, ids.blanche), eq(priceRules.dayType, "weekend"), eq(priceRules.durationMinutes, 60)));
-    expect(await book({ date: SAT, durationMinutes: 60 })).toMatchObject({ ok: true, totalCents: 11000 });
+  it("charges the approved weekend tiers on Saturday and Sunday and the weekday price on Wednesday", async () => {
+    expect(await book({ date: SAT, durationMinutes: 60 })).toMatchObject({ ok: true, totalCents: 9500 });
+    expect(await book({ date: "2026-11-22", durationMinutes: 90 })).toMatchObject({ ok: true, totalCents: 14250 });
     expect(await book({ date: WED, durationMinutes: 60 })).toMatchObject({ ok: true, totalCents: 8800 });
-    await db
-      .update(priceRules)
-      .set({ priceCents: 8800 })
-      .where(and(eq(priceRules.studioId, ids.blanche), eq(priceRules.dayType, "weekend"), eq(priceRules.durationMinutes, 60)));
+    expect(charges.map((charge) => charge.amountCents)).toEqual([9500, 14250, 8800]);
   });
 
   it("prices a holiday on a weekday as a weekend day", async () => {
@@ -168,7 +171,7 @@ describe("weekday and weekend prices", () => {
     expect(await book({ studioIds: [ids.paris], durationMinutes: 60 })).toMatchObject({ ok: true, totalCents: 9900 });
     await db
       .update(priceRules)
-      .set({ priceCents: 6800 })
+      .set({ priceCents: 7200 })
       .where(and(eq(priceRules.studioId, ids.paris), eq(priceRules.dayType, "weekend"), eq(priceRules.durationMinutes, 60)));
   });
 });
@@ -188,7 +191,7 @@ describe("double booking is impossible", () => {
     expect((await book({ startMinute: h(12) + 15, durationMinutes: 60 })).ok).toBe(true); // exactly 15 minutes later
     expect((await book({ studioIds: [ids.paris] })).ok).toBe(true); // other studio, same time
     // A bundle that includes the taken studio is refused as a whole.
-    expect(await book({ studioIds: [ids.blanche, ids.dayglow], durationMinutes: 60 })).toMatchObject({ code: "slot_taken" });
+    expect(await book({ studioIds: [ids.blanche, ids.dayglow, ids.paris], durationMinutes: 60 })).toMatchObject({ code: "slot_taken" });
     expect(await db.select().from(studioHolds).where(eq(studioHolds.studioId, ids.dayglow))).toHaveLength(0);
   });
 
@@ -221,6 +224,7 @@ describe("double booking is impossible", () => {
   it("refuses a second request that arrives while the first card is being charged", async () => {
     let nested: Awaited<ReturnType<typeof book>> | undefined;
     const slowProvider: PaymentProvider = {
+      ...mockProvider,
       name: "mock",
       async charge(request) {
         // The exact interleaving that double-booked the old site.
@@ -265,8 +269,9 @@ describe("payment", () => {
     expect((await book()).ok).toBe(true); // the slot is bookable again
   });
 
-  it("does not claim the card was spared when the processor gave no answer, and asks the owner to check", async () => {
+  it("says nothing was taken when the processor gave no answer: the card was at most reserved, and nobody has to check", async () => {
     const silent: PaymentProvider = {
+      ...mockProvider,
       name: "square",
       charge: async () => ({
         ok: false,
@@ -282,25 +287,41 @@ describe("payment", () => {
       status: 402,
       code: "payment_failed",
       message:
-        "We could not reach the card processor. Your booking was not made. We cannot tell whether your card was charged: if a charge appears, contact us and we will refund it.",
+        "We could not reach the card processor. Your booking was not made, and your card was not charged. If an amount appears as held on your card, it is released by itself within 24 hours.",
     });
 
     const [row] = await db.select().from(bookings);
     expect(row.status).toBe("expired");
     expect((await db.select().from(payments))[0]).toMatchObject({ status: "failed", error: "No answer from Square" });
-    const mail = await db.select().from(emailOutbox);
-    expect(mail).toHaveLength(1);
-    expect(mail[0]).toMatchObject({
-      toEmail: "owner@studio.test",
-      kind: "owner_payment_unknown",
-      subject: `ACTION NEEDED: check a payment for ${row.ref}`,
-    });
-    expect(mail[0].body).toContain(`A card payment of $176 for booking ${row.ref} (Test Person) got no answer from Square.`);
+    expect(await db.select().from(emailOutbox)).toHaveLength(0);
     expect((await book()).ok).toBe(true); // the time is free again
+  });
+
+  it("reserves the amount, confirms the booking, and only then takes the money", async () => {
+    const steps: string[] = [];
+    const watching: PaymentProvider = {
+      ...countingProvider,
+      async charge(request) {
+        steps.push(`reserve ${request.reserve === true}`);
+        return countingProvider.charge(request);
+      },
+      async capture(paymentId) {
+        // By the time the money is taken, the booking is confirmed and its payment recorded as reserved.
+        const [booking] = await db.select().from(bookings);
+        const [payment] = await db.select().from(payments);
+        steps.push(`take while the booking is ${booking.status} and the payment ${payment.status}`);
+        return mockProvider.capture(paymentId);
+      },
+    };
+    const made = await book({}, { payments: watching });
+    expect(made.ok).toBe(true);
+    expect(steps).toEqual(["reserve true", "take while the booking is confirmed and the payment authorized"]);
+    expect((await db.select().from(payments))[0]).toMatchObject({ status: "succeeded", error: null });
   });
 
   it("records the processor's own words for a refused card, and shows the customer a sentence", async () => {
     const refusing: PaymentProvider = {
+      ...mockProvider,
       name: "square",
       charge: async () => ({
         ok: false,
@@ -359,6 +380,7 @@ describe("payment", () => {
         studiosSubtotalCents: 17600,
         totalCents: 17600,
         manageTokenHash: "x",
+        moneyKind: "test",
       })
       .returning({ id: bookings.id });
     await db.insert(studioHolds).values({
@@ -386,6 +408,7 @@ describe("payment", () => {
         studiosSubtotalCents: 17600,
         totalCents: 17600,
         manageTokenHash: "x",
+        moneyKind: "test",
       })
       .returning({ id: bookings.id });
     await db.insert(studioHolds).values({
@@ -394,6 +417,69 @@ describe("payment", () => {
       occupied: sql`tstzrange('2026-11-18T15:00:00Z'::timestamptz, '2026-11-18T17:10:00Z'::timestamptz, '[)')`,
     });
     expect(await book()).toMatchObject({ ok: false, code: "slot_taken" });
+  });
+});
+
+/**
+ * A booking whose answer never reached the screen (the connection dropped
+ * after the card was charged): the screen sends the same attempt again, and
+ * is told what became of it. Nothing is booked or charged twice.
+ */
+describe("an attempt to book sent again", () => {
+  const attempt = "6f1c2a7e-3b4d-4e5f-8a9b-0c1d2e3f4a5b";
+
+  it("finds the booking it made, charged once, with a link that opens it", async () => {
+    const first = await book({ requestId: attempt });
+    expect(first.ok).toBe(true);
+    // The screen got no answer, and sends the same attempt again: a new card token, the same id.
+    const again = await book({ requestId: attempt, paymentToken: MOCK_TOKEN_OK });
+    expect(again).toMatchObject({ ok: true, ref: first.ok && first.ref, totalCents: first.ok && first.totalCents });
+    expect(charges).toHaveLength(1);
+    expect(await db.select().from(bookings)).toHaveLength(1);
+    // Both links open the booking: the one of the confirmation email, and the second one the screen was given.
+    expect(await getBookingByToken(db, first.ok ? first.ref : "", first.ok ? first.manageToken : "")).not.toBeNull();
+    expect(await getBookingByToken(db, again.ok ? again.ref : "", again.ok ? again.manageToken : "")).not.toBeNull();
+    expect(again.ok && first.ok && again.manageToken !== first.manageToken).toBe(true);
+    // Only a hash of the attempt's id is kept, never the id itself.
+    const [row] = await db.select().from(bookings);
+    expect(row.requestKey).toBe(hashToken(`request:${attempt}`));
+    expect(JSON.stringify(row)).not.toContain(attempt);
+  });
+
+  it("is over when it did not go through: the next press books anew", async () => {
+    expect(await book({ requestId: attempt, paymentToken: MOCK_TOKEN_DECLINED })).toMatchObject({ ok: false, code: "payment_failed" });
+    // Told what the first answer told: the card was not charged.
+    expect(await book({ requestId: attempt })).toMatchObject({
+      ok: false,
+      status: 409,
+      code: "attempt_over",
+      message: "That attempt did not make a booking, and your card was not charged. If an amount appears as held on your card, it is released by itself within 24 hours. Please try again.",
+    });
+    expect(charges).toHaveLength(0);
+    // A new attempt, with an id of its own, books the time.
+    expect(await book({ requestId: "0b2c4d6e-8f10-4a2b-9c3d-4e5f6a7b8c9d" })).toMatchObject({ ok: true });
+    expect(charges).toHaveLength(1);
+  });
+
+  it("is asked to wait while the first is still on its way", async () => {
+    // The first press is between holding the time and confirming it.
+    const slow: PaymentProvider = { ...countingProvider, charge: () => new Promise(() => {}) };
+    void book({ requestId: attempt }, { payments: slow });
+    await expect.poll(async () => (await db.select().from(bookings)).length).toBe(1);
+    expect(await book({ requestId: attempt })).toMatchObject({ ok: false, status: 409, code: "in_progress" });
+    expect(charges).toHaveLength(0);
+  });
+
+  it("is over when it is sent for something else", async () => {
+    expect((await book({ requestId: attempt })).ok).toBe(true);
+    expect(await book({ requestId: attempt, startMinute: h(14) })).toMatchObject({ ok: false, code: "attempt_over" });
+    expect(await book({ requestId: attempt, studioIds: [ids.paris] })).toMatchObject({ ok: false, code: "attempt_over" });
+    expect(charges).toHaveLength(1);
+  });
+
+  it("does not stand in the way of a booking without one", async () => {
+    expect((await book()).ok).toBe(true);
+    expect((await book({ startMinute: h(14) })).ok).toBe(true);
   });
 });
 
@@ -424,6 +510,19 @@ describe("bad input is refused", () => {
       expect(await db.select().from(bookings).where(eq(bookings.status, "confirmed"))).toHaveLength(0);
     });
   }
+
+  it("names a field the customer typed in the words of the screen", async () => {
+    // An address the booking's own rule refuses: the rule every email field follows (src/lib/parse.ts).
+    expect(await book({ customer: { name: "A B", email: "kim..lee@example.com", phone: "5550100100" } })).toMatchObject({
+      ok: false,
+      message: "Please check the email address: it does not look like one.",
+    });
+    expect(await book({ customer: { name: "A B", email: "a@example.com", phone: "" } })).toMatchObject({
+      ok: false,
+      message: "Please check the phone number: from 7 to 40 characters.",
+    });
+    expect(await book({ notes: "x".repeat(2001) })).toMatchObject({ ok: false, message: "Please make the notes shorter: at most 2,000 characters." });
+  });
 
   it("a character the database cannot store, which is dropped instead of failing the request", async () => {
     const result = await book({ customer: { name: "Jane\u0000 Smith", email: "jane@example.com", phone: "407-555-0100" }, notes: "Bring\u0000 props\r\nand lights" });
@@ -466,6 +565,26 @@ describe("opening hours", () => {
     expect(day.dayType).toBe("weekday");
   });
 
+  it("neither offers nor books the hour the clocks skip, in a studio open all night", async () => {
+    await db.insert(settings).values({ key: "maxAdvanceDays", value: 365 });
+    await db.delete(studioHours).where(and(eq(studioHours.studioId, ids.blanche), eq(studioHours.weekday, 7)));
+    await db.insert(studioHours).values({ studioId: ids.blanche, weekday: 7, openMinute: 0, closeMinute: 1440 });
+    const SPRING = "2027-03-14"; // a Sunday: the clocks go from 2:00 to 3:00
+    const catalog = await loadCatalog(db);
+    const day = await loadDayAvailability(db, catalog, SPRING, NOW);
+    const blanche = day.days.filter((d) => d.studioId === ids.blanche);
+    const starts = combinedStarts(blanche, { durationMinutes: 60, incrementMinutes: 15 });
+    // 2:00 does not exist, and a visit from 1:00 or 1:30 would run into it: none of them is offered.
+    for (const minute of [h(1), h(1) + 30, h(2), h(2) + 30]) expect(starts).not.toContain(minute);
+    expect(starts).toContain(h(3));
+    // Sent anyway, they are refused with a reason, not a server error, and nothing is charged.
+    for (const startMinute of [h(2), h(1)]) {
+      expect(await book({ date: SPRING, startMinute, durationMinutes: startMinute === h(1) ? 120 : 60 })).toMatchObject({ ok: false, code: "slot_taken" });
+    }
+    expect(await db.select().from(bookings)).toHaveLength(0);
+    expect((await book({ date: SPRING, startMinute: h(3), durationMinutes: 60 })).ok).toBe(true);
+  });
+
   it("converts local time correctly on a daylight-saving change day", async () => {
     await db.insert(settings).values({ key: "maxAdvanceDays", value: 365 });
     // Sunday 2027-03-14: clocks jump from 2:00 to 3:00, so 10:00 is UTC-4.
@@ -486,5 +605,16 @@ describe("viewing a booking", () => {
     expect(await getBookingByToken(db, result.ref, "wrong-token-wrong-token-wrong")).toBeNull();
     expect(await getBookingByToken(db, "VS-AAAAAA", result.manageToken)).toBeNull();
     expect(await getBookingByToken(db, "'; drop table bookings; --", result.manageToken)).toBeNull();
+  });
+});
+
+describe("a date far beyond the horizon", () => {
+  it("is too far ahead, as any date past the horizon, and not a failure of the database", async () => {
+    const catalog = await loadCatalog(db);
+    for (const date of ["9999-12-31", "9999-12-30", "2400-02-29"]) {
+      expect(await loadDayAvailability(db, catalog, date, NOW)).toMatchObject({ problem: "too_far" });
+    }
+    expect(await loadDayAvailability(db, catalog, "9999-12-31", NOW, { withPhotographer: true })).toMatchObject({ problem: "too_far" });
+    expect(await book({ date: "9999-12-31" })).toMatchObject({ ok: false, code: "not_bookable_date" });
   });
 });

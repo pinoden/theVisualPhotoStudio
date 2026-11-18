@@ -1,3 +1,4 @@
+import AxeBuilder from "@axe-core/playwright";
 import { expect, type Locator, type Page } from "@playwright/test";
 
 const STUDIO_TZ = "America/New_York";
@@ -21,6 +22,16 @@ export function dateAhead(minDays: number, kind: "weekday" | "saturday" = "weekd
   throw new Error("no matching date");
 }
 
+/**
+ * Errors of the development build's own tooling, not of the site: React's
+ * performance timeline sometimes measures a part of a page from before it
+ * started ("'\u200bBookings [Prerender]' cannot have a negative time stamp",
+ * seen when a signed-in client or staff member opens an owner's page). A
+ * production build has no such timeline. The browser tests leave out this one
+ * message; any other error the browser reports fails the test.
+ */
+export const frameworkNoise = (text: string) => /^Failed to execute 'measure' on 'Performance': '.*' cannot have a negative time stamp\.?$/.test(text);
+
 /*
  * After an in-app navigation the framework keeps the previous pages in the
  * document, hidden, so their state survives going back. A plain text or label
@@ -31,6 +42,32 @@ type Scope = Page | Locator;
 export const onScreen = (locator: Locator) => locator.filter({ visible: true });
 export const byLabel = (scope: Scope, label: string) => onScreen(scope.getByLabel(label, { exact: true }));
 export const byText = (scope: Scope, text: string | RegExp) => onScreen(scope.getByText(text));
+
+/**
+ * What axe-core finds wrong on the page as it is now, against WCAG 2.1 A and
+ * AA, one line for each kind of problem, naming up to three places. Colour
+ * contrast is left out: see e2e/a11y.spec.ts. `exclude` leaves out parts of
+ * the page that are not the site's own (the page editor's canvas is Puck's).
+ */
+export async function accessibilityProblems(page: Page, options: { exclude?: string[] } = {}): Promise<string[]> {
+  // After a form is sent, the framework draws the page and puts its title back a moment later. Scanned in between,
+  // a page that is about to have a title is reported without one; a page that never gets one fails here instead.
+  await expect.poll(() => page.title(), { message: "the page has a title" }).not.toBe("");
+  let builder = new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+    .disableRules(["color-contrast"])
+    // The development server's own button, which visitors never get.
+    .exclude("nextjs-portal");
+  for (const selector of options.exclude ?? []) builder = builder.exclude(selector);
+  const result = await builder.analyze();
+  return result.violations.map(
+    (violation) =>
+      `${violation.id} (${violation.impact}): ${violation.help}. At ${violation.nodes
+        .slice(0, 3)
+        .map((node) => node.target.join(" "))
+        .join(", ")}${violation.nodes.length > 3 ? ` and ${violation.nodes.length - 3} more` : ""}`,
+  );
+}
 
 /**
  * Save a full-page picture for a person to look at. Only when E2E_SHOTS is
@@ -113,6 +150,8 @@ export async function bookStudioFirstToPayment(
     time: string;
     customer: { name: string; email: string; phone: string };
     code?: string;
+    /** Add-ons to tick, by name: "Pet fee". */
+    addons?: string[];
   },
 ): Promise<void> {
   await page.goto("/book");
@@ -124,6 +163,7 @@ export async function bookStudioFirstToPayment(
   await page.getByRole("button", { name: options.time, exact: true }).click();
   await next(page);
   await fillDetails(page, options.customer);
+  for (const addon of options.addons ?? []) await page.getByRole("checkbox", { name: new RegExp(addon) }).check();
   if (options.code) {
     await byLabel(page, "Have a code?").fill(options.code);
     await page.getByRole("button", { name: "Apply" }).click();

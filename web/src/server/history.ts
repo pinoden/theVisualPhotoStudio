@@ -36,6 +36,15 @@ export async function recordEvent(
   });
 }
 
+/**
+ * A history note with its amounts taken out: "Refund $64.60" becomes "Refund
+ * (amount not shown)". For a viewer who may open the appointment and may not
+ * see what it cost: the note still says what happened, never how much.
+ */
+export function withoutAmounts(note: string): string {
+  return note.replace(/-?\$\d[\d,]*(?:\.\d{1,2})?/g, "(amount not shown)");
+}
+
 /** A booking's history, oldest first. */
 export async function listEvents(db: DbLike, bookingId: string): Promise<BookingEvent[]> {
   const rows = await db

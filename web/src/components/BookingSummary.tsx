@@ -1,6 +1,7 @@
 import { formatCents } from "@/lib/domain/pricing";
 import { durationLabel } from "@/lib/domain/time";
 import type { BookingView } from "@/server/bookings";
+import { STANDS } from "@/server/money";
 import { formatRange } from "@/server/tz";
 
 export const STATUS_LABEL: Record<string, string> = {
@@ -20,7 +21,10 @@ export function statusLabel(booking: Pick<BookingView, "status" | "cancelReason"
 /** When, where and what it cost. Server component: times are shown in studio time. */
 export function BookingSummary({ booking }: { booking: BookingView }) {
   const when = formatRange(new Date(booking.startAt), new Date(booking.endAt));
-  const paidStatus = booking.status === "confirmed" || booking.status === "completed";
+  // A booking that stands, missed ones included, is paid or owes; one that ended shows what it cost.
+  const paidStatus = STANDS.includes(booking.status);
+  /** What came by card: online, or through a payment link. */
+  const byCard = booking.receivedCents - booking.receivedAtStudioCents;
   return (
     <div className="price-summary">
       <div className="price-row">
@@ -71,7 +75,9 @@ export function BookingSummary({ booking }: { booking: BookingView }) {
         <div className="price-row price-discount">
           <span>
             {booking.creditAppliedCents > 0
-              ? "Paid with reschedule code"
+              ? booking.promoSource === "reschedule"
+                ? "Paid with reschedule code"
+                : "Paid with studio credit"
               : booking.promoKind === "free_hour"
                 ? "Free hour"
                 : "Discount code"}
@@ -79,9 +85,34 @@ export function BookingSummary({ booking }: { booking: BookingView }) {
           <span>{formatCents(-booking.promoDiscountCents)}</span>
         </div>
       )}
+      {/* A booking paid in parts (made in the admin, or one whose card was never charged): what was received, then what is owed. */}
+      {paidStatus && booking.receivedCents > 0 && booking.dueCents > 0 && (
+        <div className="price-row">
+          <span>{byCard > 0 ? "Paid so far" : "Paid at the studio so far"}</span>
+          <span>{formatCents(booking.receivedCents)}</span>
+        </div>
+      )}
       <div className="price-row total">
-        <span>{!paidStatus ? "Total" : booking.madeByAdmin ? "To pay at the studio" : "Charged to card"}</span>
-        <span>{formatCents(booking.totalCents)}</span>
+        <span>
+          {/* A booking made online owes only when the amount its card held lapsed before it was taken. While the card
+              holds it, it is not charged yet: taking it did not go through, and is tried again. */}
+          {!paidStatus || booking.totalCents === 0
+            ? "Total"
+            : booking.dueCents > 0
+              ? booking.madeByAdmin
+                ? "To pay at the studio"
+                : "To pay"
+              : booking.heldCents > 0
+                ? "Held on card"
+                : booking.receivedAtStudioCents > 0
+                ? byCard > 0
+                  ? "Paid by card and at the studio"
+                  : "Paid at the studio"
+                : booking.madeByAdmin
+                  ? "Paid by card"
+                  : "Charged to card"}
+        </span>
+        <span>{formatCents(paidStatus && booking.dueCents > 0 ? booking.dueCents : booking.totalCents)}</span>
       </div>
     </div>
   );

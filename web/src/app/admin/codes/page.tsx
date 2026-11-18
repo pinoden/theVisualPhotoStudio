@@ -4,10 +4,14 @@ import { Suspense } from "react";
 import { getDb } from "@/db/client";
 import { formatCents } from "@/lib/domain/pricing";
 import { durationLabel } from "@/lib/domain/time";
+import { EMAIL_FIELD } from "@/lib/parse";
 import { listCodes } from "@/server/admin";
+import { isBookingRef } from "@/server/bookings";
 import { requireOwner } from "@/server/session";
 import { formatInstant } from "@/server/tz";
 import { createCodeAction, voidCodeAction } from "../actions";
+import { petCreditAction } from "../appointments/actions";
+import { CodeKindAndValue } from "./CodeKindAndValue";
 import { AdminFrame, AdminLoading } from "../frame";
 
 export const metadata: Metadata = { title: "Codes", robots: { index: false } };
@@ -16,6 +20,7 @@ const SOURCE_LABEL: Record<string, string> = {
   loyalty: "Earned by visits",
   reschedule: "Reschedule credit",
   manual: "Made by you",
+  pet_fee: "Pet fee returned",
 };
 
 export default function CodesPage(props: PageProps<"/admin/codes">) {
@@ -31,45 +36,32 @@ async function Codes({ searchParams }: Pick<PageProps<"/admin/codes">, "searchPa
   await requireOwner("/admin/codes");
   const now = new Date();
   const codes = await listCodes(await getDb());
+  const query = await searchParams;
+  const bookingRef = typeof query.booking === "string" && isBookingRef(query.booking) ? query.booking : "";
 
   return (
-    <AdminFrame active="/admin/codes" title="Codes" query={await searchParams}>
+    <AdminFrame active="/admin/codes" title="Codes" query={query}>
       <div className="admin-card">
         <h3>Create a code</h3>
         <form action={createCodeAction} className="admin-form-row" style={{ marginBottom: 0 }}>
-          <div className="form-group">
-            <label className="form-label" htmlFor="code-kind">
-              Kind
-            </label>
-            <select id="code-kind" name="kind" className="form-control" defaultValue="percent">
-              <option value="percent">Percent off the rental</option>
-              <option value="amount">Credit in dollars</option>
-              <option value="free_hour">One free hour (one studio)</option>
-            </select>
-          </div>
-          <div className="form-group">
-            <label className="form-label" htmlFor="code-value">
-              Value (% or $; none for a free hour)
-            </label>
-            <input id="code-value" name="value" className="form-control" inputMode="decimal" />
-          </div>
+          <CodeKindAndValue />
           <div className="form-group">
             <label className="form-label" htmlFor="code-email">
               Only for email (optional)
             </label>
-            <input id="code-email" name="email" type="email" className="form-control" />
+            <input id="code-email" name="email" className="form-control" {...EMAIL_FIELD} />
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="code-days">
               Valid for (days)
             </label>
-            <input id="code-days" name="validDays" className="form-control" inputMode="numeric" defaultValue="30" required />
+            <input id="code-days" name="validDays" className="form-control" type="number" min={1} max={730} step={1} defaultValue="30" required />
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="code-uses">
-              Uses (not for credit)
+              Uses (discount codes only)
             </label>
-            <input id="code-uses" name="maxUses" className="form-control" inputMode="numeric" defaultValue="1" />
+            <input id="code-uses" name="maxUses" className="form-control" type="number" min={1} max={100000} step={1} defaultValue="1" />
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="code-note">
@@ -80,6 +72,27 @@ async function Codes({ searchParams }: Pick<PageProps<"/admin/codes">, "searchPa
           <button type="submit" className="btn btn-dark btn-small">
             Create
           </button>
+        </form>
+      </div>
+
+      <div className="admin-card" id="pet-fee-credit">
+        <h3>Return a pet fee as studio credit</h3>
+        <p>Use this once you know the pet did not attend. The client receives the credit code by email.</p>
+        <form action={petCreditAction} className="admin-form-row" style={{ marginBottom: 0 }}>
+          <div className="form-group">
+            <label className="form-label" htmlFor="pet-credit-booking">Booking reference</label>
+            <input
+              id="pet-credit-booking"
+              name="ref"
+              className="form-control"
+              defaultValue={bookingRef}
+              pattern="[Vv][Ss]-[A-Za-z0-9]{6}"
+              maxLength={9}
+              autoCapitalize="characters"
+              required
+            />
+          </div>
+          <button type="submit" className="btn btn-dark btn-small">Issue studio credit</button>
         </form>
       </div>
 
@@ -108,6 +121,7 @@ async function Codes({ searchParams }: Pick<PageProps<"/admin/codes">, "searchPa
                   <tr key={code.id}>
                     <td>
                       <strong style={{ color: "var(--color-dark)" }}>{code.code}</strong>
+                      <div style={{ fontSize: ".8rem" }}>{code.photographyOnly ? "Photography sessions" : "Studio rentals"}</div>
                       {code.note && <div style={{ fontSize: ".8rem" }}>{code.note}</div>}
                     </td>
                     <td>

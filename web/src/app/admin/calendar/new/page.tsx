@@ -6,7 +6,9 @@ import { Suspense } from "react";
 import { getDb } from "@/db/client";
 import { bookableDurations, formatCents, PricingError, quote } from "@/lib/domain/pricing";
 import { durationLabel, isIsoDate, longDateLabel, minutesToLabel } from "@/lib/domain/time";
-import { can } from "@/lib/staff-abilities";
+import { can } from "@/lib/abilities";
+import { studioCombinationError } from "@/lib/catalog-view";
+import { EMAIL_FIELD } from "@/lib/parse";
 import { freeStartsFor } from "@/server/appointments";
 import { dayTypeFor, loadCatalog } from "@/server/catalog";
 import { requireStaff } from "@/server/session";
@@ -27,15 +29,16 @@ export default function NewBookingPage(props: PageProps<"/admin/calendar/new">) 
 /**
  * A booking made in the admin for a client. Two steps, each a plain form:
  * first what and when, then one of the start times that are really free and
- * the client's details. The rules are those of a booking made online, except
- * that the notice period does not apply and nothing is charged.
+ * the client's details, and the add-ons the client wants. The rules are those
+ * of a booking made online, except that the notice period does not apply and
+ * nothing is charged.
  */
 async function NewBooking({ searchParams }: Pick<PageProps<"/admin/calendar/new">, "searchParams">) {
   await connection();
   const viewer = await requireStaff("/admin/calendar/new");
   const db = await getDb();
   const catalog = await loadCatalog(db);
-  if (!can(viewer, "staffCreatesBookings", catalog.settings)) notFound();
+  if (!can(viewer, "createBookings", catalog.settings)) notFound();
 
   const query = await searchParams;
   const now = new Date();
@@ -53,7 +56,10 @@ async function NewBooking({ searchParams }: Pick<PageProps<"/admin/calendar/new"
       : [...new Set(catalog.rules.map((rule) => rule.durationMinutes))].sort((a, b) => a - b);
   const duration = lengths.find((minutes) => String(minutes) === query.duration) ?? null;
 
-  const ready = studioIds.length > 0 && duration !== null;
+  const combinationError = studioCombinationError(catalog.studios, studioIds);
+  const ready = studioIds.length > 0 && duration !== null && !combinationError;
+  // The add-ons the booking screen would offer for these studios: those for any booking, and those of a chosen studio.
+  const addons = catalog.addons.filter((addon) => addon.studioId === null || studioIds.includes(addon.studioId));
   const free = ready ? await freeStartsFor(db, { studioIds, date, durationMinutes: duration }, now) : null;
   let price: number | null = null;
   if (ready) {
@@ -71,7 +77,7 @@ async function NewBooking({ searchParams }: Pick<PageProps<"/admin/calendar/new"
   }
 
   return (
-    <AdminFrame active="/admin/calendar" title="New booking" query={query} viewer={viewer}>
+    <AdminFrame active="/admin/calendar" title="New booking" query={query} viewer={viewer} settings={catalog.settings}>
       <p>
         <Link href={`/admin/calendar?view=day&date=${date}`}>← Back to the calendar</Link>
       </p>
@@ -110,7 +116,8 @@ async function NewBooking({ searchParams }: Pick<PageProps<"/admin/calendar/new"
             Show free times
           </button>
         </div>
-        {studioIds.length > 0 && query.duration !== undefined && duration === null && (
+        {combinationError && <p className="field-error" role="alert">{combinationError}</p>}
+        {!combinationError && studioIds.length > 0 && query.duration !== undefined && duration === null && (
           <p className="field-error">That length is not sold for the chosen studios on that day. Choose another.</p>
         )}
       </form>
@@ -123,7 +130,8 @@ async function NewBooking({ searchParams }: Pick<PageProps<"/admin/calendar/new"
             {price !== null && (
               <>
                 {" "}
-                <strong>{formatCents(price)}</strong>, to be paid at the studio. Nothing is charged online.
+                <strong>{formatCents(price)}</strong>
+                {addons.length > 0 && ", and the add-ons ticked below,"} to be paid at the studio. Nothing is charged online.
               </>
             )}
           </p>
@@ -163,7 +171,7 @@ async function NewBooking({ searchParams }: Pick<PageProps<"/admin/calendar/new"
                   <label className="form-label" htmlFor="new-email">
                     Client&rsquo;s email
                   </label>
-                  <input id="new-email" name="email" type="email" className="form-control" maxLength={200} autoComplete="off" required />
+                  <input id="new-email" name="email" className="form-control" {...EMAIL_FIELD} autoComplete="off" required />
                 </div>
                 <div className="form-group" style={{ flex: "1 1 10rem" }}>
                   <label className="form-label" htmlFor="new-phone">
@@ -177,6 +185,33 @@ async function NewBooking({ searchParams }: Pick<PageProps<"/admin/calendar/new"
                   Notes
                 </label>
                 <textarea id="new-notes" name="notes" className="form-control" rows={2} maxLength={2000} />
+              </div>
+              {addons.length > 0 && (
+                <fieldset className="form-group price-summary">
+                  <legend className="form-label">Add-ons</legend>
+                  {addons.map((addon) => (
+                    <label className="addon-row" key={addon.id}>
+                      <input type="checkbox" name="addon" value={addon.id} />
+                      <span className="addon-text">
+                        <span className="addon-head">
+                          <strong>{addon.name}</strong>
+                          <span className="addon-price">{formatCents(addon.priceCents)}</span>
+                        </span>
+                        {addon.description && <span className="addon-description">{addon.description}</span>}
+                      </span>
+                    </label>
+                  ))}
+                </fieldset>
+              )}
+              <div className="form-group" style={{ maxWidth: "20rem" }}>
+                <label className="form-label" htmlFor="new-code">
+                  Client&rsquo;s reward or credit code (optional)
+                </label>
+                <input id="new-code" name="code" className="form-control" maxLength={40} autoComplete="off" autoCapitalize="characters" />
+                <div style={{ fontSize: ".78rem", marginTop: ".25rem" }}>
+                  A free hour or credit that belongs to this client&rsquo;s email address. It comes off what is paid at the
+                  studio, and is used up.
+                </div>
               </div>
               <button type="submit" className="btn btn-dark">
                 Book for the client

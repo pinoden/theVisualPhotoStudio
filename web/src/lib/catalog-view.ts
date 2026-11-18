@@ -2,6 +2,16 @@ import type { Catalog, CatalogStudio } from "@/server/catalog";
 import { multiStudioPercentFor } from "@/lib/domain/pricing";
 import { weekdayName, minutesToLabel } from "@/lib/domain/time";
 
+/** Blanche and Dayglow can be reserved together as part of the three-studio bundle. */
+export function studioCombinationError(studios: readonly Pick<CatalogStudio, "id" | "slug">[], studioIds: readonly string[]): string | null {
+  if (studioIds.length < 2) return null;
+  const slugs = new Set(studios.filter((studio) => studioIds.includes(studio.id)).map((studio) => studio.slug));
+  if (slugs.has("blanche") && slugs.has("dayglow") && !slugs.has("paris")) {
+    return "To book Blanche and Dayglow together, add Paris or choose a different combination.";
+  }
+  return null;
+}
+
 /** Lowest weekday price for one hour, used for "from $X/hour" labels. */
 export function hourlyFromCents(catalog: Catalog, studioId: string): number | null {
   const prices = catalog.rules
@@ -61,6 +71,37 @@ export function multiStudioOffer(catalog: Pick<Catalog, "settings">): string {
     .join(", ");
 }
 
+/**
+ * Where pets can be booked and what it costs, from the add-ons on offer. A
+ * studio takes pets when a pet add-on can be booked with it: its own, or one
+ * for any booking. Read by the guest information and the policies page, so
+ * both follow what the owner offers and not what an add-on happens to be called.
+ */
+export function petPolicy(catalog: Pick<Catalog, "studios" | "addons">): {
+  /** The studios that take pets. Empty when no pet add-on is offered. */
+  studios: string[];
+  /** The studios that do not. */
+  petFreeStudios: string[];
+  /** The fee for each studio that takes pets: its own add-on if it has one, else the one for any booking. */
+  fees: { studio: string; cents: number }[];
+  /** True when every studio that takes pets charges the same fee. */
+  oneFee: boolean;
+} {
+  const petAddons = catalog.addons.filter((addon) => addon.kind === "pet");
+  const anywhere = petAddons.find((addon) => addon.studioId === null);
+  const welcoming = catalog.studios.filter((studio) => anywhere || petAddons.some((addon) => addon.studioId === studio.id));
+  const fees = welcoming.map((studio) => ({
+    studio: studio.name,
+    cents: (petAddons.find((addon) => addon.studioId === studio.id) ?? anywhere)!.priceCents,
+  }));
+  return {
+    studios: welcoming.map((studio) => studio.name),
+    petFreeStudios: catalog.studios.filter((studio) => !welcoming.includes(studio)).map((studio) => studio.name),
+    fees,
+    oneFee: fees.every((fee) => fee.cents === fees[0].cents),
+  };
+}
+
 /** "Mon-Fri 9:00 AM - 7:00 PM" style lines, grouping consecutive days with equal hours. */
 export function hoursLines(studio: CatalogStudio): string[] {
   const lines: string[] = [];
@@ -80,4 +121,16 @@ export function hoursLines(studio: CatalogStudio): string[] {
     runStart = weekday + 1;
   }
   return lines;
+}
+
+/** Opening hours as lines of text: once when every studio keeps the same hours, otherwise for each group of studios that do. */
+export function openingHours(catalog: Pick<Catalog, "studios">): { studios: string; lines: string[] }[] {
+  const groups = new Map<string, { names: string[]; lines: string[] }>();
+  for (const studio of catalog.studios) {
+    const lines = hoursLines(studio);
+    const group = groups.get(lines.join("|")) ?? { names: [], lines };
+    group.names.push(studio.name);
+    groups.set(lines.join("|"), group);
+  }
+  return [...groups.values()].map((group) => ({ studios: groups.size === 1 ? "" : group.names.join(", "), lines: group.lines }));
 }

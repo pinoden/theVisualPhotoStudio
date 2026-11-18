@@ -48,13 +48,13 @@ export function ManageBooking({
     return (
       <div className="notice" role="status">
         <p style={{ marginTop: 0 }}>{result.message}</p>
-        {result.code && (
+        {result.code && result.bookPath && (
           <>
             <div className="booking-ref" style={{ textAlign: "center", margin: "1rem 0" }}>
               {result.code}
             </div>
             <p style={{ marginBottom: 0 }}>
-              <Link href="/book" className="btn btn-dark">
+              <Link href={result.bookPath} className="btn btn-dark">
                 Book a new time
               </Link>
             </p>
@@ -64,7 +64,14 @@ export function ManageBooking({
     );
   }
 
-  if (!choices) return null;
+  // Nothing left to choose (the booking ended meanwhile): what the last press was told still shows.
+  if (!choices) {
+    return error ? (
+      <div className="flash flash-error" role="alert">
+        {error}
+      </div>
+    ) : null;
+  }
 
   const hidden = (
     <>
@@ -101,6 +108,8 @@ export function ManageBooking({
           <p>{choices.reschedule.text}</p>
           <form action={moveAction} style={{ display: "flex", gap: ".75rem", flexWrap: "wrap" }}>
             {hidden}
+            {/* What the client was told: if moving would give something else now, nothing is done until they look again. */}
+            <input type="hidden" name="seen" value={choices.reschedule.text} />
             {choices.reschedule.allowed && (
               <button type="submit" className="btn btn-dark" disabled={busy}>
                 {moving ? "Working…" : "Yes, release it and send my code"}
@@ -118,10 +127,12 @@ export function ManageBooking({
           <strong style={{ color: "var(--color-dark)" }}>Cancel this booking?</strong>
           <p>{choices.cancel.text}</p>
           {choices.cancel.allowed && choices.reschedule.allowed && (
-            <p style={{ fontSize: ".85rem" }}>You can also reschedule instead and keep the full value as a credit.</p>
+            <p style={{ fontSize: ".85rem" }}>You can also reschedule instead, for a code to book a new time.</p>
           )}
           <form action={cancelAction} style={{ display: "flex", gap: ".75rem", flexWrap: "wrap" }}>
             {hidden}
+            {/* What the client was told: if cancelling would give back something else now, nothing is done until they look again. */}
+            <input type="hidden" name="seen" value={choices.cancel.text} />
             {choices.cancel.allowed && (
               <button type="submit" className="btn btn-dark" disabled={busy}>
                 {cancelling ? "Working…" : "Yes, cancel it"}

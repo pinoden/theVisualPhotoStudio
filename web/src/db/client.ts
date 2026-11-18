@@ -28,7 +28,8 @@ async function openPglite(dataDir?: string): Promise<{ db: Db; close: () => Prom
   return { db: db as unknown as Db, close: () => client.close() };
 }
 
-async function openPostgres(url: string): Promise<{ db: Db; close: () => Promise<void> }> {
+/** The PostgreSQL server named by `url`, opened as it is: no migrations, no checks. For scripts. */
+export async function openPostgres(url: string): Promise<{ db: Db; close: () => Promise<void> }> {
   const { Pool } = await import("pg");
   const { drizzle } = await import("drizzle-orm/node-postgres");
   const pool = new Pool({ connectionString: url });
@@ -54,40 +55,111 @@ export async function migratePostgres(url: string): Promise<void> {
   }
 }
 
-const globalForDb = globalThis as unknown as { __studioDb?: Promise<Db> };
+/**
+ * A database opened, then made ready by `ready`: closed again when that fails (a database refused by the check of
+ * src/server/test-mode.ts above all), so that nothing of it stays open while the opening is tried again.
+ */
+export async function readyOrClosed(opened: { db: Db; close: () => Promise<void> }, ready: (db: Db) => Promise<void>): Promise<Db> {
+  try {
+    await ready(opened.db);
+  } catch (error) {
+    await opened.close().catch(() => undefined);
+    throw error;
+  }
+  return opened.db;
+}
+
+/**
+ * One opening, given to every caller. One that failed (a database server out of reach, a database refused) is given
+ * to the callers that come in the next `retryAfterMs` too, then tried again: otherwise every request, and every call
+ * of a request, would open the database anew, and a refused one is opened in full before it is refused.
+ */
+export function openOnce<T>(open: () => Promise<T>, retryAfterMs: number, clock: () => number = Date.now): () => Promise<T> {
+  let opening: Promise<T> | undefined;
+  let retryAt: number | undefined;
+  return () => {
+    if (opening && retryAt !== undefined && clock() >= retryAt) {
+      opening = undefined;
+      retryAt = undefined;
+    }
+    if (!opening) {
+      const attempt = open();
+      opening = attempt;
+      attempt.catch(() => {
+        if (opening === attempt) retryAt = clock() + retryAfterMs;
+      });
+    }
+    return opening;
+  };
+}
+
+/** How long a database that could not be opened, or was refused, is not tried again. */
+export const REOPEN_AFTER_MS = 10_000;
+
+async function openAppDb(): Promise<Db> {
+  const url = process.env.DATABASE_URL;
+  // A database holds test money or live money, never both: one that would mix them with the processor set up now is
+  // refused, with what to do (src/server/test-mode.ts). Imported here, as the pages are below: that module needs this one.
+  const oneKindOfMoney = async (db: Db) => {
+    const [{ assertOneKindOfMoney }, { resolvePayments }] = await Promise.all([import("../server/test-mode"), import("../server/payments")]);
+    await assertOneKindOfMoney(db, resolvePayments().provider?.name ?? null);
+  };
+  if (url) return readyOrClosed(await openPostgres(url), oneKindOfMoney);
+  const { seed } = await import("./seed");
+  // The pages the website was built with, into a database that never had them (src/server/pages.ts).
+  const { ensureBuiltInPages } = await import("../server/pages");
+  if (process.env.NEXT_PHASE === "phase-production-build") {
+    // `next build` without a database server: prerender pages from the
+    // starting catalog held in memory. Build workers run in parallel and
+    // PGlite's data directory can only be opened by one process.
+    const { db } = await openPglite(undefined);
+    await seed(db);
+    await ensureBuiltInPages(db, new Date());
+    return db;
+  }
+  if (process.env.NODE_ENV === "production" && process.env.ALLOW_PGLITE_IN_PRODUCTION !== "1") {
+    throw new Error("DATABASE_URL is required in production.");
+  }
+  // PGLITE_DATA_NAME lets the browser tests use their own throwaway database
+  // (.data/e2e). Always a plain folder name inside .data.
+  const name = /^[a-z0-9-]{1,40}$/.test(process.env.PGLITE_DATA_NAME ?? "") ? process.env.PGLITE_DATA_NAME! : "pglite";
+  const dataDir = path.join(process.cwd(), ".data", name);
+  mkdirSync(dataDir, { recursive: true });
+  return readyOrClosed(await openPglite(dataDir), async (db) => {
+    await seed(db);
+    await ensureBuiltInPages(db, new Date());
+    await oneKindOfMoney(db);
+  });
+}
+
+// On globalThis, so that the development server's reloading of this module keeps the one database it opened.
+const globalForDb = globalThis as unknown as { __studioDbOpen?: () => Promise<Db> };
 
 /** The application database. Opened once per process. */
 export function getDb(): Promise<Db> {
-  if (!globalForDb.__studioDb) {
-    globalForDb.__studioDb = (async () => {
-      const url = process.env.DATABASE_URL;
-      if (url) return (await openPostgres(url)).db;
-      const { seed } = await import("./seed");
-      if (process.env.NEXT_PHASE === "phase-production-build") {
-        // `next build` without a database server: prerender pages from the
-        // starting catalog held in memory. Build workers run in parallel and
-        // PGlite's data directory can only be opened by one process.
-        const { db } = await openPglite(undefined);
-        await seed(db);
-        return db;
-      }
-      if (process.env.NODE_ENV === "production" && process.env.ALLOW_PGLITE_IN_PRODUCTION !== "1") {
-        throw new Error("DATABASE_URL is required in production.");
-      }
-      // PGLITE_DATA_NAME lets the browser tests use their own throwaway database
-      // (.data/e2e). Always a plain folder name inside .data.
-      const name = /^[a-z0-9-]{1,40}$/.test(process.env.PGLITE_DATA_NAME ?? "") ? process.env.PGLITE_DATA_NAME! : "pglite";
-      const dataDir = path.join(process.cwd(), ".data", name);
-      mkdirSync(dataDir, { recursive: true });
-      const { db } = await openPglite(dataDir);
-      await seed(db);
-      return db;
-    })();
-    globalForDb.__studioDb.catch(() => {
-      globalForDb.__studioDb = undefined;
-    });
-  }
-  return globalForDb.__studioDb;
+  globalForDb.__studioDbOpen ??= openOnce(openAppDb, REOPEN_AFTER_MS);
+  return globalForDb.__studioDbOpen();
+}
+
+/** Whether `db` is a transaction: drizzle's transaction can be rolled back, the database itself cannot. */
+export function isTransaction(db: DbLike): boolean {
+  return typeof (db as { rollback?: unknown }).rollback === "function";
+}
+
+/**
+ * Queries that do not depend on each other: at once on the database, and one after another on a transaction, which
+ * has a single connection. node-postgres runs a query given to a busy connection after the one before, with a warning
+ * that its next major version refuses it (seen by the tester on 2026-11-17, at a publish and at the clear of test mode).
+ */
+export async function together<const Q extends readonly (() => unknown)[]>(
+  db: DbLike,
+  queries: Q,
+): Promise<{ -readonly [K in keyof Q]: Awaited<ReturnType<Q[K]>> }> {
+  type Results = { -readonly [K in keyof Q]: Awaited<ReturnType<Q[K]>> };
+  if (!isTransaction(db)) return (await Promise.all(queries.map((query) => query()))) as Results;
+  const results: unknown[] = [];
+  for (const query of queries) results.push(await query());
+  return results as Results;
 }
 
 /** Postgres error code of a failed query, looking through driver wrappers. */

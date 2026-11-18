@@ -33,14 +33,17 @@ export interface PromoDef {
   kind: PromoKind;
   /** percent: 1-100. amount: cents available to spend. free_hour: the minutes that are free (60). */
   value: number;
+  /** Codes default to studio rentals. */
+  photographyOnly?: boolean;
 }
 
 /** Why a code that exists cannot be used on a selection. */
-export type PromoMisfit = "several_studios" | "photography";
+export type PromoMisfit = "several_studios" | "photography" | "rental";
 
 export const PROMO_MISFIT_TEXT: Record<PromoMisfit, string> = {
   several_studios: "A free hour is for one studio. It cannot be used when several studios are booked together.",
   photography: "That code is for studio rentals. It cannot be used for a photography session.",
+  rental: "That code is for photography sessions. It cannot be used for a studio rental.",
 };
 
 export interface QuoteInput {
@@ -195,16 +198,15 @@ export function quote(input: QuoteInput): Quote {
     });
   const addonsCents = addonLines.reduce((sum, l) => sum + l.totalCents, 0);
 
-  // A percent code discounts the studio rental only. An amount code is money
-  // already owed to the customer, so it can pay for anything on the booking.
+  // A percent code discounts the rental or session price. An amount code
+  // can pay for the entire booking, including add-ons, within its scope.
   // A free hour takes the price of one hour of one studio off: it is not for
   // several studios booked together, and it does not pay for add-ons.
   let promoDiscountCents = 0;
   let promoMisfit: PromoMisfit | null = null;
   const promo = input.promo;
-  if (promo && photoPackage && promo.kind !== "amount") {
-    // Discount codes and free hours are for renting a studio. Money already paid (a reschedule credit) pays for anything.
-    promoMisfit = "photography";
+  if (promo && (promo.photographyOnly === true) !== Boolean(photoPackage)) {
+    promoMisfit = photoPackage ? "photography" : "rental";
   } else if (promo) {
     if (promo.kind === "percent") {
       if (!(promo.value > 0 && promo.value <= 100)) throw new PricingError("BAD_PROMO", "Invalid code.");

@@ -198,7 +198,7 @@ describe("checking a code before paying", () => {
     const promo = await percentCode(10);
     const result = expectOk(await quoteSelection(world.db, { ...selection(), promoCode: promo.code, email: JANE }, NOW));
     expect(result.quote.totalCents).toBe(15840);
-    expect(result.promo).toEqual({ code: promo.code, kind: "percent", value: 10 });
+    expect(result.promo).toEqual({ code: promo.code, kind: "percent", value: 10, source: "loyalty", photographyOnly: false });
     expect((await codeRow(promo.id)).usedCount).toBe(0);
   });
 

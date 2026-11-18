@@ -1,198 +1,43 @@
-import Link from "next/link";
-import { hourlyFromCents, hoursLines } from "@/lib/catalog-view";
-import { formatCents } from "@/lib/domain/pricing";
-import { SITE } from "@/lib/site";
+import type { Metadata } from "next";
+import { notFound } from "next/navigation";
+import { PageBlocks } from "@/components/site/PageBlocks";
+import { jsonLd, localBusiness } from "@/lib/site/structured-data";
 import { getCatalog } from "@/server/cached";
+import { configuredSiteUrl } from "@/server/runtime";
+import { shareMetadata, sharePicture, siteFrame, sitePage } from "@/server/site";
+
+/**
+ * The home page: the page of the admin whose address is "/" (Admin, Website,
+ * Pages, "Home"), which the website was built with and which cannot move or
+ * leave the website (src/server/pages.ts). The other pages are drawn by the
+ * route for any address, `[...slug]`; this one has a route of its own
+ * because that route cannot answer the website's own address.
+ */
+
+export async function generateMetadata(): Promise<Metadata> {
+  const [page, { frame }] = await Promise.all([sitePage(""), siteFrame()]);
+  if (!page) return {};
+  const { meta } = page.content;
+  // Without a title of its own, the home page has the website's title, as the owners set it for search engines.
+  return {
+    ...(meta.title ? { title: { absolute: meta.title } } : {}),
+    ...(meta.description ? { description: meta.description } : {}),
+    ...(meta.hidden ? { robots: { index: false } } : {}),
+    ...(await shareMetadata({ title: meta.title || frame.search.title, description: meta.description || frame.search.description, path: "/" })),
+  };
+}
 
 export default async function HomePage() {
-  const catalog = await getCatalog();
-  const first = catalog.studios[0];
-
+  const page = await sitePage("");
+  if (!page) notFound();
+  const [{ frame }, catalog, picture] = await Promise.all([siteFrame(), getCatalog(), sharePicture()]);
+  const site = configuredSiteUrl();
+  // The studio as a business, for maps and local search results (src/lib/site/structured-data.ts).
+  const business = localBusiness({ business: frame.business, catalog, url: site, image: picture && site ? `${site}${picture.url}` : null });
   return (
-    <>
-      <section className="hero">
-        <div className="hero-content">
-          <p className="hero-eyebrow">Winter Park, Florida</p>
-          <h1>
-            Where Every Frame
-            <br />
-            <em>Tells a Story</em>
-          </h1>
-          <p>
-            Three unique natural-light studios available by the hour. For photographers, brands, content creators
-            and families.
-          </p>
-          <div style={{ display: "flex", gap: "1rem", justifyContent: "center", flexWrap: "wrap" }}>
-            <Link href="/book" className="btn btn-dark">
-              Book a Studio
-            </Link>
-            <Link href="/studios" className="btn btn-ghost">
-              Explore Studios
-            </Link>
-          </div>
-        </div>
-      </section>
-
-      <section className="section section-cream">
-        <div className="container">
-          <div className="section-header">
-            <p className="section-eyebrow">Our Spaces</p>
-            <h2>Three Studios, One Vision</h2>
-            <div className="divider" />
-            <p>Each studio has its own look. Book one, or any combination of them for the same time.</p>
-          </div>
-          <div className="studios-grid">
-            {catalog.studios.map((studio) => {
-              const from = hourlyFromCents(catalog, studio.id);
-              return (
-                <div className="studio-card" key={studio.id}>
-                  <div className={`studio-card-img ${studio.slug}-bg`}>
-                    <span className="studio-placeholder-text">{studio.name}</span>
-                  </div>
-                  <div className="studio-card-body">
-                    <h3>{studio.name}</h3>
-                    <p>{studio.tagline}</p>
-                    {from !== null && <p className="studio-price">From {formatCents(from)}/hour</p>}
-                    <div style={{ marginTop: "1.25rem", display: "flex", gap: ".75rem", flexWrap: "wrap" }}>
-                      <Link
-                        href={`/studios#${studio.slug}`}
-                        className="btn btn-outline"
-                        style={{ padding: ".5rem 1.25rem", fontSize: ".78rem" }}
-                      >
-                        View Studio
-                      </Link>
-                      <Link
-                        href={`/book?studio=${studio.slug}`}
-                        className="btn btn-primary"
-                        style={{ padding: ".5rem 1.25rem", fontSize: ".78rem" }}
-                      >
-                        Book Now
-                      </Link>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </section>
-
-      <section className="section section-ivory">
-        <div className="container">
-          <div className="section-header">
-            <p className="section-eyebrow">How Booking Works</p>
-            <h2>Two Ways to Book</h2>
-            <div className="divider" />
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(240px,1fr))", gap: "2rem" }}>
-            <div style={{ textAlign: "center", padding: "1.5rem" }}>
-              <div style={{ fontSize: "2rem", marginBottom: "1rem" }}>✦</div>
-              <h4 style={{ fontSize: "1.2rem", marginBottom: ".5rem" }}>Know the studio?</h4>
-              <p style={{ fontSize: ".875rem" }}>Pick one or more studios and see every time they are free together.</p>
-            </div>
-            <div style={{ textAlign: "center", padding: "1.5rem" }}>
-              <div style={{ fontSize: "2rem", marginBottom: "1rem" }}>✦</div>
-              <h4 style={{ fontSize: "1.2rem", marginBottom: ".5rem" }}>Know the time?</h4>
-              <p style={{ fontSize: ".875rem" }}>Pick a date and time and see which studios are free then.</p>
-            </div>
-            <div style={{ textAlign: "center", padding: "1.5rem" }}>
-              <div style={{ fontSize: "2rem", marginBottom: "1rem" }}>✦</div>
-              <h4 style={{ fontSize: "1.2rem", marginBottom: ".5rem" }}>Need more space?</h4>
-              <p style={{ fontSize: ".875rem" }}>
-                Add any other studio to the same booking. The multi-studio discount applies automatically.
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="section section-cream">
-        <div className="container">
-          <div className="two-col">
-            <div>
-              <p className="section-eyebrow">Find Us</p>
-              <h2>Located in Winter Park</h2>
-              <div className="divider" style={{ margin: "1rem 0" }} />
-              <div className="contact-detail">
-                <div className="contact-icon">📍</div>
-                <div>
-                  <strong style={{ color: "var(--color-dark)" }}>Address</strong>
-                  <br />
-                  {SITE.addressLine1}
-                  <br />
-                  {SITE.addressLine2}
-                </div>
-              </div>
-              <div className="contact-detail">
-                <div className="contact-icon">📞</div>
-                <div>
-                  <strong style={{ color: "var(--color-dark)" }}>Phone</strong>
-                  <br />
-                  <a href={SITE.phoneHref}>{SITE.phoneDisplay}</a>
-                </div>
-              </div>
-              {first && (
-                <div className="contact-detail">
-                  <div className="contact-icon">🕐</div>
-                  <div>
-                    <strong style={{ color: "var(--color-dark)" }}>Hours</strong>
-                    <br />
-                    {hoursLines(first).map((line) => (
-                      <span key={line}>
-                        {line}
-                        <br />
-                      </span>
-                    ))}
-                    <em style={{ fontSize: ".8rem" }}>By appointment only</em>
-                  </div>
-                </div>
-              )}
-            </div>
-            <div
-              style={{
-                background: "var(--color-ivory)",
-                border: "1px solid var(--color-border)",
-                height: 320,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <div style={{ textAlign: "center" }}>
-                <div style={{ fontSize: "2.5rem", marginBottom: ".75rem" }}>📍</div>
-                <p style={{ fontSize: ".9rem" }}>
-                  {SITE.addressLine1}
-                  <br />
-                  {SITE.addressLine2}
-                </p>
-                <a
-                  href={SITE.mapsUrl}
-                  target="_blank"
-                  rel="noopener"
-                  className="btn btn-primary mt-2"
-                  style={{ fontSize: ".78rem", padding: ".5rem 1.25rem" }}
-                >
-                  Open in Maps
-                </a>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="section section-ivory" style={{ textAlign: "center" }}>
-        <div className="container-sm">
-          <p className="section-eyebrow">Ready to Create?</p>
-          <h2 style={{ fontSize: "clamp(2rem,4vw,3.5rem)" }}>Book Your Session Today</h2>
-          <div className="divider" />
-          <p style={{ maxWidth: 480, margin: "0 auto 2rem" }}>
-            Choose your space, pick a time and get instant confirmation.
-          </p>
-          <Link href="/book" className="btn btn-dark" style={{ fontSize: ".95rem", padding: ".9rem 2.5rem" }}>
-            Book a Studio →
-          </Link>
-        </div>
-      </section>
-    </>
+    <div className="site-page blk-root">
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(business) }} />
+      <PageBlocks blocks={page.content.blocks} site={page.site} />
+    </div>
   );
 }

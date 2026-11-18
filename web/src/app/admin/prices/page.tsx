@@ -4,7 +4,7 @@ import { Suspense } from "react";
 import { getDb } from "@/db/client";
 import { priceTable } from "@/lib/catalog-view";
 import { durationLabel, longDateLabel } from "@/lib/domain/time";
-import { centsToInput, MONEY_FIELD } from "@/lib/parse";
+import { centsToInput, PRICE_FIELD } from "@/lib/parse";
 import { loadCatalog } from "@/server/catalog";
 import { requireOwner } from "@/server/session";
 import { localDateOf } from "@/server/tz";
@@ -47,6 +47,7 @@ async function Prices({ searchParams }: Pick<PageProps<"/admin/prices">, "search
           <h3>{studio.name}</h3>
           <form action={savePricesAction}>
             <input type="hidden" name="studioId" value={studio.id} />
+            <div className="data-table-wrap">
             <table className="data-table" style={{ maxWidth: 520 }}>
               <thead>
                 <tr>
@@ -63,7 +64,7 @@ async function Prices({ searchParams }: Pick<PageProps<"/admin/prices">, "search
                       <input
                         name={`price:weekday:${row.durationMinutes}`}
                         className="price-input"
-                        {...MONEY_FIELD}
+                        {...PRICE_FIELD}
                         aria-label={`${studio.name} ${durationLabel(row.durationMinutes)} weekday price`}
                         defaultValue={row.weekdayCents === null ? "" : centsToInput(row.weekdayCents)}
                       />
@@ -72,7 +73,7 @@ async function Prices({ searchParams }: Pick<PageProps<"/admin/prices">, "search
                       <input
                         name={`price:weekend:${row.durationMinutes}`}
                         className="price-input"
-                        {...MONEY_FIELD}
+                        {...PRICE_FIELD}
                         aria-label={`${studio.name} ${durationLabel(row.durationMinutes)} weekend price`}
                         defaultValue={row.weekendCents === null ? "" : centsToInput(row.weekendCents)}
                       />
@@ -81,6 +82,7 @@ async function Prices({ searchParams }: Pick<PageProps<"/admin/prices">, "search
                 ))}
               </tbody>
             </table>
+            </div>
             <button type="submit" className="btn btn-dark btn-small" style={{ marginTop: "1rem" }}>
               Save {studio.name} prices
             </button>
@@ -92,19 +94,19 @@ async function Prices({ searchParams }: Pick<PageProps<"/admin/prices">, "search
               <label className="form-label" htmlFor={`minutes-${studio.id}`}>
                 Add a duration (minutes)
               </label>
-              <input id={`minutes-${studio.id}`} name="minutes" className="form-control" inputMode="numeric" placeholder="360" required />
+              <input id={`minutes-${studio.id}`} name="minutes" className="form-control" type="number" min={15} max={1440} step={15} placeholder="360" required />
             </div>
             <div className="form-group">
               <label className="form-label" htmlFor={`weekday-${studio.id}`}>
                 Mon–Fri ($)
               </label>
-              <input id={`weekday-${studio.id}`} name="weekday" className="form-control" {...MONEY_FIELD} required />
+              <input id={`weekday-${studio.id}`} name="weekday" className="form-control" {...PRICE_FIELD} required />
             </div>
             <div className="form-group">
               <label className="form-label" htmlFor={`weekend-${studio.id}`}>
                 Sat–Sun ($)
               </label>
-              <input id={`weekend-${studio.id}`} name="weekend" className="form-control" {...MONEY_FIELD} placeholder="same" />
+              <input id={`weekend-${studio.id}`} name="weekend" className="form-control" {...PRICE_FIELD} placeholder="same" />
             </div>
             <button type="submit" className="btn btn-outline btn-small">
               Add
@@ -124,7 +126,10 @@ async function Prices({ searchParams }: Pick<PageProps<"/admin/prices">, "search
               id="discount-two"
               name="two"
               className="form-control"
-              inputMode="numeric"
+              type="number"
+              min={0}
+              max={100}
+              step={1}
               defaultValue={catalog.settings.multiStudioPercent[2] ?? 0}
               required
             />
@@ -137,7 +142,10 @@ async function Prices({ searchParams }: Pick<PageProps<"/admin/prices">, "search
               id="discount-three"
               name="three"
               className="form-control"
-              inputMode="numeric"
+              type="number"
+              min={0}
+              max={100}
+              step={1}
               defaultValue={catalog.settings.multiStudioPercent[3] ?? 0}
               required
             />

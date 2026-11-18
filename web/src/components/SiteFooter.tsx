@@ -1,71 +1,67 @@
 import Link from "next/link";
-import { SITE } from "@/lib/site";
+import type { CSSProperties } from "react";
+import { copyrightLine, isInternalHref, SOCIAL_NETWORKS, telHref, type SiteFrame, type SiteLink } from "@/lib/site/frame";
 
-export function SiteFooter() {
+function FooterLink({ link }: { link: SiteLink }) {
+  return isInternalHref(link.href) ? <Link href={link.href}>{link.label}</Link> : <a href={link.href}>{link.label}</a>;
+}
+
+/** The footer of every page, as the owners set it under Admin, Website (src/lib/site/frame.ts). */
+export function SiteFooter({ frame }: { frame: SiteFrame }) {
+  const { business, logo, footer, social } = frame;
   return (
     <footer className="site-footer">
-      <div className="footer-grid">
+      <div className="footer-grid" style={{ "--footer-cols": footer.columns.length + 1 } as CSSProperties}>
         <div>
           <div className="footer-logo">
-            The Visuals <span>Photo Studio</span>
+            {logo.text}
+            {logo.accent && (
+              <>
+                {" "}
+                <span>{logo.accent}</span>
+              </>
+            )}
           </div>
-          <p className="footer-tagline">
-            Natural-light photography studios in Winter Park, FL. Designed for photographers, content creators,
-            brands and families.
-          </p>
+          {footer.tagline && <p className="footer-tagline">{footer.tagline}</p>}
+          {social.length > 0 && (
+            <ul className="footer-social" aria-label="Social media">
+              {social.map((entry) => (
+                <li key={`${entry.network}-${entry.url}`}>
+                  <a href={entry.url} target="_blank" rel="noopener noreferrer">
+                    {SOCIAL_NETWORKS[entry.network]}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
+        {footer.columns.map((column, index) => (
+          <div className="footer-col" key={`${index}-${column.title}`}>
+            <h4>{column.title}</h4>
+            <ul>
+              {column.links.map((link, linkIndex) => (
+                <li key={`${linkIndex}-${link.label}`}>
+                  <FooterLink link={link} />
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
         <div className="footer-col">
-          <h4>Studios</h4>
-          <ul>
-            <li>
-              <Link href="/studios#blanche">Studio Blanche</Link>
-            </li>
-            <li>
-              <Link href="/studios#dayglow">Studio Dayglow</Link>
-            </li>
-            <li>
-              <Link href="/studios#paris">Studio Paris</Link>
-            </li>
-          </ul>
-        </div>
-        <div className="footer-col">
-          <h4>Info</h4>
-          <ul>
-            <li>
-              <Link href="/rates">Rates</Link>
-            </li>
-            <li>
-              <Link href="/services">Photography</Link>
-            </li>
-            <li>
-              <Link href="/faq">Guest Information</Link>
-            </li>
-            <li>
-              <Link href="/policies">Policies</Link>
-            </li>
-            <li>
-              <Link href="/contact">Contact</Link>
-            </li>
-            <li>
-              <Link href="/book">Book a studio</Link>
-            </li>
-          </ul>
-        </div>
-        <div className="footer-col">
-          <h4>Visit Us</h4>
-          <p style={{ fontSize: ".875rem" }}>
-            {SITE.addressLine1}
+          <h4>{footer.contactTitle}</h4>
+          <p>
+            {business.addressLine1}
             <br />
-            {SITE.addressLine2}
+            {business.addressLine2}
           </p>
-          <p style={{ fontSize: ".875rem", marginTop: ".75rem" }}>
-            <a href={SITE.phoneHref}>{SITE.phoneDisplay}</a>
+          <p>
+            <a href={telHref(business.phone)}>{business.phone}</a>
           </p>
-          <p style={{ fontSize: ".8rem", marginTop: ".75rem", color: "rgba(255,255,255,.4)" }}>By appointment only</p>
+          {business.note && <p className="footer-note">{business.note}</p>}
         </div>
       </div>
       <div className="footer-bottom">
-        <p>&copy; {SITE.name}. All rights reserved.</p>
+        <p>{copyrightLine(frame)}</p>
       </div>
     </footer>
   );

@@ -1,0 +1,64 @@
+import { describe, expect, it } from "vitest";
+import { renderToStaticMarkup } from "react-dom/server";
+import type { BookingView } from "@/server/bookings";
+import { BookingSummary } from "./BookingSummary";
+
+const PAID_ONLINE: BookingView = {
+  id: "b1",
+  ref: "VS-ABC123",
+  status: "confirmed",
+  cancelReason: null,
+  customerName: "Ann Avery",
+  customerEmail: "ann@example.com",
+  startAt: "2026-12-01T15:00:00.000Z",
+  endAt: "2026-12-01T17:00:00.000Z",
+  durationMinutes: 120,
+  studios: [{ name: "Studio Blanche", priceCents: 17600 }],
+  addons: [],
+  studiosSubtotalCents: 17600,
+  multiStudioDiscountCents: 0,
+  addonsCents: 0,
+  promoDiscountCents: 0,
+  creditAppliedCents: 0,
+  promoKind: null,
+  promoSource: null,
+  label: "confirmed",
+  madeByAdmin: false,
+  photography: null,
+  totalCents: 17600,
+  receivedCents: 17600,
+  receivedAtStudioCents: 0,
+  dueCents: 0,
+  heldCents: 0,
+  rescheduledCount: 0,
+};
+
+/** The summary's last row, as its two sides read. */
+function lastRow(changes: Partial<BookingView>): [string, string] {
+  const html = renderToStaticMarkup(<BookingSummary booking={{ ...PAID_ONLINE, ...changes }} />);
+  const match = /<div class="price-row total"><span>(.*?)<\/span><span>(.*?)<\/span><\/div>/.exec(html);
+  if (!match) throw new Error(`No total row in ${html}`);
+  return [match[1], match[2]];
+}
+
+describe("a booking's summary", () => {
+  it("says where the money came from, or what is still to pay", () => {
+    expect(lastRow({})).toEqual(["Charged to card", "$176"]);
+    // Taking the amount did not go through yet: the card holds it, and it is not charged.
+    expect(lastRow({ receivedCents: 0, heldCents: 17600 })).toEqual(["Held on card", "$176"]);
+    // The reservation lapsed: the booking owes its price.
+    expect(lastRow({ receivedCents: 0, dueCents: 17600 })).toEqual(["To pay", "$176"]);
+    expect(lastRow({ madeByAdmin: true, receivedCents: 0, dueCents: 17600 })).toEqual(["To pay at the studio", "$176"]);
+    expect(lastRow({ receivedAtStudioCents: 17600 })).toEqual(["Paid at the studio", "$176"]);
+    expect(lastRow({ receivedAtStudioCents: 5000 })).toEqual(["Paid by card and at the studio", "$176"]);
+    expect(lastRow({ madeByAdmin: true })).toEqual(["Paid by card", "$176"]);
+    // A booking that ended shows what it cost.
+    expect(lastRow({ status: "cancelled", receivedCents: 0 })).toEqual(["Total", "$176"]);
+  });
+
+  it("says what a missed booking still owes, as its payment card does", () => {
+    expect(lastRow({ status: "no_show", receivedCents: 0, dueCents: 17600 })).toEqual(["To pay", "$176"]);
+    expect(lastRow({ status: "no_show", madeByAdmin: true, receivedCents: 5000, dueCents: 12600 })).toEqual(["To pay at the studio", "$126"]);
+    expect(lastRow({ status: "no_show" })).toEqual(["Charged to card", "$176"]);
+  });
+});

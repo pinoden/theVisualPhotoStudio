@@ -5,11 +5,14 @@ import { Suspense } from "react";
 import { statusLabel } from "@/components/BookingSummary";
 import { StatusBadge } from "@/components/StatusBadge";
 import { getDb } from "@/db/client";
+import { can } from "@/lib/abilities";
 import { formatCents } from "@/lib/domain/pricing";
 import { addDays, isIsoDate } from "@/lib/domain/time";
 import { centsToInput, MONEY_FIELD } from "@/lib/parse";
+import { notFound } from "next/navigation";
 import { listBookings } from "@/server/admin";
-import { requireOwner } from "@/server/session";
+import { requireManager } from "@/server/session";
+import { loadSettings } from "@/server/settings";
 import { formatRange, localDateOf } from "@/server/tz";
 import { ownerCancelAction, ownerRefundAction } from "../actions";
 import { AdminFrame, AdminLoading } from "../frame";
@@ -26,17 +29,21 @@ export default function BookingsPage(props: PageProps<"/admin/bookings">) {
 
 async function Bookings({ searchParams }: Pick<PageProps<"/admin/bookings">, "searchParams">) {
   await connection();
-  await requireOwner("/admin/bookings");
+  // The list is where a booking is cancelled and a card refunded: for the owners, and for a manager the owners let refund.
+  const viewer = await requireManager("/admin/bookings");
+  const db = await getDb();
+  const settings = await loadSettings(db);
+  if (!can(viewer, "refund", settings)) notFound();
   const query = await searchParams;
   const today = localDateOf(new Date());
   const from = typeof query.from === "string" && isIsoDate(query.from) ? query.from : today;
   const to = typeof query.to === "string" && isIsoDate(query.to) && query.to >= from ? query.to : addDays(from, 14);
   const includeCancelled = query.cancelled === "1";
-  const bookings = await listBookings(await getDb(), { from, to }, { includeCancelled });
+  const bookings = await listBookings(db, { from, to }, { includeCancelled });
   const back = `/admin/bookings?from=${from}&to=${to}${includeCancelled ? "&cancelled=1" : ""}`;
 
   return (
-    <AdminFrame active="/admin/bookings" title="Bookings" query={query}>
+    <AdminFrame active="/admin/bookings" title="Bookings" query={query} viewer={viewer} settings={settings}>
       <form method="get" className="admin-form-row">
         <div className="form-group">
           <label className="form-label" htmlFor="from">
@@ -128,11 +135,24 @@ async function Bookings({ searchParams }: Pick<PageProps<"/admin/bookings">, "se
                           <form action={ownerCancelAction} style={{ marginTop: ".5rem" }}>
                             <input type="hidden" name="ref" value={b.ref} />
                             <input type="hidden" name="back" value={back} />
+                            {/* What the card held as this page shows it: money received since refuses the cancel. */}
+                            <input type="hidden" name="seenCard" value={b.cardHeldCents} />
                             <label style={{ fontSize: ".8rem" }}>
                               Refund to card ($)
                               <br />
-                              <input name="refund" className="price-input" defaultValue={centsToInput(b.cardHeldCents)} {...MONEY_FIELD} />
+                              <input name="refund" className="price-input" defaultValue={centsToInput(b.refundableCents)} {...MONEY_FIELD} />
                             </label>
+                            {b.refundableCents < b.cardHeldCents && (
+                              <div style={{ fontSize: ".75rem", maxWidth: "12rem" }}>
+                                The pet fee was already returned as studio credit, so it is not refunded to the card.
+                              </div>
+                            )}
+                            {b.studioHeldCents > 0 && (
+                              <div style={{ fontSize: ".75rem", maxWidth: "12rem" }}>
+                                {formatCents(b.studioHeldCents)} of what was paid at the studio can be given back. It cannot be refunded from here:
+                                give back what is owed by hand, then record it on the appointment&apos;s page.
+                              </div>
+                            )}
                             <br />
                             <button type="submit" className="btn btn-dark btn-small" style={{ marginTop: ".4rem" }}>
                               Cancel booking
@@ -146,6 +166,13 @@ async function Bookings({ searchParams }: Pick<PageProps<"/admin/bookings">, "se
                           <form action={ownerRefundAction} style={{ marginTop: ".5rem" }}>
                             <input type="hidden" name="ref" value={b.ref} />
                             <input type="hidden" name="back" value={back} />
+                            {b.rescheduleCode && (
+                              <div style={{ fontSize: ".75rem", maxWidth: "12rem", marginBottom: ".4rem" }}>
+                                Its money went into the reschedule code {b.rescheduleCode.code}
+                                {b.rescheduleCode.voided ? " (cancelled)" : ""}, which has {formatCents(b.rescheduleCode.valueCents)} left: a refund
+                                comes off the code, up to that.
+                              </div>
+                            )}
                             <label style={{ fontSize: ".8rem" }}>
                               Amount ($)
                               <br />

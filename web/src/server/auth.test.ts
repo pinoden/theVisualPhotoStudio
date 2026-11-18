@@ -11,6 +11,8 @@ import {
   verifyLoginCode,
 } from "./auth";
 import { createTestWorld, daysAfter, expectOk, minutesAfter, NOW, type TestWorld } from "./testing";
+import { deliverPendingEmails, MAX_EMAIL_ATTEMPTS, OUT_OF_DATE, queueEmail, type EmailTransport } from "./email";
+import { emailOutbox } from "@/db/schema";
 
 let world: TestWorld;
 beforeAll(async () => {
@@ -130,6 +132,36 @@ describe("signing in with an emailed code", () => {
     const result = expectOk(await verifyLoginCode(world.db, "jane@example.com", await emailedCode("jane@example.com"), deps()));
     await deleteSession(world.db, result.sessionToken);
     expect(await getSessionUser(world.db, result.sessionToken, NOW)).toBeNull();
+  });
+});
+
+describe("a sign-in code's email", () => {
+  it("is not sent once its code no longer works, when mail waited for an email service; the rest still is", async () => {
+    // No email service yet, as on a host set up before one: a code and a confirmation wait.
+    expect(await requestLoginCode(world.db, "late@example.com", NOW)).toMatchObject({ ok: true });
+    await queueEmail(world.db, { to: "late@example.com", kind: "booking_confirmation", subject: "Booking confirmed: VS-AAAAAA", body: "Body" });
+    const sent: string[] = [];
+    const transport: EmailTransport = {
+      name: "test",
+      async send(mail) {
+        sent.push(mail.subject);
+        return { ok: true };
+      },
+    };
+    // Three weeks later an email service is set up: the confirmation goes, the code, long out of date, does not.
+    expect(await deliverPendingEmails(world.db, transport, daysAfter(NOW, 21))).toEqual({ sent: 1, failed: 0 });
+    expect(sent).toEqual(["Booking confirmed: VS-AAAAAA"]);
+    expect((await world.db.select().from(emailOutbox).where(eq(emailOutbox.kind, "login_code")))[0]).toMatchObject({
+      sentAt: null,
+      attempts: MAX_EMAIL_ATTEMPTS,
+      error: OUT_OF_DATE,
+    });
+    // Nothing is tried again.
+    expect(await deliverPendingEmails(world.db, transport, daysAfter(NOW, 22))).toEqual({ sent: 0, failed: 0 });
+    // A code sent within its minutes goes, as always.
+    expect(await requestLoginCode(world.db, "soon@example.com", NOW)).toMatchObject({ ok: true });
+    expect(await deliverPendingEmails(world.db, transport, minutesAfter(NOW, 9))).toEqual({ sent: 1, failed: 0 });
+    expect(sent.at(-1)).toContain("Your sign-in code");
   });
 });
 

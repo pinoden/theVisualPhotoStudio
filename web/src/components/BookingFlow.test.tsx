@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defaultDayType, isoWeekday } from "@/lib/domain/time";
+import { NO_FACTS } from "@/lib/studio-facts";
 import type { Catalog } from "@/server/catalog";
 import { DEFAULT_SETTINGS } from "@/server/settings";
 import { BookingFlow } from "./BookingFlow";
@@ -44,9 +45,9 @@ function rulesFor(studioId: string, weekday: Record<number, number>, weekend: Re
 
 const catalog: Catalog = {
   studios: [
-    { id: B, slug: "blanche", name: "Studio Blanche", tagline: "All white.", description: "", includedGuests: 6, bufferMinutes: 10, color: "#4f7cac", hours },
-    { id: D, slug: "dayglow", name: "Studio Dayglow", tagline: "Boho.", description: "", includedGuests: 6, bufferMinutes: 10, color: "#c9851a", hours },
-    { id: P, slug: "paris", name: "Studio Paris", tagline: "Vintage.", description: "", includedGuests: 4, bufferMinutes: 10, color: "#b4517b", hours },
+    { id: B, slug: "blanche", name: "Studio Blanche", tagline: "All white.", description: "", includedGuests: 6, bufferMinutes: 10, color: "#4f7cac", hours, photos: [], facts: NO_FACTS, floorPlan: null },
+    { id: D, slug: "dayglow", name: "Studio Dayglow", tagline: "Boho.", description: "", includedGuests: 6, bufferMinutes: 10, color: "#c9851a", hours, photos: [], facts: NO_FACTS, floorPlan: null },
+    { id: P, slug: "paris", name: "Studio Paris", tagline: "Vintage.", description: "", includedGuests: 4, bufferMinutes: 10, color: "#b4517b", hours, photos: [], facts: NO_FACTS, floorPlan: null },
   ],
   rules: [
     ...rulesFor(B, { 60: 88, 120: 176, 600: 720 }, { 60: 110, 120: 200, 600: 800 }),
@@ -75,6 +76,8 @@ let availabilityAsked: string;
 let photographerBusy: [number, number][];
 let posted: Record<string, unknown>[];
 let bookingReply: { status: number; body: Record<string, unknown> };
+/** How many of the next answers to a booking are lost on the way, as when a phone's connection drops. */
+let lostAnswers: number;
 
 function reply(body: unknown, status = 200) {
   return { ok: status < 400, status, json: async () => body };
@@ -86,6 +89,7 @@ beforeEach(() => {
   availabilityAsked = "";
   photographerBusy = [];
   posted = [];
+  lostAnswers = 0;
   bookingReply = { status: 201, body: { ok: true, ref: "VS-TEST22", manageToken: "secret-token-1234567890" } };
   nav.push.mockReset();
   nav.refresh.mockReset();
@@ -130,6 +134,10 @@ beforeEach(() => {
       if (input === "/api/quote") return reply({ ok: true, promo: { code: "THANKS-FREE-HOUR", kind: "free_hour", value: 60 } });
       if (input === "/api/bookings") {
         posted.push(JSON.parse(init!.body!));
+        if (lostAnswers > 0) {
+          lostAnswers--;
+          throw new TypeError("Failed to fetch");
+        }
         return reply(bookingReply.body, bookingReply.status);
       }
       throw new Error(`unexpected request: ${input}`);
@@ -157,17 +165,21 @@ async function fillDetails() {
 }
 
 describe("studio-first flow", () => {
-  it("books any two studios together and sends what the customer saw", async () => {
+  it("requires Paris with Blanche and Dayglow and books an allowed pair at the price shown", async () => {
     render(<BookingFlow catalog={catalog} navigate={nav.push} />);
 
     await user.click(studioBox("Studio Blanche"));
     await user.click(studioBox("Studio Dayglow"));
     await next();
+    expect(screen.getByRole("alert").textContent).toContain("add Paris or choose a different combination");
+    await user.click(studioBox("Studio Dayglow"));
+    await user.click(studioBox("Studio Paris"));
+    await next();
 
     pickDate(WED);
     await pickDuration("1 hr");
-    // ($88 + $78) less the 20% two-studio discount
-    expect(screen.getByText("Estimated total").nextElementSibling?.textContent).toBe("$132.80");
+    // ($88 + $68) less the 20% two-studio discount
+    expect(screen.getByText("Estimated total").nextElementSibling?.textContent).toBe("$124.80");
     await next();
 
     await pickTime("10:00 AM");
@@ -178,12 +190,12 @@ describe("studio-first flow", () => {
     await next();
 
     expect(await screen.findByText(/No card processor is connected/)).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Confirm & pay $132.80" }));
+    await user.click(screen.getByRole("button", { name: "Confirm & pay $124.80" }));
 
     await waitFor(() => expect(nav.push).toHaveBeenCalledWith("/booking/VS-TEST22?t=secret-token-1234567890"));
     expect(posted).toHaveLength(1);
     expect(posted[0]).toMatchObject({
-      studioIds: [B, D],
+      studioIds: [B, P],
       date: WED,
       startMinute: h(10),
       durationMinutes: 60,
@@ -191,15 +203,15 @@ describe("studio-first flow", () => {
       addons: [],
       acceptTerms: true,
       paymentToken: "mock-card-ok",
-      expectedTotalCents: 13280,
+      expectedTotalCents: 12480,
     });
   });
 
   it("offers only times when every chosen studio is free", async () => {
-    busy = { [B]: [[h(10), h(12) + 10]], [D]: [[h(15), h(16) + 10]] };
+    busy = { [B]: [[h(10), h(12) + 10]], [P]: [[h(15), h(16) + 10]] };
     render(<BookingFlow catalog={catalog} navigate={nav.push} />);
     await user.click(studioBox("Studio Blanche"));
-    await user.click(studioBox("Studio Dayglow"));
+    await user.click(studioBox("Studio Paris"));
     await next();
     pickDate(WED);
     await pickDuration("1 hr");
@@ -215,10 +227,10 @@ describe("studio-first flow", () => {
   });
 
   it("explains when the chosen studios are never free together that day", async () => {
-    busy = { [B]: [[0, h(14)]], [D]: [[h(13), 1440]] };
+    busy = { [B]: [[0, h(14)]], [P]: [[h(13), 1440]] };
     render(<BookingFlow catalog={catalog} navigate={nav.push} />);
     await user.click(studioBox("Studio Blanche"));
-    await user.click(studioBox("Studio Dayglow"));
+    await user.click(studioBox("Studio Paris"));
     await next();
     pickDate(WED);
     await pickDuration("1 hr");
@@ -243,6 +255,20 @@ describe("studio-first flow", () => {
     await user.click(studioBox("Studio Paris"));
     await next();
     expect(screen.queryByRole("button", { name: "10 hr" })).toBeNull();
+  });
+
+  it("keeps working while a date is typed digit by digit, and takes it once it is a real date", async () => {
+    render(<BookingFlow catalog={catalog} navigate={nav.push} />);
+    await user.click(studioBox("Studio Paris"));
+    await next();
+    // What a browser's date field holds as the year 2030 is typed into it, one digit at a time.
+    for (const typing of ["0002-01-09", "0020-01-09", "0203-01-09", WED]) pickDate(typing);
+    await pickDuration("1 hr");
+    expect(screen.getByText("Estimated total").nextElementSibling?.textContent).toBe("$68");
+    // A date that is not one yet is no date: the step asks for one.
+    pickDate("0002-01-09");
+    await next();
+    expect(screen.getByRole("alert").textContent).toBe("Please select a date.");
   });
 
   it("does not let the customer skip a step", async () => {
@@ -372,8 +398,8 @@ describe("studio-first flow", () => {
   it("states the discount for several studios as it is charged, not more", () => {
     const settings = { ...catalog.settings, multiStudioPercent: { 2: 15, 3: 0 } };
     render(<BookingFlow catalog={{ ...catalog, settings }} navigate={nav.push} />);
-    expect(screen.getByText(/Booking several studios together/).textContent).toBe(
-      "Booking several studios together: 15% off when you book exactly 2.",
+    expect(screen.getByText(/Paris is included in every bundle/).textContent).toBe(
+      "Paris is included in every bundle. 15% off when you book exactly 2.",
     );
   });
 
@@ -417,6 +443,58 @@ describe("studio-first flow", () => {
     expect(posted[0].promoCode).toBeUndefined(); // the code is not sent, so it is not spent
   });
 
+  it("sends the same attempt again after no answer at all, so a booking that was made is found", async () => {
+    render(<BookingFlow catalog={catalog} navigate={nav.push} />);
+    await user.click(studioBox("Studio Paris"));
+    await next();
+    pickDate(WED);
+    await pickDuration("1 hr");
+    await next();
+    await pickTime("9:00 AM");
+    await next();
+    await fillDetails();
+    await next();
+    // The booking is made, and its answer is lost on the way.
+    lostAnswers = 1;
+    await user.click(await screen.findByRole("button", { name: "Confirm & pay $68" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("we cannot tell whether your booking went through");
+    expect(nav.push).not.toHaveBeenCalled();
+    // Pressed again, the same attempt: the server finds the booking, and the customer is taken to it.
+    await user.click(screen.getByRole("button", { name: "Confirm & pay $68" }));
+    await waitFor(() => expect(nav.push).toHaveBeenCalledWith("/booking/VS-TEST22?t=secret-token-1234567890"));
+    expect(posted).toHaveLength(2);
+    expect(posted[0].requestId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(posted[1].requestId).toBe(posted[0].requestId);
+  });
+
+  it("starts a new attempt after an answer, and after a step back", async () => {
+    bookingReply = { status: 402, body: { ok: false, code: "payment_failed", message: "Payment failed: Card declined. Your card was not charged." } };
+    render(<BookingFlow catalog={catalog} navigate={nav.push} />);
+    await user.click(studioBox("Studio Paris"));
+    await next();
+    pickDate(WED);
+    await pickDuration("1 hr");
+    await next();
+    await pickTime("9:00 AM");
+    await next();
+    await fillDetails();
+    await next();
+    await user.click(await screen.findByRole("button", { name: "Confirm & pay $68" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Card declined");
+    await user.click(screen.getByRole("button", { name: "Confirm & pay $68" }));
+    await waitFor(() => expect(posted).toHaveLength(2));
+    expect(posted[1].requestId).not.toBe(posted[0].requestId);
+    // No answer, then a step back and forward again: a new attempt too.
+    lostAnswers = 1;
+    await user.click(screen.getByRole("button", { name: "Confirm & pay $68" }));
+    await waitFor(() => expect(posted).toHaveLength(3));
+    await user.click(screen.getByRole("button", { name: /Back/ }));
+    await next();
+    await user.click(await screen.findByRole("button", { name: "Confirm & pay $68" }));
+    await waitFor(() => expect(posted).toHaveLength(4));
+    expect(posted[3].requestId).not.toBe(posted[2].requestId);
+  });
+
   it("shows the server's message when payment fails and stays on the payment step", async () => {
     bookingReply = { status: 402, body: { ok: false, code: "payment_failed", message: "Payment failed: Card declined. Your card was not charged." } };
     render(<BookingFlow catalog={catalog} navigate={nav.push} />);
@@ -437,6 +515,24 @@ describe("studio-first flow", () => {
 });
 
 describe("time-first flow", () => {
+  it("allows Blanche and Dayglow together once Paris is added", async () => {
+    render(<BookingFlow catalog={catalog} navigate={nav.push} />);
+    await user.click(screen.getByRole("radio", { name: /I know when I want to come/ }));
+    pickDate(WED);
+    await pickDuration("1 hr");
+    await next();
+    await pickTime("10:00 AM");
+    await next();
+
+    await user.click(studioBox("Studio Blanche"));
+    await user.click(studioBox("Studio Dayglow"));
+    await next();
+    expect(screen.getByRole("alert").textContent).toContain("add Paris or choose a different combination");
+    await user.click(studioBox("Studio Paris"));
+    await next();
+    expect(screen.getByLabelText("Full name *")).toBeTruthy();
+  });
+
   it("shows which studios are free at the chosen time and books from there", async () => {
     busy = { [B]: [[h(10), h(12) + 10]] };
     render(<BookingFlow catalog={catalog} navigate={nav.push} />);

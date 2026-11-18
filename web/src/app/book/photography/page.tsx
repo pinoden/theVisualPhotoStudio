@@ -2,8 +2,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
 import { BookingFlow } from "@/components/BookingFlow";
-import { SITE } from "@/lib/site";
+import { telHref } from "@/lib/site/frame";
 import { getCatalog } from "@/server/cached";
+import { siteFrame } from "@/server/site";
 
 export const metadata: Metadata = {
   title: "Book a Photographer",
@@ -19,10 +20,11 @@ export const metadata: Metadata = {
  * are free.
  */
 export default async function BookPhotographyPage() {
-  const catalog = await getCatalog();
+  const [catalog, { frame }] = await Promise.all([getCatalog(), siteFrame()]);
+  const { business } = frame;
   return (
     <>
-      <div className="page-banner">
+      <div className="page-banner site-page">
         <p className="section-eyebrow">Photography</p>
         <h1>Book a Photographer</h1>
         <p>A professional photoshoot with our in-house photographer. Studio rental is included.</p>
@@ -32,7 +34,7 @@ export default async function BookPhotographyPage() {
           <div className="wizard-container" style={{ textAlign: "center" }}>
             <p>
               Photography sessions cannot be booked online right now. Please <Link href="/contact">send us a message</Link>{" "}
-              or call <a href={SITE.phoneHref}>{SITE.phoneDisplay}</a>.
+              or call <a href={telHref(business.phone)}>{business.phone}</a>.
             </p>
             <Link href="/book" className="btn btn-dark">
               Rent a Studio

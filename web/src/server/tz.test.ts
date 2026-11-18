@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dayBoundsUtc, formatInstant, formatRange, localDateOf, localMinuteOn, localMinuteOnFloor, localToUtc } from "./tz";
+import { clockChangeOn, dayBoundsUtc, formatInstant, formatRange, localDateOf, localMinuteOn, localMinuteOnFloor, localToUtc } from "./tz";
 
 const iso = (d: Date) => d.toISOString();
 
@@ -19,6 +19,15 @@ describe("studio time zone (America/New_York)", () => {
     expect((spring.end.getTime() - spring.start.getTime()) / 3_600_000).toBe(23);
     const fall = dayBoundsUtc("2026-11-01");
     expect((fall.end.getTime() - fall.start.getTime()) / 3_600_000).toBe(25);
+  });
+
+  it("knows the hour the clocks skip or show twice, and that other days have none", () => {
+    expect(clockChangeOn("2027-03-14")).toEqual({ start: 120, end: 180 }); // 2:00 to 3:00 never happens
+    expect(clockChangeOn("2026-11-01")).toEqual({ start: 60, end: 120 }); // 1:00 to 2:00 happens twice
+    expect(clockChangeOn("2027-11-07")).toEqual({ start: 60, end: 120 });
+    expect(clockChangeOn("2027-03-13")).toBeNull();
+    expect(clockChangeOn("2026-11-18")).toBeNull();
+    expect(clockChangeOn("not a date")).toBeNull();
   });
 
   it("treats minute 1440 as midnight of the next day", () => {

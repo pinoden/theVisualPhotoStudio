@@ -6,19 +6,24 @@ import type { PromoDef, PromoKind } from "@/lib/domain/pricing";
 
 /**
  * Codes customers enter at checkout. Three kinds:
- *  - percent: a discount on the studio rental, usable `maxUses` times.
- *  - amount: money the customer already paid (a reschedule credit). `value`
- *    is what is left on it and goes down as it is spent.
+ *  - percent: a discount on a rental or photography session, usable `maxUses` times.
+ *  - amount: money the customer already paid (a reschedule credit, or a pet
+ *    fee returned as studio credit), or credit the studio gave. `value` is
+ *    what is left on it and goes down as it is spent.
  *  - free_hour: the price of one hour of one studio, usable `maxUses` times
  *    (the loyalty reward: once). `value` is the free minutes, 60.
  */
-export type PromoSource = "loyalty" | "reschedule" | "manual";
+export type PromoSource = "loyalty" | "reschedule" | "manual" | "pet_fee";
 
-export interface UsablePromo {
+/** What an amount code is, in the customer's words: a moved booking's money, or credit from the studio. */
+export function creditName(source: PromoSource): string {
+  return source === "reschedule" ? "reschedule code" : "studio credit";
+}
+
+export interface UsablePromo extends PromoDef {
   id: string;
   code: string;
-  kind: PromoKind;
-  value: number;
+  photographyOnly: boolean;
   source: PromoSource;
   rescheduleGeneration: number;
 }
@@ -65,20 +70,16 @@ export async function findUsablePromo(
       code: row.code,
       kind: row.kind,
       value: row.value,
+      photographyOnly: row.photographyOnly,
       source: row.source,
       rescheduleGeneration: row.rescheduleGeneration,
     },
   };
 }
 
-export function toPromoDef(promo: UsablePromo): PromoDef {
-  return { kind: promo.kind, value: promo.value };
-}
-
-export interface CustomerCode {
+export interface CustomerCode extends PromoDef {
   code: string;
-  kind: PromoKind;
-  value: number;
+  photographyOnly: boolean;
   source: PromoSource;
   expiresAt: string | null;
 }
@@ -102,6 +103,7 @@ export async function listCodesForEmail(db: DbLike, email: string, now: Date): P
       code: row.code,
       kind: row.kind,
       value: row.value,
+      photographyOnly: row.photographyOnly,
       source: row.source,
       expiresAt: row.expiresAt ? row.expiresAt.toISOString() : null,
     }));
@@ -150,26 +152,47 @@ export async function restorePromo(tx: DbLike, promoId: string, kind: PromoKind,
     .where(eq(promoCodes.id, promoId));
 }
 
+/**
+ * A booking that was never made (its card was refused, or its hold on the
+ * time ran out before it was paid) gives back what it spent of its code: an
+ * amount, and a use.
+ */
+export async function giveBackUnmade(
+  tx: DbLike,
+  booking: { promoCodeId: string | null; promoDiscountCents: number; creditAppliedCents: number },
+): Promise<void> {
+  if (!booking.promoCodeId || booking.promoDiscountCents <= 0) return;
+  await restorePromo(tx, booking.promoCodeId, booking.creditAppliedCents > 0 ? "amount" : "percent", booking.creditAppliedCents);
+}
+
 export interface IssuePromoInput {
   kind: PromoKind;
   value: number;
   source: PromoSource;
+  photographyOnly?: boolean;
   email: string | null;
   expiresAt: Date | null;
   maxUses?: number;
   rescheduleGeneration?: number;
   originBookingId?: string | null;
+  /** For a free hour earned by visits: which one of the customer's it is. The database allows each once. */
+  loyaltySeq?: number | null;
   note?: string;
+  /** When it was issued: the moment of the change that issued it. The database's clock when left out. */
+  issuedAt?: Date;
 }
 
-const PREFIX: Record<PromoSource, string> = { loyalty: "THANKS", reschedule: "MOVE", manual: "VS" };
+const PREFIX: Record<PromoSource, string> = { loyalty: "THANKS", reschedule: "MOVE", manual: "VS", pet_fee: "PET" };
 
 /**
- * Create a new code. Returns null when a code for the same origin booking and
- * source already exists (the database allows only one), which makes issuing
- * safe to repeat.
+ * Create a new code. Returns null when the code already exists: one for the
+ * same origin booking and source, or the same numbered free hour of the same
+ * customer (the database allows only one of each), which makes issuing safe
+ * to repeat.
  */
-export async function issuePromo(tx: DbLike, input: IssuePromoInput): Promise<{ id: string; code: string } | null> {
+export async function issuePromo(tx: DbLike, given: IssuePromoInput): Promise<{ id: string; code: string } | null> {
+  let input = given;
+  const email = input.email ? input.email.trim().toLowerCase() : null;
   for (let attempt = 0; attempt < 6; attempt++) {
     // ON CONFLICT DO NOTHING instead of catching an error: a failed statement
     // would abort the surrounding transaction.
@@ -179,27 +202,93 @@ export async function issuePromo(tx: DbLike, input: IssuePromoInput): Promise<{ 
         code: randomCode(PREFIX[input.source]),
         kind: input.kind,
         value: input.value,
+        issuedCents: input.value,
         source: input.source,
-        email: input.email ? input.email.trim().toLowerCase() : null,
+        photographyOnly: input.photographyOnly ?? false,
+        email,
         expiresAt: input.expiresAt,
         maxUses: input.maxUses ?? 1,
         rescheduleGeneration: input.rescheduleGeneration ?? 0,
         originBookingId: input.originBookingId ?? null,
+        loyaltySeq: input.loyaltySeq ?? null,
         note: input.note ?? "",
+        ...(input.issuedAt ? { createdAt: input.issuedAt } : {}),
       })
       .onConflictDoNothing()
       .returning({ id: promoCodes.id, code: promoCodes.code });
     if (rows[0]) return rows[0];
 
+    if (input.loyaltySeq != null && email) {
+      const numbered = await tx
+        .select({ id: promoCodes.id })
+        .from(promoCodes)
+        .where(and(eq(promoCodes.email, email), eq(promoCodes.loyaltySeq, input.loyaltySeq)))
+        .limit(1);
+      if (numbered.length > 0) return null; // this free hour of this customer was already sent
+    }
     if (input.originBookingId) {
       const existing = await tx
         .select({ id: promoCodes.id })
         .from(promoCodes)
         .where(and(eq(promoCodes.originBookingId, input.originBookingId), eq(promoCodes.source, input.source)))
         .limit(1);
-      if (existing.length > 0) return null; // already issued for this booking
+      if (existing.length > 0) {
+        if (input.loyaltySeq == null) return null; // already issued for this booking
+        // The visit already stands for another of this customer's free hours (their stamps were corrected
+        // since). This one is still owed: it is sent without naming a visit.
+        input = { ...input, originBookingId: null };
+        continue;
+      }
     }
     // Otherwise the random code text collided with an existing one; try another.
   }
   throw new Error("Could not generate a unique code.");
+}
+
+/**
+ * The reschedule code a booking's money went into when its customer released
+ * it (`requestRescheduleCode`): what is left on it is that money still,
+ * whether the code can be spent or the owner cancelled it, and what was spent
+ * of it cannot come back. Null for a booking never released so.
+ */
+/** The reschedule code a booking's money went into when it was released (`rescheduleCodeOf`). */
+export type RescheduleCode = { id: string; code: string; valueCents: number; voided: boolean; expiresAt: Date | null };
+
+/** Whether what is left on a reschedule code can still be spent: not cancelled, not expired. */
+export const spendable = (code: RescheduleCode, now: Date) => !code.voided && (code.expiresAt === null || code.expiresAt.getTime() > now.getTime());
+
+export async function rescheduleCodeOf(db: DbLike, bookingId: string): Promise<RescheduleCode | null> {
+  const [code] = await db
+    .select({ id: promoCodes.id, code: promoCodes.code, valueCents: promoCodes.value, voidedAt: promoCodes.voidedAt, expiresAt: promoCodes.expiresAt })
+    .from(promoCodes)
+    .where(and(eq(promoCodes.originBookingId, bookingId), eq(promoCodes.source, "reschedule")))
+    .limit(1);
+  return code ? { id: code.id, code: code.code, valueCents: code.valueCents, voided: code.voidedAt !== null, expiresAt: code.expiresAt } : null;
+}
+
+/**
+ * What became of a code of studio credit: how much of it was used
+ * (`usedCents`: what it was issued for less what is left, whatever became of
+ * the bookings it paid for, moved, cancelled after their visit, or refunded
+ * from), and whether what is left can still be spent.
+ */
+export async function codeStanding(db: DbLike, codeId: string, now: Date): Promise<{ code: string; usedCents: number; usable: boolean }> {
+  const [code] = await db.select().from(promoCodes).where(eq(promoCodes.id, codeId)).limit(1);
+  if (!code) return { code: "", usedCents: 0, usable: false };
+  const usable = code.voidedAt === null && code.value > 0 && (code.expiresAt === null || code.expiresAt.getTime() > now.getTime());
+  return { code: code.code, usedCents: Math.max(0, (code.issuedCents ?? code.value) - code.value), usable };
+}
+
+/**
+ * Take a refund of a released booking off its reschedule code, in the
+ * caller's transaction: the money comes back once, on the code or as a
+ * refund. False when the code no longer holds that much (spent meanwhile).
+ */
+export async function takeOffRescheduleCode(tx: DbLike, codeId: string, cents: number): Promise<boolean> {
+  const taken = await tx
+    .update(promoCodes)
+    .set({ value: sql`${promoCodes.value} - ${cents}` })
+    .where(and(eq(promoCodes.id, codeId), gte(promoCodes.value, cents)))
+    .returning({ id: promoCodes.id });
+  return taken.length > 0;
 }

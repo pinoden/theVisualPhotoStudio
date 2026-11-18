@@ -4,8 +4,8 @@ import { connection } from "next/server";
 import { Suspense } from "react";
 import { getDb } from "@/db/client";
 import { durationLabel, minutesToHHMM, weekdayName } from "@/lib/domain/time";
-import { centsToInput, MONEY_FIELD } from "@/lib/parse";
-import { can } from "@/lib/staff-abilities";
+import { centsToInput, PRICE_FIELD } from "@/lib/parse";
+import { can } from "@/lib/abilities";
 import { listPhotoPackages, listPhotographerBlocks, loadPhotographer } from "@/server/photography";
 import { requireStaff } from "@/server/session";
 import { loadSettings } from "@/server/settings";
@@ -38,7 +38,7 @@ async function Photography({ searchParams }: Pick<PageProps<"/admin/photography"
   const viewer = await requireStaff("/admin/photography");
   const db = await getDb();
   const settings = await loadSettings(db);
-  if (!can(viewer, "staffSetsPhotographerTimes", settings)) notFound();
+  if (!can(viewer, "setPhotographerTimes", settings)) notFound();
 
   const now = new Date();
   const [photographer, blocks, packages] = await Promise.all([
@@ -225,7 +225,7 @@ async function Photography({ searchParams }: Pick<PageProps<"/admin/photography"
                           id={`pack-${id}-price`}
                           name="price"
                           className="form-control price-input"
-                          {...MONEY_FIELD}
+                          {...PRICE_FIELD}
                           defaultValue={centsToInput(pack.priceCents)}
                           required
                         />

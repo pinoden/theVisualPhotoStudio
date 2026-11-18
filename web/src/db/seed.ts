@@ -3,8 +3,8 @@ import type { Db } from "./client";
 
 /**
  * Starting catalog, taken from the studio's live price list (read 2026-11-14
- * from its public scheduling page). Weekend prices start equal to weekday
- * prices until the owner sets them. Everything here is editable data, not code.
+ * from its public scheduling page), with the owner's approved weekend prices.
+ * Owners can change the prices in Admin.
  */
 const h = (hours: number) => Math.round(hours * 60);
 
@@ -26,7 +26,10 @@ const STUDIOS = [
       "A bright, modern canvas for creative work. Featuring a 10×15 ft seamless white cyclorama wall, a wall-mounted paper backdrop system, large southeast-facing windows and a minimalist aesthetic designed for portraits, branding sessions and editorial work. Shoes come off or get covered here to keep the space white.",
     includedGuests: 6,
     // hours -> dollars
-    prices: { 1: 88, 1.5: 132, 2: 176, 3: 264, 4: 320, 5: 385, 8: 605, 10: 720 },
+    prices: {
+      weekday: { 1: 88, 1.5: 132, 2: 176, 3: 264, 4: 320, 5: 385, 8: 605, 10: 720 },
+      weekend: { 1: 95, 1.5: 142.5, 2: 190, 3: 285, 4: 345, 5: 416, 8: 653, 10: 777 },
+    },
     // Photography sessions, studio included: hours -> dollars
     sessions: { 1: 375, 2: 575, 3: 730, 4: 840 },
   },
@@ -38,7 +41,10 @@ const STUDIOS = [
     description:
       "A warm, natural-light studio with a boho feel. The paper backdrop on a floor stand can be switched out during your session. Dayglow is our only pet-friendly studio.",
     includedGuests: 6,
-    prices: { 1: 78, 1.5: 117, 2: 156, 3: 234, 4: 285, 5: 350, 8: 540 },
+    prices: {
+      weekday: { 1: 78, 1.5: 117, 2: 156, 3: 234, 4: 285, 5: 350, 8: 540 },
+      weekend: { 1: 82, 1.5: 123, 2: 164, 3: 246, 4: 300, 5: 368, 8: 568 },
+    },
     // Photography sessions, studio included: hours -> dollars
     sessions: { 1: 315, 2: 515, 3: 670, 4: 775 },
   },
@@ -50,7 +56,10 @@ const STUDIOS = [
     description:
       "A romantic, elegant space for timeless visuals. Classic details, a white vintage couch, a fireplace mantel, gold mirrors and soft natural light from large southeast-facing windows. Styled with seasonal setups through the year.",
     includedGuests: 4,
-    prices: { 1: 68, 1.5: 102, 2: 136, 3: 195, 4: 245, 5: 300 },
+    prices: {
+      weekday: { 1: 68, 1.5: 102, 2: 136, 3: 195, 4: 245, 5: 300 },
+      weekend: { 1: 72, 1.5: 108, 2: 144, 3: 206, 4: 259, 5: 318 },
+    },
     // Photography sessions, studio included: hours -> dollars
     sessions: { 1: 315, 2: 515, 3: 670 },
   },
@@ -91,7 +100,7 @@ export async function seed(db: Db): Promise<boolean> {
 
       await tx.insert(priceRules).values(
         (["weekday", "weekend"] as const).flatMap((dayType) =>
-          Object.entries(s.prices).map(([hours, dollars]) => ({
+          Object.entries(s.prices[dayType]).map(([hours, dollars]) => ({
             studioId: row.id,
             dayType,
             durationMinutes: h(Number(hours)),
@@ -113,7 +122,8 @@ export async function seed(db: Db): Promise<boolean> {
     );
 
     // The in-house photographer. The migration that added photography creates one; this is for a
-    // database that has none. Their hours start as the studios' opening hours, until the owner sets them.
+    // database that has none. They work 9 am to 5 pm (the owner, 2026-11-15), so the last one-hour
+    // session starts at 4 pm. The owner changes the hours, and switches days off, under Admin, Photography.
     const [someone] = await tx.select({ id: photographers.id }).from(photographers).limit(1);
     if (!someone) {
       const [photographer] = await tx.insert(photographers).values({ name: "In-house photographer" }).returning({ id: photographers.id });
@@ -121,8 +131,8 @@ export async function seed(db: Db): Promise<boolean> {
         [1, 2, 3, 4, 5, 6, 7].map((weekday) => ({
           photographerId: photographer.id,
           weekday,
-          openMinute: weekday <= 5 ? h(9) : h(8),
-          closeMinute: weekday <= 5 ? h(19) : h(20),
+          openMinute: h(9),
+          closeMinute: h(17),
         })),
       );
     }

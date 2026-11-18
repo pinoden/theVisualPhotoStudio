@@ -1,5 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { centsToInput, dollarsToCents, DOLLARS_PATTERN, formText, hhmmToMinutes, intInRange } from "./parse";
+import { z } from "zod";
+import { normalizeEmail } from "@/server/auth";
+import {
+  centsToInput,
+  dollarsToCents,
+  DOLLARS_PATTERN,
+  EMAIL_PATTERN,
+  EMAIL_RULE,
+  formText,
+  hhmmToMinutes,
+  intInRange,
+  POSITIVE_DOLLARS_PATTERN,
+  PRICE_PATTERN,
+} from "./parse";
 
 describe("money typed into a form", () => {
   it("reads whole and decimal amounts exactly", () => {
@@ -67,6 +80,66 @@ describe("times and numbers typed into a form", () => {
   it("reads whole numbers within a range", () => {
     expect(intInRange("5", 0, 100)).toBe(5);
     expect(intInRange(" 100 ", 0, 100)).toBe(100);
-    for (const bad of ["101", "-1", "5.5", "five", "", null, 5]) expect(intInRange(bad, 0, 100)).toBeNull();
+    for (const bad of ["101", "-1", "5.5", "five", "", null, 5, "0x10", "1e3"]) expect(intInRange(bad, 0, 100)).toBeNull();
+    // What a number field sends for a whole number, written another way.
+    expect(intInRange("5.0", 0, 100)).toBe(5);
+    expect(intInRange("1e3", 0, 1000)).toBe(1000);
+    expect(intInRange("240e-1", 0, 100)).toBe(24);
+    expect(intInRange("245e-1", 0, 100)).toBeNull();
+    // A number field lets these through as 50 too.
+    expect(intInRange(".5e2", 0, 100)).toBe(50);
+    expect(intInRange("0000000050", 0, 100)).toBe(50);
+    expect(intInRange("1e400", 0, 100)).toBeNull();
+    expect(intInRange(`${"0".repeat(41)}50`, 0, 100)).toBe(50);
+    expect(intInRange("5.", 0, 100)).toBe(5);
+  });
+});
+
+describe("an email address typed into a form", () => {
+  // The booking's own check, the sign-in check, and the pattern a field gives the browser, read as a browser reads it.
+  const booking = (text: string) => z.string().trim().toLowerCase().max(200).pipe(z.email()).safeParse(text).success;
+  const field = (text: string) => new RegExp(`^(?:${EMAIL_PATTERN})$`, "v").test(text);
+  const addresses = [
+    "jane@example.com",
+    "Jane.Smith+studio@example.co.uk",
+    "o'brien@example.ie",
+    "a_b-c@sub-domain.example.com",
+    "x@y.io",
+    // What the browser let through before and the server refused (the tester's, 2026-11-16).
+    "jane..smith@example.com",
+    "jane.@example.com",
+    "jo!e@example.com",
+    "jane@example.c0",
+    "jane@example.123",
+    ".jane@example.com",
+    "jane@-example.com",
+    "jane@example",
+    "@example.com",
+    "jane @example.com",
+  ];
+
+  it("is taken or refused alike by the browser, the booking and the sign-in", () => {
+    for (const address of addresses) {
+      const taken = booking(address);
+      expect(field(address), address).toBe(taken);
+      expect(EMAIL_RULE.test(address), address).toBe(taken);
+      expect(normalizeEmail(address) !== null, address).toBe(taken);
+    }
+    expect(addresses.filter(booking)).toEqual(["jane@example.com", "Jane.Smith+studio@example.co.uk", "o'brien@example.ie", "a_b-c@sub-domain.example.com", "x@y.io"]);
+  });
+});
+
+describe("the patterns a browser checks a money field with", () => {
+  // As a browser reads a field's pattern: whole, and with the "v" flag.
+  const accepts = (pattern: string, text: string) => new RegExp(`^(?:${pattern})$`, "v").test(text);
+
+  it("take a price up to $100,000 and nothing above", () => {
+    for (const ok of ["0", "88", "88.50", "$1,500", "99,999.99", "100000", "100,000.00"]) expect(accepts(PRICE_PATTERN, ok), ok).toBe(true);
+    for (const bad of ["100000.01", "150000", "1,000,000", "12,50", "-5"]) expect(accepts(PRICE_PATTERN, bad), bad).toBe(false);
+  });
+
+  it("take a credit above zero only", () => {
+    for (const ok of ["40", "0.50", "$1,250.00"]) expect(accepts(POSITIVE_DOLLARS_PATTERN, ok), ok).toBe(true);
+    for (const bad of ["0", "0.00", "$0", " 0 ", "00"]) expect(accepts(POSITIVE_DOLLARS_PATTERN, bad), bad).toBe(false);
   });
 });

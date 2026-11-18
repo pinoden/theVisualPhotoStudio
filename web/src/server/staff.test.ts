@@ -77,15 +77,16 @@ describe("the day sheet", () => {
     expect(text).not.toContain(nextDayRef);
   });
 
-  it("hides contact details from staff unless the owner allows them", async () => {
+  it("shows contact details to staff, until the owners switch that off", async () => {
+    // Shown by default: the owner's answer of 2026-11-15.
+    const shown = expectOk(await getDaySheet(world.db, sam, NEAR));
+    expect(shown.entries[0]).toMatchObject({ customerPhone: "407-555-0111", customerEmail: "bob@example.com" });
+
+    await world.db.insert(settings).values({ key: "staffSeesContact", value: false });
     const hidden = expectOk(await getDaySheet(world.db, sam, NEAR));
     expect(hidden.entries.every((e) => e.customerPhone === null && e.customerEmail === null)).toBe(true);
     expect(JSON.stringify(hidden)).not.toContain("bob@example.com");
     expect(JSON.stringify(hidden)).not.toContain("407-555");
-
-    await world.db.insert(settings).values({ key: "staffSeesContact", value: true });
-    const shown = expectOk(await getDaySheet(world.db, sam, NEAR));
-    expect(shown.entries[0]).toMatchObject({ customerPhone: "407-555-0111", customerEmail: "bob@example.com" });
   });
 
   it("refuses every other day, and every person without a shift", async () => {

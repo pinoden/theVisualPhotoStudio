@@ -3,11 +3,16 @@
 import { redirect } from "next/navigation";
 import { getDb } from "@/db/client";
 import { isSettableLabel, LABEL_BLOCK_TEXT, LABEL_TEXT } from "@/lib/domain/labels";
+import { formatCents } from "@/lib/domain/pricing";
 import { isIsoDate } from "@/lib/domain/time";
-import { formText, intInRange } from "@/lib/parse";
+import { dollarsToCents, formText, intInRange } from "@/lib/parse";
 import { createAdminBooking, moveBooking, setLabel } from "@/server/appointments";
-import { flushEmailsSoon, siteUrl } from "@/server/runtime";
-import { requireStaff } from "@/server/session";
+import { cancelPayLink, checkBookingPayLink, closePayLinkByHand, sendPayLink } from "@/server/pay-links";
+import { resolvePayments } from "@/server/payments";
+import { givePetFeeCredit } from "@/server/pet-fee";
+import { flushEmailsSoon, payLinkDeps, siteUrl } from "@/server/runtime";
+import { requireOwner, requireStaff } from "@/server/session";
+import { recordHandRefund, recordStudioPayment, voidStudioPayment } from "@/server/studio-payments";
 import { formatInstant } from "@/server/tz";
 
 /**
@@ -96,8 +101,13 @@ export async function createAdminBookingAction(formData: FormData): Promise<void
         phone: formText(formData.get("phone")),
       },
       notes: formText(formData.get("notes")),
+      // Each add-on once, as on the booking screen; one that does not apply to the studios is refused by the price.
+      addons: [...new Set(formData.getAll("addon").filter((value): value is string => typeof value === "string"))].map((addonId) => ({ addonId, quantity: 1 })),
+      // A reward or credit of the client's, used on their behalf: it is checked and spent as at checkout.
+      promoCode: formText(formData.get("code")) || undefined,
     },
-    { now: new Date(), baseUrl: await siteUrl() },
+    // The processor set up now says what kind of money the booking is: test mode's, or real (src/server/test-mode.ts).
+    { now: new Date(), baseUrl: await siteUrl(), processor: resolvePayments().provider?.name ?? null },
   );
   if (!result.ok) redirect(withMessage(form, "error", result.message));
   flushEmailsSoon();
@@ -106,6 +116,175 @@ export async function createAdminBookingAction(formData: FormData): Promise<void
       `/admin/appointments/${result.ref}`,
       "notice",
       "Booked. The client has been emailed their confirmation. Nothing was charged: the price is paid at the studio.",
+    ),
+  );
+}
+
+// ── Money taken at the studio ────────────────────────────────────────────────
+
+/** The appointment's own page, for the actions that only make sense there. */
+function appointmentPage(ref: string): string {
+  return /^VS-[0-9A-Z]{6}$/.test(ref) ? `/admin/appointments/${ref}` : "/admin/calendar";
+}
+
+/** "Mark as paid": record a payment taken at the studio. The service checks who may, and how much is owed. */
+export async function recordPaymentAction(formData: FormData): Promise<void> {
+  const ref = formText(formData.get("ref"));
+  const page = appointmentPage(ref);
+  const viewer = await requireStaff(page);
+  const amountCents = dollarsToCents(formText(formData.get("amount")));
+  if (amountCents === null) redirect(withMessage(page, "error", "Enter the amount that was paid, for example 88 or 88.50."));
+
+  const result = await recordStudioPayment(
+    await getDb(),
+    viewer,
+    ref,
+    { amountCents, method: formText(formData.get("method")), note: formText(formData.get("note")) },
+    new Date(),
+  );
+  if (!result.ok) redirect(withMessage(page, "error", result.message));
+  flushEmailsSoon();
+  redirect(
+    withMessage(
+      page,
+      "notice",
+      `${formatCents(result.amountCents)} recorded. ${
+        result.dueCents > 0 ? `${formatCents(result.dueCents)} is still to pay.` : "The booking is paid in full."
+      } The client has been emailed a confirmation.`,
+    ),
+  );
+}
+
+/** Take back a payment recorded by mistake. Owners only. */
+export async function voidPaymentAction(formData: FormData): Promise<void> {
+  const page = appointmentPage(formText(formData.get("ref")));
+  const viewer = await requireOwner(page);
+  const result = await voidStudioPayment(await getDb(), viewer, formText(formData.get("paymentId")), formText(formData.get("reason")), new Date());
+  if (!result.ok) redirect(withMessage(page, "error", result.message));
+  redirect(
+    withMessage(
+      page,
+      "notice",
+      result.owesAgain
+        ? "The payment record was taken back. The booking owes that amount again."
+        : "The payment record was taken back. The booking has ended, so it owes nothing.",
+    ),
+  );
+}
+
+/** Record a refund the studio gave by hand. Owners only. Nothing is sent anywhere. */
+export async function handRefundAction(formData: FormData): Promise<void> {
+  const page = appointmentPage(formText(formData.get("ref")));
+  const viewer = await requireOwner(page);
+  const amountCents = dollarsToCents(formText(formData.get("amount")));
+  if (amountCents === null) redirect(withMessage(page, "error", "Enter the amount that was given back, for example 25 or 25.50."));
+  const result = await recordHandRefund(
+    await getDb(),
+    viewer,
+    formText(formData.get("paymentId")),
+    { amountCents, note: formText(formData.get("note")) },
+    new Date(),
+  );
+  if (!result.ok) redirect(withMessage(page, "error", result.message));
+  redirect(withMessage(page, "notice", `Refund of ${formatCents(amountCents)} recorded. Nothing was sent: this records what you gave back by hand.`));
+}
+
+/** Manually issue booking-linked pet-fee credit from Codes. Owners only. */
+export async function petCreditAction(formData: FormData): Promise<void> {
+  const ref = formText(formData.get("ref")).toUpperCase();
+  const page = appointmentPage(ref);
+  const retry = /^VS-[0-9A-Z]{6}$/.test(ref) ? `/admin/codes?booking=${ref}` : "/admin/codes";
+  const viewer = await requireOwner(retry);
+  const result = await givePetFeeCredit(await getDb(), viewer, ref, { now: new Date(), baseUrl: await siteUrl() });
+  if (!result.ok) redirect(withMessage(retry, "error", result.message));
+  flushEmailsSoon();
+  redirect(withMessage(page, "notice", `The pet fee of ${formatCents(result.cents)} is now studio credit. The client has been emailed the code ${result.code}.`));
+}
+
+// ── A payment link for what a booking still owes ─────────────────────────────
+
+/** Email the client a link to pay by card. Pressed again while the link is open, it emails the same link again. */
+export async function sendPayLinkAction(formData: FormData): Promise<void> {
+  const ref = formText(formData.get("ref"));
+  const page = appointmentPage(ref);
+  const viewer = await requireStaff(page);
+  const result = await sendPayLink(await getDb(), viewer, ref, await payLinkDeps());
+  if (!result.ok) redirect(withMessage(page, "error", result.message));
+  flushEmailsSoon();
+  redirect(
+    withMessage(
+      page,
+      "notice",
+      result.again
+        ? `The payment link for ${formatCents(result.amountCents)} was emailed to the client again.`
+        : `A payment link for ${formatCents(result.amountCents)} was emailed to the client. When they have paid, the payment appears here by itself.`,
+    ),
+  );
+}
+
+/** An owner closes a link the card processor cannot say anything about, once they looked it up in Square. */
+export async function closePayLinkByHandAction(formData: FormData): Promise<void> {
+  const ref = formText(formData.get("ref"));
+  const page = appointmentPage(ref);
+  const owner = await requireOwner(page);
+  const result = await closePayLinkByHand(await getDb(), owner, ref, await payLinkDeps());
+  if (!result.ok) redirect(withMessage(page, "error", result.message));
+  flushEmailsSoon();
+  redirect(
+    withMessage(
+      page,
+      "notice",
+      result.outcome === "was_paid"
+        ? result.late
+          ? result.late.made
+            ? "The card processor answered: the client had paid through the link. The booking had ended, so the payment is refunded to the card in full, and the client is told."
+            : "The card processor answered: the client had paid through the link. The booking had ended, so the payment is due back to the card in full; the refund has not gone through yet, and is tried again by itself."
+          : "The card processor answered: the client had paid through the link. The payment is recorded, and nothing was closed."
+        : "The payment link was closed. The site no longer asks about it.",
+    ),
+  );
+}
+
+/** Ask the card processor now whether the link was paid. */
+export async function checkPayLinkAction(formData: FormData): Promise<void> {
+  const ref = formText(formData.get("ref"));
+  const page = appointmentPage(ref);
+  const viewer = await requireStaff(page);
+  const result = await checkBookingPayLink(await getDb(), viewer, ref, await payLinkDeps());
+  if (!result.ok) redirect(withMessage(page, "error", result.message));
+  flushEmailsSoon();
+  redirect(
+    withMessage(
+      page,
+      "notice",
+      result.status === "paid"
+        ? result.late
+          ? result.late.made
+            ? "The client's payment through the link was recorded after the booking ended: it is refunded to the card in full, and the client is told."
+            : "The client's payment through the link was recorded after the booking ended. It is due back to the card in full, and the refund has not gone through yet: it is tried again by itself, and the client is told."
+          : "The client has paid through the link. The payment is recorded."
+        : result.status === "cancelled"
+          ? "The link was cancelled at the card processor."
+          : "The link has not been paid yet.",
+    ),
+  );
+}
+
+/** Withdraw the link, for example to record cash instead. A link that turns out to be paid is recorded as paid. */
+export async function cancelPayLinkAction(formData: FormData): Promise<void> {
+  const ref = formText(formData.get("ref"));
+  const page = appointmentPage(ref);
+  const viewer = await requireStaff(page);
+  const result = await cancelPayLink(await getDb(), viewer, ref, await payLinkDeps());
+  if (!result.ok) redirect(withMessage(page, "error", result.message));
+  flushEmailsSoon();
+  redirect(
+    withMessage(
+      page,
+      "notice",
+      result.outcome === "was_paid"
+        ? "The client had already paid through the link: the payment is recorded, and nothing was cancelled."
+        : "The payment link was cancelled. It can no longer be paid.",
     ),
   );
 }

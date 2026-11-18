@@ -1,11 +1,20 @@
-import { and, asc, eq, isNull, lt, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, lt, lte, sql } from "drizzle-orm";
 import { emailOutbox } from "@/db/schema";
 import type { DbLike } from "@/db/client";
+import { afterFee } from "@/lib/domain/policy";
+import { formatInstant } from "./tz";
+import { loadBusiness } from "./website";
 
 /**
  * Email is always queued in the database first, in the same step as the
  * change it reports, and delivered afterwards. A mail outage therefore never
  * blocks a booking, and nothing is lost: undelivered rows are retried.
+ *
+ * The studio's name and address are not written into the messages below.
+ * Their texts carry two marks, `{{studio}}` and `{{address}}`, and
+ * `queueEmail` puts the published contact details in their place (Admin,
+ * Website, "Header, menu & footer"), so every email follows a change made
+ * there.
  */
 export interface QueuedEmail {
   to: string;
@@ -15,16 +24,69 @@ export interface QueuedEmail {
   kind: string;
   /** Who a reply should reach, when that is not the site's own address. */
   replyTo?: string;
+  /** When the message is no longer any use (a sign-in code's email): one still waiting then is not sent. */
+  expiresAt?: Date;
 }
 
-export async function queueEmail(db: DbLike, message: QueuedEmail): Promise<void> {
-  await db.insert(emailOutbox).values({
-    toEmail: message.to.trim().toLowerCase(),
-    replyTo: message.replyTo?.trim().toLowerCase() || null,
-    subject: message.subject,
-    body: message.body,
-    kind: message.kind,
-  });
+/** Where `queueEmail` writes the studio's name, and its address on one line. */
+const STUDIO = "{{studio}}";
+const ADDRESS = "{{address}}";
+
+/** The message with the studio's published name and address in place of their marks. */
+async function filled(db: DbLike, message: QueuedEmail): Promise<{ subject: string; body: string }> {
+  const business = await loadBusiness(db);
+  const fill = (text: string) =>
+    text.replaceAll(STUDIO, () => business.name).replaceAll(ADDRESS, () => `${business.addressLine1}, ${business.addressLine2}`);
+  return { subject: fill(message.subject), body: fill(message.body) };
+}
+
+/** Queue a message. Answers its id, with which it can be replaced while it waits (`replaceQueuedEmail`). */
+export async function queueEmail(db: DbLike, message: QueuedEmail): Promise<string> {
+  const [row] = await db
+    .insert(emailOutbox)
+    .values({
+      toEmail: message.to.trim().toLowerCase(),
+      replyTo: message.replyTo?.trim().toLowerCase() || null,
+      ...(await filled(db, message)),
+      kind: message.kind,
+      expiresAt: message.expiresAt ?? null,
+    })
+    .returning({ id: emailOutbox.id });
+  return row.id;
+}
+
+export function reviewRequestEmail(input: { email: string; name: string; ref: string }): QueuedEmail {
+  return {
+    to: input.email,
+    kind: "review_request",
+    subject: `How was your visit to ${STUDIO}?`,
+    body: [
+      `Hi ${input.name},`,
+      "",
+      `Thank you for visiting ${STUDIO}. We'd love to hear about your experience.`,
+      "",
+      "Leave a Google review: https://g.page/r/CTQ9ea1fatgnEBM/review",
+      "",
+      `Booking reference: ${input.ref}`,
+      "",
+      SIGN_OFF,
+    ].join("\n"),
+  };
+}
+
+/**
+ * Put `message` in the place of a queued one that has not started on its way:
+ * for a message written before the outcome it reports was known (a refund
+ * that is sent after the cancellation is recorded). Answers false when the
+ * queued one is already being sent, or was sent.
+ */
+export async function replaceQueuedEmail(db: DbLike, id: string, message: QueuedEmail): Promise<boolean> {
+  const replaced = await db
+    .update(emailOutbox)
+    .set({ ...(await filled(db, message)), kind: message.kind })
+    .where(and(eq(emailOutbox.id, id), isNull(emailOutbox.sentAt), eq(emailOutbox.attempts, 0)))
+    .returning({ id: emailOutbox.id });
+  return replaced.length > 0;
 }
 
 export type SendResult = { ok: true } | { ok: false; error: string };
@@ -87,7 +149,14 @@ export function resolveEmailTransport(env: Env = process.env): EmailTransport | 
 
 export const MAX_EMAIL_ATTEMPTS = 5;
 
-/** Send queued messages, oldest first. Safe to run from several places at once. */
+/** Why a message that waited past its use is not sent: what a person reading the outbox sees. */
+export const OUT_OF_DATE = "Not sent: it was out of date before it could be sent.";
+
+/**
+ * Send queued messages, oldest first. Safe to run from several places at once.
+ * One that is no longer any use (a sign-in code whose minutes are over, when
+ * no email service was set up yet) is not sent: it is marked out of date.
+ */
 export async function deliverPendingEmails(
   db: DbLike,
   transport: EmailTransport | null,
@@ -95,6 +164,10 @@ export async function deliverPendingEmails(
   limit = 25,
 ): Promise<{ sent: number; failed: number }> {
   if (!transport) return { sent: 0, failed: 0 };
+  await db
+    .update(emailOutbox)
+    .set({ attempts: MAX_EMAIL_ATTEMPTS, error: OUT_OF_DATE })
+    .where(and(isNull(emailOutbox.sentAt), lt(emailOutbox.attempts, MAX_EMAIL_ATTEMPTS), lte(emailOutbox.expiresAt, now)));
   const pending = await db
     .select()
     .from(emailOutbox)
@@ -105,19 +178,20 @@ export async function deliverPendingEmails(
   let sent = 0;
   let failed = 0;
   for (const row of pending) {
-    // Claim the row by bumping its attempt count; whoever loses the race skips it.
-    const claimed = await db
+    // Claim the row by bumping its attempt count; whoever loses the race skips it. What is sent is the message as it is
+    // once claimed: one put right meanwhile (`replaceQueuedEmail`) goes out put right.
+    const [claimed] = await db
       .update(emailOutbox)
       .set({ attempts: sql`${emailOutbox.attempts} + 1` })
       .where(and(eq(emailOutbox.id, row.id), isNull(emailOutbox.sentAt), eq(emailOutbox.attempts, row.attempts)))
-      .returning({ id: emailOutbox.id });
-    if (claimed.length === 0) continue;
+      .returning({ toEmail: emailOutbox.toEmail, subject: emailOutbox.subject, body: emailOutbox.body, replyTo: emailOutbox.replyTo });
+    if (!claimed) continue;
 
     const result = await transport.send({
-      to: row.toEmail,
-      subject: row.subject,
-      text: row.body,
-      ...(row.replyTo ? { replyTo: row.replyTo } : {}),
+      to: claimed.toEmail,
+      subject: claimed.subject,
+      text: claimed.body,
+      ...(claimed.replyTo ? { replyTo: claimed.replyTo } : {}),
     });
     if (result.ok) {
       await db.update(emailOutbox).set({ sentAt: now, error: null }).where(eq(emailOutbox.id, row.id));
@@ -132,7 +206,7 @@ export async function deliverPendingEmails(
 
 // ── Message texts ────────────────────────────────────────────────────────────
 
-const SIGN_OFF = "The Visuals Photo Studio\n7457 Aloma Ave, Suite 301, Winter Park, FL 32792";
+const SIGN_OFF = `${STUDIO}\n${ADDRESS}`;
 
 function money(cents: number): string {
   const dollars = Math.floor(Math.abs(cents) / 100).toLocaleString("en-US");
@@ -146,7 +220,7 @@ export function loginCodeEmail(to: string, code: string, minutes: number): Queue
     kind: "login_code",
     subject: `Your sign-in code: ${code}`,
     body: [
-      `Your sign-in code for The Visuals Photo Studio is ${code}.`,
+      `Your sign-in code for ${STUDIO} is ${code}.`,
       "",
       `It works once and expires in ${minutes} minutes. If you did not ask for it, you can ignore this email.`,
       "",
@@ -164,8 +238,10 @@ export function bookingConfirmationEmail(input: {
   duration: string;
   /** Price after discounts. */
   totalCents: number;
-  /** Part of the total covered by a reschedule credit. */
+  /** Part of the total covered by an amount code: a reschedule code, or studio credit. */
   creditCents: number;
+  /** What that code is called: "reschedule code" or "studio credit". */
+  creditName?: string;
   /** Part of the total charged to the card. */
   cardCents: number;
   /** The studio made the booking for the client: nothing was charged, the total is paid at the studio. */
@@ -183,7 +259,7 @@ export function bookingConfirmationEmail(input: {
     body: [
       `Hi ${input.name},`,
       "",
-      "Your booking at The Visuals Photo Studio is confirmed.",
+      `Your booking at ${STUDIO} is confirmed.`,
       "",
       `Reference: ${input.ref}`,
       `Studio: ${input.studios}`,
@@ -196,7 +272,7 @@ export function bookingConfirmationEmail(input: {
         : []),
       input.payAtStudio ? `To pay at the studio: ${money(input.totalCents)}` : `Total: ${money(input.totalCents)}`,
       ...(input.creditCents > 0
-        ? [`Paid with your reschedule code: ${money(input.creditCents)}`, `Charged to your card: ${money(input.cardCents)}`]
+        ? [`Paid with your ${input.creditName ?? "reschedule code"}: ${money(input.creditCents)}`, `Charged to your card: ${money(input.cardCents)}`]
         : []),
       "",
       `View, cancel or move your booking: ${input.manageUrl}`,
@@ -219,6 +295,8 @@ export function bookingMovedEmail(input: {
   was: string;
   now: string;
   duration: string;
+  /** Set when the client asked for the move: it counts as their reschedule, which the rental terms do not refund. */
+  clientAsked?: { canMoveAgain: boolean };
 }): QueuedEmail {
   return {
     to: input.to,
@@ -227,13 +305,19 @@ export function bookingMovedEmail(input: {
     body: [
       `Hi ${input.name},`,
       "",
-      `Your booking at The Visuals Photo Studio has been moved.`,
+      `Your booking at ${STUDIO} has been moved.`,
       "",
       `Reference: ${input.ref}`,
       `Studio: ${input.studios}`,
       `New time: ${input.now} (${input.duration})`,
       `It was: ${input.was}`,
       "",
+      ...(input.clientAsked
+        ? [
+            `As you asked for this change, it counts as your reschedule under the rental terms: if the booking is cancelled now, it is not refunded${input.clientAsked.canMoveAgain ? "" : ", and it cannot be moved again online"}.`,
+            "",
+          ]
+        : []),
       "The link in your confirmation email still opens this booking. If the new time does not suit you, please reply to this email or call us.",
       "",
       SIGN_OFF,
@@ -241,29 +325,313 @@ export function bookingMovedEmail(input: {
   };
 }
 
+/**
+ * Where a card refund stands: `sent` when the processor accepted it, `not_yet`
+ * when it has not gone through: it failed, and is tried again, or it waits for
+ * the card processor its payment was taken through. Either way the studio was
+ * told, and the client is told no more than that.
+ */
+export type RefundState = "sent" | "not_yet";
+
+/** What a client reads of a card refund that has not reached their card: true whatever keeps it back. */
+const REFUND_NOT_YET = "the studio has been told, and will see that it does.";
+
+/** A card refund, in a sentence: what the customer can expect. */
+function refundSentence(refund: { cents: number; feeCents: number; state: RefundState }): string {
+  const fee = refund.feeCents > 0 ? ` (${money(refund.feeCents)} processing fee kept)` : "";
+  return refund.state === "sent"
+    ? `A refund of ${money(refund.cents)} is on its way to your card${fee}. Banks usually show it within 5 to 10 business days.`
+    : `A refund of ${money(refund.cents)} is due to your card${fee}, and has not reached it yet: ${REFUND_NOT_YET}`;
+}
+
 export function cancellationEmail(input: {
   to: string;
   name: string;
   ref: string;
   when: string;
-  refundCents: number;
-  feeCents: number;
-  /** Why no refund is due, when refundCents is 0. */
-  note: string;
+  /** True when the studio cancelled: the email says so first. */
+  byStudio?: boolean;
+  /** The card refund, when there is one. */
+  refund?: { cents: number; feeCents: number; state: RefundState };
+  /** The rest of what the cancellation does, or why nothing is refunded: a sentence each. */
+  lines: string[];
+  /**
+   * The pet fee, returned as a code for studio credit and not to the card:
+   * `cents` of a fee of `feeCents`. `card` is false for a booking that no
+   * card paid, which is not told about a card.
+   */
+  petCredit?: { code: string; cents: number; feeCents: number; card?: boolean; expires: string; bookUrl: string };
 }): QueuedEmail {
-  const refundLines =
-    input.refundCents > 0
-      ? [
-          `A refund of ${money(input.refundCents)} is on its way to your card${
-            input.feeCents > 0 ? ` (${money(input.feeCents)} processing fee kept)` : ""
-          }. Banks usually show it within 5 to 10 business days.`,
-        ]
-      : [input.note];
+  const credit = input.petCredit;
+  const notBack = credit?.card === false ? "not refunded" : "not refunded to a card";
+  const creditLines = credit
+    ? [
+        "",
+        credit.cents === credit.feeCents
+          ? `The pet fee of ${money(credit.feeCents)} is ${notBack}. It is returned to you as studio credit:`
+          : `Of the pet fee, ${money(credit.cents)} is returned to you as studio credit, ${credit.card === false ? "not refunded" : "not to a card"}:`,
+        "",
+        `Code: ${credit.code}`,
+        `Valid until: ${credit.expires}`,
+        "",
+        `Book at ${credit.bookUrl} and enter the code at checkout, with this email address. What you do not spend stays on the code.`,
+      ]
+    : [];
+  const outcome = [...(input.refund ? [refundSentence(input.refund)] : []), ...input.lines];
   return {
     to: input.to,
     kind: "booking_cancelled",
     subject: `Booking cancelled: ${input.ref}`,
-    body: [`Hi ${input.name},`, "", `Your booking ${input.ref} on ${input.when} has been cancelled.`, "", ...refundLines, "", SIGN_OFF].join("\n"),
+    body: [
+      `Hi ${input.name},`,
+      "",
+      `Your booking ${input.ref} on ${input.when} has been cancelled${input.byStudio ? " by the studio" : ""}.`,
+      // One empty line between parts, also when the cancellation says nothing but the pet fee's credit.
+      ...(outcome.length > 0 ? ["", ...outcome] : []),
+      ...creditLines,
+      "",
+      SIGN_OFF,
+    ].join("\n"),
+  };
+}
+
+/**
+ * A card refund that was promised in a cancellation email already on its way
+ * did not go through: what the customer was told is put right.
+ */
+export function refundNotYetEmail(input: { to: string; name: string; ref: string; cents: number; feeCents: number }): QueuedEmail {
+  return {
+    to: input.to,
+    kind: "refund_not_yet",
+    subject: `Your refund for booking ${input.ref}`,
+    body: [
+      `Hi ${input.name},`,
+      "",
+      `About your cancelled booking ${input.ref}: ${refundSentence({ cents: input.cents, feeCents: input.feeCents, state: "not_yet" })}`,
+      "",
+      SIGN_OFF,
+    ].join("\n"),
+  };
+}
+
+/** The pet did not come: the pet fee of a booking is returned as studio credit. */
+export function petCreditEmail(input: {
+  to: string;
+  name: string;
+  ref: string;
+  code: string;
+  cents: number;
+  expires: string;
+  bookUrl: string;
+}): QueuedEmail {
+  return {
+    to: input.to,
+    kind: "pet_credit",
+    subject: `Your pet fee for booking ${input.ref} is now studio credit`,
+    body: [
+      `Hi ${input.name},`,
+      "",
+      `Your pet did not come to booking ${input.ref}, so the pet fee of ${money(input.cents)} is returned to you as studio credit.`,
+      "",
+      `Code: ${input.code}`,
+      `Valid until: ${input.expires}`,
+      "",
+      `Book at ${input.bookUrl} and enter the code at checkout, with this email address. What you do not spend stays on the code.`,
+      "",
+      SIGN_OFF,
+    ].join("\n"),
+  };
+}
+
+/** A payment taken at the studio was recorded for a booking: the customer's confirmation of it. */
+export function paymentReceivedEmail(input: {
+  to: string;
+  name: string;
+  ref: string;
+  when: string;
+  amountCents: number;
+  /** How it was paid, in words: "Cash". */
+  method: string;
+  /** What is still to pay after this payment. */
+  dueCents: number;
+  /** True when it was paid by card through a payment link, not at the studio. */
+  online?: boolean;
+}): QueuedEmail {
+  return {
+    to: input.to,
+    kind: "payment_received",
+    subject: `Payment received for booking ${input.ref}`,
+    body: [
+      `Hi ${input.name},`,
+      "",
+      `We received your payment of ${money(input.amountCents)} for booking ${input.ref} on ${input.when}.`,
+      "",
+      input.online ? `Paid by: ${input.method}` : `Paid at the studio: ${input.method}`,
+      input.dueCents > 0 ? `Still to pay: ${money(input.dueCents)}` : "Your booking is paid in full.",
+      "",
+      SIGN_OFF,
+    ].join("\n"),
+  };
+}
+
+/**
+ * A refund of a booking released for a reschedule code, which came off that
+ * code. What is left on it is named only while the code can be spent. A
+ * card refund's `state` says whether it went through, as a cancellation's
+ * email does.
+ */
+export function codeRefundEmail(input: {
+  to: string;
+  name: string;
+  ref: string;
+  code: string;
+  cents: number;
+  leftCents: number;
+  /** False once the code was cancelled or has expired. */
+  usable: boolean;
+  byHand: boolean;
+  state?: RefundState;
+}): QueuedEmail {
+  const what = input.byHand ? `${money(input.cents)} given back to you at the studio` : `A refund of ${money(input.cents)} to your card`;
+  const left =
+    input.leftCents <= 0
+      ? ", which has nothing left on it."
+      : input.usable
+        ? `, which now has ${money(input.leftCents)} left.`
+        : ". That code can no longer be used.";
+  const notYet = !input.byHand && input.state === "not_yet" ? ` The refund has not reached your card yet: ${REFUND_NOT_YET}` : "";
+  return {
+    to: input.to,
+    kind: "reschedule_code_refund",
+    subject: `A refund for booking ${input.ref}`,
+    body: [`Hi ${input.name},`, "", `${what} for booking ${input.ref} came off your reschedule code ${input.code}${left}${notYet}`, "", SIGN_OFF].join("\n"),
+  };
+}
+
+/**
+ * A payment through a link that reached the site after its booking was
+ * cancelled, or released for a reschedule code: it is given back in full.
+ * `state` says whether the refund went through, as a cancellation's email does.
+ */
+export function latePaymentEmail(input: { to: string; name: string; ref: string; amountCents: number; released: boolean; state: RefundState }): QueuedEmail {
+  const ended = input.released ? "was released for a reschedule code" : "was cancelled";
+  const back =
+    input.state === "sent"
+      ? "so it is refunded to your card in full. Banks usually show a refund within 5 to 10 business days."
+      : `so it is due back to your card in full. It has not reached your card yet: ${REFUND_NOT_YET}`;
+  return {
+    to: input.to,
+    kind: "late_payment_refunded",
+    subject: input.state === "sent" ? `Your payment for booking ${input.ref} is refunded` : `Your payment for booking ${input.ref} is due back to your card`,
+    // "Recorded": a payment the processor could not tell the site about at the time may have been made before.
+    body: [
+      `Hi ${input.name},`,
+      "",
+      `Your payment of ${money(input.amountCents)} through the payment link for booking ${input.ref} was recorded after the booking ${ended}, ${back}`,
+      "",
+      SIGN_OFF,
+    ].join("\n"),
+  };
+}
+
+/** The link an administrator sends so that a client can pay by card what their booking still owes. */
+export function payLinkEmail(input: {
+  to: string;
+  name: string;
+  ref: string;
+  when: string;
+  amountCents: number;
+  /** The page on this site that leads to the processor's payment page. */
+  payUrl: string;
+}): QueuedEmail {
+  return {
+    to: input.to,
+    kind: "payment_link",
+    subject: `Pay for your booking ${input.ref}`,
+    body: [
+      `Hi ${input.name},`,
+      "",
+      `You can pay for your booking ${input.ref} on ${input.when} by card here:`,
+      "",
+      input.payUrl,
+      "",
+      `Amount: ${money(input.amountCents)}`,
+      "",
+      "The card payment page is run by Square, our card processor: your card details never reach us. If you would rather pay at the studio, you still can.",
+      "",
+      SIGN_OFF,
+    ].join("\n"),
+  };
+}
+
+/**
+ * A booking paid at the studio was cancelled early enough to be refunded. The
+ * site cannot send that money back, so the owner is asked to.
+ */
+export function ownerHandRefundNotice(input: { to: string; ref: string; customer: string; paidCents: number; feePercent: number }): QueuedEmail {
+  return {
+    to: input.to,
+    kind: "owner_hand_refund",
+    subject: `ACTION NEEDED: refund by hand for ${input.ref}`,
+    body: [
+      `${input.customer} cancelled booking ${input.ref} early enough to be refunded.`,
+      "",
+      `Of what was paid at the studio, ${money(input.paidCents)} is refunded by the rental terms${
+        input.feePercent > 0 ? `, less the ${input.feePercent}% fee: ${money(afterFee(input.paidCents, input.feePercent))}` : ", in full"
+      }. The site cannot send that back.`,
+      "Refund the customer by hand, then record the refund on the appointment's page.",
+    ].join("\n"),
+  };
+}
+
+/**
+ * A booking ended while the card processor could not say whether its payment
+ * link had been paid. The client is told the same (`UNSEEN_LINK`).
+ */
+export const UNSEEN_LINK =
+  "We could not check just now whether the payment link for this booking was paid. If it was, that payment is refunded to your card in full once the card processor tells us.";
+
+/** The same, for a link of another processor than the one set up now, which the site can never ask. */
+export const FOREIGN_LINK = "The site cannot check the payment link for this booking. If you paid it, please contact us, and we will refund it.";
+
+export function ownerUnseenLinkNotice(input: {
+  to: string;
+  ref: string;
+  customer: string;
+  linkCents: number;
+  ended: "cancelled" | "released";
+  /**
+   * `unseen`: the processor could not say. `other`: the link was made by another processor than the one set up now (in
+   * test mode, or with Square's other account), which the site can never ask. `none`: no processor was set up.
+   */
+  kind: "unseen" | "other" | "none";
+}): QueuedEmail {
+  const ended = `${input.customer}'s booking ${input.ref} was ${input.ended === "released" ? "released for a reschedule code" : "cancelled"}`;
+  const close = 'close it on the appointment\'s page with "Close it by hand"';
+  const settle = `When it was not paid, ${close}. When it was paid, refund it to the client there, as the client was told to ask, then ${close}.`;
+  return {
+    to: input.to,
+    kind: "owner_unseen_link",
+    subject: `CHECK THE PAYMENT LINK of ${input.ref}`,
+    body:
+      input.kind === "other"
+        ? [
+            `${ended}. Its payment link for ${money(input.linkCents)} was made by another card processor than the one set up now (in test mode, or with Square's other account), which the site cannot ask whether it was paid.`,
+            "",
+            `Look the link up there. ${settle}`,
+          ].join("\n")
+        : input.kind === "none"
+          ? [
+              `${ended} while no card processor was set up, so the site could not ask whether its payment link for ${money(input.linkCents)} had been paid.`,
+              "",
+              `Look the link up in Square. ${settle}`,
+            ].join("\n")
+          : [
+              `${ended} while the card processor could not say whether its payment link for ${money(input.linkCents)} had been paid.`,
+              "",
+              "If it was paid, the payment is refunded to the card in full once the processor tells the site, and the client was told so. The site keeps asking.",
+              `If the processor never can (a link it no longer knows), look the link up in Square. When it was not paid, ${close}. When Square shows it was paid, the site will never see that payment: refund it to the client in Square, as they were promised, then ${close}.`,
+            ].join("\n"),
   };
 }
 
@@ -277,6 +645,8 @@ export function rescheduleCodeEmail(input: {
   discountCents?: number;
   expires: string;
   bookUrl: string;
+  /** What the client is told of a payment link the site could not check (`UNSEEN_LINK`, `FOREIGN_LINK`). */
+  unseenNote?: string | null;
 }): QueuedEmail {
   const credit =
     (input.discountCents ?? 0) > 0
@@ -290,6 +660,7 @@ export function rescheduleCodeEmail(input: {
       `Hi ${input.name},`,
       "",
       credit,
+      ...(input.unseenNote ? ["", input.unseenNote] : []),
       "",
       `Reschedule code: ${input.code}`,
       `Valid until: ${input.expires}`,
@@ -329,7 +700,7 @@ export function freeHourEmail(input: {
       "",
       "The price of one hour comes off your booking: a one-hour booking is free, and a longer one costs the rest. The free hour is for one studio, so it cannot be used when several studios are booked together, and it does not pay for add-ons.",
       "",
-      `Every ${input.visits} visits, on separate days, earn another free hour. A visit made with a free hour does not count.`,
+      `Every ${input.visits} visits, on separate days, earn another free hour. A visit made with a free hour does not count, and neither does a photography session with our photographer.`,
       "",
       SIGN_OFF,
     ].join("\n"),
@@ -343,6 +714,8 @@ export function ownerRefundNotice(input: {
   amountCents: number;
   automatic: boolean;
   failedReason?: string;
+  /** What the refund is for, as recorded with it. */
+  reason?: string;
 }): QueuedEmail {
   const failed = input.failedReason !== undefined;
   return {
@@ -357,10 +730,12 @@ export function ownerRefundNotice(input: {
           "",
           `Reason: ${input.failedReason}`,
           "",
-          "The booking is cancelled and the customer was told a refund is coming. The system will retry; if it keeps failing, refund the payment in Square.",
+          "The site tries it again by itself. If it keeps failing, refund the payment in Square, then press \u201cRefunded it in Square\u201d beside it on the admin's overview, so that the site stops trying.",
         ].join("\n")
       : [
-          `${input.automatic ? "An automatic refund" : "A refund"} of ${money(input.amountCents)} was sent for booking ${input.ref} (${input.customer}).`,
+          `${input.automatic ? "An automatic refund" : "A refund"} of ${money(input.amountCents)} was sent for booking ${input.ref} (${input.customer})${
+            input.reason ? `: ${input.reason.replace(/[.!?]$/, "")}` : ""
+          }.`,
         ].join("\n"),
   };
 }
@@ -370,25 +745,81 @@ export function ownerRefundNotice(input: {
  * server stopped before the answer was recorded. The booking was not made,
  * but the card may have been charged.
  */
-export function ownerPaymentUnknownNotice(input: {
+/**
+ * A booking whose card amount was reserved, and whose money could not be
+ * taken yet (src/server/reserved.ts). The booking stands; the site keeps
+ * trying; past `givenBackAt` the processor gives the amount back by itself.
+ */
+export function ownerCaptureNotice(input: {
   to: string;
   ref: string;
   customer: string;
   amountCents: number;
-  /** True when the server stopped mid-charge; otherwise the processor gave no answer. */
-  interrupted?: boolean;
+  reason: string;
+  givenBackAt: Date;
 }): QueuedEmail {
   return {
     to: input.to,
-    kind: "owner_payment_unknown",
-    subject: `ACTION NEEDED: check a payment for ${input.ref}`,
+    kind: "owner_capture_failed",
+    subject: `Payment not taken yet for ${input.ref}`,
     body: [
-      `A card payment of ${money(input.amountCents)} for booking ${input.ref} (${input.customer}) ${
-        input.interrupted ? "was interrupted before its result was recorded." : "got no answer from Square."
-      }`,
+      `The card for booking ${input.ref} (${input.customer}) has ${money(input.amountCents)} reserved on it, and the booking is confirmed, but taking the money did not go through.`,
       "",
-      "The booking was not made and its time was released. Square may still have charged the card.",
-      `Look in Square for a payment with the reference ${input.ref}. If it is there, refund it.`,
+      `Reason: ${input.reason}`,
+      "",
+      `The site tries again every time its scheduled task runs. If the money has not been taken by ${formatInstant(input.givenBackAt)}, Square gives the amount back to the card and the booking is unpaid: then take the payment at the studio, or cancel the booking.`,
+    ].join("\n"),
+  };
+}
+
+/** A refund that cannot be sent with the card processor set up now, and waits for the right one. */
+export function ownerRefundWaitingNotice(input: { to: string; ref: string; customer: string; amountCents: number; reason: string }): QueuedEmail {
+  return {
+    to: input.to,
+    kind: "owner_refund_waiting",
+    subject: `A refund for ${input.ref} is waiting`,
+    body: [
+      `A refund of ${money(input.amountCents)} for booking ${input.ref} (${input.customer}) has not been sent.`,
+      "",
+      input.reason,
+      "",
+      "The client was told it has not reached their card yet. It is listed on the admin's overview until it goes through.",
+    ].join("\n"),
+  };
+}
+
+/**
+ * The amount reserved on a booking's card lapsed before the site could take it:
+ * the card was not charged, and the booking, which stands, owes `dueCents`.
+ * Sent only while it owes something: the studio may have collected it already.
+ */
+export function ownerReservationLapsedNotice(input: { to: string; ref: string; customer: string; amountCents: number; dueCents: number }): QueuedEmail {
+  return {
+    to: input.to,
+    kind: "owner_reservation_lapsed",
+    subject: `ACTION NEEDED: ${input.ref} was not paid`,
+    body: [
+      `The ${money(input.amountCents)} reserved on the card for booking ${input.ref} (${input.customer}) lapsed before it could be taken: Square gave it back to the card, and nothing was charged.`,
+      "",
+      `The booking still stands, and ${money(input.dueCents)} is still to pay. Take the payment at the studio and record it on the appointment's page, or email the client a payment link from there, or cancel the booking. The client was told that their card was not charged and that the studio will be in touch.`,
+    ].join("\n"),
+  };
+}
+
+/** The client's side of `ownerReservationLapsedNotice`: their card was not charged, and the booking, which stands, is still to pay. */
+export function reservationLapsedEmail(input: { to: string; name: string; ref: string; when: string; dueCents: number }): QueuedEmail {
+  return {
+    to: input.to,
+    kind: "reservation_lapsed",
+    subject: `Booking ${input.ref}: your card was not charged`,
+    body: [
+      `Hi ${input.name},`,
+      "",
+      `The amount reserved on your card for booking ${input.ref} on ${input.when} could not be taken, and has been released: your card was not charged.`,
+      "",
+      `Nothing else about your booking changes, and ${money(input.dueCents)} is still to pay. The studio will be in touch about how to pay it. If you have a question, please reply to this email or call us.`,
+      "",
+      SIGN_OFF,
     ].join("\n"),
   };
 }

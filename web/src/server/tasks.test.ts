@@ -1,7 +1,7 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { bookings, emailOutbox, payments, promoCodes, settings } from "@/db/schema";
-import { deliverPendingEmails, MAX_EMAIL_ATTEMPTS, queueEmail, resolveEmailTransport, type EmailTransport } from "./email";
+import { deliverPendingEmails, MAX_EMAIL_ATTEMPTS, queueEmail, replaceQueuedEmail, resolveEmailTransport, type EmailTransport } from "./email";
 import { cancelBooking } from "./manage";
 import { MOCK_TOKEN_DECLINED, mockProvider, resolvePayments, type PaymentProvider } from "./payments";
 import { completeVisits, runScheduledTasks } from "./tasks";
@@ -14,7 +14,6 @@ import {
   hoursAfter,
   minutesAfter,
   NOW,
-  OWNER_EMAIL,
   type TestWorld,
 } from "./testing";
 
@@ -74,6 +73,25 @@ describe("email delivery", () => {
   });
 
   const message = (n: number) => ({ to: `person${n}@example.com`, subject: `Subject ${n}`, body: "Body", kind: "test" });
+
+  it("sends a message as it is when it is taken, put right meanwhile or not", async () => {
+    await queueEmail(world.db, message(1));
+    const second = await queueEmail(world.db, message(2));
+    const bodies: string[] = [];
+    // While the first goes out, the second, already read with the others, is put right.
+    const putRight: EmailTransport = {
+      name: "test",
+      async send(mail) {
+        bodies.push(mail.text);
+        if (bodies.length === 1) expect(await replaceQueuedEmail(world.db, second, { ...message(2), body: "Put right" })).toBe(true);
+        return { ok: true };
+      },
+    };
+    expect(await deliverPendingEmails(world.db, putRight, NOW)).toEqual({ sent: 2, failed: 0 });
+    expect(bodies).toEqual(["Body", "Put right"]);
+    // Once it has left, it is not replaced.
+    expect(await replaceQueuedEmail(world.db, second, { ...message(2), body: "Too late" })).toBe(false);
+  });
 
   it("sends each queued message once", async () => {
     await queueEmail(world.db, message(1));
@@ -142,21 +160,46 @@ describe("the scheduled run", () => {
     expect(summary).toEqual({
       holdsReleased: 0,
       paymentsFlagged: 0,
+      reservationsTaken: 0,
+      reservationsReleased: 0,
       visitsCompleted: 1,
       loyaltyCodes: 1,
+      reviewRequestsQueued: 0,
       refundsSucceeded: 0,
       refundsFailed: 0,
+      refundsSettled: 0,
+      refundsRejected: 0,
+      payLinksPaid: 0,
+      payLinksClosed: 0,
       emailsSent: 2, // the booking confirmation and the free hour
       emailsFailed: 0,
+      pagesRemoved: 0,
     });
     expect(delivered).toContain(`Booking confirmed: ${booked.ref}`);
     expect(delivered).toContain("You have earned a free hour in the studio");
+  });
+
+  it("queues a single Google review request 24 hours after a completed appointment", async () => {
+    const completed = expectOk(await world.book());
+    const noShow = expectOk(await world.book({ startMinute: h(14) }));
+    await world.db.update(bookings).set({ status: "no_show" }).where(eq(bookings.ref, noShow.ref));
+    const run = (now: Date) => runScheduledTasks(world.db, { ...world.manageDeps({ now }), email: null });
+    const due = hoursAfter(VISIT_END, 24);
+
+    expect((await run(minutesAfter(due, -1))).reviewRequestsQueued).toBe(0);
+    expect((await run(due)).reviewRequestsQueued).toBe(1);
+    expect((await run(daysAfter(due, 1))).reviewRequestsQueued).toBe(0);
+    const requests = await world.emails("review_request");
+    expect(requests).toHaveLength(1);
+    expect(requests[0].body).toContain("https://g.page/r/CTQ9ea1fatgnEBM/review");
+    expect(requests[0].body).toContain(completed.ref);
   });
 });
 
 describe("a charge that was interrupted", () => {
   // The server stopping mid-charge looks, from the inside, like the charge never returning.
   const crashing: PaymentProvider = {
+    ...mockProvider,
     name: "mock",
     charge: async () => {
       throw new Error("the server stopped");
@@ -167,7 +210,7 @@ describe("a charge that was interrupted", () => {
   const runAt = (minutes: number) =>
     runScheduledTasks(world.db, { ...world.manageDeps({ now: minutesAfter(NOW, minutes) }), email });
 
-  it("is closed once its hold has expired, and the owner is asked to check it, once", async () => {
+  it("is closed once its hold has expired, and nobody has to check it: the card was at most reserved", async () => {
     await expect(world.book({}, { payments: crashing })).rejects.toThrow("the server stopped");
     expect((await world.db.select().from(payments))[0].status).toBe("pending");
 
@@ -177,37 +220,53 @@ describe("a charge that was interrupted", () => {
     expect(await runAt(11)).toMatchObject({ holdsReleased: 1, paymentsFlagged: 1 });
     expect((await world.db.select().from(payments))[0]).toMatchObject({
       status: "failed",
-      error: "Interrupted: no result was recorded",
+      error: "Interrupted before its result was recorded. Nothing was taken: a reserved amount is given back by Square by itself.",
     });
-    const [notice] = await world.emails("owner_payment_unknown");
-    expect(notice.toEmail).toBe(OWNER_EMAIL);
-    expect(notice.subject).toMatch(/^ACTION NEEDED: check a payment for VS-/);
-    expect(notice.body).toContain("A card payment of $176 for booking");
-    expect(notice.body).toContain("was interrupted before its result was recorded.");
-
+    expect(await world.emails()).toHaveLength(0);
     expect((await runAt(12)).paymentsFlagged).toBe(0);
-    expect(await world.emails("owner_payment_unknown")).toHaveLength(1);
   });
 
   it("is not confused with a card that was simply refused", async () => {
     expect((await world.book({ paymentToken: MOCK_TOKEN_DECLINED })).ok).toBe(false);
     expect((await runAt(11)).paymentsFlagged).toBe(0);
-    expect(await world.emails("owner_payment_unknown")).toHaveLength(0);
   });
 });
 
 describe("which card processor is used", () => {
-  const square = { SQUARE_ACCESS_TOKEN: "t", SQUARE_LOCATION_ID: "l", SQUARE_APPLICATION_ID: "a" };
+  // Square's application ids say which of its accounts they are for: a sandbox one begins with "sandbox-".
+  const square = { SQUARE_ACCESS_TOKEN: "t", SQUARE_LOCATION_ID: "l", SQUARE_APPLICATION_ID: "sandbox-sq0idb-a" };
+  const live = { ...square, SQUARE_APPLICATION_ID: "sq0idp-a" };
 
   it("uses Square only when all three credentials are present", () => {
     expect(resolvePayments({ ...square, NODE_ENV: "production" }).client).toEqual({
       mode: "square",
-      squareApplicationId: "a",
+      squareApplicationId: "sandbox-sq0idb-a",
       squareLocationId: "l",
       squareEnvironment: "sandbox",
     });
-    expect(resolvePayments({ ...square, SQUARE_ENVIRONMENT: "production", NODE_ENV: "production" }).client.squareEnvironment).toBe("production");
+    expect(resolvePayments({ ...live, SQUARE_ENVIRONMENT: "production", NODE_ENV: "production" }).client.squareEnvironment).toBe("production");
     expect(resolvePayments({ SQUARE_ACCESS_TOKEN: "t", NODE_ENV: "production" }).client.mode).toBe("disabled");
+  });
+
+  it("tells Square's sandbox from its live account by the application id, and turns payments off when the setting disagrees", () => {
+    expect(resolvePayments({ ...square, NODE_ENV: "production" }).provider?.name).toBe("square-sandbox");
+    expect(resolvePayments({ ...live, NODE_ENV: "production" }).provider?.name).toBe("square");
+    expect(resolvePayments({ ...live, SQUARE_ENVIRONMENT: " Production ", NODE_ENV: "production" }).provider?.name).toBe("square");
+    // A setting that says the other account, or neither: no processor at all, rather than the wrong one.
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(resolvePayments({ ...live, SQUARE_ENVIRONMENT: "sandbox", NODE_ENV: "production" })).toEqual({
+      provider: null,
+      client: {
+        mode: "disabled",
+        problem: "Card payments are off: SQUARE_ENVIRONMENT says sandbox, but the application id is of Square's live account. Set SQUARE_ENVIRONMENT to production, or leave it empty.",
+      },
+    });
+    expect(resolvePayments({ ...square, SQUARE_ENVIRONMENT: "production", NODE_ENV: "production" }).client.mode).toBe("disabled");
+    expect(resolvePayments({ ...live, SQUARE_ENVIRONMENT: "prod", NODE_ENV: "production" }).client.mode).toBe("disabled");
+    expect(errors).toHaveBeenCalledWith(
+      "Card payments are off: SQUARE_ENVIRONMENT says sandbox, but the application id is of Square's live account. Set SQUARE_ENVIRONMENT to production, or leave it empty.",
+    );
+    errors.mockRestore();
   });
 
   it("never falls back to the pretend processor in production unless asked to", () => {

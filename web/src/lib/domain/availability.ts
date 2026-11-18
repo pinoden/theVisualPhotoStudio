@@ -34,6 +34,15 @@ export interface SlotOptions {
   earliestStartMinute?: number;
 }
 
+/**
+ * The notice a customer has to give, in hours. A photography session needs
+ * more of it than a studio rental (the photographer is booked from two weeks
+ * out), and never less than a rental does.
+ */
+export function noticeHours(settings: { minLeadHours: number; photoMinLeadHours: number }, photography: boolean): number {
+  return photography ? Math.max(settings.minLeadHours, settings.photoMinLeadHours) : settings.minLeadHours;
+}
+
 function overlaps(aStart: number, aEnd: number, b: Interval): boolean {
   return aStart < b.end && aEnd > b.start;
 }

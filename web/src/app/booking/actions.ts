@@ -13,6 +13,7 @@ export interface ManageState {
   message: string;
   /** The reschedule code, shown once on screen as well as emailed. */
   code?: string;
+  bookPath?: "/book" | "/book/photography";
 }
 
 /**
@@ -31,29 +32,41 @@ const SIGNED_OUT: ManageState = { status: "error", message: "Please sign in agai
 export async function cancelBookingAction(_previous: ManageState, formData: FormData): Promise<ManageState> {
   const actor = await actorFrom(formData);
   if (!actor) return SIGNED_OUT;
-  const result = await cancelBooking(await getDb(), String(formData.get("ref") ?? ""), actor, await manageDeps());
-  if (!result.ok) return { status: "error", message: result.message };
+  const seen = formData.get("seen");
+  const result = await cancelBooking(await getDb(), String(formData.get("ref") ?? ""), actor, await manageDeps(), typeof seen === "string" ? seen : undefined);
+  // Refused because something changed since the page was drawn: it is drawn again, with what can be done now. Not
+  // when the booking has ended meanwhile: the page drawn again would have nowhere to say why nothing was done.
+  if (!result.ok) {
+    if (result.code !== "not_confirmed") refresh();
+    return { status: "error", message: result.message };
+  }
   flushEmailsSoon();
   if (!formData.get("keepInPlace")) refresh();
-  return {
-    status: "cancelled",
-    message:
-      result.refund === "none"
-        ? `Your booking is cancelled. ${result.message}`
-        : `Your booking is cancelled. A refund of ${formatCents(result.refundCents)} is on its way to your card.`,
-  };
+  // The whole outcome, as the client was told it before confirming. A card refund that did not go through is not "on its way".
+  const late =
+    result.refund === "pending" || result.refund === "waiting"
+      ? " The refund has not reached your card yet: the studio has been told, and will see that it does."
+      : "";
+  return { status: "cancelled", message: `Your booking is cancelled. ${result.message}${late}` };
 }
 
 export async function rescheduleBookingAction(_previous: ManageState, formData: FormData): Promise<ManageState> {
   const actor = await actorFrom(formData);
   if (!actor) return SIGNED_OUT;
-  const result = await requestRescheduleCode(await getDb(), String(formData.get("ref") ?? ""), actor, await manageDeps());
-  if (!result.ok) return { status: "error", message: result.message };
+  const seen = formData.get("seen");
+  const result = await requestRescheduleCode(await getDb(), String(formData.get("ref") ?? ""), actor, await manageDeps(), typeof seen === "string" ? seen : undefined);
+  if (!result.ok) {
+    if (result.code !== "not_confirmed") refresh();
+    return { status: "error", message: result.message };
+  }
   flushEmailsSoon();
   if (!formData.get("keepInPlace")) refresh();
   return {
     status: "rescheduled",
     code: result.code,
-    message: `Your booking was released. Your code is worth ${formatCents(result.valueCents)} and is valid until ${formatInstant(result.expiresAt)}. We also emailed it to you.`,
+    bookPath: result.bookPath,
+    message: `Your booking was released. Your code is worth ${formatCents(result.valueCents)} and is valid until ${formatInstant(result.expiresAt)}. We also emailed it to you.${
+      result.unseenNote ? ` ${result.unseenNote}` : ""
+    }`,
   };
 }

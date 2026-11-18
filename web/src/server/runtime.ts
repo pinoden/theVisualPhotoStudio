@@ -14,12 +14,35 @@ import type { TaskDeps } from "./tasks";
  */
 
 /** The site's public origin, for links in emails. */
+/**
+ * The website's address as configured (`SITE_URL`), or null. For what is
+ * worked out while a page is prerendered (the addresses in its metadata),
+ * which cannot ask the request the way `siteUrl` does.
+ */
+export function configuredSiteUrl(): string | null {
+  return process.env.SITE_URL ? process.env.SITE_URL.replace(/\/$/, "") : null;
+}
+
 export async function siteUrl(): Promise<string> {
   if (process.env.SITE_URL) return process.env.SITE_URL.replace(/\/$/, "");
   const h = await headers();
   const host = h.get("x-forwarded-host") ?? h.get("host") ?? "localhost:3000";
   const proto = h.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
   return `${proto}://${host}`;
+}
+
+/**
+ * Every address this request knows the website by: the configured one
+ * (`SITE_URL`) and the one the request came in at, which a host can give the
+ * same site beside it. For telling a full address of the site from another
+ * site's.
+ */
+export async function siteOrigins(): Promise<string[]> {
+  const h = await headers();
+  const host = h.get("x-forwarded-host") ?? h.get("host");
+  const proto = h.get("x-forwarded-proto") ?? (host?.startsWith("localhost") ? "http" : "https");
+  const origins = [configuredSiteUrl(), host ? `${proto}://${host}` : null];
+  return [...new Set(origins.filter((origin): origin is string => origin !== null))];
 }
 
 /** Where refund notices go: OWNER_NOTIFY_EMAIL, else the first owner address. */
@@ -36,11 +59,37 @@ export async function manageDeps(): Promise<ManageDeps> {
   };
 }
 
+/** What the payment-link service needs: the processor, and where this site lives. */
+export async function payLinkDeps(): Promise<Pick<ManageDeps, "now" | "payments" | "baseUrl" | "ownerEmail">> {
+  return { now: new Date(), payments: resolvePayments().provider, baseUrl: await siteUrl(), ownerEmail: ownerNotifyEmail() };
+}
+
 export async function taskDeps(): Promise<TaskDeps> {
   return { ...(await manageDeps()), email: resolveEmailTransport() };
 }
 
 /** Deliver queued email once the response has been sent, without delaying it. */
+/**
+ * Work a page started and does not wait for to the end (asking the card
+ * processor about a payment link): kept going after the response, which a
+ * serverless host would otherwise freeze part-way, and the mail it queued is
+ * then delivered.
+ */
+export function finishAfterResponse(work: Promise<unknown>): void {
+  after(async () => {
+    try {
+      await work;
+    } catch (error) {
+      console.error("Work left for after the response failed", error);
+    }
+    try {
+      await deliverPendingEmails(await getDb(), resolveEmailTransport(), new Date());
+    } catch (error) {
+      console.error("Email delivery failed", error);
+    }
+  });
+}
+
 export function flushEmailsSoon(): void {
   after(async () => {
     try {

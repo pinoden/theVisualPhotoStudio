@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto
 import { and, desc, eq, gt, isNull, sql } from "drizzle-orm";
 import { loginCodes, sessions, users } from "@/db/schema";
 import type { Db, DbLike } from "@/db/client";
+import { EMAIL_RULE } from "@/lib/parse";
 import { loginCodeEmail, queueEmail } from "./email";
 
 /**
@@ -9,7 +10,7 @@ import { loginCodeEmail, queueEmail } from "./email";
  * typing a one-time code sent to it. The first sign-in creates the account.
  * Only hashes of codes and session tokens are stored.
  */
-export type Role = "customer" | "staff" | "owner";
+export type Role = "customer" | "staff" | "manager" | "owner";
 
 export interface AuthUser {
   id: string;
@@ -24,12 +25,11 @@ export const MAX_CODES_PER_WINDOW = 3;
 export const CODE_WINDOW_MINUTES = 15;
 export const SESSION_DAYS = 30;
 
-const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
-
+/** An email address as the site keeps it: trimmed and in small letters, by the rule every email field follows (`EMAIL_RULE`). */
 export function normalizeEmail(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
   const email = raw.trim().toLowerCase();
-  return email.length <= 200 && EMAIL.test(email) ? email : null;
+  return email.length <= 200 && EMAIL_RULE.test(email) ? email : null;
 }
 
 function sha256(value: string): string {
@@ -61,13 +61,10 @@ export async function requestLoginCode(db: DbLike, rawEmail: unknown, now: Date)
   if (count >= MAX_CODES_PER_WINDOW) return { ok: false, code: "too_many" };
 
   const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
-  await db.insert(loginCodes).values({
-    email,
-    codeHash: codeHash(email, code),
-    expiresAt: new Date(now.getTime() + CODE_TTL_MINUTES * 60_000),
-    createdAt: now,
-  });
-  await queueEmail(db, loginCodeEmail(email, code, CODE_TTL_MINUTES));
+  const expiresAt = new Date(now.getTime() + CODE_TTL_MINUTES * 60_000);
+  await db.insert(loginCodes).values({ email, codeHash: codeHash(email, code), expiresAt, createdAt: now });
+  // A code that could not be sent in its minutes (no email service set up yet) is not sent later: it no longer works.
+  await queueEmail(db, { ...loginCodeEmail(email, code, CODE_TTL_MINUTES), expiresAt });
   return { ok: true, email };
 }
 

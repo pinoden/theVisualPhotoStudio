@@ -1,8 +1,9 @@
-import { and, asc, desc, eq, gte, inArray, isNotNull, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, lt, ne, sql } from "drizzle-orm";
 import {
   addons,
   blocks,
   bookings,
+  loyaltyLedger,
   payments,
   priceRules,
   promoCodes,
@@ -15,9 +16,12 @@ import {
   users,
 } from "@/db/schema";
 import { PG_EXCLUSION_VIOLATION, pgErrorCode, queryRows, type Db, type DbLike } from "@/db/client";
+import { isAdminLevel, type AdminLevel } from "@/lib/abilities";
 import { isAddonKind, type AddonKind } from "@/lib/addon-kinds";
 import type { PromoKind } from "@/lib/domain/pricing";
 import { isIsoDate, type DayType, type IsoDate } from "@/lib/domain/time";
+import { MANUAL_PROVIDER } from "@/lib/payment-methods";
+import { parseStudioFacts, type StudioFacts } from "@/lib/studio-facts";
 import { deleteAllSessions, normalizeEmail } from "./auth";
 import { toBookingViews, type BookingView } from "./bookings";
 import { issuePromo } from "./promos";
@@ -34,12 +38,17 @@ export interface StaffMember {
   id: string;
   email: string;
   name: string;
-  /** Assigned dates from today on. */
+  /** Studio Manager or Studio Attendant. */
+  level: AdminLevel;
+  /** Assigned dates from today on. Only an attendant's matter: a manager sees every day. */
   days: IsoDate[];
 }
 
+/** Everyone who works in the admin below the owners: managers first, then attendants, by email. */
 export async function listStaff(db: DbLike, from: IsoDate): Promise<StaffMember[]> {
-  const people = await db.select().from(users).where(eq(users.role, "staff")).orderBy(asc(users.email));
+  const people = (await db.select().from(users).where(inArray(users.role, ["staff", "manager"])).orderBy(asc(users.email))).sort(
+    (a, b) => Number(b.role === "manager") - Number(a.role === "manager"),
+  );
   if (people.length === 0) return [];
   const shifts = await db
     .select()
@@ -58,34 +67,54 @@ export async function listStaff(db: DbLike, from: IsoDate): Promise<StaffMember[
     id: p.id,
     email: p.email,
     name: p.name,
+    level: p.role === "manager" ? "manager" : "staff",
     days: shifts.filter((s) => s.userId === p.id).map((s) => s.day),
   }));
 }
 
 export type AddStaffResult = { ok: true; id: string } | { ok: false; message: string };
 
-/** Give an email address staff access. The person signs in with a code like anyone else. */
-export async function addStaff(db: DbLike, rawEmail: unknown, rawName: unknown): Promise<AddStaffResult> {
+/**
+ * Give an email address access to the admin, as a Studio Attendant or a
+ * Studio Manager. The person signs in with a code like anyone else.
+ */
+export async function addStaff(db: DbLike, rawEmail: unknown, rawName: unknown, level: AdminLevel = "staff"): Promise<AddStaffResult> {
   const email = normalizeEmail(rawEmail);
   if (!email) return { ok: false, message: "Enter a valid email address." };
+  if (!isAdminLevel(level)) return { ok: false, message: "Choose Studio Manager or Studio Attendant." };
   const name = typeof rawName === "string" ? rawName.trim().slice(0, 120) : "";
   const [existing] = await db.select().from(users).where(eq(users.email, email)).limit(1);
   if (existing?.role === "owner") return { ok: false, message: "That address belongs to an owner." };
   const [row] = await db
     .insert(users)
-    .values({ email, name, role: "staff" })
-    .onConflictDoUpdate({ target: users.email, set: name ? { role: "staff", name } : { role: "staff" } })
+    .values({ email, name, role: level })
+    .onConflictDoUpdate({ target: users.email, set: name ? { role: level, name } : { role: level } })
     .returning({ id: users.id });
   return { ok: true, id: row.id };
 }
 
-/** Take staff access away at once: role, shifts and open sessions. */
+/**
+ * Make an attendant a manager, or a manager an attendant. It applies at their
+ * next request: nobody has to sign in again. The days assigned to them stay
+ * on record, and matter again if a manager becomes an attendant.
+ */
+export async function setStaffLevel(db: DbLike, userId: string, level: unknown): Promise<boolean> {
+  if (!isAdminLevel(level) || !UUID.test(userId)) return false;
+  const changed = await db
+    .update(users)
+    .set({ role: level })
+    .where(and(eq(users.id, userId), inArray(users.role, ["staff", "manager"])))
+    .returning({ id: users.id });
+  return changed.length === 1;
+}
+
+/** Take admin access away at once, from an attendant or a manager: role, shifts and open sessions. */
 export async function removeStaff(db: Db, userId: string): Promise<void> {
   await db.transaction(async (tx) => {
     const changed = await tx
       .update(users)
       .set({ role: "customer" })
-      .where(and(eq(users.id, userId), eq(users.role, "staff")))
+      .where(and(eq(users.id, userId), inArray(users.role, ["staff", "manager"])))
       .returning({ id: users.id });
     if (changed.length === 0) return;
     await tx.delete(staffShifts).where(eq(staffShifts.userId, userId));
@@ -93,7 +122,7 @@ export async function removeStaff(db: Db, userId: string): Promise<void> {
   });
 }
 
-/** Assign or unassign one date for a staff member. */
+/** Assign or unassign one date for an attendant. A manager sees every day, so has none assigned. */
 export async function setShift(db: DbLike, userId: string, day: string, assigned: boolean): Promise<boolean> {
   if (!isIsoDate(day)) return false;
   const [person] = await db.select({ role: users.role }).from(users).where(eq(users.id, userId)).limit(1);
@@ -110,6 +139,9 @@ export async function setShift(db: DbLike, userId: string, day: string, assigned
  * duration on weekdays or weekends. Removing a price makes that duration
  * unbookable for the studio on that kind of day.
  */
+/** The most a price can be: $100,000. */
+export const PRICE_MAX_CENTS = 10_000_000;
+
 export async function savePrice(
   db: DbLike,
   input: { studioId: string; dayType: DayType; durationMinutes: number; priceCents: number | null },
@@ -126,7 +158,7 @@ export async function savePrice(
       .where(and(eq(priceRules.studioId, studioId), eq(priceRules.dayType, dayType), eq(priceRules.durationMinutes, durationMinutes)));
     return true;
   }
-  if (!Number.isInteger(priceCents) || priceCents < 0 || priceCents > 10_000_000) return false;
+  if (!Number.isInteger(priceCents) || priceCents < 0 || priceCents > PRICE_MAX_CENTS) return false;
   await db
     .insert(priceRules)
     .values({ studioId, dayType, durationMinutes, priceCents })
@@ -266,8 +298,17 @@ export async function listBlocks(db: DbLike, from: Date): Promise<BlockView[]> {
 export interface AdminBooking extends BookingView {
   customerPhone: string;
   notes: string;
-  /** Card money still held: payments less refunds sent or on their way. */
+  /** Card money still held: payments less every refund recorded, made, on its way or owed (one that failed is tried again). */
   cardHeldCents: number;
+  /** What the studio can still send back to the card: what it holds, less a pet fee already returned as studio credit. */
+  refundableCents: number;
+  /** Money taken at the studio and not given back: the site cannot send it anywhere, the studio gives it back by hand. */
+  studioHeldCents: number;
+  /**
+   * For a booking released for a reschedule code: the code its money went into, what is left on it, and whether an
+   * owner cancelled it. A refund comes off it; what was spent of it cannot come back.
+   */
+  rescheduleCode: { code: string; valueCents: number; voided: boolean } | null;
   refundProblem: boolean;
 }
 
@@ -298,7 +339,8 @@ export async function listBookings(
       paidCents: sql<number>`coalesce(sum(${payments.amountCents}), 0)::int`,
     })
     .from(payments)
-    .where(and(inArray(payments.bookingId, ids), eq(payments.status, "succeeded")))
+    // Card money charged through the site only: what was taken at the studio cannot be refunded from here.
+    .where(and(inArray(payments.bookingId, ids), eq(payments.status, "succeeded"), ne(payments.provider, MANUAL_PROVIDER)))
     .groupBy(payments.bookingId);
   const back = await db
     .select({
@@ -308,18 +350,50 @@ export async function listBookings(
     })
     .from(refunds)
     .innerJoin(payments, eq(payments.id, refunds.paymentId))
-    .where(inArray(payments.bookingId, ids))
+    .where(and(inArray(payments.bookingId, ids), ne(payments.provider, MANUAL_PROVIDER)))
     .groupBy(payments.bookingId, refunds.status);
+
+  // The reschedule codes the money of released bookings went into, cancelled by an owner or not: what was spent of
+  // a code cannot come back, and what is left is that money still.
+  const codes = await db
+    .select({ bookingId: promoCodes.originBookingId, code: promoCodes.code, valueCents: promoCodes.value, voidedAt: promoCodes.voidedAt })
+    .from(promoCodes)
+    .where(and(inArray(promoCodes.originBookingId, ids), eq(promoCodes.source, "reschedule")));
+
+  // Money taken at the studio, less what the studio gave back by hand.
+  const atStudio = await db
+    .select({ bookingId: payments.bookingId, cents: sql<number>`coalesce(sum(${payments.amountCents} - ${payments.refundedCents}), 0)::int` })
+    .from(payments)
+    .where(and(inArray(payments.bookingId, ids), eq(payments.status, "succeeded"), eq(payments.provider, MANUAL_PROVIDER)))
+    .groupBy(payments.bookingId);
+
+  // The pet fees already returned as studio credit (see src/server/pet-fee.ts), for what each credit was issued for,
+  // which can be part of the fee: not to be refunded to the card or by hand as well.
+  const petReturned = await db
+    .select({ bookingId: promoCodes.originBookingId, cents: sql<number>`coalesce(${promoCodes.issuedCents}, ${promoCodes.value})::int` })
+    .from(promoCodes)
+    .where(and(inArray(promoCodes.originBookingId, ids), eq(promoCodes.source, "pet_fee")));
 
   const views = await toBookingViews(db, rows);
   return views.map((view, i) => {
     const refundRows = back.filter((b) => b.bookingId === view.id);
-    const returned = refundRows.filter((b) => b.status !== "failed").reduce((sum, b) => sum + b.cents, 0);
+    const returned = refundRows.reduce((sum, b) => sum + b.cents, 0);
+    const cardHeldCents = (paid.find((p) => p.bookingId === view.id)?.paidCents ?? 0) - returned;
+    const asCredit = Math.min(Math.max(0, cardHeldCents), petReturned.find((p) => p.bookingId === view.id)?.cents ?? 0);
+    const code = codes.find((row) => row.bookingId === view.id);
     return {
       ...view,
       customerPhone: rows[i].customerPhone,
       notes: rows[i].notes,
-      cardHeldCents: (paid.find((p) => p.bookingId === view.id)?.paidCents ?? 0) - returned,
+      cardHeldCents,
+      // A released booking's money is on its code: no more than is left there can be refunded.
+      refundableCents: Math.min(Math.max(0, cardHeldCents - asCredit), code?.valueCents ?? Infinity),
+      // The pet fee returned as credit that the card did not hold comes off what the studio gives back by hand.
+      studioHeldCents: Math.min(
+        Math.max(0, (atStudio.find((p) => p.bookingId === view.id)?.cents ?? 0) - ((petReturned.find((p) => p.bookingId === view.id)?.cents ?? 0) - asCredit)),
+        code?.valueCents ?? Infinity,
+      ),
+      rescheduleCode: code ? { code: code.code, valueCents: code.valueCents, voided: code.voidedAt !== null } : null,
       refundProblem: refundRows.some((b) => b.status === "failed"),
     };
   });
@@ -348,7 +422,8 @@ export async function listRefundProblems(db: DbLike): Promise<RefundProblem[]> {
     .from(refunds)
     .innerJoin(payments, eq(payments.id, refunds.paymentId))
     .innerJoin(bookings, eq(bookings.id, payments.bookingId))
-    .where(inArray(refunds.status, ["pending", "failed"]))
+    // Refunds of payments that were taken: a refund is only ever made of one.
+    .where(and(inArray(refunds.status, ["pending", "failed"]), eq(payments.status, "succeeded")))
     .orderBy(desc(refunds.createdAt));
   return rows as RefundProblem[];
 }
@@ -361,6 +436,7 @@ export interface CodeView {
   kind: PromoKind;
   value: number;
   source: string;
+  photographyOnly: boolean;
   email: string | null;
   usedCount: number;
   maxUses: number;
@@ -377,6 +453,7 @@ export async function listCodes(db: DbLike, limit = 200): Promise<CodeView[]> {
     kind: r.kind,
     value: r.value,
     source: r.source,
+    photographyOnly: r.photographyOnly,
     email: r.email,
     usedCount: r.usedCount,
     maxUses: r.maxUses,
@@ -386,9 +463,28 @@ export async function listCodes(db: DbLike, limit = 200): Promise<CodeView[]> {
   }));
 }
 
-/** Stop a code from being used again. What was already spent stays spent. */
-export async function voidCode(db: DbLike, codeId: string, now: Date): Promise<void> {
-  await db.update(promoCodes).set({ voidedAt: now }).where(eq(promoCodes.id, codeId));
+/**
+ * Stop a code from being used again. What was already spent stays spent. A
+ * customer's reward (a free hour that is theirs) cancelled here gets the same
+ * line in the loyalty ledger as one cancelled on the customer's page, with
+ * `actor`, so that its history says who cancelled it.
+ */
+export async function voidCode(db: DbLike, codeId: string, now: Date, actor = "an owner"): Promise<void> {
+  const [code] = await db
+    .update(promoCodes)
+    .set({ voidedAt: now })
+    .where(and(eq(promoCodes.id, codeId), sql`${promoCodes.voidedAt} is null`))
+    .returning({ id: promoCodes.id, kind: promoCodes.kind, email: promoCodes.email });
+  if (code && code.kind === "free_hour" && code.email) {
+    await db.insert(loyaltyLedger).values({
+      email: code.email,
+      kind: "reward_cancelled",
+      codeId: code.id,
+      reason: "Cancelled on the Codes page",
+      actor,
+      createdAt: now,
+    });
+  }
 }
 
 export type CreateCodeResult = { ok: true; code: string } | { ok: false; message: string };
@@ -400,11 +496,14 @@ export type CreateCodeResult = { ok: true; code: string } | { ok: false; message
  */
 export async function createManualCode(
   db: DbLike,
-  input: { kind: PromoKind; value: number; email: string | null; validDays: number; maxUses: number; note: string },
+  input: { kind: PromoKind; value: number; email: string | null; validDays: number; maxUses: number; note: string; photographyOnly?: boolean },
   now: Date,
 ): Promise<CreateCodeResult> {
   if (input.kind !== "percent" && input.kind !== "amount" && input.kind !== "free_hour") {
     return { ok: false, message: "Choose a kind of code." };
+  }
+  if (input.photographyOnly && input.kind !== "percent") {
+    return { ok: false, message: "Only percentage discounts can be created for photography sessions." };
   }
   if (!Number.isInteger(input.value) || input.value <= 0) return { ok: false, message: "Enter a value above zero." };
   if (input.kind === "percent" && input.value > 100) return { ok: false, message: "A discount cannot exceed 100%." };
@@ -423,10 +522,13 @@ export async function createManualCode(
     kind: input.kind,
     value: input.value,
     source: "manual",
+    photographyOnly: input.photographyOnly,
     email,
     expiresAt: new Date(now.getTime() + input.validDays * 86_400_000),
-    maxUses: input.kind === "amount" ? 1_000_000 : input.maxUses,
+    // Credit is limited by the money left on it. A free hour is a reward, and a reward is used once.
+    maxUses: input.kind === "amount" ? 1_000_000 : input.kind === "free_hour" ? 1 : input.maxUses,
     note: input.note.slice(0, 200),
+    issuedAt: now,
   });
   return issued ? { ok: true, code: issued.code } : { ok: false, message: "Could not create the code." };
 }
@@ -461,6 +563,8 @@ export interface StudioDetails {
   includedGuests: number;
   /** Clean-up minutes kept free after each booking. */
   bufferMinutes: number;
+  /** Its facts, but the floor plan, which is chosen on its own (`setStudioFloorPlan`). Text the limits do not take is cut. */
+  facts?: Omit<StudioFacts, "floorPlan">;
 }
 
 /**
@@ -474,9 +578,13 @@ export async function saveStudioDetails(db: DbLike, studioId: string, input: Stu
   if (!UUID.test(studioId) || tagline.length > 200 || description.length > 2000) return false;
   if (!Number.isInteger(input.includedGuests) || input.includedGuests < 1 || input.includedGuests > 100) return false;
   if (!Number.isInteger(input.bufferMinutes) || input.bufferMinutes < 0 || input.bufferMinutes > 240) return false;
+  const [current] = await db.select({ facts: studios.facts }).from(studios).where(eq(studios.id, studioId)).limit(1);
+  if (!current) return false;
+  // The floor plan stays as it was: it is chosen on its own.
+  const facts = input.facts ? parseStudioFacts({ ...input.facts, floorPlan: parseStudioFacts(current.facts).floorPlan }) : parseStudioFacts(current.facts);
   const updated = await db
     .update(studios)
-    .set({ tagline, description, includedGuests: input.includedGuests, bufferMinutes: input.bufferMinutes })
+    .set({ tagline, description, includedGuests: input.includedGuests, bufferMinutes: input.bufferMinutes, facts })
     .where(eq(studios.id, studioId))
     .returning({ id: studios.id });
   return updated.length === 1;
