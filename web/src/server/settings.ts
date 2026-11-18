@@ -5,7 +5,7 @@ import type { DbLike } from "@/db/client";
 /**
  * Business rules the owner can change without a deploy. Values in the
  * `settings` table override these defaults. Several defaults are placeholders
- * for decisions that are still open; see "Rebuild decisions" in CLAUDE.md.
+ * for decisions that are still open; see "Rebuild decisions" in ProjectLibrary.md.
  */
 export interface Settings {
   // ── Booking ──

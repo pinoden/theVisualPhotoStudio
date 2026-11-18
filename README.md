@@ -17,6 +17,6 @@ Open http://localhost:3000. Locally the site uses an embedded database and a pre
 ## Read more
 
 - [`web/README.md`](web/README.md): running, testing and the settings for production.
-- [`CLAUDE.md`](CLAUDE.md): how the code is organised and, under "Rebuild decisions", what has been decided, what is still open and the known gaps.
+- [`ProjectLibrary.md`](ProjectLibrary.md): how the code is organised and, under "Rebuild decisions", what has been decided, what is still open and the known gaps.
 
 The site is not connected to a real card processor, an email service or a host yet.

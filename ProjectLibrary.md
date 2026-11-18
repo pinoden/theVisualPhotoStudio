@@ -1,11 +1,11 @@
-# CLAUDE.md
+# Project library
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+The guide to this repository's code and the record of the rebuild's decisions, for whoever works on it next, person or coding tool. It was `CLAUDE.md` until 2026-11-17. `CLAUDE.md` is now a short file that points here, because Claude Code loads a file of that name at the start of every session and this one is too long for that.
 
 ## Repository layout
 
 - **`web/`** is the site: Next.js 16, TypeScript, PostgreSQL. All code lives there. Work happens on the `rebuild` branch and reaches `master` through pull requests.
-- **The repository root** holds only this file, a short `README.md` and `.gitignore`.
+- **The repository root** holds only this file, `CLAUDE.md` (a pointer to it), a short `README.md` and `.gitignore`.
 
 The site replaced an earlier Flask prototype that lived at the repository root (`app/`, `run.py`, `config.py`, `seed.py`, `migrations/`). It was deleted on 2026-11-15 at the owner's request. Its last version is commit `f1420bc`: list its files with `git ls-tree -r --name-only f1420bc app` and read one with `git show f1420bc:app/templates/faq.html`. It is a reference for page design and copy only. It had unfixed defects: card payments could not succeed, the browser could skip payment, and double booking was possible.
 
@@ -752,10 +752,11 @@ Known weaknesses:
 - 2026-11-17: Verified follow-up 11 against the existing photography checkout. Exactly 336 hours of notice is enough, and 15 minutes less is refused. The targeted boundary test passed.
 - 2026-11-17: Built follow-up 4. Pet-fee credit now has an owner-only form under Admin → Codes, linked from eligible appointments. Type checking and all 21 pet-fee tests passed. A fresh isolated Chromium run passed all 28 cases in `e2e/site.spec.ts`, including the revised calendar-to-Codes credit flow.
 - 2026-11-17: Built follow-up 7. The scheduled task queues one Google review request per completed appointment after 24 hours, using the outbox for delivery. Migration `0034_review_requests` prevents backfill emails for older appointments. Type checking and all 17 scheduled-task tests passed. The full unit and integration suite then passed all 886 tests.
+- 2026-11-17: Put back `CLAUDE.md` as a short pointer to this file, which had been renamed from it earlier the same day. Without a file of that name a Claude Code session starts with no guide. The pointer says which sections to read and when, instead of loading all of this file. The links and comments that still named the old file now name this one, the tester agent's instructions included. Checked on `69b3db4` before the change: type check, lint and all 886 unit and integration tests pass.
 
 ### Handoff for the next coding session
 
-- This file is the current project guide and decision record; it replaces `CLAUDE.md`. The numbered answers below are the owner-approved follow-ups. Work through them one at a time and update this file with each implementation and its verification.
+- This file is the current project guide and decision record. `CLAUDE.md` is a short pointer to it, so that a Claude Code session knows where to read. The numbered answers below are the owner-approved follow-ups. Work through them one at a time and update this file with each implementation and its verification.
 - Completed follow-ups: 1 (weekend prices), 4 (manual pet-fee credit under Codes), 7 (review request after 24 hours), 8 (valid studio bundles), 11 (photography notice boundary, already implemented), 12 (photography-only codes and reschedule credits), and 15 (after-hours contact route). Their migrations are `0030` through `0034`, in order. No deployment or production migration has been run.
 - Verification so far: 886 unit and integration tests, type checking, and lint passed. An earlier complete browser run passed 59 cases after follow-ups 1, 8, 12, and 15. The later isolated `e2e/site.spec.ts` run passed all 28 cases after follow-ups 4 and 7; it is not a repeat of the entire browser suite. Migrations `0030` through `0033` were checked against older data. Review-request migration `0034` excludes pre-existing appointments whose 24-hour deadline had already passed.
 - Next work remains in follow-ups 2, 3, 5, 6, 9, 10, 13, and 14. Follow-up 5 needs a decision on which changes require repricing. Follow-up 2 needs clarification of bundle headcounts. Follow-up 14 awaits the owner's Instagram connection. Follow-up 16 is a decision to omit annual-spend discounts.
