@@ -548,37 +548,42 @@ describe("the reschedule code", () => {
     });
   });
 
-  it("asks the customer to look again when the fee changed while the page was open", async () => {
+  it("keeps the fee the booking was made under when the owners change it while the page is open", async () => {
     const first = expectOk(await world.book({ date: NEAR }));
     const one = expectOk(await requestRescheduleCode(world.db, first.ref, byToken(first.manageToken), world.manageDeps()));
     const second = expectOk(await world.book({ date: FAR, promoCode: one.code, paymentToken: undefined }));
     const seen = (await getManageChoices(world.db, second.ref, byToken(second.manageToken), NOW))!.reschedule.text;
+    // A change of the settings applies to bookings made from then on (question 10): what the client read still holds.
     await world.db.insert(settings).values({ key: "rescheduleFeeCents", value: 3000 });
-    expect(await requestRescheduleCode(world.db, second.ref, byToken(second.manageToken), world.manageDeps(), seen)).toMatchObject({ ok: false, code: "changed" });
-    expect((await bookingRow(second.ref)).status).toBe("confirmed");
+    expect(await requestRescheduleCode(world.db, second.ref, byToken(second.manageToken), world.manageDeps(), seen)).toMatchObject({ ok: true, valueCents: 15600 });
   });
 
   it("refuses a second move whose fee would leave no credit, and any second move while the owners set no fee", async () => {
     const first = expectOk(await world.book({ date: NEAR, durationMinutes: 60 })); // $88
     const one = expectOk(await requestRescheduleCode(world.db, first.ref, byToken(first.manageToken), world.manageDeps()));
-    const second = expectOk(await world.book({ date: FAR, durationMinutes: 60, promoCode: one.code, paymentToken: undefined }));
-
+    // Made while a further move costs $88: the booking keeps that fee (question 10).
     await world.db.insert(settings).values({ key: "rescheduleFeeCents", value: 8800 });
+    const second = expectOk(await world.book({ date: FAR, durationMinutes: 60, promoCode: one.code, paymentToken: undefined }));
     expect(await requestRescheduleCode(world.db, second.ref, byToken(second.manageToken), world.manageDeps())).toMatchObject({
       ok: false,
       code: "fee_not_covered",
       message: "Moving a booking again costs $88, and this booking is not worth more than that, so no credit would be left to move. Please call the studio.",
     });
+    expect((await bookingRow(second.ref)).status).toBe("confirmed");
 
+    // Made while the owners set no fee for a further move: it cannot be moved again online.
+    const firstAgain = expectOk(await world.book({ date: NEAR, startMinute: h(14), durationMinutes: 60 }));
+    const two = expectOk(await requestRescheduleCode(world.db, firstAgain.ref, byToken(firstAgain.manageToken), world.manageDeps()));
     await world.db.update(settings).set({ value: 0 }).where(eq(settings.key, "rescheduleFeeCents"));
-    expect(await getManageChoices(world.db, second.ref, byToken(second.manageToken), NOW)).toMatchObject({
+    const third = expectOk(await world.book({ date: FAR, startMinute: h(14), durationMinutes: 60, promoCode: two.code, paymentToken: undefined }));
+    expect(await getManageChoices(world.db, third.ref, byToken(third.manageToken), NOW)).toMatchObject({
       reschedule: { allowed: false, offered: true, text: "This booking was already moved and cannot be moved again online. Please call the studio." },
     });
-    expect(await requestRescheduleCode(world.db, second.ref, byToken(second.manageToken), world.manageDeps())).toMatchObject({
+    expect(await requestRescheduleCode(world.db, third.ref, byToken(third.manageToken), world.manageDeps())).toMatchObject({
       ok: false,
       code: "limit_reached",
     });
-    expect((await bookingRow(second.ref)).status).toBe("confirmed");
+    expect((await bookingRow(third.ref)).status).toBe("confirmed");
   });
 
   it("charges only the difference for a dearer time and carries the whole value if moved again", async () => {
@@ -615,8 +620,12 @@ describe("the reschedule code", () => {
     });
     expect((await bookingRow(booked.ref)).status).toBe("confirmed");
 
+    // A shorter cut-off applies to bookings made from then on; this one keeps its 24 hours (question 10).
     await world.db.insert(settings).values({ key: "rescheduleCutoffHours", value: 2 });
-    expect((await requestRescheduleCode(world.db, booked.ref, byToken(booked.manageToken), late)).ok).toBe(true);
+    expect((await requestRescheduleCode(world.db, booked.ref, byToken(booked.manageToken), late)).ok).toBe(false);
+    const later = expectOk(await world.book({ date: NEAR, startMinute: h(14) }));
+    const lateForLater = world.manageDeps({ now: hoursAfter(NEAR_START, -19) }); // 23 hours before 14:00
+    expect((await requestRescheduleCode(world.db, later.ref, byToken(later.manageToken), lateForLater)).ok).toBe(true);
   });
 
   it("issues one code when asked twice at the same moment", async () => {

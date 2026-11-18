@@ -26,6 +26,7 @@ import {
 } from "./bookings";
 import { loadCatalog } from "./catalog";
 import { chargesOf, hourlyRateOf, type ChargeLine } from "./charges";
+import { storedTerms, termsChangedSince, termsFor, type BookingTerms } from "./terms";
 import { bookingMovedEmail, queueEmail } from "./email";
 import { listEvents, recordEvent, withoutAmounts, type BookingEvent } from "./history";
 import { openPayLinkOf, type PayLinkView } from "./pay-links";
@@ -82,6 +83,8 @@ export interface Appointment {
    * a studio with no one-hour price that day.
    */
   charges: { lines: ChargeLine[]; canAdd: boolean; overtime: boolean; hourlyCents: number | null; missingRate: string[] } | null;
+  /** The terms the booking was made under (question 10), and whether the settings have changed since. */
+  terms: BookingTerms & { changedSince: boolean };
   petFee: { cents: number; creditCode: string | null; returnedCents: number; canReturn: boolean; why: string } | null;
   history: BookingEvent[];
   /** Each label that can be set by hand, and whether it can be set right now. */
@@ -129,6 +132,7 @@ export async function getAppointment(db: DbLike, viewer: AuthUser, ref: string, 
     money: may("seePrices") ? view : null,
     payments: seesPayments ? money : null,
     payLink: seesPayments ? await openPayLinkOf(db, booking.id) : null,
+    terms: { ...storedTerms(booking, settings), changedSince: termsChangedSince(booking, settings) },
     charges: seesCharges
       ? {
           lines: await chargesOf(db, booking.id),
@@ -318,8 +322,10 @@ export async function moveBooking(
   const startAt = localToUtc(input.date, input.startMinute);
   const endAt = localToUtc(input.date, input.startMinute + found.durationMinutes);
   if (startAt.getTime() === found.startAt.getTime()) return refuse("invalid_time", "That is the time the booking already has.");
-  // With moving switched off the rental terms say nothing about a move, so one made for the client costs them nothing.
-  const clientMove = input.countsAsClientMove && settings.maxReschedules > 0;
+  // The terms the booking was made under (question 10). With moving switched off in them, the rental terms say nothing
+  // about a move, so one made for the client costs them nothing.
+  const terms = termsFor(found, settings);
+  const clientMove = input.countsAsClientMove && terms.maxReschedules > 0;
   // Across the hour the clocks change, the booking would not last as long as it was paid for.
   if (endAt.getTime() - startAt.getTime() !== found.durationMinutes * 60_000) {
     return refuse("slot_taken", "The clocks change at that time, so the booking cannot move there. Choose another.");
@@ -405,7 +411,7 @@ export async function moveBooking(
           was,
           now: is,
           duration: durationLabel(booking.durationMinutes),
-          ...(clientMove ? { clientAsked: movesLeft(booking.rescheduledCount + 1, settings) } : {}),
+          ...(clientMove ? { clientAsked: movesLeft(booking.rescheduledCount + 1, terms) } : {}),
         }),
       );
       return { ok: true, startAt, endAt };

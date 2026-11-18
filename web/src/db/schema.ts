@@ -374,6 +374,12 @@ export const bookings = pgTable(
     /** Hash of the secret of a second manage link, given to the screen that asked again for a booking it had made. */
     retryTokenHash: text("retry_token_hash"),
     termsAcceptedAt: ts("terms_accepted_at"),
+    /**
+     * The terms the booking was made under (`BookingTerms` in src/server/terms.ts): its refund window and fee, how
+     * long and how often it can be moved and for what fee, and how long the credit it gives stays valid. A booking
+     * keeps them when the owners change the settings (question 10). Null for one made before they were kept.
+     */
+    terms: jsonb("terms"),
     /** When this completed visit was counted for loyalty (a free hour may or may not have followed). */
     loyaltyIssuedAt: ts("loyalty_issued_at"),
     /** When the review request was queued, or the rollout skipped an older appointment. */

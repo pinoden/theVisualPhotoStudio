@@ -11,6 +11,7 @@ import { formatCents } from "@/lib/domain/pricing";
 import { durationLabel, isIsoDate, longDateLabel, minutesToLabel } from "@/lib/domain/time";
 import { centsToInput, CHARGE_FIELD, MONEY_FIELD } from "@/lib/parse";
 import { PAYMENT_METHODS } from "@/lib/payment-methods";
+import { hoursInWords } from "@/lib/words";
 import { getAppointment, moveOptions } from "@/server/appointments";
 import { CHARGE_NOTE_MAX, OVERTIME_MAX_MINUTES, overtimeBlocks, overtimeCents } from "@/server/charges";
 import { BY_CUSTOMER, BY_SYSTEM } from "@/server/history";
@@ -159,6 +160,31 @@ async function AppointmentDetails({
           <dt>Reference</dt>
           <dd>{appointment.ref}</dd>
         </dl>
+        {/* The terms it was made under, which a cancellation and a move follow (question 10). */}
+        <details className="booking-terms" style={{ marginBottom: ".75rem" }}>
+          <summary style={{ cursor: "pointer" }}>
+            Terms of this booking{appointment.terms.changedSince ? ": the settings have changed since it was made" : ""}
+          </summary>
+          <ul style={{ fontSize: ".85rem", margin: ".5rem 0 0" }}>
+            <li>
+              Refunded when cancelled {hoursInWords(appointment.terms.refundWindowHours)} or more before it starts
+              {appointment.terms.refundFeePercent > 0 ? `, less the ${appointment.terms.refundFeePercent}% processing fee` : ""}.
+            </li>
+            <li>
+              {appointment.terms.maxReschedules > 0
+                ? `Moved online until ${hoursInWords(appointment.terms.rescheduleCutoffHours)} before it starts: ${
+                    appointment.terms.maxReschedules === 1 ? "once" : `${appointment.terms.maxReschedules} times`
+                  } free${appointment.terms.rescheduleFeeCents > 0 ? `, then ${formatCents(appointment.terms.rescheduleFeeCents)} each time` : ", then no more"}.`
+                : "Not moved online: moving was switched off when it was made."}
+            </li>
+            <li>A reschedule code or credit it gives is valid for {appointment.terms.creditValidDays} days.</li>
+          </ul>
+          {appointment.terms.changedSince && (
+            <p style={{ fontSize: ".8rem", margin: ".5rem 0 0" }}>
+              A booking keeps the terms it was made under; the settings of today apply to bookings made from now on.
+            </p>
+          )}
+        </details>
         <p style={{ marginBottom: 0 }}>
           <Link href={`/admin/calendar?view=day&date=${day}`}>This day in the calendar</Link>
           {" · "}
@@ -252,13 +278,13 @@ async function AppointmentDetails({
                   Move booking
                 </button>
               </div>
-              {settings.maxReschedules > 0 ? (
+              {appointment.terms.maxReschedules > 0 ? (
                 <label style={{ display: "block", fontSize: ".85rem" }}>
                   <input type="checkbox" name="countsAsClientMove" defaultChecked /> The client asked for this move. It
                   counts as a reschedule of theirs: the booking is then no longer refunded automatically, as the rental
                   terms say
-                  {settings.rescheduleFeeCents > 0
-                    ? `, and each move beyond their ${settings.maxReschedules === 1 ? "free one" : `${settings.maxReschedules} free ones`} costs them ${formatCents(settings.rescheduleFeeCents)} online`
+                  {appointment.terms.rescheduleFeeCents > 0
+                    ? `, and each move beyond their ${appointment.terms.maxReschedules === 1 ? "free one" : `${appointment.terms.maxReschedules} free ones`} costs them ${formatCents(appointment.terms.rescheduleFeeCents)} online`
                     : ""}
                   . Untick it when the studio needs the change.
                 </label>

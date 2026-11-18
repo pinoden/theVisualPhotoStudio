@@ -8,7 +8,7 @@ Where the work stands. A snapshot, rewritten at each checkpoint by whichever too
 
 - Branch `rebuild`, pushed. The commit that holds this file is the state described here. Nothing is uncommitted.
 - `master` is at pull request #8 (2026-11-17), which holds everything up to the commit before this one. Anything newer on `rebuild` waits for the owner's word to merge.
-- Migrations run from `0000` to `0039`. No deployment and no production migration has ever been run.
+- Migrations run from `0000` to `0040`. No deployment and no production migration has ever been run.
 
 ## In progress
 
@@ -19,16 +19,17 @@ Nothing. No tool has unfinished changes in the tree.
 On the tree of this commit, 2026-11-17:
 
 - `npm run typecheck` and `npm run lint`: clean.
-- `npm test`: 925 tests pass.
+- `npm test`: 934 tests pass.
 - `npm run test:e2e`: the whole browser suite, 59 cases, passes (rerun on this commit, 2026-11-18).
-- Migrations `0035` and `0036` were each tried on copies of two browser-test databases, and `0037` (extra charges) on a copy of one holding 25 bookings: applied, its checks refuse an unknown kind and a zero amount, and a second run changes nothing. `0038` (extra guests) on a copy of a browser-test database whose owners had changed Paris's included guests and renamed a tier: it keeps both, switches the two tiers off, adds the $5 add-on once, leaves the add-ons of earlier bookings as they were, and a second run changes nothing. `0039` (the reminder) on a copy holding 25 bookings: the column is added, no booking is marked as reminded, and a second run changes nothing.
+- Migrations `0035` and `0036` were each tried on copies of two browser-test databases, and `0037` (extra charges) on a copy of one holding 25 bookings: applied, its checks refuse an unknown kind and a zero amount, and a second run changes nothing. `0038` (extra guests) on a copy of a browser-test database whose owners had changed Paris's included guests and renamed a tier: it keeps both, switches the two tiers off, adds the $5 add-on once, leaves the add-ons of earlier bookings as they were, and a second run changes nothing. `0039` (the reminder) on a copy holding 25 bookings: the column is added, no booking is marked as reminded, and a second run changes nothing. `0035` to `0040` together on a copy of an older database (at `0034`, 16 bookings): all apply, the bookings get no stored terms and so follow the settings of the day, and a second run changes nothing.
+- One browser run on 2026-11-18 failed once at the header editor's "Discard changes" (`website.spec.ts`, the font and logo case): the discard was still running when the 20-second wait ran out, with the dev server busy. The whole suite passed on the rerun, as in the five runs before. If it comes back, look at how long a discard takes under load.
 - Follow-up 13 was used in a real browser on a separate server (port 3215) with a booking moved into the past: overtime and a cleaning charge added, the summary and payment card, a payment link for the charges, and taking a charge back refused while that link was open; at 375px wide nothing is wider than the screen. The browser suite has no case for it, because it cannot reach an appointment that has started (it runs on the real clock). `0030` to `0033` were checked against older data by Codex.
 - CI on GitHub: the first run (commit `ae4cc99`, Node 24, UTC) passed both jobs: `checks` in 3 minutes, `browser` (59 cases) in 14 minutes. The run on `58007de`, the first with Node 26 from `web/.nvmrc`, passed both jobs too (`browser` in 10 minutes).
 - Branch protection on `master` requires the CI jobs `checks` and `browser` to pass, for everyone, and refuses direct pushes (set 2026-11-17).
 
 Tester pass (2026-11-18, `.claude/agents/tester.md`) on follow-ups 6 and 9, the 7-day refund window, the food rule, the Settings fee field and `/api/health`: four low defects, all fixed in commit `3a76abc` (see the decision log). Not covered by it: the 503 answer of `/api/health` in a production build, migrations `0035` and `0036` on an older database (checked by hand earlier), photography reschedule fees, staff-role views, keyboard and screen-reader use.
 
-Not yet through an independent tester pass: follow-ups 1, 2, 4, 7, 8, 12, 13 and 15, and the reminder email.
+Not yet through an independent tester pass: follow-ups 1, 2, 4, 7, 8, 12, 13 and 15, the reminder email, and bookings keeping their terms.
 
 ## Done from the owner's 16 follow-up answers
 
@@ -93,10 +94,9 @@ Agreed with the owner on 2026-11-17. Each item is done once it is checked off he
 
 ## Next, in this order
 
-1. **Each booking keeps the terms in effect when it was made** (question 10).
-2. **A client asks the studio to move a booking** (question 20).
-3. **Follow-up 3: memberships.** Plan it before building: it needs Square's subscriptions.
-4. **The admin's email templates** (question 33).
+1. **A client asks the studio to move a booking** (question 20).
+2. **Follow-up 3: memberships.** Plan it before building: it needs Square's subscriptions.
+3. **The admin's email templates** (question 33).
 
 ## Waiting on the owners
 
@@ -108,6 +108,6 @@ Agreed with the owner on 2026-11-17. Each item is done once it is checked off he
 
 ## Before deploying
 
-- Apply migrations `0030` through `0039`. Keep the owners' customised prices when the weekend-price migration runs.
+- Apply migrations `0030` through `0040`. Keep the owners' customised prices when the weekend-price migration runs.
 - Set up the scheduled task and the email service: reminders, review requests, free hours and refund retries depend on them.
 - Run the whole browser suite once more.

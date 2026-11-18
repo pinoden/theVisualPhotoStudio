@@ -10,6 +10,7 @@ import { recordEvent } from "./history";
 import { netCardPaidCents, paidAtStudioCents } from "./money";
 import { issuePromo, rescheduleCodeOf, type RescheduleCode } from "./promos";
 import { loadSettings } from "./settings";
+import { termsFor } from "./terms";
 import { formatInstant } from "./tz";
 
 /**
@@ -169,7 +170,8 @@ export async function givePetFeeCredit(
     const standing = await petCreditStanding(tx, booking);
     if (standing.block) return { ok: false, reason: standing.block, message: PET_CREDIT_BLOCK_TEXT[standing.block] };
 
-    const credit = await issuePetCredit(tx, booking, standing.feeCents, { now: deps.now, validDays: settings.creditValidDays });
+    // As long as the booking's own terms keep a credit valid (question 10).
+    const credit = await issuePetCredit(tx, booking, standing.feeCents, { now: deps.now, validDays: termsFor(booking, settings).creditValidDays });
     if (!credit) return { ok: false, reason: "already_given", message: PET_CREDIT_BLOCK_TEXT.already_given };
 
     const label = labelOf(booking);

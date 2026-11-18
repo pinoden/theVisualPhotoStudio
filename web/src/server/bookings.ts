@@ -38,6 +38,7 @@ import {
   type UsablePromo,
 } from "./promos";
 import { loadAccessInstructions } from "./settings";
+import { termsAtBooking } from "./terms";
 import { moneyKindNow, moneyKindOfCode, OTHER_MONEY_CODE } from "./test-mode";
 import { formatInstant, localToUtc } from "./tz";
 
@@ -458,6 +459,8 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
             madeBy: deps.madeBy ?? null,
             // The client has not ticked the box themselves when an administrator books for them.
             termsAcceptedAt: deps.madeBy ? null : now,
+            // The terms in effect now stay with the booking when the owners change them later (question 10).
+            terms: termsAtBooking(catalog.settings, session !== null),
             createdAt: now,
           })
           .returning({ id: bookings.id });

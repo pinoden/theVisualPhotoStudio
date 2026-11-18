@@ -49,6 +49,7 @@ import type { PaymentProvider } from "./payments";
 import { issuePetCredit, petCreditOf, petFeeCentsOf, petFeeReturnedCents, studioRefundableCents } from "./pet-fee";
 import { issuePromo, rescheduleCodeOf, restorePromo, spendable, takeOffRescheduleCode, type RescheduleCode } from "./promos";
 import { loadSettings, type Settings } from "./settings";
+import { termsFor } from "./terms";
 import { formatInstant } from "./tz";
 
 /**
@@ -109,15 +110,6 @@ async function factsFor(db: DbLike, booking: BookingRow): Promise<BookingFacts> 
 export interface ManageOptions {
   cancel: CancelOutcome;
   reschedule: RescheduleOutcome;
-}
-
-/**
- * The terms that apply to one booking. A photography session has to be
- * cancelled earlier than a studio rental to be refunded: the photographer has
- * set the time aside. Everything else is the same.
- */
-function termsFor(booking: Pick<BookingRow, "photographerId">, settings: Settings): Settings {
-  return booking.photographerId ? { ...settings, refundWindowHours: settings.photoRefundWindowHours } : settings;
 }
 
 async function manageContext(
@@ -906,7 +898,7 @@ export async function cancelBooking(db: Db, ref: string, actor: Actor, deps: Man
     // The pet is not coming: its fee stays off the card and goes back as studio credit.
     const petCredit =
       decision.creditCents > 0
-        ? await issuePetCredit(tx, booking, decision.creditCents, { now: deps.now, validDays: settings.creditValidDays })
+        ? await issuePetCredit(tx, booking, decision.creditCents, { now: deps.now, validDays: terms.creditValidDays })
         : null;
     await recordEvent(tx, {
       bookingId: booking.id,
@@ -1028,16 +1020,19 @@ export async function requestRescheduleCode(db: Db, ref: string, actor: Actor, d
     const [booking] = await tx.select().from(bookings).where(eq(bookings.ref, ref)).for("update").limit(1);
     if (!booking || !mayAct(booking, actor)) return { kind: "not_found" as const };
 
-    const decision = rescheduleOutcome(await factsFor(tx, booking), deps.now, settings);
+    // The terms the booking was made under: its moving rules, and how long the code it gives stays valid.
+    const terms = termsFor(booking, settings);
+    const decision = rescheduleOutcome(await factsFor(tx, booking), deps.now, terms);
     if (!decision.allowed) {
       return {
         kind: "blocked" as const,
         reason: decision.reason,
         booking: { status: booking.status, cancelReason: booking.cancelReason },
         heldCents: await heldCentsOf(tx, booking.id, deps.now),
+        terms,
       };
     }
-    if (seen !== undefined && seen !== rescheduleOfferText(decision, settings)) return { kind: "changed" as const };
+    if (seen !== undefined && seen !== rescheduleOfferText(decision, terms)) return { kind: "changed" as const };
 
     await tx
       .update(bookings)
@@ -1057,7 +1052,7 @@ export async function requestRescheduleCode(db: Db, ref: string, actor: Actor, d
           : `Released for a reschedule code worth ${formatCents(decision.creditCents)}`,
     });
 
-    const expiresAt = new Date(deps.now.getTime() + settings.creditValidDays * 86_400_000);
+    const expiresAt = new Date(deps.now.getTime() + terms.creditValidDays * 86_400_000);
     const photographyOnly = booking.photographerId !== null;
     const bookPath: "/book" | "/book/photography" = photographyOnly ? "/book/photography" : "/book";
     const issued = await issuePromo(tx, {
@@ -1103,7 +1098,7 @@ export async function requestRescheduleCode(db: Db, ref: string, actor: Actor, d
         : look === "foreign"
           ? " The site cannot check the payment link for this booking. If you paid it, please contact us."
           : " We could not check just now whether the payment link for this booking was paid. If you paid it, please try again later, or call us.";
-    const said = outcome.reason === "not_confirmed" ? endedText(outcome.booking) : rescheduleBlockText(outcome.reason, settings, outcome.heldCents);
+    const said = outcome.reason === "not_confirmed" ? endedText(outcome.booking) : rescheduleBlockText(outcome.reason, outcome.terms, outcome.heldCents);
     return { ok: false, status: 409, code: outcome.reason, message: `${said}${unseenNote}` };
   }
   if (outcome.kind === "changed") return { ok: false, status: 409, code: "changed", message: LOOK_AGAIN };

@@ -281,6 +281,13 @@
       "when": 1794984578993,
       "tag": "0039_booking_reminder",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1794985542479,
+      "tag": "0040_booking_terms",
+      "breakpoints": true
     }
   ]
 }
