@@ -1,11 +1,11 @@
 import { randomInt } from "node:crypto";
-import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, lte, ne, or } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Db, DbLike } from "@/db/client";
-import { membershipMinutes, membershipPayments, membershipPlanPrices, membershipPlans, membershipPlanStudios, memberships, studios } from "@/db/schema";
+import { bookings, MEMBERSHIP_STATUSES, membershipMinutes, membershipPayments, membershipPlanPrices, membershipPlans, membershipPlanStudios, memberships, studios } from "@/db/schema";
 import { studioCombinationError } from "@/lib/catalog-view";
 import { formatCents } from "@/lib/domain/pricing";
-import { longDateLabel } from "@/lib/domain/time";
+import { durationLabel, longDateLabel } from "@/lib/domain/time";
 import { emailField, hashToken, textField } from "./input-fields";
 import {
   membershipCancelledEmail,
@@ -722,4 +722,132 @@ async function settleMonths(db: Db, payments: PaymentProvider, row: MembershipRo
     });
   }
   return { months, problems: 0 };
+}
+
+// ── The owners' view (step 5) ────────────────────────────────────────────────
+
+export type MembershipStatus = (typeof MEMBERSHIP_STATUSES)[number];
+
+/** A membership as the owners' list shows it. */
+export interface MemberRow {
+  id: string;
+  name: string;
+  email: string;
+  code: string;
+  planName: string;
+  priceCents: number;
+  status: MembershipStatus;
+  startedOn: string;
+  minutesLeft: number;
+  /** While billed each month: the day the next month is. */
+  nextBilling: string | null;
+  endsOn: string | null;
+  problem: string | null;
+}
+
+/** Every membership, newest first, those never started too (the owners check Square for those). */
+export async function listMembers(db: DbLike): Promise<MemberRow[]> {
+  const rows = await db.select().from(memberships).orderBy(desc(memberships.createdAt));
+  const sums = await db
+    .select({ id: membershipMinutes.membershipId, total: sql<number>`coalesce(sum(${membershipMinutes.minutes}), 0)::int` })
+    .from(membershipMinutes)
+    .groupBy(membershipMinutes.membershipId);
+  const left = new Map(sums.map((sum) => [sum.id, sum.total]));
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    email: row.email,
+    code: row.code,
+    planName: row.planName,
+    priceCents: row.priceCents,
+    status: row.status,
+    startedOn: row.startedOn,
+    minutesLeft: left.get(row.id) ?? 0,
+    nextBilling: row.status === "active" ? row.paidThrough : null,
+    endsOn: row.endsOn,
+    problem: row.problem,
+  }));
+}
+
+/** A change to a membership's minutes, for the owners: when, how many, why, and the booking it was for. */
+export interface MinutesLine {
+  at: Date;
+  minutes: number;
+  kind: "month" | "booking" | "returned" | "correction";
+  note: string;
+  actor: string;
+  bookingRef: string | null;
+}
+
+export interface MemberDetail extends MemberRow {
+  phone: string;
+  minutesPerMonth: number;
+  cancelledAt: Date | null;
+  lines: MinutesLine[];
+  payments: MembershipPaymentView[];
+}
+
+/** One membership in full for the owners: every change to its minutes and every month paid. */
+export async function memberDetail(db: DbLike, membershipId: string): Promise<MemberDetail | null> {
+  if (!UUID.test(membershipId)) return null;
+  const [row] = await db.select().from(memberships).where(eq(memberships.id, membershipId));
+  if (!row) return null;
+  const lines = await db
+    .select({
+      at: membershipMinutes.createdAt,
+      minutes: membershipMinutes.minutes,
+      kind: membershipMinutes.kind,
+      note: membershipMinutes.note,
+      actor: membershipMinutes.actor,
+      bookingRef: bookings.ref,
+    })
+    .from(membershipMinutes)
+    .leftJoin(bookings, eq(bookings.id, membershipMinutes.bookingId))
+    .where(eq(membershipMinutes.membershipId, row.id))
+    .orderBy(desc(membershipMinutes.createdAt));
+  const [listed] = (await listMembers(db)).filter((member) => member.id === row.id);
+  return {
+    ...listed,
+    phone: row.phone,
+    minutesPerMonth: row.minutesPerMonth,
+    cancelledAt: row.cancelledAt,
+    lines: lines.map((line) => ({ ...line, bookingRef: line.bookingRef ?? null })),
+    payments: await membershipPaymentsOf(db, row.id),
+  };
+}
+
+export const MINUTES_REASON_MIN = 3;
+export const MINUTES_REASON_MAX = 300;
+/** The most minutes added or taken away at once: 100 hours. */
+export const MINUTES_AT_ONCE = 6000;
+
+export type CorrectMinutesResult = { ok: true; minutesLeft: number } | { ok: false; message: string };
+
+/**
+ * An owner adds minutes to a membership, or takes some away, with a reason, as stamps are corrected: in quarter hours,
+ * and never below nothing. The change is a line of its own, which the member's account counts like any other.
+ */
+export async function correctMinutes(
+  db: Db,
+  viewer: { email: string; role: string },
+  membershipId: string,
+  input: { minutes: number; reason: string },
+): Promise<CorrectMinutesResult> {
+  if (viewer.role !== "owner") return { ok: false, message: "Only an owner can change a membership's hours." };
+  if (!UUID.test(membershipId)) return { ok: false, message: "Membership not found." };
+  if (!Number.isInteger(input.minutes) || input.minutes === 0 || input.minutes % 15 !== 0 || Math.abs(input.minutes) > MINUTES_AT_ONCE) {
+    return { ok: false, message: "Enter the hours to add or take away in quarter hours, from 0.25 to 100, for example 1.5, or -2 to take two away." };
+  }
+  const reason = input.reason.replace(/\s+/g, " ").trim();
+  if (reason.length < MINUTES_REASON_MIN || reason.length > MINUTES_REASON_MAX) {
+    return { ok: false, message: `Say why, in ${MINUTES_REASON_MIN} to ${MINUTES_REASON_MAX} characters: the change is recorded with your reason.` };
+  }
+  return db.transaction(async (tx): Promise<CorrectMinutesResult> => {
+    const [row] = await tx.select().from(memberships).where(eq(memberships.id, membershipId)).for("update");
+    if (!row || row.status === "starting" || row.status === "failed") return { ok: false, message: "Membership not found." };
+    const left = await minutesLeftOf(tx, row.id);
+    if (left + input.minutes < 0) return { ok: false, message: `This membership has ${durationLabel(left)} left: no more than that can be taken away.` };
+    await tx.insert(membershipMinutes).values({ membershipId: row.id, minutes: input.minutes, kind: "correction", note: reason, actor: viewer.email });
+    return { ok: true, minutesLeft: left + input.minutes };
+  });
 }

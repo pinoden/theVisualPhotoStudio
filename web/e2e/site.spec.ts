@@ -50,7 +50,7 @@ const SECOND_OWNER = "owner2@studio.test";
 const THIRD_OWNER = "owner3@studio.test";
 // And the third. This one looks customers up.
 const FIFTH_OWNER = "owner5@studio.test";
-// This one rewords an email and changes a membership plan.
+// This one rewords an email, changes a membership plan and gives a member an hour.
 const EMAILS_OWNER = "owner13@studio.test";
 const STAFF = "sam.e2e@studio.test";
 const MANAGER = "mia.e2e@studio.test";
@@ -991,17 +991,32 @@ test("a client buys a membership, gets its code, sees it in their account and ca
   await confirmAndGetRef(page, "Confirm booking");
   await expect(byText(page, "Membership hours (1 hour)")).toBeVisible();
 
+  // The owners see the member and the hour the booking took, and give an hour back.
+  await signIn(page, EMAILS_OWNER, "/admin/memberships");
+  await page.getByRole("link", { name: max.name }).click();
+  await expect(page.getByRole("heading", { name: max.name })).toBeVisible();
+  await expect(page.locator(".history-table")).toContainText("Booking VS-");
+  await byLabel(page, "Hours to add (a minus takes away)").fill("1");
+  await byLabel(page, "Why").fill("A gift for the first visit");
+  await page.getByRole("button", { name: "Change the hours" }).click();
+  await expect(byText(page, "Hours changed. The member sees them in their account.")).toBeVisible();
+  await expect(page.locator(".reward-facts dd").first()).toHaveText("5 hours");
+  await expect(page.locator(".history-table")).toContainText("A gift for the first visit");
+  expect(await accessibilityProblems(page)).toEqual([]);
+
+  // Signed out of the owner's account first: signed in, the sign-in page goes straight on to the account.
+  await page.context().clearCookies();
   await signIn(page, max.email, "/account/membership");
   const card = page.locator(".membership-card", { hasText: "Studio Paris, 5 hours a month" });
   await expect(card).toContainText("Active. The next month is billed on");
   await expect(card).toContainText(code);
-  await expect(card.locator(".reward-facts dd").first()).toHaveText("4 hours");
+  await expect(card.locator(".reward-facts dd").first()).toHaveText("5 hours");
   await card.getByRole("button", { name: "Cancel membership" }).click();
   await card.getByRole("button", { name: "Yes, cancel it" }).click();
   await expect(card).toContainText("Cancelled: no more monthly payments.");
   await expect(card.getByRole("button", { name: "Cancel membership" })).toHaveCount(0);
   const goodbye = await latestEmail(page, "membership_cancelled", max.email);
-  expect(goodbye.body).toContain(`The hours left on your code ${code} stay yours to use: 4 hours.`);
+  expect(goodbye.body).toContain(`The hours left on your code ${code} stay yours to use: 5 hours.`);
 });
 
 test("the owner changes an add-on's price and a studio's guest number, and customers see both", async ({ page }) => {

@@ -44,6 +44,7 @@ const PATHS = [
   // compiled inside the first test that opened it, which on a busy machine took longer than that test waits (the
   // staff test, 2026-11-17, with the machine's load at 9).
   "/admin/appointments/VS-AAAAAA",
+  "/admin/memberships/members/00000000-0000-4000-8000-000000000000",
   "/admin/customers",
   "/admin/customers/warm-up%40example.com",
   "/account/appointments",

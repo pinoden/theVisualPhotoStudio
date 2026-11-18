@@ -1,11 +1,15 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { connection } from "next/server";
 import { Suspense } from "react";
 import { getDb } from "@/db/client";
 import { formatCents } from "@/lib/domain/pricing";
+import { durationLabel, longDateLabel } from "@/lib/domain/time";
 import { centsToInput, CHARGE_FIELD } from "@/lib/parse";
 import { loadCatalog } from "@/server/catalog";
-import { listPlans, PLAN_DESCRIPTION_MAX, PLAN_NAME_MAX, planStudioChoices, type PlanView } from "@/server/memberships";
+import { listMembers, listPlans, PLAN_DESCRIPTION_MAX, PLAN_NAME_MAX, planStudioChoices, type PlanView } from "@/server/memberships";
+import { localDateOf } from "@/server/tz";
+import { MEMBER_STATE, nextOf } from "./member-state";
 import { requireOwner } from "@/server/session";
 import { AdminFrame, AdminLoading } from "../frame";
 import { addPlanAction, offerPlanAgainAction, savePlanAction, stopOfferingPlanAction } from "./actions";
@@ -84,14 +88,71 @@ async function Memberships({ searchParams }: Pick<PageProps<"/admin/memberships"
   await connection();
   await requireOwner("/admin/memberships");
   const db = await getDb();
-  const [plans, catalog] = await Promise.all([listPlans(db), loadCatalog(db)]);
+  const [plans, catalog, members] = await Promise.all([listPlans(db), loadCatalog(db), listMembers(db)]);
   const choices = planStudioChoices(catalog.studios);
+  const started = members.filter((member) => member.status !== "failed");
+  const notStarted = members.filter((member) => member.status === "failed");
+  const today = localDateOf(new Date());
 
   return (
     <AdminFrame active="/admin/memberships" title="Memberships" query={await searchParams}>
-      <div className="notice notice-warning" role="status">
-        Clients cannot buy a membership on the site yet: buying one online, with the card billed each month by Square, is
-        being built. The plans below are what it will offer.
+      <div className="admin-card">
+        <h3>Members</h3>
+        {started.length === 0 ? (
+          <p style={{ marginBottom: 0 }}>
+            No one has bought a membership yet. Clients buy one on the <Link href="/memberships">Memberships</Link> page.
+          </p>
+        ) : (
+          <div className="data-table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Member</th>
+                  <th>Plan</th>
+                  <th>State</th>
+                  <th>Hours left</th>
+                </tr>
+              </thead>
+              <tbody>
+                {started.map((member) => (
+                  <tr key={member.id}>
+                    <td>
+                      <Link href={`/admin/memberships/members/${member.id}`}>
+                        <strong>{member.name}</strong>
+                      </Link>
+                      <br />
+                      {member.email}
+                    </td>
+                    <td>
+                      {member.planName}
+                      <br />
+                      <small>{formatCents(member.priceCents)} a month</small>
+                    </td>
+                    <td>
+                      {MEMBER_STATE[member.status]}
+                      <br />
+                      <small>{nextOf(member, today)}</small>
+                      {member.problem && <div className="field-error">{member.problem}</div>}
+                    </td>
+                    <td>{member.minutesLeft > 0 ? durationLabel(member.minutesLeft) : "None"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {notStarted.length > 0 && (
+          <details className="members-not-started">
+            <summary>Not started ({notStarted.length})</summary>
+            <ul>
+              {notStarted.map((member) => (
+                <li key={member.id}>
+                  {longDateLabel(member.startedOn)}: {member.name} ({member.email}), {member.planName}, {member.code}. {member.problem}
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
       </div>
       <div className="admin-card">
         <h3>Plans</h3>

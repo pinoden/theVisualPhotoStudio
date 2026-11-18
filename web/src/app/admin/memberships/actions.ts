@@ -5,7 +5,10 @@ import { redirect } from "next/navigation";
 import { getDb } from "@/db/client";
 import { dollarsToCents, formText } from "@/lib/parse";
 import { CATALOG_TAG } from "@/server/cached";
-import { addPlan, savePlan, setPlanActive, type PlanInput } from "@/server/memberships";
+import { addPlan, cancelMembership, correctMinutes, savePlan, setPlanActive, type PlanInput } from "@/server/memberships";
+import { resolvePayments } from "@/server/payments";
+import { flushEmailsSoon, siteUrl } from "@/server/runtime";
+import type { CancelMembershipState } from "@/app/account/membership/actions";
 import { requireOwner } from "@/server/session";
 
 const PATH = "/admin/memberships";
@@ -61,4 +64,28 @@ export async function offerPlanAgainAction(formData: FormData): Promise<void> {
   await requireOwner(PATH);
   if (!(await setPlanActive(await getDb(), text(formData, "planId"), true))) failed("Unknown plan.");
   done("The plan is offered again.");
+}
+
+// ── A member's page ──────────────────────────────────────────────────────────
+
+const memberPath = (id: string) => `/admin/memberships/members/${encodeURIComponent(id)}`;
+
+/** An owner adds hours to a membership, or takes some away, with a reason (`correctMinutes`). */
+export async function correctMinutesAction(formData: FormData): Promise<void> {
+  const id = text(formData, "membershipId");
+  const viewer = await requireOwner(memberPath(id));
+  const hours = Number(text(formData, "hours"));
+  const result = await correctMinutes(await getDb(), viewer, id, { minutes: Number.isFinite(hours) ? Math.round(hours * 60) : Number.NaN, reason: text(formData, "reason") });
+  updateTag(CATALOG_TAG);
+  redirect(`${memberPath(id)}?${result.ok ? "notice" : "error"}=${encodeURIComponent(result.ok ? "Hours changed. The member sees them in their account." : result.message)}`);
+}
+
+/** An owner cancels a membership for its member: the same as the member's own "Cancel membership". */
+export async function cancelMemberAction(_previous: CancelMembershipState, formData: FormData): Promise<CancelMembershipState> {
+  const id = String(formData.get("membershipId") ?? "");
+  const viewer = await requireOwner(memberPath(id));
+  const result = await cancelMembership(await getDb(), viewer, id, { now: new Date(), payments: resolvePayments().provider, baseUrl: await siteUrl() });
+  if (!result.ok) return { status: "error", message: result.message };
+  flushEmailsSoon();
+  redirect(`${memberPath(id)}?notice=${encodeURIComponent("Membership cancelled. No more monthly payments will be taken, and the member was emailed.")}`);
 }

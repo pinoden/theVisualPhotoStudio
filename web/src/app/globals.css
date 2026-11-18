@@ -2236,3 +2236,6 @@ fieldset { min-inline-size: 0; }
 .membership-plans .membership-plan-description { font-size: .85rem; }
 .membership-card h3 { overflow-wrap: anywhere; }
 .membership-cancel { margin-top: 1.25rem; }
+.members-not-started { margin-top: 1rem; font-size: .85rem; }
+.members-not-started summary { cursor: pointer; }
+.membership-correction { margin-top: 1.25rem; border-top: 1px solid var(--color-border); padding-top: 1rem; }
