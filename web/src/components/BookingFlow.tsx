@@ -74,6 +74,11 @@ interface AppliedCode {
   photographyOnly?: boolean;
   /** Where the code came from: "reschedule" for a moved booking's money. */
   source?: string;
+  /**
+   * A membership's code (follow-up 3): the minutes left on it, and whether weekends pay the difference. It pays with
+   * minutes, never as a discount: `kind` and `value` are not used then.
+   */
+  membership?: { minutesLeft: number; weekendDifference: boolean };
   email: string;
 }
 
@@ -235,7 +240,9 @@ export function BookingFlow({
 
   // A code is tied to an email address, so it stops applying if the address changes.
   const normalizedEmail = email.trim().toLowerCase();
-  const promo = applied && applied.email === normalizedEmail ? applied : null;
+  const current = applied && applied.email === normalizedEmail ? applied : null;
+  const promo = current && !current.membership ? current : null;
+  const member = current?.membership ? current : null;
 
   const price: Quote | null = useMemo(() => {
     if (studioIds.length === 0 || duration <= 0 || combinationError) return null;
@@ -254,6 +261,7 @@ export function BookingFlow({
           .map((addon) => ({ addonId: addon.id, quantity: Math.min(addonCounts[addon.id] ?? 0, mostOf(addon)) }))
           .filter((selection) => selection.quantity > 0),
         promo,
+        membership: member?.membership ?? null,
         photoPackage: session ? { priceCents: session.priceCents } : null,
       });
     } catch {
@@ -261,7 +269,7 @@ export function BookingFlow({
     }
     // availableAddons, guestsAllowed and mostOf are derived from studioIds and the catalog.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [studioIds, dayType, duration, rules, settings.multiStudioPercent, catalog.addons, addonCounts, promo, photography, session, combinationError]);
+  }, [studioIds, dayType, duration, rules, settings.multiStudioPercent, catalog.addons, addonCounts, promo, member, photography, session, combinationError]);
 
   const needsCard = price !== null && price.totalCents > 0;
 
@@ -336,8 +344,13 @@ export function BookingFlow({
         ok?: boolean;
         message?: string;
         promo?: Omit<AppliedCode, "email"> | null;
+        membership?: { code: string; minutesLeft: number; weekendDifference: boolean } | null;
       };
-      if (response.ok && data.ok && data.promo) {
+      if (response.ok && data.ok && data.membership) {
+        const { code: memberCode, ...membership } = data.membership;
+        setApplied({ code: memberCode, kind: "amount", value: 0, membership, email: normalizedEmail });
+        setCodeInput("");
+      } else if (response.ok && data.ok && data.promo) {
         setApplied({ ...data.promo, email: normalizedEmail });
         setCodeInput("");
       } else {
@@ -469,7 +482,7 @@ export function BookingFlow({
           notes: notes.trim(),
           addons: price.addonLines.map((line) => ({ addonId: line.addonId, quantity: line.quantity })),
           // A code that does not fit this selection is not used, which the summary says.
-          promoCode: promo && !price.promoMisfit ? promo.code : undefined,
+          promoCode: member ? member.code : promo && !price.promoMisfit ? promo.code : undefined,
           photography,
           acceptTerms: true,
           paymentToken,
@@ -576,8 +589,16 @@ export function BookingFlow({
           <span>{formatCents(-price.promoDiscountCents)}</span>
         </div>
       )}
+      {member && price.membershipCents > 0 && (
+        <div className="price-row price-discount">
+          <span>
+            Membership hours, code {member.code} ({durationLabel(price.membershipMinutes)})
+          </span>
+          <span>{formatCents(-price.membershipCents)}</span>
+        </div>
+      )}
       <div className="price-row total">
-        <span>{promo ? "To pay" : "Total"}</span>
+        <span>{promo || member ? "To pay" : "Total"}</span>
         <span>{formatCents(price.totalCents)}</span>
       </div>
       {session && (
@@ -1005,10 +1026,16 @@ export function BookingFlow({
             <label className="form-label" htmlFor="promo-code">
               Have a code?
             </label>
-            {promo ? (
+            {current ? (
               <div className="price-row">
                 <span>
-                  Code <strong>{promo.code}</strong> applied.
+                  Code <strong>{current.code}</strong> applied.
+                  {member && price && price.membershipMinutes < duration && (
+                    <>
+                      {" "}
+                      It has {durationLabel(member.membership!.minutesLeft)} left: the rest of the time is paid.
+                    </>
+                  )}
                 </span>
                 <button type="button" className="link-button" onClick={() => setApplied(null)}>
                   Remove
@@ -1019,7 +1046,7 @@ export function BookingFlow({
                 <input
                   id="promo-code"
                   className="form-control"
-                  placeholder={photography ? "Photography code" : "Discount, reward or credit code"}
+                  placeholder={photography ? "Photography code" : "Discount, reward, credit or membership code"}
                   autoCapitalize="characters"
                   autoComplete="off"
                   value={codeInput}
@@ -1040,7 +1067,7 @@ export function BookingFlow({
                 {codeError}
               </p>
             )}
-            {applied && !promo && (
+            {applied && !current && (
               <p className="field-error">The code was removed because the email address changed. Apply it again.</p>
             )}
           </div>

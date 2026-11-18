@@ -254,12 +254,16 @@ export function bookingConfirmationEmail(input: {
   /** How to get into the building, when the owner has set it. */
   access?: string;
 }): QueuedEmail {
-  const payment = [
-    input.payAtStudio ? `To pay at the studio: ${money(input.totalCents)}` : `Total: ${money(input.totalCents)}`,
-    ...(input.creditCents > 0
-      ? [`Paid with your ${input.creditName ?? "reschedule code"}: ${money(input.creditCents)}`, `Charged to your card: ${money(input.cardCents)}`]
-      : []),
-  ];
+  // Part paid with a code or membership hours: the whole, that part, and the rest, paid by card or, for a booking the
+  // studio made, at the studio.
+  const payment =
+    input.creditCents > 0
+      ? [
+          `Total: ${money(input.totalCents)}`,
+          `Paid with your ${input.creditName ?? "reschedule code"}: ${money(input.creditCents)}`,
+          input.payAtStudio ? `To pay at the studio: ${money(input.cardCents)}` : `Charged to your card: ${money(input.cardCents)}`,
+        ]
+      : [input.payAtStudio ? `To pay at the studio: ${money(input.totalCents)}` : `Total: ${money(input.totalCents)}`];
   return written(
     "booking_confirmation",
     { to: input.to, kind: "booking_confirmation" },

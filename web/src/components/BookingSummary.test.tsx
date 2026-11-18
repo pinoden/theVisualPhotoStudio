@@ -20,6 +20,8 @@ const PAID_ONLINE: BookingView = {
   addonsCents: 0,
   promoDiscountCents: 0,
   creditAppliedCents: 0,
+  membershipMinutes: 0,
+  membershipCents: 0,
   promoKind: null,
   promoSource: null,
   label: "confirmed",

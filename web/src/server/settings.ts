@@ -57,6 +57,13 @@ export interface Settings {
    */
   memberReturnHours: number;
 
+  /**
+   * At weekends, a booking paid with membership minutes pays the difference between the weekday and the weekend price
+   * of the time the minutes cover (the owners' rule of 2026-11-17; whether it still stands: question 41). Off, the
+   * minutes cover weekend time in full.
+   */
+  memberWeekendDifference: boolean;
+
   // ── Guests ──
   /**
    * The most guests in all, those included and the extra ones, for two studios booked together, and for all three
@@ -138,6 +145,7 @@ export const DEFAULT_SETTINGS: Settings = {
 
   reminderHours: 24,
   memberReturnHours: 48,
+  memberWeekendDifference: true,
   twoStudioGuestLimit: 10,
   threeStudioGuestLimit: 20,
 
@@ -241,6 +249,7 @@ const VALIDATORS: { [K in Exclude<keyof Settings, "multiStudioPercent">]: (v: un
   creditValidDays: int(NUMBER_SETTING_RANGES.creditValidDays),
   reminderHours: int(NUMBER_SETTING_RANGES.reminderHours),
   memberReturnHours: int(NUMBER_SETTING_RANGES.memberReturnHours),
+  memberWeekendDifference: bool,
   twoStudioGuestLimit: int(NUMBER_SETTING_RANGES.twoStudioGuestLimit),
   threeStudioGuestLimit: int(NUMBER_SETTING_RANGES.threeStudioGuestLimit),
   loyaltyEnabled: bool,

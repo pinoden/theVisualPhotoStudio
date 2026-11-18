@@ -38,6 +38,7 @@ describe("a booking keeps the terms it was made under", () => {
       maxReschedules: 1,
       rescheduleFeeCents: 2000,
       creditValidDays: 90,
+      memberReturnHours: 48,
     });
   });
 
@@ -117,6 +118,7 @@ describe("reading terms back", () => {
       maxReschedules: 2,
       rescheduleFeeCents: 2000,
       creditValidDays: 90,
+      memberReturnHours: 48,
     });
     expect(storedTerms({ photographerId: null, terms: "nonsense" }, DEFAULT_SETTINGS)).toEqual(termsAtBooking(DEFAULT_SETTINGS, false));
   });

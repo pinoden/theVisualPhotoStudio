@@ -68,6 +68,18 @@ async function SettingsForm({ searchParams }: Pick<PageProps<"/admin/settings">,
                 </p>
               </>
             )}
+            {group.title === "Memberships" && (
+              <>
+                <label style={{ display: "block", marginBottom: ".4rem", fontSize: ".9rem" }}>
+                  <input type="checkbox" name="memberWeekendDifference" defaultChecked={settings.memberWeekendDifference} /> At
+                  weekends, members pay the difference to the weekend price
+                </label>
+                <p style={{ fontSize: ".78rem", margin: "0 0 1rem" }}>
+                  Their hours then cover the weekday price of the time, and they pay the rest of the weekend price. Off, their
+                  hours cover weekend time in full.
+                </p>
+              </>
+            )}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "1rem" }}>
               {group.fields.map((field) => (
                 <div className="form-group" key={field.key} style={{ marginBottom: 0 }}>

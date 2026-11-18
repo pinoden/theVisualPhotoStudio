@@ -85,6 +85,12 @@ export function BookingSummary({ booking }: { booking: BookingView }) {
           <span>{formatCents(-booking.promoDiscountCents)}</span>
         </div>
       )}
+      {booking.membershipCents > 0 && (
+        <div className="price-row price-discount">
+          <span>Membership hours ({durationLabel(booking.membershipMinutes)})</span>
+          <span>{formatCents(-booking.membershipCents)}</span>
+        </div>
+      )}
       {/* Added once the appointment started: overtime, cleaning, damage (src/server/charges.ts). */}
       {booking.charges.map((charge, index) => (
         <div className="price-row" key={`charge-${index}`}>

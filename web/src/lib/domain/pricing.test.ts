@@ -256,3 +256,45 @@ describe("a free hour", () => {
     expect(code(() => quote({ ...one, durationMinutes: 60, promo: { kind: "free_hour", value: 0 } }))).toBe("BAD_PROMO");
   });
 });
+
+describe("membership minutes", () => {
+  const member = (minutesLeft: number, weekendDifference = true) => ({ membership: { minutesLeft, weekendDifference } });
+
+  it("pay the whole studio price when enough are left, never the add-ons", () => {
+    const q = quote({ ...base, studioIds: [P], dayType: "weekday", durationMinutes: 120, addons: [{ addonId: "people", quantity: 1 }], ...member(300) });
+    expect(q).toMatchObject({ membershipMinutes: 120, membershipCents: 13600, addonsCents: 3000, totalCents: 3000 });
+  });
+
+  it("pay their share of a longer booking, which pays the rest", () => {
+    // 60 of 240 minutes: a quarter of $245 is covered, three quarters paid.
+    const q = quote({ ...base, studioIds: [P], dayType: "weekday", durationMinutes: 240, ...member(60) });
+    expect(q).toMatchObject({ membershipMinutes: 60, membershipCents: 6125, totalCents: 18375 });
+    expect(quote({ ...base, studioIds: [P], dayType: "weekday", durationMinutes: 240, ...member(0) })).toMatchObject({ membershipMinutes: 0, membershipCents: 0, totalCents: 24500 });
+  });
+
+  it("cover studios booked together after their discount, as one booking's length", () => {
+    // Blanche + Paris for 2 hours: $176 + $136, less 20%: $249.60. Two hours of minutes cover it all.
+    const q = quote({ ...base, studioIds: [B, P], dayType: "weekday", durationMinutes: 120, ...member(300) });
+    expect(q).toMatchObject({ membershipMinutes: 120, membershipCents: 24960, totalCents: 0 });
+  });
+
+  it("cover the weekday price at weekends while the owners keep that rule, and weekend time in full otherwise", () => {
+    // Blanche for 2 hours on a Saturday: $200; on a weekday $176.
+    expect(quote({ ...base, studioIds: [B], dayType: "weekend", durationMinutes: 120, ...member(300) })).toMatchObject({ membershipCents: 17600, totalCents: 2400 });
+    expect(quote({ ...base, studioIds: [B], dayType: "weekend", durationMinutes: 120, ...member(300, false) })).toMatchObject({ membershipCents: 20000, totalCents: 0 });
+    // Half of it covered: half the weekday price comes off the weekend price.
+    expect(quote({ ...base, studioIds: [B], dayType: "weekend", durationMinutes: 120, ...member(60) })).toMatchObject({ membershipCents: 8800, totalCents: 11200 });
+    // Dayglow's weekday hour is $78 and its weekend hour $90: the difference is paid.
+    expect(quote({ ...base, studioIds: [D], dayType: "weekend", durationMinutes: 60, ...member(300) }).totalCents).toBe(9000 - 7800);
+    // A length with a weekend price and no weekday one: the minutes cover the weekend price.
+    const weekendOnly = [...rules, ...tiers(P, "weekend", { 90: 120 })];
+    expect(quote({ ...base, rules: weekendOnly, studioIds: [P], dayType: "weekend", durationMinutes: 90, ...member(300) })).toMatchObject({ membershipCents: 12000, totalCents: 0 });
+  });
+
+  it("are not for a photography session, and refuse a balance that is not a whole number", () => {
+    const session = quote({ ...base, studioIds: [P], dayType: "weekday", durationMinutes: 60, photoPackage: { priceCents: 25000 }, ...member(300) });
+    expect(session).toMatchObject({ membershipMinutes: 0, membershipCents: 0, totalCents: 25000 });
+    expect(code(() => quote({ ...base, studioIds: [P], dayType: "weekday", durationMinutes: 60, ...member(-1) }))).toBe("BAD_PROMO");
+    expect(code(() => quote({ ...base, studioIds: [P], dayType: "weekday", durationMinutes: 60, ...member(1.5) }))).toBe("BAD_PROMO");
+  });
+});

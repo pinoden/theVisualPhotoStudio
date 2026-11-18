@@ -1,12 +1,14 @@
 import { randomInt } from "node:crypto";
-import { and, asc, desc, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, ne } from "drizzle-orm";
 import { z } from "zod";
 import type { Db, DbLike } from "@/db/client";
 import { membershipMinutes, membershipPayments, membershipPlanPrices, membershipPlans, membershipPlanStudios, memberships, studios } from "@/db/schema";
 import { studioCombinationError } from "@/lib/catalog-view";
-import { emailField, hashToken, textField } from "./bookings";
+import { emailField, hashToken, textField } from "./input-fields";
 import { membershipCancelledEmail, membershipStartedEmail, ownerMembershipRefundNotice, queueEmail } from "./email";
+import { minutesLeftOf } from "./membership-minutes";
 import { monthsAfter, type PaymentProvider } from "./payments";
+import { normalizeCode, PROMO_PROBLEM_TEXT } from "./promos";
 import { localDateOf } from "./tz";
 
 /**
@@ -191,14 +193,6 @@ function membershipCode(): string {
 }
 
 type MembershipRow = typeof memberships.$inferSelect;
-
-async function minutesLeftOf(db: DbLike, membershipId: string): Promise<number> {
-  const [row] = await db
-    .select({ total: sql<number>`coalesce(sum(${membershipMinutes.minutes}), 0)::int` })
-    .from(membershipMinutes)
-    .where(eq(membershipMinutes.membershipId, membershipId));
-  return row?.total ?? 0;
-}
 
 async function viewOf(db: DbLike, row: MembershipRow): Promise<MembershipView> {
   return {
@@ -469,4 +463,51 @@ export async function cancelMembership(
   });
   const [now] = await db.select().from(memberships).where(eq(memberships.id, row.id));
   return { ok: true, membership: await viewOf(db, now) };
+}
+
+// ── Spending minutes on a booking (step 3) ───────────────────────────────────
+
+/** A membership whose minutes can pay for a booking: what is left on it, and the processor it was bought with. */
+export interface UsableMembership {
+  id: string;
+  code: string;
+  minutesLeft: number;
+  provider: string;
+}
+
+/** True for a membership's code (`MEMBER-XXXX-XXXX`), which the code field takes as it takes the others. */
+export function isMembershipCode(raw: string): boolean {
+  return normalizeCode(raw).startsWith("MEMBER-");
+}
+
+/** "Studio Blanche or Studio Paris". */
+const orList = (names: string[]) => (names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} or ${names[names.length - 1]}`);
+
+/**
+ * Whether a membership's code can pay for a booking of these studios, made with this email address: a membership that
+ * was bought (its hours stay usable once it is cancelled or stopped), of this client, with minutes left, whose plan is
+ * for every studio booked (a bundle's plan for any one of them too), and not for a photography session.
+ */
+export async function findUsableMembership(
+  db: DbLike,
+  rawCode: string,
+  email: string,
+  booking: { studioIds: readonly string[]; photography: boolean },
+): Promise<{ ok: true; membership: UsableMembership } | { ok: false; message: string }> {
+  const [row] = await db.select().from(memberships).where(eq(memberships.code, normalizeCode(rawCode)));
+  if (!row || row.status === "starting" || row.status === "failed") return { ok: false, message: PROMO_PROBLEM_TEXT.not_found };
+  if (row.email !== email.trim().toLowerCase()) return { ok: false, message: PROMO_PROBLEM_TEXT.wrong_email };
+  if (booking.photography) return { ok: false, message: "Membership hours are for studio rentals: they cannot pay for a photography session." };
+  const covered = await db
+    .select({ studioId: membershipPlanStudios.studioId, name: studios.name })
+    .from(membershipPlanStudios)
+    .innerJoin(studios, eq(studios.id, membershipPlanStudios.studioId))
+    .where(eq(membershipPlanStudios.planId, row.planId))
+    .orderBy(asc(studios.sortOrder));
+  if (!booking.studioIds.every((id) => covered.some((studio) => studio.studioId === id))) {
+    return { ok: false, message: `This membership's hours are for ${orList(covered.map((studio) => studio.name))}, so they cannot pay for this booking.` };
+  }
+  const minutesLeft = await minutesLeftOf(db, row.id);
+  if (minutesLeft <= 0) return { ok: false, message: "No hours are left on this membership. Each month paid adds its hours." };
+  return { ok: true, membership: { id: row.id, code: row.code, minutesLeft, provider: row.provider } };
 }

@@ -44,6 +44,8 @@ export interface BookingFacts {
    * site cannot send it anywhere: a refund of it is the studio's to make.
    */
   paidAtStudioCents?: number;
+  /** Membership minutes the booking took (follow-up 3). Leave it out for a booking without any. */
+  membershipMinutes?: number;
 }
 
 export type CancelBlock = "not_confirmed" | "already_started";
@@ -125,7 +127,12 @@ export type RescheduleBlock =
   | "limit_reached"
   /** The fee for moving again is as much as the booking is worth, or more: no credit would be left. */
   | "fee_not_covered"
-  | "nothing_paid";
+  | "nothing_paid"
+  /**
+   * Paid with membership minutes: such a booking is cancelled, which gives its minutes back from far enough ahead, and
+   * booked again, rather than released for a reschedule code (the builder's reading, question 43).
+   */
+  | "membership";
 
 export type RescheduleOutcome =
   | { allowed: false; reason: RescheduleBlock }
@@ -157,6 +164,7 @@ export type RescheduleOutcome =
 export function rescheduleOutcome(booking: BookingFacts, now: Date, settings: PolicySettings): RescheduleOutcome {
   if (booking.status !== "confirmed") return { allowed: false, reason: "not_confirmed" };
   if (now.getTime() >= booking.startAt.getTime()) return { allowed: false, reason: "already_started" };
+  if ((booking.membershipMinutes ?? 0) > 0) return { allowed: false, reason: "membership" };
   if (settings.maxReschedules <= 0) return { allowed: false, reason: "not_offered" };
   const free = booking.rescheduledCount < settings.maxReschedules;
   if (!free && settings.rescheduleFeeCents <= 0) return { allowed: false, reason: "limit_reached" };

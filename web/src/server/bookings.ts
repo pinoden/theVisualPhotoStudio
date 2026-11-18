@@ -1,4 +1,4 @@
-import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
+import { randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
@@ -16,7 +16,6 @@ import { extraGuestsFor, studioCombinationError } from "@/lib/catalog-view";
 import { isStartFree, noticeHours } from "@/lib/domain/availability";
 import { labelOf, type LabelKey } from "@/lib/domain/labels";
 import { formatCents, PricingError, PROMO_MISFIT_TEXT, quote, type PromoKind, type Quote } from "@/lib/domain/pricing";
-import { formText } from "@/lib/parse";
 import { count, hoursInWords } from "@/lib/words";
 import { durationLabel, isIsoDate } from "@/lib/domain/time";
 import { loadDayAvailability, releaseExpiredHolds } from "./availability";
@@ -27,6 +26,10 @@ import { releaseHolds } from "./holds";
 import { giveBackReserved, takeReserved } from "./reserved";
 import { activeChargesByBooking } from "./charges";
 import { heldCentsByBooking, owedCentsByBooking, receivedCentsByBooking } from "./money";
+import { emailField, hashToken, textField } from "./input-fields";
+import { giveBackUnmadeMinutes, takeBookingMinutes } from "./membership-minutes";
+import { findUsableMembership, isMembershipCode, type UsableMembership } from "./memberships";
+export { hashToken };
 import { RESERVE_HOURS, type PaymentProvider } from "./payments";
 import {
   creditName,
@@ -39,12 +42,9 @@ import {
 } from "./promos";
 import { loadAccessInstructions } from "./settings";
 import { termsAtBooking } from "./terms";
-import { moneyKindNow, moneyKindOfCode, OTHER_MONEY_CODE } from "./test-mode";
+import { moneyKindNow, moneyKindOf, moneyKindOfCode, OTHER_MONEY_CODE } from "./test-mode";
 import { formatInstant, localToUtc } from "./tz";
 
-export const emailField = z.string().trim().toLowerCase().max(200).pipe(z.email());
-/** Text a person typed: trimmed, line breaks made single, and without the NUL character the database refuses. */
-export const textField = (min: number, max: number) => z.string().transform(formText).pipe(z.string().min(min).max(max));
 const addonsField = z
   .array(z.object({ addonId: z.uuid(), quantity: z.number().int().min(1).max(20) }))
   .max(20)
@@ -62,7 +62,7 @@ export const bookingInput = z.object({
   }),
   notes: textField(0, 2000).default(""),
   addons: addonsField,
-  /** A discount, reward or credit code. */
+  /** A discount, reward, credit or membership code. */
   promoCode: textField(0, 40).optional(),
   /**
    * A photography session with the in-house photographer, in one studio. The
@@ -131,9 +131,6 @@ function newRef(): string {
   return out;
 }
 
-export function hashToken(token: string): string {
-  return createHash("sha256").update(token).digest("hex");
-}
 
 function fail<T extends string>(status: number, code: T, message: string) {
   return { ok: false as const, status, code, message };
@@ -155,6 +152,8 @@ function firstIssue(error: z.ZodError): string {
 
 /** Raised inside the booking transaction when the code was spent by another request. */
 class PromoGone extends Error {}
+/** A membership's minutes were spent by another booking between the price and the hold. */
+class MinutesGone extends Error {}
 
 type ParsedInput = z.output<typeof bookingInput>;
 
@@ -216,7 +215,13 @@ export const quoteInput = z.object({
 });
 
 export type QuoteResult =
-  | { ok: true; quote: Quote; promo: Pick<UsablePromo, "code" | "kind" | "value" | "source" | "photographyOnly"> | null }
+  | {
+      ok: true;
+      quote: Quote;
+      promo: Pick<UsablePromo, "code" | "kind" | "value" | "source" | "photographyOnly"> | null;
+      /** A membership's code: what is left on it, and whether weekends pay the difference, for the screen's own price. */
+      membership: { code: string; minutesLeft: number; weekendDifference: boolean } | null;
+    }
   | { ok: false; status: number; code: "invalid_input" | "invalid_price" | "invalid_code"; message: string };
 
 /**
@@ -233,7 +238,17 @@ export async function quoteSelection(db: DbLike, rawInput: unknown, now: Date, p
   const combinationError = studioCombinationError(catalog.studios, input.studioIds);
   if (combinationError) return fail(422, "invalid_price", combinationError);
   let promo: UsablePromo | null = null;
-  if (input.promoCode) {
+  let member: UsableMembership | null = null;
+  if (input.promoCode && isMembershipCode(input.promoCode)) {
+    if (!input.email) return fail(422, "invalid_code", "Enter your email address first, then apply the code.");
+    const found = await findUsableMembership(db, input.promoCode, input.email, { studioIds: input.studioIds, photography: input.photography });
+    if (!found.ok) return fail(422, "invalid_code", found.message);
+    member = found.membership;
+    if (processor !== undefined) {
+      const kind = await moneyKindNow(db, processor);
+      if (moneyKindOf(member.provider) !== kind) return fail(422, "invalid_code", OTHER_MONEY_CODE[kind]);
+    }
+  } else if (input.promoCode) {
     if (!input.email) return fail(422, "invalid_code", "Enter your email address first, then apply the code.");
     const found = await findUsablePromo(db, input.promoCode, input.email, now);
     if (!found.ok) return fail(422, "invalid_code", PROMO_PROBLEM_TEXT[found.problem]);
@@ -244,6 +259,7 @@ export async function quoteSelection(db: DbLike, rawInput: unknown, now: Date, p
       if (behind !== null && behind !== kind) return fail(422, "invalid_code", OTHER_MONEY_CODE[kind]);
     }
   }
+  const membership = member ? { minutesLeft: member.minutesLeft, weekendDifference: catalog.settings.memberWeekendDifference } : null;
   const session = input.photography ? photoPackageFor(catalog, input.studioIds, input.durationMinutes) : null;
   if (input.photography && !session) return fail(422, "invalid_price", NO_SUCH_SESSION);
   try {
@@ -257,6 +273,7 @@ export async function quoteSelection(db: DbLike, rawInput: unknown, now: Date, p
       addonCatalog: catalog.addons,
       extraGuestsAllowed: extraGuestsFor(catalog, input.studioIds),
       promo,
+      membership,
       photoPackage: session,
     });
     // A code that exists but cannot be used on this selection is refused with the reason.
@@ -265,6 +282,7 @@ export async function quoteSelection(db: DbLike, rawInput: unknown, now: Date, p
       ok: true,
       quote: price,
       promo: promo ? { code: promo.code, kind: promo.kind, value: promo.value, source: promo.source, photographyOnly: promo.photographyOnly } : null,
+      membership: member && membership ? { code: member.code, ...membership } : null,
     };
   } catch (error) {
     if (error instanceof PricingError) return fail(422, "invalid_price", error.message);
@@ -334,7 +352,14 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
   const moneyKind = await moneyKindNow(db, deps.processor !== undefined ? deps.processor : (deps.payments?.name ?? null));
 
   let promo: UsablePromo | null = null;
-  if (input.promoCode) {
+  let member: UsableMembership | null = null;
+  if (input.promoCode && isMembershipCode(input.promoCode)) {
+    const found = await findUsableMembership(db, input.promoCode, input.customer.email, { studioIds: input.studioIds, photography: input.photography });
+    if (!found.ok) return fail(422, "invalid_code", found.message);
+    member = found.membership;
+    // A membership bought in test mode does not pay for a real booking, nor a real one for a pretend booking.
+    if (moneyKindOf(member.provider) !== moneyKind) return fail(422, "invalid_code", OTHER_MONEY_CODE[moneyKind]);
+  } else if (input.promoCode) {
     const found = await findUsablePromo(db, input.promoCode, input.customer.email, now);
     if (!found.ok) return fail(422, "invalid_code", PROMO_PROBLEM_TEXT[found.problem]);
     promo = found.promo;
@@ -355,12 +380,14 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
       addonCatalog: catalog.addons,
       extraGuestsAllowed: extraGuestsFor(catalog, input.studioIds),
       promo,
+      membership: member ? { minutesLeft: member.minutesLeft, weekendDifference: catalog.settings.memberWeekendDifference } : null,
       photoPackage: session,
     });
   } catch (error) {
     if (error instanceof PricingError) return fail(422, "invalid_price", error.message);
     throw error;
   }
+  const spendsMinutes = member !== null && price.membershipMinutes > 0;
   // The booking screen leaves out a code that does not fit the selection. Anything else that
   // sends one is told why, instead of being charged the full price without a word.
   if (price.promoMisfit) return fail(422, "invalid_code", PROMO_MISFIT_TEXT[price.promoMisfit]);
@@ -449,6 +476,9 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
             totalCents: price.totalCents,
             promoCodeId: spendsCode ? promo!.id : null,
             creditAppliedCents: spendsCode && promo!.kind === "amount" ? price.promoDiscountCents : 0,
+            membershipId: spendsMinutes ? member!.id : null,
+            membershipMinutes: spendsMinutes ? price.membershipMinutes : 0,
+            membershipCents: spendsMinutes ? price.membershipCents : 0,
             // Money that was already moved once stays "moved" on the new booking.
             rescheduledCount: spendsCode && promo!.source === "reschedule" ? promo!.rescheduleGeneration : 0,
             manageTokenHash: hashToken(manageToken),
@@ -464,6 +494,9 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
             createdAt: now,
           })
           .returning({ id: bookings.id });
+        if (spendsMinutes && !(await takeBookingMinutes(tx, { membershipId: member!.id, bookingId: row.id, minutes: price.membershipMinutes, ref }))) {
+          throw new MinutesGone();
+        }
 
         // Always take studios in the same order, so two multi-studio bookings
         // that overlap can never wait on each other in a cycle.
@@ -507,6 +540,9 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
     } catch (error) {
       if (error instanceof PromoGone) {
         return fail(409, "invalid_code", "That code was just used. Please remove it and try again.");
+      }
+      if (error instanceof MinutesGone) {
+        return fail(409, "invalid_code", "The hours left on your membership changed meanwhile. Please apply the code again to see the price.");
       }
       const code = pgErrorCode(error);
       if (code === PG_EXCLUSION_VIOLATION || code === PG_DEADLOCK_DETECTED) {
@@ -555,6 +591,7 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
         if (!ended) return;
         await releaseHolds(tx, bookingId);
         if (spendsCode) await restorePromo(tx, promo!.id, promo!.kind, price.promoDiscountCents);
+        await giveBackUnmadeMinutes(tx, [bookingId]);
       });
       return fail(
         402,
@@ -614,9 +651,9 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
         studios: studioNames,
         when: formatInstant(startAt),
         duration: durationLabel(input.durationMinutes),
-        totalCents: price.totalCents + (spendsCode && promo!.kind === "amount" ? price.promoDiscountCents : 0),
-        creditCents: spendsCode && promo!.kind === "amount" ? price.promoDiscountCents : 0,
-        creditName: promo ? creditName(promo.source) : undefined,
+        totalCents: price.totalCents + (spendsCode && promo!.kind === "amount" ? price.promoDiscountCents : 0) + price.membershipCents,
+        creditCents: spendsCode && promo!.kind === "amount" ? price.promoDiscountCents : price.membershipCents,
+        creditName: spendsMinutes ? `membership hours (${durationLabel(price.membershipMinutes)})` : promo ? creditName(promo.source) : undefined,
         cardCents: price.totalCents,
         payAtStudio: Boolean(deps.madeBy) && price.totalCents > 0,
         photoIncludes: session ? session.includes : undefined,
@@ -658,6 +695,9 @@ export interface BookingView {
   promoKind: PromoKind | null;
   /** Where that code came from: a moved booking, the loyalty reward, the studio, or a pet fee returned. */
   promoSource: PromoSource | null;
+  /** Membership minutes the booking took, and the part of the studio price they paid (follow-up 3). */
+  membershipMinutes: number;
+  membershipCents: number;
   /** The status label an administrator sees. */
   label: LabelKey;
   /** Made in the admin for the client: nothing was charged online, the total is paid at the studio. */
@@ -734,6 +774,8 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[], now: Date =
     creditAppliedCents: booking.creditAppliedCents,
     promoKind: codeRows.find((code) => code.id === booking.promoCodeId)?.kind ?? null,
     promoSource: codeRows.find((code) => code.id === booking.promoCodeId)?.source ?? null,
+    membershipMinutes: booking.membershipMinutes,
+    membershipCents: booking.membershipCents,
     label: labelOf(booking),
     madeByAdmin: booking.madeBy !== null,
     photography: booking.photographerId !== null ? { includes: booking.photoIncludes ?? "" } : null,

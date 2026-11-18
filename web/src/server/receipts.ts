@@ -1,3 +1,4 @@
+import { durationLabel } from "@/lib/domain/time";
 import { and, asc, desc, eq, inArray, notInArray } from "drizzle-orm";
 import { bookings, paymentLinks, payments, refunds } from "@/db/schema";
 import type { DbLike } from "@/db/client";
@@ -120,6 +121,7 @@ function linesOf(booking: BookingView): ReceiptLine[] {
           : "Discount code";
     lines.push({ label, cents: -booking.promoDiscountCents });
   }
+  if (booking.membershipCents > 0) lines.push({ label: `Paid with membership hours (${durationLabel(booking.membershipMinutes)})`, cents: -booking.membershipCents });
   for (const charge of booking.charges) lines.push({ label: charge.label, cents: charge.cents });
   return lines;
 }

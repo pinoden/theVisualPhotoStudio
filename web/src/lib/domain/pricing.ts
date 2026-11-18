@@ -69,6 +69,12 @@ export interface QuoteInput {
    * only each add-on's own `maxQuantity` limits them.
    */
   extraGuestsAllowed?: number | null;
+  /**
+   * Membership minutes paying for the studio time (follow-up 3): what is left on the membership, and whether at
+   * weekends they cover only the weekday price of the time (`memberWeekendDifference`). Never with a code, nor for a
+   * photography session: the server sees to both.
+   */
+  membership?: { minutesLeft: number; weekendDifference: boolean } | null;
 }
 
 /** The most guests in all for studios booked together, by how many: the owners' settings (10 for two, 20 for three). */
@@ -103,6 +109,10 @@ export interface Quote {
    * price is then the price without the code, and the customer is told why.
    */
   promoMisfit: PromoMisfit | null;
+  /** The membership minutes the booking takes: its length, or what is left when that is less. */
+  membershipMinutes: number;
+  /** The part of the studio price those minutes pay. */
+  membershipCents: number;
   totalCents: number;
 }
 
@@ -267,6 +277,27 @@ export function quote(input: QuoteInput): Quote {
     }
   }
 
+  // Membership minutes pay for studio time, never add-ons: the booking's length, or what is left. A booking longer than
+  // what is left pays the share of its studio price the minutes do not cover (the builder's reading, question 42). At
+  // weekends, while the owners keep that rule, the minutes cover the weekday price of the time and the rest of the
+  // weekend price is paid (question 41).
+  let membershipMinutes = 0;
+  let membershipCents = 0;
+  const membership = input.membership;
+  if (membership && !photoPackage) {
+    if (!(Number.isInteger(membership.minutesLeft) && membership.minutesLeft >= 0)) throw new PricingError("BAD_PROMO", "Invalid code.");
+    membershipMinutes = Math.min(membership.minutesLeft, durationMinutes);
+    let basisCents = studiosNetCents;
+    if (membership.weekendDifference && dayType === "weekend") {
+      const weekday = studioLines.map((line) => findPrice(line.studioId, "weekday", durationMinutes, rules));
+      if (weekday.every((cents) => cents !== null)) {
+        const subtotal = weekday.reduce((sum: number, cents) => sum + cents!, 0);
+        basisCents = subtotal - percentOf(subtotal, multiStudioPercent);
+      }
+    }
+    membershipCents = Math.min(studiosNetCents - promoDiscountCents, Math.round((basisCents * membershipMinutes) / durationMinutes));
+  }
+
   return {
     studioLines,
     studiosSubtotalCents,
@@ -276,7 +307,9 @@ export function quote(input: QuoteInput): Quote {
     addonsCents,
     promoDiscountCents,
     promoMisfit,
-    totalCents: studiosNetCents + addonsCents - promoDiscountCents,
+    membershipMinutes,
+    membershipCents,
+    totalCents: studiosNetCents + addonsCents - promoDiscountCents - membershipCents,
   };
 }
 

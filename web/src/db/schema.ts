@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  type AnyPgColumn,
   boolean,
   check,
   customType,
@@ -341,6 +342,13 @@ export const bookings = pgTable(
      * paid (a reschedule credit), as opposed to a discount.
      */
     creditAppliedCents: integer("credit_applied_cents").notNull().default(0),
+    /**
+     * A booking paid with membership minutes (follow-up 3): the membership, the minutes it took, and the part of the
+     * studio price they paid. `total_cents` is what is left to pay after them.
+     */
+    membershipId: uuid("membership_id").references((): AnyPgColumn => memberships.id, { onDelete: "restrict" }),
+    membershipMinutes: integer("membership_minutes").notNull().default(0),
+    membershipCents: integer("membership_cents").notNull().default(0),
 
     /** A booking that has been moved can no longer be refunded. */
     rescheduledCount: integer("rescheduled_count").notNull().default(0),

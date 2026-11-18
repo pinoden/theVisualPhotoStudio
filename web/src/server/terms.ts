@@ -16,6 +16,8 @@ export interface BookingTerms {
   maxReschedules: number;
   rescheduleFeeCents: number;
   creditValidDays: number;
+  /** How long before its start a booking paid with membership minutes is cancelled with its minutes given back. */
+  memberReturnHours: number;
 }
 
 const RANGES: Record<keyof BookingTerms, readonly [number, number]> = {
@@ -25,6 +27,7 @@ const RANGES: Record<keyof BookingTerms, readonly [number, number]> = {
   maxReschedules: NUMBER_SETTING_RANGES.maxReschedules,
   rescheduleFeeCents: MONEY_SETTING_RANGES.rescheduleFeeCents,
   creditValidDays: NUMBER_SETTING_RANGES.creditValidDays,
+  memberReturnHours: NUMBER_SETTING_RANGES.memberReturnHours,
 };
 
 const KEYS = Object.keys(RANGES) as (keyof BookingTerms)[];
@@ -38,6 +41,7 @@ export function termsAtBooking(settings: Settings, photography: boolean): Bookin
     maxReschedules: settings.maxReschedules,
     rescheduleFeeCents: settings.rescheduleFeeCents,
     creditValidDays: settings.creditValidDays,
+    memberReturnHours: settings.memberReturnHours,
   };
 }
 

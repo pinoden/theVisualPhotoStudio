@@ -243,12 +243,13 @@ async function NewBooking({ searchParams }: Pick<PageProps<"/admin/calendar/new"
               )}
               <div className="form-group" style={{ maxWidth: "20rem" }}>
                 <label className="form-label" htmlFor="new-code">
-                  Client&rsquo;s reward or credit code (optional)
+                  Client&rsquo;s reward, credit or membership code (optional)
                 </label>
                 <input id="new-code" name="code" className="form-control" maxLength={40} autoComplete="off" autoCapitalize="characters" />
                 <div style={{ fontSize: ".78rem", marginTop: ".25rem" }}>
-                  A free hour or credit that belongs to this client&rsquo;s email address. It comes off what is paid at the
-                  studio, and is used up.
+                  A free hour, studio credit or membership code that belongs to this client&rsquo;s email address. A free hour
+                  and credit are used up; a membership&rsquo;s hours come off what it has left. What they pay comes off
+                  what is paid at the studio.
                 </div>
               </div>
               <button type="submit" className="btn btn-dark">

@@ -39,6 +39,7 @@ const PHOTO_DAY = dateAhead(59); // and for the photography sessions
 const LOST_DAY = dateAhead(66); // and for the booking whose answer is lost on the way
 const REFUSED_DAY = dateAhead(73); // and for the booking whose refund the card processor refuses
 const EMAIL_DAY = dateAhead(129); // and for the booking whose confirmation the owners reworded
+const MEMBER_DAY = dateAhead(143); // and for the booking a membership's hours pay for
 
 const jane = { name: "Jane Smith", email: "jane.e2e@example.com", phone: "407-555-0100" };
 const bob = { name: "Bob Brown", email: "bob.e2e@example.com", phone: "407-555-0111" };
@@ -983,17 +984,24 @@ test("a client buys a membership, gets its code, sees it in their account and ca
   expect(welcome.subject).toBe("Your membership: Studio Paris, 5 hours a month");
   expect(welcome.body).toContain(`Your membership code: ${code}`);
 
+  // The code pays for an hour in Paris: nothing to pay, no card.
+  await bookStudioFirstToPayment(page, { studios: ["Studio Paris"], date: MEMBER_DAY, duration: "1 hr", time: "11:00 AM", customer: max, code });
+  await expect(byText(page, "Nothing to pay: your code covers this booking. No card is needed.")).toBeVisible();
+  await expect(totalRow(page)).toContainText("$0");
+  await confirmAndGetRef(page, "Confirm booking");
+  await expect(byText(page, "Membership hours (1 hour)")).toBeVisible();
+
   await signIn(page, max.email, "/account/membership");
   const card = page.locator(".membership-card", { hasText: "Studio Paris, 5 hours a month" });
   await expect(card).toContainText("Active. The next month is billed on");
   await expect(card).toContainText(code);
-  await expect(card.locator(".reward-facts dd").first()).toHaveText("5 hours");
+  await expect(card.locator(".reward-facts dd").first()).toHaveText("4 hours");
   await card.getByRole("button", { name: "Cancel membership" }).click();
   await card.getByRole("button", { name: "Yes, cancel it" }).click();
   await expect(card).toContainText("Cancelled: no more monthly payments.");
   await expect(card.getByRole("button", { name: "Cancel membership" })).toHaveCount(0);
   const goodbye = await latestEmail(page, "membership_cancelled", max.email);
-  expect(goodbye.body).toContain(`The hours left on your code ${code} stay yours to use: 5 hours.`);
+  expect(goodbye.body).toContain(`The hours left on your code ${code} stay yours to use: 4 hours.`);
 });
 
 test("the owner changes an add-on's price and a studio's guest number, and customers see both", async ({ page }) => {

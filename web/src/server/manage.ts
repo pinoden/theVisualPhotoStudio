@@ -1,5 +1,5 @@
 import { and, eq, inArray, isNotNull, isNull, max, ne, sql } from "drizzle-orm";
-import { bookingEvents, bookings, payments, promoCodes, refunds } from "@/db/schema";
+import { bookingEvents, bookings, membershipMinutes, payments, promoCodes, refunds } from "@/db/schema";
 import type { Db, DbLike } from "@/db/client";
 import { labelOf } from "@/lib/domain/labels";
 import { formatCents } from "@/lib/domain/pricing";
@@ -107,12 +107,46 @@ async function factsFor(db: DbLike, booking: BookingRow): Promise<BookingFacts> 
     petFeeCents,
     petCreditGiven: petFeeCents > 0 && (await petCreditOf(db, booking.id)) !== null,
     paidAtStudioCents: await paidAtStudioCents(db, booking.id),
+    membershipMinutes: booking.membershipMinutes,
   };
 }
 
 export interface ManageOptions {
   cancel: CancelOutcome;
   reschedule: RescheduleOutcome;
+}
+
+// ── Membership minutes on a cancellation (follow-up 3) ───────────────────────
+
+/**
+ * Whether cancelling now gives a booking's membership minutes back: by the client, at least `memberReturnHours` before
+ * the start, as the booking's own terms say (the owner's answer of 2026-11-18); by the studio, whenever the visit has
+ * not started, as the studio's cancellation gives a code back then.
+ */
+function minutesComeBack(booking: Pick<BookingRow, "membershipMinutes" | "startAt">, terms: Pick<Settings, "memberReturnHours">, now: Date, byStudio: boolean): boolean {
+  if (booking.membershipMinutes <= 0) return false;
+  const ahead = booking.startAt.getTime() - now.getTime();
+  return byStudio ? ahead > 0 : ahead >= terms.memberReturnHours * 3_600_000;
+}
+
+/** What cancelling now does with the booking's membership minutes, in a sentence. "" for a booking without any. */
+function minutesOnCancelText(booking: Pick<BookingRow, "membershipMinutes" | "startAt">, terms: Pick<Settings, "memberReturnHours">, now: Date, byStudio: boolean): string {
+  if (booking.membershipMinutes <= 0) return "";
+  const used = `The membership time it used (${durationLabel(booking.membershipMinutes)})`;
+  if (minutesComeBack(booking, terms, now, byStudio)) return `${used} goes back to your membership.`;
+  return byStudio ? "" : `${used} is not given back, as the booking is cancelled less than ${hoursInWords(terms.memberReturnHours)} before it starts.`;
+}
+
+/** Give a cancelled booking's membership minutes back: a line of `membership_minutes`, which adds them to what is left. */
+async function giveMinutesBack(tx: DbLike, booking: BookingRow, actor: string): Promise<void> {
+  await tx.insert(membershipMinutes).values({
+    membershipId: booking.membershipId!,
+    minutes: booking.membershipMinutes,
+    kind: "returned",
+    bookingId: booking.id,
+    note: `Booking ${booking.ref} cancelled`,
+    actor,
+  });
 }
 
 async function manageContext(
@@ -190,9 +224,15 @@ export function rescheduleOfferText(
 /** What cancelling or moving would do, in words. A page asks `noticeBookingPayments` first, so that this counts a link just paid. */
 export async function getManageChoices(db: DbLike, ref: string, actor: Actor, now: Date): Promise<ManageChoices | null> {
   const context = await manageContext(db, ref, actor, now);
-  return context
-    ? { ...describeManageOptions(context.options, context.terms, context.heldCents), request: moveRequestChoice(context.booking, now) }
-    : null;
+  if (!context) return null;
+  const choices = describeManageOptions(context.options, context.terms, context.heldCents);
+  // What becomes of membership minutes is part of what the client is told, and agrees to, before cancelling.
+  const minutes = choices.cancel.allowed ? minutesOnCancelText(context.booking, context.terms, now, actor.kind === "owner") : "";
+  return {
+    ...choices,
+    cancel: minutes ? { ...choices.cancel, text: [choices.cancel.text, minutes].filter(Boolean).join(" ") } : choices.cancel,
+    request: moveRequestChoice(context.booking, now),
+  };
 }
 
 // ── Asking the studio to move a booking ──────────────────────────────────────
@@ -308,10 +348,12 @@ export function cancelBlockText(reason: CancelBlock): string {
 
 export function rescheduleBlockText(
   reason: RescheduleBlock,
-  settings: Pick<Settings, "rescheduleCutoffHours" | "rescheduleFeeCents">,
+  settings: Pick<Settings, "rescheduleCutoffHours" | "rescheduleFeeCents" | "memberReturnHours">,
   heldCents = 0,
 ): string {
   switch (reason) {
+    case "membership":
+      return `A booking made with membership hours is moved by cancelling it and booking the new time: its hours go back to your membership when it is cancelled at least ${hoursInWords(settings.memberReturnHours)} before it starts. Or ask the studio to move it.`;
     case "already_started":
       return "This booking has already started.";
     case "not_confirmed":
@@ -979,7 +1021,10 @@ export async function cancelBooking(db: Db, ref: string, actor: Actor, deps: Man
     if (!decision.allowed) return { kind: "blocked" as const, reason: decision.reason, booking: { status: booking.status, cancelReason: booking.cancelReason } };
     // What the card holds, not taken yet: nothing was charged, and the cancellation says it is released.
     const heldCents = await heldCentsOf(tx, booking.id, deps.now);
-    if (seen !== undefined && seen !== cancelOutcomeText(decision, terms, {}, heldCents)) return { kind: "changed" as const };
+    const byStudio = actor.kind === "owner";
+    const minutesText = minutesOnCancelText(booking, terms, deps.now, byStudio);
+    const said = [cancelOutcomeText(decision, terms, {}, heldCents), minutesText].filter(Boolean).join(" ");
+    if (seen !== undefined && seen !== said) return { kind: "changed" as const };
 
     await tx
       .update(bookings)
@@ -988,6 +1033,8 @@ export async function cancelBooking(db: Db, ref: string, actor: Actor, deps: Man
     await releaseHolds(tx, booking.id);
 
     const codeBack = await giveCodeBack(tx, booking, actor.kind === "owner" ? "studio" : "customer");
+    const minutesBack = minutesComeBack(booking, terms, deps.now, byStudio);
+    if (minutesBack) await giveMinutesBack(tx, booking, byStudio ? "the studio" : "the site");
     // The pet is not coming: its fee stays off the card and goes back as studio credit.
     const petCredit =
       decision.creditCents > 0
@@ -1002,6 +1049,7 @@ export async function cancelBooking(db: Db, ref: string, actor: Actor, deps: Man
       note: [
         decision.refundCents > 0 ? `Refund ${formatCents(decision.refundCents)}` : "No refund",
         ...(petCredit ? [`pet fee of ${formatCents(decision.creditCents)} returned as studio credit`] : []),
+        ...(booking.membershipMinutes > 0 ? [`${durationLabel(booking.membershipMinutes)} of membership time ${minutesBack ? "given back" : "used"}`] : []),
         ...(decision.byHandCents > 0
           ? [
               afterFee(decision.byHandCents, terms.refundFeePercent) > 0
@@ -1014,7 +1062,7 @@ export async function cancelBooking(db: Db, ref: string, actor: Actor, deps: Man
 
     const refundIds = await recordRefunds(tx, booking.id, decision.refundCents, `Cancellation of ${booking.ref}`, true);
     const unseenNote = unseen ? await noteUnseenLink(tx, booking, "cancelled", deps) : null;
-    const message = `${cancelOutcomeText(decision, terms, {}, heldCents)}${codeBack ? ` ${CODE_BACK}` : ""}${unseenNote ? ` ${unseenNote}` : ""}`;
+    const message = `${said}${codeBack ? ` ${CODE_BACK}` : ""}${unseenNote ? ` ${unseenNote}` : ""}`;
     // The whole outcome. The card refund is said as sent: if it does not go through, the email is put right (`refundNotSent`).
     const email: CancellationNotice = {
       to: booking.customerEmail,
@@ -1024,6 +1072,7 @@ export async function cancelBooking(db: Db, ref: string, actor: Actor, deps: Man
       ...(decision.refundCents > 0 ? { refund: { cents: decision.refundCents, feeCents: decision.feeCents } } : {}),
       lines: [
         cancelOutcomeText(decision, terms, { card: decision.refundCents > 0, pet: true }, heldCents),
+        minutesText,
         ...(codeBack ? [CODE_BACK] : []),
         ...(unseenNote ? [unseenNote] : []),
       ].filter(Boolean),
@@ -1304,11 +1353,15 @@ export async function ownerCancelBooking(
         ...(atStudio > 0
           ? [`${formatCents(atStudio)} of what was paid at the studio is for the studio to give back by hand${petAside > 0 ? " (its pet fee was returned as studio credit)" : ""}`]
           : []),
+        ...(booking.membershipMinutes > 0 ? [`${durationLabel(booking.membershipMinutes)} of membership time ${deps.now.getTime() < booking.startAt.getTime() ? "given back" : "used"}`] : []),
       ].join("; "),
     });
     // A visit that has not started was taken from the customer, so the code that paid for it goes back to them.
     // After the start the code has done its work: a later cancellation is the owner settling a refund.
     const codeBack = deps.now.getTime() < booking.startAt.getTime() && (await giveCodeBack(tx, booking, "studio"));
+    // Its membership minutes too, by the same rule.
+    const minutesBack = minutesComeBack(booking, { memberReturnHours: 0 }, deps.now, true);
+    if (minutesBack) await giveMinutesBack(tx, booking, "the studio");
     const unseenNote = unseen ? await noteUnseenLink(tx, booking, "cancelled", deps) : null;
     const email: CancellationNotice = {
       to: booking.customerEmail,
@@ -1325,6 +1378,7 @@ export async function ownerCancelBooking(
                 : `What you paid at the studio (${formatCents(atStudio)}) cannot be sent back online: the studio will be in touch with you about it.`,
             ]
           : []),
+        ...(minutesBack ? [minutesOnCancelText(booking, { memberReturnHours: 0 }, deps.now, true)] : []),
         ...(codeBack ? [CODE_BACK] : []),
         ...(unseenNote ? [unseenNote] : []),
         // Then "Please contact us with any questions.", which is the owners' wording in the email's template.
