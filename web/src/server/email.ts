@@ -853,6 +853,81 @@ export function membershipStartedEmail(input: {
   );
 }
 
+/** A month of a membership paid (follow-up 3): its hours are on the code. */
+export function membershipMonthPaidEmail(input: {
+  to: string;
+  name: string;
+  planName: string;
+  minutes: number;
+  priceCents: number;
+  code: string;
+  minutesLeft: number;
+  /** The day the next month is billed, `YYYY-MM-DD`. */
+  nextBilling: string;
+  accountUrl: string;
+}): QueuedEmail {
+  return written(
+    "membership_month_paid",
+    { to: input.to, kind: "membership_month_paid" },
+    {
+      name: input.name,
+      plan: input.planName,
+      hours: durationLabel(input.minutes),
+      price: money(input.priceCents),
+      code: input.code,
+      hours_left: durationLabel(input.minutesLeft),
+      next_billing: longDateLabel(input.nextBilling),
+      account_link: input.accountUrl,
+    },
+  );
+}
+
+/** A month of a membership not paid, or its monthly payments stopped (follow-up 3): to the member. */
+export function membershipProblemEmail(input: { to: string; name: string; planName: string; problem: string; code: string; minutesLeft: number }): QueuedEmail {
+  return written(
+    "membership_payment_problem",
+    { to: input.to, kind: "membership_payment_problem" },
+    {
+      name: input.name,
+      plan: input.planName,
+      problem: input.problem,
+      code: input.code,
+      hours_left: input.minutesLeft > 0 ? durationLabel(input.minutesLeft) : "none at the moment",
+    },
+  );
+}
+
+/** The studio's side of `membershipProblemEmail`: what went wrong, and that the member was told. */
+export function ownerMembershipProblemNotice(input: { to: string; code: string; customer: string; planName: string; problem: string }): QueuedEmail {
+  return {
+    to: input.to,
+    kind: "owner_membership_problem",
+    subject: `ACTION NEEDED: membership ${input.code} was not paid`,
+    body: [
+      `${input.customer}'s membership ${input.code} (${input.planName}): ${input.problem}`,
+      "",
+      "No hours were added for it. The member was told that the studio will be in touch. A month Square takes later is recorded, and its hours added, by itself.",
+    ].join("\n"),
+  };
+}
+
+/**
+ * A client pressed to join and no answer came about their card, so the membership was not started; an hour on, the site
+ * gave it up. Square may have taken the payment all the same.
+ */
+export function ownerMembershipUnfinishedNotice(input: { to: string; code: string; customer: string; planName: string; amountCents: number }): QueuedEmail {
+  return {
+    to: input.to,
+    kind: "owner_membership_unfinished",
+    subject: `CHECK SQUARE: membership ${input.code} was not finished`,
+    body: [
+      `${input.customer} pressed to join ${input.planName} (${money(input.amountCents)} a month), and no answer came from the card processor about their card, so the membership was not started.`,
+      "",
+      `Look in Square for a payment of ${money(input.amountCents)} with the reference ${input.code}. If there is one, refund it there: the client was told they would not be charged twice, not that they were not charged.`,
+    ].join("\n"),
+  };
+}
+
 /** A membership cancelled (follow-up 3): no more payments, and the hours left stay usable. */
 export function membershipCancelledEmail(input: {
   to: string;

@@ -1,11 +1,22 @@
 import { randomInt } from "node:crypto";
-import { and, asc, desc, eq, inArray, isNotNull, ne } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, lte, ne, or } from "drizzle-orm";
 import { z } from "zod";
 import type { Db, DbLike } from "@/db/client";
 import { membershipMinutes, membershipPayments, membershipPlanPrices, membershipPlans, membershipPlanStudios, memberships, studios } from "@/db/schema";
 import { studioCombinationError } from "@/lib/catalog-view";
+import { formatCents } from "@/lib/domain/pricing";
+import { longDateLabel } from "@/lib/domain/time";
 import { emailField, hashToken, textField } from "./input-fields";
-import { membershipCancelledEmail, membershipStartedEmail, ownerMembershipRefundNotice, queueEmail } from "./email";
+import {
+  membershipCancelledEmail,
+  membershipMonthPaidEmail,
+  membershipProblemEmail,
+  membershipStartedEmail,
+  ownerMembershipProblemNotice,
+  ownerMembershipRefundNotice,
+  ownerMembershipUnfinishedNotice,
+  queueEmail,
+} from "./email";
 import { minutesLeftOf } from "./membership-minutes";
 import { monthsAfter, type PaymentProvider } from "./payments";
 import { normalizeCode, PROMO_PROBLEM_TEXT } from "./promos";
@@ -287,6 +298,7 @@ export async function joinMembership(db: Db, raw: unknown, deps: JoinDeps): Prom
           requestKey,
           provider: payments.name,
           startedOn: localDateOf(deps.now),
+          createdAt: deps.now,
         })
         .onConflictDoNothing()
         .returning();
@@ -339,6 +351,25 @@ export async function joinMembership(db: Db, raw: unknown, deps: JoinDeps): Prom
       .onConflictDoNothing();
   }
 
+  return finishStarting(db, payments, row, customerId, price.variationId, paymentId, deps);
+}
+
+/**
+ * The rest of buying a membership once its first month is paid: the card kept, the months after the first billed to
+ * it, and the membership started, with its first month's minutes and the member's email. When the card cannot be kept
+ * or the subscription made, the first month is given back (`giveBack`). Used by `joinMembership`, and by the scheduled
+ * task for a membership whose buying stopped after its payment (`carryOn`).
+ */
+async function finishStarting(
+  db: Db,
+  payments: PaymentProvider,
+  row: MembershipRow,
+  customerId: string,
+  variationId: string,
+  paymentId: string,
+  deps: JoinDeps,
+): Promise<JoinResult> {
+  const price = { variationId };
   // The card kept, and the months after the first billed to it.
   const firstBilling = monthsAfter(row.startedOn, 1);
   const card = row.cardId ? { ok: true as const, cardId: row.cardId } : await payments.memberships.saveCard({ paymentId, customerId, idempotencyKey: `${row.id}-card` });
@@ -510,4 +541,185 @@ export async function findUsableMembership(
   const minutesLeft = await minutesLeftOf(db, row.id);
   if (minutesLeft <= 0) return { ok: false, message: "No hours are left on this membership. Each month paid adds its hours." };
   return { ok: true, membership: { id: row.id, code: row.code, minutesLeft, provider: row.provider } };
+}
+
+// ── Each month (step 4) ──────────────────────────────────────────────────────
+
+/** Ask the processor about a membership whose month has come at most this often: it bills once a month. */
+const CHECK_EVERY_MS = 60 * 60_000;
+/** A membership left being bought this long is carried on, or given up when its first month was never recorded paid. */
+const CARRY_ON_AFTER_MS = 60 * 60_000;
+
+export interface MembershipBillingSummary {
+  /** Months paid, recorded with their minutes. */
+  monthsPaid: number;
+  /** Members (and the studio) told that a month was not paid, or that the payments stopped. */
+  problems: number;
+  /** Memberships whose buying stopped after their first month was paid, started now. */
+  carriedOn: number;
+}
+
+/**
+ * The scheduled task's part in memberships (step 4 of the plan under follow-up 3):
+ *  - A membership whose buying stopped after its first month was paid (the client left, the server stopped) is carried
+ *    on; one with no payment recorded an hour on is given up, and the studio is asked to check Square for one.
+ *  - Each active membership whose next month has come is asked about, at most once an hour: every month Square was paid
+ *    is recorded once, with its minutes, and the member is emailed; a month not paid by the day after it was due, or
+ *    payments Square stopped, are told to the member and the studio once; a subscription cancelled at Square is
+ *    cancelled here too. Never a month from the day a cancelled membership ends.
+ * Only memberships of the processor set up now: the sandbox's are unknown to the live account, and the other way round.
+ */
+export async function runMembershipBilling(db: Db, deps: JoinDeps): Promise<MembershipBillingSummary> {
+  const summary: MembershipBillingSummary = { monthsPaid: 0, problems: 0, carriedOn: 0 };
+  const payments = deps.payments;
+  if (!payments) return summary;
+
+  const stuck = await db
+    .select()
+    .from(memberships)
+    .where(and(eq(memberships.status, "starting"), eq(memberships.provider, payments.name), lt(memberships.createdAt, new Date(deps.now.getTime() - CARRY_ON_AFTER_MS))));
+  for (const row of stuck) if (await carryOn(db, payments, row, deps)) summary.carriedOn++;
+
+  const due = await db
+    .select()
+    .from(memberships)
+    .where(
+      and(
+        eq(memberships.status, "active"),
+        eq(memberships.provider, payments.name),
+        isNotNull(memberships.subscriptionId),
+        lte(memberships.paidThrough, localDateOf(deps.now)),
+        or(isNull(memberships.billingCheckedAt), lt(memberships.billingCheckedAt, new Date(deps.now.getTime() - CHECK_EVERY_MS))),
+      ),
+    );
+  for (const row of due) {
+    const settled = await settleMonths(db, payments, row, deps);
+    summary.monthsPaid += settled.months;
+    summary.problems += settled.problems;
+  }
+  return summary;
+}
+
+/** A membership left being bought: carried on from its paid first month, or given up when none was recorded. */
+async function carryOn(db: Db, payments: PaymentProvider, row: MembershipRow, deps: JoinDeps): Promise<boolean> {
+  const [paid] = await db.select().from(membershipPayments).where(eq(membershipPayments.membershipId, row.id)).limit(1);
+  if (paid && row.customerId) {
+    const price = await priceAtProcessor(db, payments, row);
+    if (!price.ok) return false; // the processor did not answer: next time
+    return (await finishStarting(db, payments, row, row.customerId, price.variationId, paid.processorId, deps)).ok;
+  }
+  // No answer ever came about the card, and the client has not pressed again: Square may have charged it all the same.
+  await db.transaction(async (tx) => {
+    const [given] = await tx
+      .update(memberships)
+      .set({ status: "failed", problem: "No answer came about the card, and the membership was not started. The studio was asked to look in Square for a payment to refund." })
+      .where(and(eq(memberships.id, row.id), eq(memberships.status, "starting")))
+      .returning();
+    if (given && deps.ownerEmail) {
+      await queueEmail(
+        tx,
+        ownerMembershipUnfinishedNotice({ to: deps.ownerEmail, code: row.code, customer: `${row.name} (${row.email})`, planName: row.planName, amountCents: row.priceCents }),
+      );
+    }
+  });
+  return false;
+}
+
+/** One active membership whose next month has come: its months paid, a problem with one, and what Square did with it. */
+async function settleMonths(db: Db, payments: PaymentProvider, row: MembershipRow, deps: JoinDeps): Promise<{ months: number; problems: number }> {
+  await db.update(memberships).set({ billingCheckedAt: deps.now }).where(eq(memberships.id, row.id));
+  const state = await payments.memberships.subscriptionState(row.subscriptionId!);
+  if (state.state === "unknown") return { months: 0, problems: 0 };
+  const accountUrl = `${deps.baseUrl.replace(/\/$/, "")}/account/membership`;
+  const known = new Set((await db.select({ id: membershipPayments.processorId }).from(membershipPayments).where(eq(membershipPayments.membershipId, row.id))).map((payment) => payment.id));
+  const counts = (day: string) => day !== "" && !(row.endsOn !== null && day >= row.endsOn);
+
+  let months = 0;
+  let paidThrough = row.paidThrough ?? monthsAfter(row.startedOn, 1);
+  for (const invoice of [...state.invoices].sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0))) {
+    if (!invoice.paid || known.has(invoice.id) || !counts(invoice.day)) continue;
+    const through = [paidThrough, monthsAfter(invoice.day, 1), state.paidThrough ?? ""].reduce((latest, day) => (day > latest ? day : latest));
+    const recorded = await db.transaction(async (tx) => {
+      const [payment] = await tx
+        .insert(membershipPayments)
+        .values({ membershipId: row.id, processorId: invoice.id, amountCents: invoice.amountCents > 0 ? invoice.amountCents : row.priceCents, periodStart: invoice.day, paidAt: deps.now })
+        .onConflictDoNothing()
+        .returning();
+      if (!payment) return false;
+      await tx.insert(membershipMinutes).values({
+        membershipId: row.id,
+        minutes: row.minutesPerMonth,
+        kind: "month",
+        paymentId: payment.id,
+        note: `The month from ${longDateLabel(invoice.day)}`,
+        actor: "the site",
+      });
+      await tx.update(memberships).set({ paidThrough: through, problem: null }).where(eq(memberships.id, row.id));
+      await queueEmail(
+        tx,
+        membershipMonthPaidEmail({
+          to: row.email,
+          name: row.name,
+          planName: row.planName,
+          minutes: row.minutesPerMonth,
+          priceCents: payment.amountCents,
+          code: row.code,
+          minutesLeft: await minutesLeftOf(tx, row.id),
+          nextBilling: through,
+          accountUrl,
+        }),
+      );
+      return true;
+    });
+    if (recorded) {
+      months++;
+      paidThrough = through;
+    }
+  }
+
+  // What went wrong, told once: payments Square stopped, or a month not paid by the day after it was due.
+  const today = localDateOf(deps.now);
+  const unpaid = state.invoices.filter((invoice) => !invoice.paid && counts(invoice.day) && invoice.day < today).sort((a, b) => (a.day < b.day ? -1 : 1))[0];
+  const problem =
+    state.state === "stopped"
+      ? "Square has stopped the monthly payments of your membership: it could not keep charging your card."
+      : unpaid
+        ? `The payment of ${formatCents(unpaid.amountCents > 0 ? unpaid.amountCents : row.priceCents)} for the month from ${longDateLabel(unpaid.day)} did not go through.`
+        : null;
+  const [now] = await db.select().from(memberships).where(eq(memberships.id, row.id));
+  if (problem && now.problem !== problem) {
+    await db.transaction(async (tx) => {
+      await tx.update(memberships).set({ problem, ...(state.state === "stopped" ? { status: "stopped" as const } : {}) }).where(eq(memberships.id, row.id));
+      await queueEmail(tx, membershipProblemEmail({ to: row.email, name: row.name, planName: row.planName, problem, code: row.code, minutesLeft: await minutesLeftOf(tx, row.id) }));
+      if (deps.ownerEmail) {
+        await queueEmail(tx, ownerMembershipProblemNotice({ to: deps.ownerEmail, code: row.code, customer: `${row.name} (${row.email})`, planName: row.planName, problem }));
+      }
+    });
+    return { months, problems: 1 };
+  }
+  // Cancelled at Square itself (in its dashboard): cancelled here too, and the member told as when they cancel.
+  if (state.state === "cancelled" && now.status === "active") {
+    const endsOn = state.endsOn ?? now.paidThrough;
+    await db.transaction(async (tx) => {
+      const [cancelled] = await tx
+        .update(memberships)
+        .set({ status: "cancelled", cancelledAt: deps.now, endsOn })
+        .where(and(eq(memberships.id, row.id), eq(memberships.status, "active")))
+        .returning();
+      if (!cancelled) return;
+      await queueEmail(
+        tx,
+        membershipCancelledEmail({
+          to: row.email,
+          name: row.name,
+          planName: row.planName,
+          code: row.code,
+          endsOn: endsOn && endsOn > today ? endsOn : null,
+          minutesLeft: await minutesLeftOf(tx, row.id),
+          bookUrl: `${deps.baseUrl.replace(/\/$/, "")}/book`,
+        }),
+      );
+    });
+  }
+  return { months, problems: 0 };
 }

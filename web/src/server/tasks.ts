@@ -5,6 +5,7 @@ import { releaseExpiredHolds } from "./availability";
 import { durationLabel } from "@/lib/domain/time";
 import { toBookingViews } from "./bookings";
 import { bookingReminderEmail, deliverPendingEmails, queueEmail, reviewRequestEmail, type EmailTransport } from "./email";
+import { runMembershipBilling } from "./memberships";
 import { labelOf } from "@/lib/domain/labels";
 import { BY_SYSTEM, recordEvent } from "./history";
 import { sendEarnedFreeHours } from "./loyalty";
@@ -51,6 +52,12 @@ export interface TaskSummary {
   payLinksPaid: number;
   /** Payment links withdrawn because their booking is no longer active. */
   payLinksClosed: number;
+  /** Memberships' months found paid at the processor, recorded with their minutes (`runMembershipBilling`). */
+  membershipMonthsPaid: number;
+  /** Members told that a month was not paid, or that their payments stopped. */
+  membershipProblems: number;
+  /** Memberships whose buying stopped after their first month was paid, started now. */
+  membershipsCarriedOn: number;
   emailsSent: number;
   emailsFailed: number;
   /** Pages removed for good from the trash, after the days a deleted page is kept. */
@@ -246,6 +253,7 @@ export async function runScheduledTasks(db: Db, deps: TaskDeps): Promise<TaskSum
   const refundRuns = await retryOpenRefunds(db, deps);
   const settling = await checkUnsettledRefunds(db, deps);
   const links = await checkOpenPayLinks(db, deps);
+  const billing = await runMembershipBilling(db, deps);
   const mail = await deliverPendingEmails(db, deps.email, deps.now);
   const pagesRemoved = await emptyOldTrash(db, deps.now);
   return {
@@ -263,6 +271,9 @@ export async function runScheduledTasks(db: Db, deps: TaskDeps): Promise<TaskSum
     refundsRejected: settling.rejected,
     payLinksPaid: links.paid,
     payLinksClosed: links.closed,
+    membershipMonthsPaid: billing.monthsPaid,
+    membershipProblems: billing.problems,
+    membershipsCarriedOn: billing.carriedOn,
     emailsSent: mail.sent,
     emailsFailed: mail.failed,
     pagesRemoved,

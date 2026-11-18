@@ -744,8 +744,10 @@ export const memberships = pgTable(
     cancelledAt: ts("cancelled_at"),
     /** Once cancelled: the day the month paid for ends, with no charge after it. */
     endsOn: date("ends_on", { mode: "string" }),
-    /** Why it failed or was stopped, for the owners. */
+    /** Why it failed or was stopped, or what went wrong with a month's payment, for the owners. */
     problem: text("problem"),
+    /** When the scheduled task last asked the processor about its months: at most once an hour (`runMembershipBilling`). */
+    billingCheckedAt: ts("billing_checked_at"),
     createdAt: createdAt(),
   },
   (t) => [

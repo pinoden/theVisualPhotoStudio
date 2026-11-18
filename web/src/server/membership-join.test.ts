@@ -78,7 +78,7 @@ describe("buying a membership", () => {
     expect(await world.emails("membership_started")).toHaveLength(1);
 
     // The same client buys a second plan, and another client the first one.
-    const second = expectOk(await joinMembership(world.db, input({ planId: dayglow10.id }), deps()));
+    const second = expectOk(await joinMembership(world.db, input({ planId: dayglow10.id }), deps({ now: new Date(NOW.getTime() + 60_000) })));
     expectOk(await joinMembership(world.db, input({ customer: { name: "Bob Brown", email: "bob@example.com", phone: "407-555-0111" } }), deps()));
     const [a, b, c] = world.subscriptions;
     expect(b.customerId).toBe(a.customerId);

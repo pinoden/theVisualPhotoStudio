@@ -1,0 +1,1 @@
+ALTER TABLE "memberships" ADD COLUMN "billing_checked_at" timestamp with time zone;

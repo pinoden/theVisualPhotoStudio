@@ -49,6 +49,8 @@ export const TEMPLATE_KEYS = [
   "loyalty_code",
   "login_code",
   "membership_started",
+  "membership_month_paid",
+  "membership_payment_problem",
   "membership_cancelled",
 ] as const;
 
@@ -646,6 +648,62 @@ const TEMPLATES: readonly EmailTemplateSpec[] = [
     ],
   },
   {
+    key: "membership_month_paid",
+    title: "A month paid",
+    group: "Memberships",
+    when: "When Square has taken a month's payment of a membership, and the month's hours are added to its code.",
+    subject: "Your membership: {{hours}} added",
+    body: lines(
+      "Hi {{name}},",
+      "",
+      "This month's payment for your membership {{plan}} went through ({{price}}), and its {{hours}} are on your code {{code}}. You have {{hours_left}} in all.",
+      "",
+      "The next month is billed on {{next_billing}}. You can cancel at any time in your account: {{account_link}}",
+      "",
+      ...SIGN_OFF,
+    ),
+    parts: [
+      NAME,
+      FIRST_NAME,
+      { key: "plan", label: "The membership's name", sample: "Studio Paris, 5 hours a month" },
+      { key: "hours", label: "The studio time the month adds", sample: "5 hours" },
+      { key: "price", label: "What the month cost", sample: "$300" },
+      { key: "code", label: "The membership code", required: true, sample: "MEMBER-4K7P-2XQ9" },
+      { key: "hours_left", label: "The studio time on the code now, this month's with what was left", sample: "6 hours 30 minutes" },
+      { key: "next_billing", label: "The day the next month is billed", sample: "Monday, January 18, 2027" },
+      { key: "account_link", label: "The link to the member's account", link: true, sample: "/account/membership" },
+    ],
+  },
+  {
+    key: "membership_payment_problem",
+    title: "A membership's payment did not go through",
+    group: "Memberships",
+    when: "When Square could not take a month's payment by the day after it was due, or stopped the monthly payments. Sent once for each.",
+    subject: "Your membership {{plan}}: a payment did not go through",
+    body: lines(
+      "Hi {{name}},",
+      "",
+      "{{problem}} The hours already on your code {{code}} stay yours to use: {{hours_left}}.",
+      "",
+      "The studio will be in touch about it. If you have a question, please reply to this email or call us.",
+      "",
+      ...SIGN_OFF,
+    ),
+    parts: [
+      NAME,
+      FIRST_NAME,
+      { key: "plan", label: "The membership's name", sample: "Studio Paris, 5 hours a month" },
+      {
+        key: "problem",
+        label: "What went wrong: a month's payment that did not go through, or the monthly payments stopped",
+        required: true,
+        sample: "The payment of $300 for the month from Monday, January 18, 2027 did not go through.",
+      },
+      { key: "code", label: "The membership code", sample: "MEMBER-4K7P-2XQ9" },
+      { key: "hours_left", label: "The studio time left on the code", sample: "2 hours" },
+    ],
+  },
+  {
     key: "membership_cancelled",
     title: "Membership cancelled",
     group: "Memberships",
@@ -698,6 +756,8 @@ export const STUDIO_NOTICES: readonly { title: string; when: string }[] = [
   { title: "A reserved amount lapsed", when: "When the amount reserved on a card lapsed before it could be taken, and the booking is still to pay." },
   { title: "A payment link to check", when: "When a booking ends while the site cannot tell whether its payment link was paid." },
   { title: "A membership's first month to refund", when: "When a membership could not be set up after its first month was paid, and the refund did not go through." },
+  { title: "A membership's payment did not go through", when: "When Square could not take a month's payment, or stopped a membership's monthly payments." },
+  { title: "A membership not finished", when: "When a client pressed to join and no answer came about their card, so the membership was not started: Square may hold a payment to refund." },
 ];
 
 // ── Filling a template in ────────────────────────────────────────────────────

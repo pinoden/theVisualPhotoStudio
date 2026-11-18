@@ -145,6 +145,8 @@ describe("every email to a client", () => {
       emails.loginCodeEmail("a@x.test", "123456", 10),
       emails.membershipStartedEmail({ to: "a@x.test", name: "Jane", planName: "P", minutes: 300, priceCents: 100, code: "C", nextBilling: "2026-12-14", bookUrl: "U", accountUrl: "A" }),
       emails.membershipCancelledEmail({ to: "a@x.test", name: "Jane", planName: "P", code: "C", endsOn: null, minutesLeft: 0, bookUrl: "U" }),
+      emails.membershipMonthPaidEmail({ to: "a@x.test", name: "Jane", planName: "P", minutes: 300, priceCents: 100, code: "C", minutesLeft: 300, nextBilling: "2027-01-14", accountUrl: "A" }),
+      emails.membershipProblemEmail({ to: "a@x.test", name: "Jane", planName: "P", problem: "It did not go through.", code: "C", minutesLeft: 0 }),
     ];
     expect(written.map((message) => message.template?.key).sort()).toEqual([...TEMPLATE_KEYS].sort());
     for (const message of written) {
