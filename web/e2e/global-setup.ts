@@ -25,6 +25,8 @@ const PATHS = [
   "/admin/hours",
   "/admin/codes",
   "/admin/settings",
+  "/admin/emails",
+  "/admin/emails/booking_confirmation",
   "/admin/website",
   "/admin/website/design",
   "/admin/website/navigation",

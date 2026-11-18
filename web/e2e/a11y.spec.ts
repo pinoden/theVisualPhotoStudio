@@ -93,6 +93,8 @@ const ADMIN_PAGES = [
   "/admin/staff",
   "/admin/codes",
   "/admin/settings",
+  "/admin/emails",
+  "/admin/emails/booking_confirmation",
   "/admin/photography",
   "/admin/website",
   "/admin/website/design",

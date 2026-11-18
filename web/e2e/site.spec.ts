@@ -38,6 +38,7 @@ const FREE_HOUR_DAY = dateAhead(52); // and for the bookings made with a free ho
 const PHOTO_DAY = dateAhead(59); // and for the photography sessions
 const LOST_DAY = dateAhead(66); // and for the booking whose answer is lost on the way
 const REFUSED_DAY = dateAhead(73); // and for the booking whose refund the card processor refuses
+const EMAIL_DAY = dateAhead(129); // and for the booking whose confirmation the owners reworded
 
 const jane = { name: "Jane Smith", email: "jane.e2e@example.com", phone: "407-555-0100" };
 const bob = { name: "Bob Brown", email: "bob.e2e@example.com", phone: "407-555-0111" };
@@ -48,6 +49,8 @@ const SECOND_OWNER = "owner2@studio.test";
 const THIRD_OWNER = "owner3@studio.test";
 // And the third. This one looks customers up.
 const FIFTH_OWNER = "owner5@studio.test";
+// This one rewords an email.
+const EMAILS_OWNER = "owner13@studio.test";
 const STAFF = "sam.e2e@studio.test";
 const MANAGER = "mia.e2e@studio.test";
 
@@ -888,6 +891,46 @@ test("the owner sets how to get in, and only a customer with a confirmed booking
   await page.getByRole("button", { name: "Yes, cancel it" }).click();
   await expect(page.getByRole("heading", { name: "Booking Cancelled" })).toBeVisible();
   await expect(byText(page, GETTING_IN)).toHaveCount(0);
+});
+
+test("the owners change an email's wording, and the next one is written in it until they go back to the site's", async ({ page }) => {
+  const erin = { name: "Erin Hale", email: "erin.e2e@example.com", phone: "407-555-0122" };
+  await signIn(page, EMAILS_OWNER, "/admin/emails");
+  await expect(page.getByRole("row", { name: /Booking confirmed/ })).toContainText("The site's wording");
+  await page.getByRole("link", { name: "Booking confirmed" }).click();
+  await expect(page.getByRole("heading", { name: "Booking confirmed" })).toBeVisible();
+  const text = byLabel(page, "Text");
+  const preview = page.getByTestId("email-preview");
+  await expect(preview).toContainText("Your booking at The Visuals Photo Studio is confirmed.");
+  const original = await text.inputValue();
+  const opening = "Your booking at {{studio_name}} is confirmed.";
+
+  // A part the email does not have is named as it is typed, and nothing is saved until it is put right.
+  await text.fill(original.replace(opening, `Thank you, {{frist_name}}! ${opening}`));
+  await expect(byText(page, "{{frist_name}} is not one of this email's parts. The parts it has are listed beside the text.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+  await text.fill(original.replace(opening, `Thank you, {{first_name}}! ${opening}`));
+  await expect(preview).toContainText("Thank you, Jane! Your booking at The Visuals Photo Studio is confirmed.");
+  await shot(page, "19-email-editor");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(byText(page, "Saved. Emails sent from now on use this wording.")).toBeVisible();
+  await expect(byText(page, /It is sent in your wording, saved .* by owner13@studio\.test\./)).toBeVisible();
+
+  // The next confirmation is written in it, with the client's own details.
+  await bookStudioFirstToPayment(page, { studios: ["Studio Paris"], date: EMAIL_DAY, duration: "1 hr", time: "3:00 PM", customer: erin });
+  const ref = await confirmAndGetRef(page, /^Confirm & pay \$/);
+  const mail = await latestEmail(page, "booking_confirmation", erin.email);
+  expect(mail.body).toContain(`Thank you, Erin! ${opening.replace("{{studio_name}}", "The Visuals Photo Studio")}`);
+  expect(mail.body).toContain(`Reference: ${ref}`);
+
+  // Back to the site's wording, which the emails after it are written in.
+  await page.goto("/admin/emails/booking_confirmation");
+  await page.getByRole("button", { name: "Use the site's wording" }).click();
+  await page.getByRole("button", { name: "Yes, use the site's wording" }).click();
+  await expect(byText(page, "Done. This email is sent in the site's wording again.")).toBeVisible();
+  await expect(text).toHaveValue(original);
+  await page.goto("/admin/emails");
+  await expect(page.getByRole("row", { name: /Booking confirmed/ })).toContainText("The site's wording");
 });
 
 test("the owner changes an add-on's price and a studio's guest number, and customers see both", async ({ page }) => {

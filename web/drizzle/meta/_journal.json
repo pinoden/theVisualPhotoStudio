@@ -288,6 +288,13 @@
       "when": 1794985542479,
       "tag": "0040_booking_terms",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1795009892296,
+      "tag": "0041_email_templates",
+      "breakpoints": true
     }
   ]
 }

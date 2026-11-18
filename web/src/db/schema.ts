@@ -633,6 +633,25 @@ export const emailOutbox = pgTable("email_outbox", {
   createdAt: createdAt(),
 });
 
+/**
+ * The owners' wording of an email the site sends to clients (Admin → Emails): a row for each email they have changed
+ * or set back. No subject and text: the site's own wording again. `revision` goes up with each save, so that a save
+ * from an editor opened before someone else's is noticed. See src/server/email-templates.ts.
+ */
+export const emailTemplates = pgTable(
+  "email_templates",
+  {
+    /** Which email: a key of `EMAIL_TEMPLATES` in src/lib/email-templates.ts. */
+    key: text("key").primaryKey(),
+    subject: text("subject"),
+    body: text("body"),
+    revision: integer("revision").notNull().default(1),
+    updatedBy: text("updated_by").notNull(),
+    updatedAt: ts("updated_at").notNull(),
+  },
+  (t) => [check("email_templates_wording", sql`(${t.subject} is null) = (${t.body} is null)`)],
+);
+
 // ── The website's content ────────────────────────────────────────────────────
 
 /**

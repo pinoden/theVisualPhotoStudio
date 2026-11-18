@@ -2,6 +2,8 @@ import { and, asc, eq, isNull, lt, lte, sql } from "drizzle-orm";
 import { emailOutbox } from "@/db/schema";
 import type { DbLike } from "@/db/client";
 import { afterFee } from "@/lib/domain/policy";
+import { EMAIL_TEMPLATES, firstNameOf, renderEmail, type TemplateKey } from "@/lib/email-templates";
+import { ownersWording } from "./email-templates";
 import { formatInstant } from "./tz";
 import { loadBusiness } from "./website";
 
@@ -11,10 +13,14 @@ import { loadBusiness } from "./website";
  * blocks a booking, and nothing is lost: undelivered rows are retried.
  *
  * The studio's name and address are not written into the messages below.
- * Their texts carry two marks, `{{studio}}` and `{{address}}`, and
+ * Their texts carry two marks, `{{studio_name}}` and `{{studio_address}}`, and
  * `queueEmail` puts the published contact details in their place (Admin,
  * Website, "Header, menu & footer"), so every email follows a change made
  * there.
+ *
+ * A message to a client is written from its template (`src/lib/email-templates.ts`):
+ * in the site's wording here, and in the owners' when they have changed that
+ * email under Admin → Emails, which `queueEmail` puts in its place.
  */
 export interface QueuedEmail {
   to: string;
@@ -26,18 +32,26 @@ export interface QueuedEmail {
   replyTo?: string;
   /** When the message is no longer any use (a sign-in code's email): one still waiting then is not sent. */
   expiresAt?: Date;
+  /** The template a message to a client is written from, with the parts the site filled in. */
+  template?: { key: TemplateKey; parts: Readonly<Record<string, string>> };
 }
 
-/** Where `queueEmail` writes the studio's name, and its address on one line. */
-const STUDIO = "{{studio}}";
-const ADDRESS = "{{address}}";
+/** Where `queueEmail` writes the studio's name, and its address on one line: the template parts of those names. */
+const STUDIO = "{{studio_name}}";
+const ADDRESS = "{{studio_address}}";
 
-/** The message with the studio's published name and address in place of their marks. */
-async function filled(db: DbLike, message: QueuedEmail): Promise<{ subject: string; body: string }> {
+/**
+ * The message as it is sent: in the owners' wording when they have changed its email, with the studio's published
+ * name and address in place of their marks. Wording that would leave the subject or the text empty is not used.
+ */
+async function composed(db: DbLike, message: QueuedEmail): Promise<{ subject: string; body: string }> {
+  const own = message.template ? await ownersWording(db, message.template.key) : null;
+  const theirs = own && message.template ? renderEmail(own, message.template.parts) : null;
+  const text = theirs && theirs.subject !== "" && theirs.body !== "" ? theirs : message;
   const business = await loadBusiness(db);
-  const fill = (text: string) =>
-    text.replaceAll(STUDIO, () => business.name).replaceAll(ADDRESS, () => `${business.addressLine1}, ${business.addressLine2}`);
-  return { subject: fill(message.subject), body: fill(message.body) };
+  const fill = (part: string) =>
+    part.replaceAll(STUDIO, () => business.name).replaceAll(ADDRESS, () => `${business.addressLine1}, ${business.addressLine2}`);
+  return { subject: fill(text.subject), body: fill(text.body) };
 }
 
 /** Queue a message. Answers its id, with which it can be replaced while it waits (`replaceQueuedEmail`). */
@@ -47,7 +61,7 @@ export async function queueEmail(db: DbLike, message: QueuedEmail): Promise<stri
     .values({
       toEmail: message.to.trim().toLowerCase(),
       replyTo: message.replyTo?.trim().toLowerCase() || null,
-      ...(await filled(db, message)),
+      ...(await composed(db, message)),
       kind: message.kind,
       expiresAt: message.expiresAt ?? null,
     })
@@ -55,23 +69,17 @@ export async function queueEmail(db: DbLike, message: QueuedEmail): Promise<stri
   return row.id;
 }
 
+/**
+ * A message to a client, written from its template with these parts: in the site's wording, which `queueEmail`
+ * replaces with the owners' when they have changed the email. `first_name` comes with `name`.
+ */
+function written(key: TemplateKey, head: { to: string; kind: string; replyTo?: string }, parts: Record<string, string>): QueuedEmail {
+  const all = Object.hasOwn(parts, "name") ? { ...parts, first_name: firstNameOf(parts.name) } : parts;
+  return { ...head, ...renderEmail(EMAIL_TEMPLATES[key], all), template: { key, parts: all } };
+}
+
 export function reviewRequestEmail(input: { email: string; name: string; ref: string }): QueuedEmail {
-  return {
-    to: input.email,
-    kind: "review_request",
-    subject: `How was your visit to ${STUDIO}?`,
-    body: [
-      `Hi ${input.name},`,
-      "",
-      `Thank you for visiting ${STUDIO}. We'd love to hear about your experience.`,
-      "",
-      "Leave a Google review: https://g.page/r/CTQ9ea1fatgnEBM/review",
-      "",
-      `Booking reference: ${input.ref}`,
-      "",
-      SIGN_OFF,
-    ].join("\n"),
-  };
+  return written("review_request", { to: input.email, kind: "review_request" }, { name: input.name, reference: input.ref });
 }
 
 /**
@@ -83,7 +91,7 @@ export function reviewRequestEmail(input: { email: string; name: string; ref: st
 export async function replaceQueuedEmail(db: DbLike, id: string, message: QueuedEmail): Promise<boolean> {
   const replaced = await db
     .update(emailOutbox)
-    .set({ ...(await filled(db, message)), kind: message.kind })
+    .set({ ...(await composed(db, message)), kind: message.kind })
     .where(and(eq(emailOutbox.id, id), isNull(emailOutbox.sentAt), eq(emailOutbox.attempts, 0)))
     .returning({ id: emailOutbox.id });
   return replaced.length > 0;
@@ -206,27 +214,20 @@ export async function deliverPendingEmails(
 
 // ── Message texts ────────────────────────────────────────────────────────────
 
-const SIGN_OFF = `${STUDIO}\n${ADDRESS}`;
-
 function money(cents: number): string {
   const dollars = Math.floor(Math.abs(cents) / 100).toLocaleString("en-US");
   const rest = Math.abs(cents) % 100;
   return `${cents < 0 ? "-" : ""}$${dollars}${rest === 0 ? "" : `.${String(rest).padStart(2, "0")}`}`;
 }
 
+/** How to get into the building, under its heading: the part `getting_in`, empty when the owners have set nothing. */
+const gettingIn = (access: string | undefined) => (access ? `Getting in:\n${access}` : "");
+
+/** A photography session in a sentence, with what it includes when that is set. */
+const sessionSentence = (includes: string) => `Photography session with our in-house photographer, studio included${includes ? `: ${includes}` : ""}.`;
+
 export function loginCodeEmail(to: string, code: string, minutes: number): QueuedEmail {
-  return {
-    to,
-    kind: "login_code",
-    subject: `Your sign-in code: ${code}`,
-    body: [
-      `Your sign-in code for ${STUDIO} is ${code}.`,
-      "",
-      `It works once and expires in ${minutes} minutes. If you did not ask for it, you can ignore this email.`,
-      "",
-      SIGN_OFF,
-    ].join("\n"),
-  };
+  return written("login_code", { to, kind: "login_code" }, { code, minutes: String(minutes) });
 }
 
 export function bookingConfirmationEmail(input: {
@@ -252,37 +253,27 @@ export function bookingConfirmationEmail(input: {
   /** How to get into the building, when the owner has set it. */
   access?: string;
 }): QueuedEmail {
-  return {
-    to: input.to,
-    kind: "booking_confirmation",
-    subject: `Booking confirmed: ${input.ref}`,
-    body: [
-      `Hi ${input.name},`,
-      "",
-      `Your booking at ${STUDIO} is confirmed.`,
-      "",
-      `Reference: ${input.ref}`,
-      `Studio: ${input.studios}`,
-      `When: ${input.when} (${input.duration})`,
-      ...(input.photoIncludes !== undefined
-        ? [
-            `Photography session with our in-house photographer, studio included${input.photoIncludes ? `: ${input.photoIncludes}` : ""}.`,
-            "Your edited images are delivered within 7 to 14 days.",
-          ]
-        : []),
-      input.payAtStudio ? `To pay at the studio: ${money(input.totalCents)}` : `Total: ${money(input.totalCents)}`,
-      ...(input.creditCents > 0
-        ? [`Paid with your ${input.creditName ?? "reschedule code"}: ${money(input.creditCents)}`, `Charged to your card: ${money(input.cardCents)}`]
-        : []),
-      "",
-      `View, cancel or move your booking: ${input.manageUrl}`,
-      "",
-      ...(input.access ? ["Getting in:", input.access, ""] : []),
-      "Your booking begins at the scheduled start time. Please arrive no more than five minutes early.",
-      "",
-      SIGN_OFF,
-    ].join("\n"),
-  };
+  const payment = [
+    input.payAtStudio ? `To pay at the studio: ${money(input.totalCents)}` : `Total: ${money(input.totalCents)}`,
+    ...(input.creditCents > 0
+      ? [`Paid with your ${input.creditName ?? "reschedule code"}: ${money(input.creditCents)}`, `Charged to your card: ${money(input.cardCents)}`]
+      : []),
+  ];
+  return written(
+    "booking_confirmation",
+    { to: input.to, kind: "booking_confirmation" },
+    {
+      name: input.name,
+      reference: input.ref,
+      studios: input.studios,
+      when: input.when,
+      duration: input.duration,
+      photography: input.photoIncludes !== undefined ? `${sessionSentence(input.photoIncludes)}\nYour edited images are delivered within 7 to 14 days.` : "",
+      payment: payment.join("\n"),
+      booking_link: input.manageUrl,
+      getting_in: gettingIn(input.access),
+    },
+  );
 }
 
 /**
@@ -323,21 +314,11 @@ export function moveRequestStudioEmail(input: {
 
 /** The client's copy of their request to move a booking. */
 export function moveRequestReceivedEmail(input: { to: string; name: string; ref: string; when: string; message: string }): QueuedEmail {
-  return {
-    to: input.to,
-    kind: "move_request_received",
-    subject: `We have your request to move booking ${input.ref}`,
-    body: [
-      `Hi ${input.name},`,
-      "",
-      `We have your request to move your booking ${input.ref}, now ${input.when}. The studio will contact you to agree a new time. Until then your booking stays as it is.`,
-      "",
-      "What you wrote:",
-      input.message,
-      "",
-      SIGN_OFF,
-    ].join("\n"),
-  };
+  return written(
+    "move_request_received",
+    { to: input.to, kind: "move_request_received" },
+    { name: input.name, reference: input.ref, when: input.when, message: input.message },
+  );
 }
 
 /** The reminder before a visit (`queueReminders` in tasks.ts), with how to get in as it is now. */
@@ -356,32 +337,20 @@ export function bookingReminderEmail(input: {
   /** How to get into the building, when the owner has set it. */
   access?: string;
 }): QueuedEmail {
-  return {
-    to: input.to,
-    kind: "booking_reminder",
-    subject: `Reminder: your booking at ${STUDIO}, ${input.when}`,
-    body: [
-      `Hi ${input.name},`,
-      "",
-      `This is a reminder of your booking at ${STUDIO}.`,
-      "",
-      `Reference: ${input.ref}`,
-      `Studio: ${input.studios}`,
-      `When: ${input.when} (${input.duration})`,
-      ...(input.photoIncludes !== undefined
-        ? [`Photography session with our in-house photographer, studio included${input.photoIncludes ? `: ${input.photoIncludes}` : ""}.`]
-        : []),
-      ...(input.dueCents > 0 ? [input.atStudio ? `To pay at the studio: ${money(input.dueCents)}` : `Still to pay: ${money(input.dueCents)}`] : []),
-      `Address: ${ADDRESS}`,
-      "",
-      ...(input.access ? ["Getting in:", input.access, ""] : []),
-      "Your booking begins at the scheduled start time. Please arrive no more than five minutes early.",
-      "",
-      "The link in your confirmation email opens your booking. If you cannot come, please reply to this email or call us.",
-      "",
-      SIGN_OFF,
-    ].join("\n"),
-  };
+  return written(
+    "booking_reminder",
+    { to: input.to, kind: "booking_reminder" },
+    {
+      name: input.name,
+      reference: input.ref,
+      studios: input.studios,
+      when: input.when,
+      duration: input.duration,
+      photography: input.photoIncludes !== undefined ? sessionSentence(input.photoIncludes) : "",
+      to_pay: input.dueCents > 0 ? `${input.atStudio ? "To pay at the studio" : "Still to pay"}: ${money(input.dueCents)}` : "",
+      getting_in: gettingIn(input.access),
+    },
+  );
 }
 
 /** An administrator moved the booking to a new time. The customer's link stays the same. */
@@ -400,37 +369,29 @@ export function bookingMovedEmail(input: {
    */
   clientAsked?: { canMoveAgain: boolean; againFeeCents?: number };
 }): QueuedEmail {
-  return {
-    to: input.to,
-    kind: "booking_moved",
-    subject: `Your booking ${input.ref} has a new time`,
-    body: [
-      `Hi ${input.name},`,
-      "",
-      `Your booking at ${STUDIO} has been moved.`,
-      "",
-      `Reference: ${input.ref}`,
-      `Studio: ${input.studios}`,
-      `New time: ${input.now} (${input.duration})`,
-      `It was: ${input.was}`,
-      "",
-      ...(input.clientAsked
-        ? [
-            `As you asked for this change, it counts as a reschedule under the rental terms: if the booking is cancelled now, it is not refunded${
-              !input.clientAsked.canMoveAgain
-                ? ", and it cannot be moved again online."
-                : (input.clientAsked.againFeeCents ?? 0) > 0
-                  ? `. Moving it again online costs ${money(input.clientAsked.againFeeCents!)}.`
-                  : "."
-            }`,
-            "",
-          ]
-        : []),
-      "The link in your confirmation email still opens this booking. If the new time does not suit you, please reply to this email or call us.",
-      "",
-      SIGN_OFF,
-    ].join("\n"),
-  };
+  const asked = input.clientAsked;
+  const again = !asked
+    ? ""
+    : !asked.canMoveAgain
+      ? ", and it cannot be moved again online."
+      : (asked.againFeeCents ?? 0) > 0
+        ? `. Moving it again online costs ${money(asked.againFeeCents!)}.`
+        : ".";
+  return written(
+    "booking_moved",
+    { to: input.to, kind: "booking_moved" },
+    {
+      name: input.name,
+      reference: input.ref,
+      studios: input.studios,
+      when: input.now,
+      duration: input.duration,
+      old_time: input.was,
+      reschedule_note: asked
+        ? `As you asked for this change, it counts as a reschedule under the rental terms: if the booking is cancelled now, it is not refunded${again}`
+        : "",
+    },
+  );
 }
 
 /**
@@ -472,9 +433,8 @@ export function cancellationEmail(input: {
 }): QueuedEmail {
   const credit = input.petCredit;
   const notBack = credit?.card === false ? "not refunded" : "not refunded to a card";
-  const creditLines = credit
+  const petCredit = credit
     ? [
-        "",
         credit.cents === credit.feeCents
           ? `The pet fee of ${money(credit.feeCents)} is ${notBack}. It is returned to you as studio credit:`
           : `Of the pet fee, ${money(credit.cents)} is returned to you as studio credit, ${credit.card === false ? "not refunded" : "not to a card"}:`,
@@ -486,21 +446,11 @@ export function cancellationEmail(input: {
       ]
     : [];
   const outcome = [...(input.refund ? [refundSentence(input.refund)] : []), ...input.lines];
-  return {
-    to: input.to,
-    kind: "booking_cancelled",
-    subject: `Booking cancelled: ${input.ref}`,
-    body: [
-      `Hi ${input.name},`,
-      "",
-      `Your booking ${input.ref} on ${input.when} has been cancelled${input.byStudio ? " by the studio" : ""}.`,
-      // One empty line between parts, also when the cancellation says nothing but the pet fee's credit.
-      ...(outcome.length > 0 ? ["", ...outcome] : []),
-      ...creditLines,
-      "",
-      SIGN_OFF,
-    ].join("\n"),
-  };
+  return written(
+    input.byStudio ? "booking_cancelled_by_studio" : "booking_cancelled",
+    { to: input.to, kind: "booking_cancelled" },
+    { name: input.name, reference: input.ref, when: input.when, outcome: outcome.join("\n"), pet_credit: petCredit.join("\n") },
+  );
 }
 
 /**
@@ -508,18 +458,11 @@ export function cancellationEmail(input: {
  * did not go through: what the customer was told is put right.
  */
 export function refundNotYetEmail(input: { to: string; name: string; ref: string; cents: number; feeCents: number }): QueuedEmail {
-  return {
-    to: input.to,
-    kind: "refund_not_yet",
-    subject: `Your refund for booking ${input.ref}`,
-    body: [
-      `Hi ${input.name},`,
-      "",
-      `About your cancelled booking ${input.ref}: ${refundSentence({ cents: input.cents, feeCents: input.feeCents, state: "not_yet" })}`,
-      "",
-      SIGN_OFF,
-    ].join("\n"),
-  };
+  return written(
+    "refund_not_yet",
+    { to: input.to, kind: "refund_not_yet" },
+    { name: input.name, reference: input.ref, refund: refundSentence({ cents: input.cents, feeCents: input.feeCents, state: "not_yet" }) },
+  );
 }
 
 /** The pet did not come: the pet fee of a booking is returned as studio credit. */
@@ -532,23 +475,11 @@ export function petCreditEmail(input: {
   expires: string;
   bookUrl: string;
 }): QueuedEmail {
-  return {
-    to: input.to,
-    kind: "pet_credit",
-    subject: `Your pet fee for booking ${input.ref} is now studio credit`,
-    body: [
-      `Hi ${input.name},`,
-      "",
-      `Your pet did not come to booking ${input.ref}, so the pet fee of ${money(input.cents)} is returned to you as studio credit.`,
-      "",
-      `Code: ${input.code}`,
-      `Valid until: ${input.expires}`,
-      "",
-      `Book at ${input.bookUrl} and enter the code at checkout, with this email address. What you do not spend stays on the code.`,
-      "",
-      SIGN_OFF,
-    ].join("\n"),
-  };
+  return written(
+    "pet_credit",
+    { to: input.to, kind: "pet_credit" },
+    { name: input.name, reference: input.ref, amount: money(input.cents), code: input.code, valid_until: input.expires, book_link: input.bookUrl },
+  );
 }
 
 /** A payment taken at the studio was recorded for a booking: the customer's confirmation of it. */
@@ -565,21 +496,18 @@ export function paymentReceivedEmail(input: {
   /** True when it was paid by card through a payment link, not at the studio. */
   online?: boolean;
 }): QueuedEmail {
-  return {
-    to: input.to,
-    kind: "payment_received",
-    subject: `Payment received for booking ${input.ref}`,
-    body: [
-      `Hi ${input.name},`,
-      "",
-      `We received your payment of ${money(input.amountCents)} for booking ${input.ref} on ${input.when}.`,
-      "",
-      input.online ? `Paid by: ${input.method}` : `Paid at the studio: ${input.method}`,
-      input.dueCents > 0 ? `Still to pay: ${money(input.dueCents)}` : "Your booking is paid in full.",
-      "",
-      SIGN_OFF,
-    ].join("\n"),
-  };
+  return written(
+    "payment_received",
+    { to: input.to, kind: "payment_received" },
+    {
+      name: input.name,
+      reference: input.ref,
+      when: input.when,
+      amount: money(input.amountCents),
+      paid_how: input.online ? `Paid by: ${input.method}` : `Paid at the studio: ${input.method}`,
+      balance: input.dueCents > 0 ? `Still to pay: ${money(input.dueCents)}` : "Your booking is paid in full.",
+    },
+  );
 }
 
 /**
@@ -608,12 +536,11 @@ export function codeRefundEmail(input: {
         ? `, which now has ${money(input.leftCents)} left.`
         : ". That code can no longer be used.";
   const notYet = !input.byHand && input.state === "not_yet" ? ` The refund has not reached your card yet: ${REFUND_NOT_YET}` : "";
-  return {
-    to: input.to,
-    kind: "reschedule_code_refund",
-    subject: `A refund for booking ${input.ref}`,
-    body: [`Hi ${input.name},`, "", `${what} for booking ${input.ref} came off your reschedule code ${input.code}${left}${notYet}`, "", SIGN_OFF].join("\n"),
-  };
+  return written(
+    "reschedule_code_refund",
+    { to: input.to, kind: "reschedule_code_refund" },
+    { name: input.name, reference: input.ref, code: input.code, refund: `${what} for booking ${input.ref} came off your reschedule code ${input.code}${left}${notYet}` },
+  );
 }
 
 /**
@@ -627,19 +554,17 @@ export function latePaymentEmail(input: { to: string; name: string; ref: string;
     input.state === "sent"
       ? "so it is refunded to your card in full. Banks usually show a refund within 5 to 10 business days."
       : `so it is due back to your card in full. It has not reached your card yet: ${REFUND_NOT_YET}`;
-  return {
-    to: input.to,
-    kind: "late_payment_refunded",
-    subject: input.state === "sent" ? `Your payment for booking ${input.ref} is refunded` : `Your payment for booking ${input.ref} is due back to your card`,
-    // "Recorded": a payment the processor could not tell the site about at the time may have been made before.
-    body: [
-      `Hi ${input.name},`,
-      "",
-      `Your payment of ${money(input.amountCents)} through the payment link for booking ${input.ref} was recorded after the booking ${ended}, ${back}`,
-      "",
-      SIGN_OFF,
-    ].join("\n"),
-  };
+  return written(
+    input.state === "sent" ? "late_payment_refunded" : "late_payment_due",
+    { to: input.to, kind: "late_payment_refunded" },
+    {
+      name: input.name,
+      reference: input.ref,
+      amount: money(input.amountCents),
+      // "Recorded": a payment the processor could not tell the site about at the time may have been made before.
+      refund: `Your payment of ${money(input.amountCents)} through the payment link for booking ${input.ref} was recorded after the booking ${ended}, ${back}`,
+    },
+  );
 }
 
 /** The link an administrator sends so that a client can pay by card what their booking still owes. */
@@ -652,24 +577,11 @@ export function payLinkEmail(input: {
   /** The page on this site that leads to the processor's payment page. */
   payUrl: string;
 }): QueuedEmail {
-  return {
-    to: input.to,
-    kind: "payment_link",
-    subject: `Pay for your booking ${input.ref}`,
-    body: [
-      `Hi ${input.name},`,
-      "",
-      `You can pay for your booking ${input.ref} on ${input.when} by card here:`,
-      "",
-      input.payUrl,
-      "",
-      `Amount: ${money(input.amountCents)}`,
-      "",
-      "The card payment page is run by Square, our card processor: your card details never reach us. If you would rather pay at the studio, you still can.",
-      "",
-      SIGN_OFF,
-    ].join("\n"),
-  };
+  return written(
+    "payment_link",
+    { to: input.to, kind: "payment_link" },
+    { name: input.name, reference: input.ref, when: input.when, pay_link: input.payUrl, amount: money(input.amountCents) },
+  );
 }
 
 /**
@@ -765,26 +677,20 @@ export function rescheduleCodeEmail(input: {
       : fee
         ? `Your booking ${input.ref} has been released. What you paid, ${fee}, is now a credit of ${money(input.valueCents)}.`
         : `Your booking ${input.ref} has been released, and what you paid is now a credit of ${money(input.valueCents)}.`;
-  return {
-    to: input.to,
-    kind: "reschedule_code",
-    subject: `Your reschedule code for booking ${input.ref}`,
-    body: [
-      `Hi ${input.name},`,
-      "",
+  return written(
+    "reschedule_code",
+    { to: input.to, kind: "reschedule_code" },
+    {
+      name: input.name,
+      reference: input.ref,
       credit,
-      ...(input.unseenNote ? ["", input.unseenNote] : []),
-      "",
-      `Reschedule code: ${input.code}`,
-      `Valid until: ${input.expires}`,
-      "",
-      `Book your new time at ${input.bookUrl} and enter the code at checkout, with this email address. If the new booking costs more, you pay only the difference. If it costs less, the rest stays on the code.`,
-      "",
-      "A booking made with a reschedule code cannot be refunded.",
-      "",
-      SIGN_OFF,
-    ].join("\n"),
-  };
+      value: money(input.valueCents),
+      link_note: input.unseenNote ?? "",
+      code: input.code,
+      valid_until: input.expires,
+      book_link: input.bookUrl,
+    },
+  );
 }
 
 /** The loyalty reward: one free hour, earned by visiting on `visits` separate days. */
@@ -797,27 +703,11 @@ export function freeHourEmail(input: {
   expires: string;
   bookUrl: string;
 }): QueuedEmail {
-  return {
-    to: input.to,
-    kind: "loyalty_code",
-    subject: "You have earned a free hour in the studio",
-    body: [
-      `Hi ${input.name},`,
-      "",
-      `Thank you for shooting with us ${input.visits} times. Your next hour is on us.`,
-      "",
-      `Code: ${input.code}`,
-      `Valid until: ${input.expires}`,
-      "",
-      `Book any one studio at ${input.bookUrl} and enter the code at checkout, with this email address. It works once.`,
-      "",
-      "The price of one hour comes off your booking: a one-hour booking is free, and a longer one costs the rest. The free hour is for one studio, so it cannot be used when several studios are booked together, and it does not pay for add-ons.",
-      "",
-      `Every ${input.visits} visits, on separate days, earn another free hour. A visit made with a free hour does not count, and neither does a photography session with our photographer.`,
-      "",
-      SIGN_OFF,
-    ].join("\n"),
-  };
+  return written(
+    "loyalty_code",
+    { to: input.to, kind: "loyalty_code" },
+    { name: input.name, visits: String(input.visits), code: input.code, valid_until: input.expires, book_link: input.bookUrl },
+  );
 }
 
 export function ownerRefundNotice(input: {
@@ -921,20 +811,11 @@ export function ownerReservationLapsedNotice(input: { to: string; ref: string; c
 
 /** The client's side of `ownerReservationLapsedNotice`: their card was not charged, and the booking, which stands, is still to pay. */
 export function reservationLapsedEmail(input: { to: string; name: string; ref: string; when: string; dueCents: number }): QueuedEmail {
-  return {
-    to: input.to,
-    kind: "reservation_lapsed",
-    subject: `Booking ${input.ref}: your card was not charged`,
-    body: [
-      `Hi ${input.name},`,
-      "",
-      `The amount reserved on your card for booking ${input.ref} on ${input.when} could not be taken, and has been released: your card was not charged.`,
-      "",
-      `Nothing else about your booking changes, and ${money(input.dueCents)} is still to pay. The studio will be in touch about how to pay it. If you have a question, please reply to this email or call us.`,
-      "",
-      SIGN_OFF,
-    ].join("\n"),
-  };
+  return written(
+    "reservation_lapsed",
+    { to: input.to, kind: "reservation_lapsed" },
+    { name: input.name, reference: input.ref, when: input.when, due: money(input.dueCents) },
+  );
 }
 
 /** A visitor's message from the contact page, sent to the owner. Replying reaches the visitor. */

@@ -1327,7 +1327,7 @@ export async function ownerCancelBooking(
           : []),
         ...(codeBack ? [CODE_BACK] : []),
         ...(unseenNote ? [unseenNote] : []),
-        "Please contact us with any questions.",
+        // Then "Please contact us with any questions.", which is the owners' wording in the email's template.
       ],
     };
     const emailId = await queueEmail(tx, noticeEmail(email, "sent"));
