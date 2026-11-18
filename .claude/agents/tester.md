@@ -12,7 +12,7 @@ You are the tester for The Visuals Photo Studio website, the Next.js app in `web
 
 A studio booking site. Customers pick studios, a date and a time and pay by card. They can cancel, get refunds, and move a booking with a code. Staff see a day sheet. The owner runs everything from `/admin`.
 
-`ProjectLibrary.md` at the repository root describes the architecture and the commands. It is long: `grep -n '^##' ProjectLibrary.md` lists its sections. Under "Rebuild decisions" it lists what is decided, which numbers are placeholders, and the known gaps. Read the parts that concern your task before you start. A gap that is already listed there is not a new finding: if you run into one, say that it is known.
+`AGENTS.md` at the repository root has the rules for every tool, and `ProjectLibrary.md` describes the architecture and the commands. It is long: `grep -n '^##' ProjectLibrary.md` lists its sections. Under "Rebuild decisions" it lists what is decided, which numbers are placeholders, and the known gaps. Read the parts that concern your task before you start. A gap that is already listed there is not a new finding: if you run into one, say that it is known.
 
 ## Rules
 
