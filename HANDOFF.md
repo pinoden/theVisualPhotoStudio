@@ -35,7 +35,7 @@ Details and status of each are under "Katya's answers to the 16 follow-up questi
 | 2 | Extra people, $5 each with a quantity | **To build.** Bundle limits wait on the owner |
 | 3 | Memberships (5 and 10 hours a month, Square subscriptions) | **To build.** The largest item |
 | 4 | Unused pet fee as credit, issued by hand | Built |
-| 5 | Changes made by the studio: repricing, payment section | **Waits on the owner** (which changes reprice) |
+| 5 | Changes made by the studio: repricing, payment section | Repricing on a new time only, as confirmed 2026-11-17. The payment section is **to build** |
 | 6 | $20 for each reschedule after the free one | Built |
 | 7 | Review request 24 hours after a visit | Built |
 | 8 | No Blanche + Dayglow without Paris | Built |
@@ -53,7 +53,7 @@ Also built from the answers of 2026-11-17: rentals refunded when cancelled 7 day
 ## Next, in this order
 
 1. **Follow-up 13: overtime, cleaning and damage charges.** Overtime at the studio's hourly rate in 15-minute blocks, each started block a quarter of the rate. Cleaning and damage as an amount an administrator types. Paid at the studio or by payment link.
-2. **Follow-up 2: extra people.** One $5 add-on taken in a quantity, in place of the two add-ons of today. Blanche and Dayglow include 6 guests and allow 6 more, Paris includes 4 and allows 4 more. Build the single-studio part; the bundle limits wait on the owner.
+2. **Follow-up 2: extra people (bundle limits confirmed 2026-11-17: every guest counts).** One $5 add-on taken in a quantity, in place of the two add-ons of today. Blanche and Dayglow include 6 guests and allow 6 more, Paris includes 4 and allows 4 more. Build the single-studio part; the bundle limits wait on the owner.
 3. **Reminder email 24 hours before an appointment** (question 29 of the answers of 2026-11-17). The review request after a visit is its model: `queueReviewRequests` in `web/src/server/tasks.ts`.
 4. **Each booking keeps the terms in effect when it was made** (question 10).
 5. **A client asks the studio to move a booking** (question 20).
@@ -62,9 +62,6 @@ Also built from the answers of 2026-11-17: rentals refunded when cancelled 7 day
 
 ## Waiting on the owners
 
-- **Follow-up 2:** do the limits of 10 people for a two-studio bundle and 20 for all three count every guest, or only the additional ones?
-- **Follow-up 5:** which changes by the studio reprice a booking: only a new time, or also the length, the studios and the add-ons?
-- **Follow-up 6, question 35:** the $20 for a further reschedule is taken off the reschedule code. Should the card be charged at the moment of the move instead?
 - **Follow-up 14:** the Instagram account has to be connected by an owner.
 - **To go live:** hosting, the web address, the email service, live Square keys, a privacy policy and the sales-tax answer. Questions 1 to 6 of "Questions for the owners" in `ProjectLibrary.md`.
 
