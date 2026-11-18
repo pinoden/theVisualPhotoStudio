@@ -25,6 +25,7 @@ import { bookingConfirmationEmail, queueEmail } from "./email";
 import { BY_CUSTOMER, recordEvent } from "./history";
 import { releaseHolds } from "./holds";
 import { giveBackReserved, takeReserved } from "./reserved";
+import { activeChargesByBooking } from "./charges";
 import { heldCentsByBooking, owedCentsByBooking, receivedCentsByBooking } from "./money";
 import { RESERVE_HOURS, type PaymentProvider } from "./payments";
 import {
@@ -659,6 +660,10 @@ export interface BookingView {
   /** Set on a photography session: what it includes, as it was sold. */
   photography: { includes: string } | null;
   totalCents: number;
+  /** Extra charges added once the appointment started (overtime, cleaning, damage), not taken back: src/server/charges.ts. */
+  charges: { label: string; cents: number }[];
+  /** Their sum: the booking costs `totalCents` and this. */
+  chargesCents: number;
   /** Money received for the booking so far, by card through the site or at the studio, before any refund. */
   receivedCents: number;
   /** The part of it taken at the studio and recorded by hand; the rest came by card (online, or through a payment link). */
@@ -681,7 +686,7 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[], now: Date =
   if (rows.length === 0) return [];
   const ids = rows.map((r) => r.id);
   const codeIds = rows.map((r) => r.promoCodeId).filter((id): id is string => id !== null);
-  const [holdRows, addonRows, codeRows, received, atStudio, owed, held] = await together(db, [
+  const [holdRows, addonRows, codeRows, received, atStudio, owed, held, charged] = await together(db, [
     () => db
       .select({ bookingId: studioHolds.bookingId, name: studios.name, priceCents: studioHolds.priceCents, sort: studios.sortOrder })
       .from(studioHolds)
@@ -698,6 +703,7 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[], now: Date =
     () => receivedCentsByBooking(db, ids, "at_studio"),
     () => owedCentsByBooking(db, rows, now),
     () => heldCentsByBooking(db, ids, now),
+    () => activeChargesByBooking(db, ids),
   ]);
   return rows.map((booking) => ({
     id: booking.id,
@@ -727,6 +733,8 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[], now: Date =
     madeByAdmin: booking.madeBy !== null,
     photography: booking.photographerId !== null ? { includes: booking.photoIncludes ?? "" } : null,
     totalCents: booking.totalCents,
+    charges: charged.get(booking.id) ?? [],
+    chargesCents: (charged.get(booking.id) ?? []).reduce((sum, charge) => sum + charge.cents, 0),
     receivedCents: received.get(booking.id) ?? 0,
     receivedAtStudioCents: atStudio.get(booking.id) ?? 0,
     dueCents: owed.get(booking.id) ?? 0,

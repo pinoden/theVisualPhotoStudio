@@ -9,9 +9,10 @@ import { getDb } from "@/db/client";
 import { LABEL_MEANING, LABEL_TEXT } from "@/lib/domain/labels";
 import { formatCents } from "@/lib/domain/pricing";
 import { durationLabel, isIsoDate, longDateLabel, minutesToLabel } from "@/lib/domain/time";
-import { centsToInput, MONEY_FIELD } from "@/lib/parse";
+import { centsToInput, CHARGE_FIELD, MONEY_FIELD } from "@/lib/parse";
 import { PAYMENT_METHODS } from "@/lib/payment-methods";
 import { getAppointment, moveOptions } from "@/server/appointments";
+import { CHARGE_NOTE_MAX, OVERTIME_MAX_MINUTES, overtimeBlocks, overtimeCents } from "@/server/charges";
 import { BY_CUSTOMER, BY_SYSTEM } from "@/server/history";
 import { resolvePayments } from "@/server/payments";
 import { requireStaff } from "@/server/session";
@@ -20,6 +21,7 @@ import { moneyKindOf, payLinkPossible } from "@/server/test-mode";
 import { formatInstant, formatRange, localDateOf } from "@/server/tz";
 import { AdminFrame, AdminLoading } from "../../frame";
 import {
+  addChargeAction,
   cancelPayLinkAction,
   checkPayLinkAction,
   closePayLinkByHandAction,
@@ -28,6 +30,7 @@ import {
   recordPaymentAction,
   sendPayLinkAction,
   setLabelAction,
+  voidChargeAction,
   voidPaymentAction,
 } from "../actions";
 
@@ -282,6 +285,140 @@ async function AppointmentDetails({
         </div>
       )}
 
+      {appointment.charges && (appointment.charges.canAdd || appointment.charges.lines.length > 0) && (
+        <div className="admin-card" id="charges">
+          <h3>Extra charges</h3>
+          {appointment.charges.lines.length > 0 && (
+            <ul className="charge-list">
+              {appointment.charges.lines.map((charge) => (
+                <li key={charge.id}>
+                  <span style={charge.voided ? { textDecoration: "line-through" } : undefined}>
+                    {charge.label}: {formatCents(charge.amountCents)}
+                  </span>
+                  <span style={{ fontSize: ".8rem" }}>
+                    {" "}
+                    · {formatInstant(new Date(charge.at))}, by {charge.createdBy}
+                    {charge.kind === "overtime" && charge.minutes && charge.hourlyCents
+                      ? ` · ${overtimeBlocks(charge.minutes)} × 15 minutes started, each a quarter of ${formatCents(charge.hourlyCents)} an hour`
+                      : ""}
+                  </span>
+                  {charge.note && <div style={{ fontSize: ".8rem" }}>{charge.note}</div>}
+                  {charge.voided && <div style={{ fontSize: ".8rem" }}>Taken back by {charge.voidedBy}: it does not count.</div>}
+                  {appointment.may.changePayments && !charge.voided && (
+                    <details>
+                      <summary style={{ fontSize: ".8rem", cursor: "pointer" }}>Added by mistake</summary>
+                      <form action={voidChargeAction}>
+                        <input type="hidden" name="ref" value={appointment.ref} />
+                        <input type="hidden" name="chargeId" value={charge.id} />
+                        <label className="form-label" htmlFor={`void-charge-${charge.id}`}>
+                          Why it is taken back
+                        </label>
+                        <input id={`void-charge-${charge.id}`} name="reason" className="form-control" maxLength={CHARGE_NOTE_MAX} />
+                        <button type="submit" className="btn btn-outline btn-small">
+                          Take this charge back
+                        </button>
+                      </form>
+                    </details>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {appointment.charges.canAdd && appointment.charges.overtime && (
+            <form action={addChargeAction} className="payment-form">
+              <input type="hidden" name="ref" value={appointment.ref} />
+              <input type="hidden" name="kind" value="overtime" />
+              <h4>Overtime</h4>
+              {appointment.charges.hourlyCents !== null ? (
+                <>
+                  <div className="admin-form-row">
+                    <div className="form-group">
+                      <label className="form-label" htmlFor="overtime-minutes">
+                        Minutes past the end
+                      </label>
+                      <input
+                        id="overtime-minutes"
+                        name="minutes"
+                        className="form-control"
+                        type="number"
+                        min={1}
+                        max={OVERTIME_MAX_MINUTES}
+                        step={1}
+                        required
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label" htmlFor="overtime-note">
+                        Note (optional)
+                      </label>
+                      <input id="overtime-note" name="note" className="form-control" maxLength={CHARGE_NOTE_MAX} />
+                    </div>
+                    <button type="submit" className="btn btn-dark btn-small">
+                      Add overtime
+                    </button>
+                  </div>
+                  <p style={{ fontSize: ".78rem", margin: ".5rem 0 0" }}>
+                    Each 15 minutes started costs {formatCents(overtimeCents(appointment.charges.hourlyCents, 1))}, a quarter of
+                    the hourly rate of {formatCents(appointment.charges.hourlyCents)}
+                    {appointment.studios.length > 1 ? " (the one-hour prices of its studios for this day, added together)" : " (the studio's one-hour price for this day)"}.
+                    For example, 20 minutes is {formatCents(overtimeCents(appointment.charges.hourlyCents, 20))}.
+                  </p>
+                </>
+              ) : (
+                <p className="field-error" style={{ marginBottom: 0 }}>
+                  {appointment.charges.missingRate.join(" and ") || "This booking's studio"}{" "}
+                  {appointment.charges.missingRate.length > 1 ? "have" : "has"} no one-hour price for this day under Prices, so
+                  overtime cannot be worked out. Add the price, or add the amount below as a cleaning or damage charge.
+                </p>
+              )}
+            </form>
+          )}
+
+          {appointment.charges.canAdd && (
+            <details className="payment-form">
+              <summary style={{ cursor: "pointer" }}>Cleaning or damage</summary>
+              <form action={addChargeAction}>
+                <input type="hidden" name="ref" value={appointment.ref} />
+                <div className="admin-form-row">
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="charge-kind">
+                      Charge for
+                    </label>
+                    <select id="charge-kind" name="kind" className="form-control" defaultValue="cleaning" required>
+                      <option value="cleaning">Cleaning</option>
+                      <option value="damage">Damage</option>
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="charge-amount">
+                      Amount ($)
+                    </label>
+                    <input id="charge-amount" name="amount" className="form-control" required {...CHARGE_FIELD} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="charge-note">
+                      What it is for
+                    </label>
+                    <input id="charge-note" name="note" className="form-control" maxLength={CHARGE_NOTE_MAX} required />
+                  </div>
+                  <button type="submit" className="btn btn-dark btn-small">
+                    Add the charge
+                  </button>
+                </div>
+                <p style={{ fontSize: ".78rem", margin: ".5rem 0 0" }}>
+                  The client sees the charge and what it is for on their receipt.
+                </p>
+              </form>
+            </details>
+          )}
+
+          <p style={{ fontSize: ".78rem", margin: ".75rem 0 0" }}>
+            A charge adds to what the booking owes: collect it below, at the studio (Mark as paid) or with a payment link.
+          </p>
+        </div>
+      )}
+
       {/* Also for an open link of a booking that ended with nothing paid: an owner may have to close it by hand. */}
       {appointment.payments && (appointment.payments.payments.length > 0 || appointment.payments.dueCents > 0 || appointment.payLink) && (
         <div className="admin-card" id="payment">
@@ -290,7 +427,10 @@ async function AppointmentDetails({
             {appointment.payments.dueCents > 0 ? (
               <>
                 <strong>{formatCents(appointment.payments.dueCents)} is still to pay.</strong>{" "}
-                {appointment.payments.madeInAdmin
+                {appointment.payments.chargesCents > 0 &&
+                appointment.payments.receivedCents >= appointment.payments.totalCents - appointment.payments.chargesCents
+                  ? `That is for the extra charges: collect it at the studio${linkPossible ? ", or with a payment link" : ""}.`
+                  : appointment.payments.madeInAdmin
                   ? "This booking was made in the admin, so nothing was charged online."
                   : `The amount its card held lapsed before it was taken, so the card was not charged: collect the price at the studio${linkPossible ? ", or with a payment link" : ""}.`}
               </>

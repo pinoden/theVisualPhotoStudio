@@ -545,6 +545,38 @@ export const paymentLinks = pgTable(
   (t) => [index("payment_links_booking_idx").on(t.bookingId)],
 );
 
+/**
+ * What an appointment costs beyond its price, added by the studio once it has started (follow-up 13): overtime, at a
+ * quarter of the studio's hourly rate for each 15 minutes started, and cleaning or damage, at an amount typed each time.
+ * An active charge adds to what the booking owes (`owedCentsByBooking`), so it is paid at the studio or through a
+ * payment link like the rest. One added by mistake is taken back (`voidedAt`), never deleted. See src/server/charges.ts.
+ */
+export const bookingCharges = pgTable(
+  "booking_charges",
+  {
+    id: id(),
+    bookingId: uuid("booking_id")
+      .notNull()
+      .references(() => bookings.id, { onDelete: "cascade" }), // removed with a test-mode booking, as its holds are
+    kind: text("kind", { enum: ["overtime", "cleaning", "damage"] }).notNull(),
+    amountCents: integer("amount_cents").notNull(),
+    /** Overtime only: the minutes the client stayed past the end. */
+    minutes: integer("minutes"),
+    /** Overtime only: the hourly rate it was worked out from, as it was then. */
+    hourlyCents: integer("hourly_cents"),
+    note: text("note").notNull().default(""),
+    createdBy: text("created_by").notNull(),
+    createdAt: createdAt(),
+    voidedAt: ts("voided_at"),
+    voidedBy: text("voided_by"),
+  },
+  (t) => [
+    index("booking_charges_booking_idx").on(t.bookingId),
+    check("booking_charges_kind", sql`${t.kind} in ('overtime', 'cleaning', 'damage')`),
+    check("booking_charges_amount", sql`${t.amountCents} > 0`),
+  ],
+);
+
 export const refunds = pgTable("refunds", {
   id: id(),
   paymentId: uuid("payment_id")

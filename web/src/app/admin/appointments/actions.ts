@@ -7,6 +7,7 @@ import { formatCents } from "@/lib/domain/pricing";
 import { isIsoDate } from "@/lib/domain/time";
 import { dollarsToCents, formText, intInRange } from "@/lib/parse";
 import { createAdminBooking, moveBooking, setLabel } from "@/server/appointments";
+import { addCharge, OVERTIME_MAX_MINUTES, voidCharge, type AddChargeInput } from "@/server/charges";
 import { cancelPayLink, checkBookingPayLink, closePayLinkByHand, sendPayLink } from "@/server/pay-links";
 import { resolvePayments } from "@/server/payments";
 import { givePetFeeCredit } from "@/server/pet-fee";
@@ -153,6 +154,45 @@ export async function recordPaymentAction(formData: FormData): Promise<void> {
       } The client has been emailed a confirmation.`,
     ),
   );
+}
+
+/** Add overtime, or a cleaning or damage charge, to an appointment that has started (src/server/charges.ts). */
+export async function addChargeAction(formData: FormData): Promise<void> {
+  const ref = formText(formData.get("ref"));
+  const page = appointmentPage(ref);
+  const viewer = await requireStaff(page);
+  const kind = formText(formData.get("kind"));
+  const note = formText(formData.get("note"));
+  let input: AddChargeInput;
+  if (kind === "overtime") {
+    const minutes = intInRange(formText(formData.get("minutes")), 1, OVERTIME_MAX_MINUTES);
+    if (minutes === null) redirect(withMessage(page, "error", `Enter the minutes past the end, from 1 to ${OVERTIME_MAX_MINUTES}.`));
+    input = { kind, minutes, note };
+  } else if (kind === "cleaning" || kind === "damage") {
+    const amountCents = dollarsToCents(formText(formData.get("amount")));
+    if (amountCents === null) redirect(withMessage(page, "error", "Enter the amount of the charge, for example 50 or 50.50."));
+    input = { kind, amountCents, note };
+  } else {
+    redirect(withMessage(page, "error", "Choose what the charge is for."));
+  }
+  const result = await addCharge(await getDb(), viewer, ref, input, new Date());
+  if (!result.ok) redirect(withMessage(page, "error", result.message));
+  redirect(
+    withMessage(
+      page,
+      "notice",
+      `${formatCents(result.amountCents)} added. The booking now has ${formatCents(result.dueCents)} to pay: mark it as paid, or email a payment link.`,
+    ),
+  );
+}
+
+/** Take back a charge added by mistake. Owners only. */
+export async function voidChargeAction(formData: FormData): Promise<void> {
+  const page = appointmentPage(formText(formData.get("ref")));
+  const viewer = await requireOwner(page);
+  const result = await voidCharge(await getDb(), viewer, formText(formData.get("chargeId")), formText(formData.get("reason")), new Date());
+  if (!result.ok) redirect(withMessage(page, "error", result.message));
+  redirect(withMessage(page, "notice", "The charge was taken back. It no longer counts."));
 }
 
 /** Take back a payment recorded by mistake. Owners only. */

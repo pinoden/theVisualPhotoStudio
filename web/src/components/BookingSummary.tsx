@@ -85,6 +85,13 @@ export function BookingSummary({ booking }: { booking: BookingView }) {
           <span>{formatCents(-booking.promoDiscountCents)}</span>
         </div>
       )}
+      {/* Added once the appointment started: overtime, cleaning, damage (src/server/charges.ts). */}
+      {booking.charges.map((charge, index) => (
+        <div className="price-row" key={`charge-${index}`}>
+          <span>{charge.label}</span>
+          <span>{formatCents(charge.cents)}</span>
+        </div>
+      ))}
       {/* A booking paid in parts (made in the admin, or one whose card was never charged): what was received, then what is owed. */}
       {paidStatus && booking.receivedCents > 0 && booking.dueCents > 0 && (
         <div className="price-row">
@@ -96,7 +103,7 @@ export function BookingSummary({ booking }: { booking: BookingView }) {
         <span>
           {/* A booking made online owes only when the amount its card held lapsed before it was taken. While the card
               holds it, it is not charged yet: taking it did not go through, and is tried again. */}
-          {!paidStatus || booking.totalCents === 0
+          {!paidStatus || booking.totalCents + booking.chargesCents === 0
             ? "Total"
             : booking.dueCents > 0
               ? booking.madeByAdmin
@@ -112,7 +119,7 @@ export function BookingSummary({ booking }: { booking: BookingView }) {
                   ? "Paid by card"
                   : "Charged to card"}
         </span>
-        <span>{formatCents(paidStatus && booking.dueCents > 0 ? booking.dueCents : booking.totalCents)}</span>
+        <span>{formatCents(paidStatus && booking.dueCents > 0 ? booking.dueCents : booking.totalCents + booking.chargesCents)}</span>
       </div>
     </div>
   );

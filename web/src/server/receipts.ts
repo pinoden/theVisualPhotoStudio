@@ -120,6 +120,7 @@ function linesOf(booking: BookingView): ReceiptLine[] {
           : "Discount code";
     lines.push({ label, cents: -booking.promoDiscountCents });
   }
+  for (const charge of booking.charges) lines.push({ label: charge.label, cents: charge.cents });
   return lines;
 }
 
@@ -213,14 +214,14 @@ export async function loadReceipts(db: DbLike, email: string): Promise<{ receipt
       photography: booking.photography !== null,
       bookingStatus: customerStatus(booking).text,
       lines: linesOf(booking),
-      totalCents: booking.totalCents,
+      totalCents: booking.totalCents + booking.chargesCents,
       payments: list,
       paidCents,
       refundedCents,
       netCents: paidCents - refundedCents,
       dueCents: booking.dueCents,
       // Partly paid: less than the total, whether the rest is still owed or the booking ended before it was.
-      status: refundedCents >= paidCents ? "refunded" : refundedCents > 0 ? "partly_refunded" : paidCents < booking.totalCents ? "partly_paid" : "paid",
+      status: refundedCents >= paidCents ? "refunded" : refundedCents > 0 ? "partly_refunded" : paidCents < booking.totalCents + booking.chargesCents ? "partly_paid" : "paid",
       paidAt: list[0].at,
     });
   }

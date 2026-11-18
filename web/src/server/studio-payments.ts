@@ -10,7 +10,7 @@ import { isBookingRef } from "./bookings";
 import { codeRefundEmail, paymentReceivedEmail, queueEmail } from "./email";
 import { recordEvent } from "./history";
 import { openPayLinkOf } from "./pay-links";
-import { netCardPaidCents, owedCents, paidAtStudioCents, STANDS } from "./money";
+import { chargesCentsByBooking, netCardPaidCents, owedCents, paidAtStudioCents, STANDS } from "./money";
 import { RESERVE_HOURS } from "./payments";
 import { petFeeCentsOf, studioRefundableCents } from "./pet-fee";
 import { codeStanding, rescheduleCodeOf, spendable, takeOffRescheduleCode } from "./promos";
@@ -53,7 +53,10 @@ export interface PaymentLine {
 }
 
 export interface BookingMoney {
+  /** What the booking costs: its price, and the extra charges added since (src/server/charges.ts). */
   totalCents: number;
+  /** The part of `totalCents` that is extra charges. */
+  chargesCents: number;
   /** Every payment that succeeded, before refunds. */
   receivedCents: number;
   /** What is still to pay (`owedCents`): nothing once the booking has ended. */
@@ -95,8 +98,10 @@ export async function moneyOf(
         .where(and(eq(paymentLinks.bookingId, booking.id), isNotNull(paymentLinks.paymentId)))
     ).map((row) => row.paymentId),
   );
+  const charged = (await chargesCentsByBooking(db, [booking.id])).get(booking.id) ?? 0;
   return {
-    totalCents: booking.totalCents,
+    totalCents: booking.totalCents + charged,
+    chargesCents: charged,
     receivedCents,
     dueCents: await owedCents(db, booking, now),
     madeInAdmin: booking.madeBy !== null,

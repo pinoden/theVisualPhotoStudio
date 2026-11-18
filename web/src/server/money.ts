@@ -1,5 +1,5 @@
-import { and, eq, gt, inArray, ne, sql } from "drizzle-orm";
-import { payments, refunds } from "@/db/schema";
+import { and, eq, gt, inArray, isNull, ne, sql } from "drizzle-orm";
+import { bookingCharges, payments, refunds } from "@/db/schema";
 import { together, type DbLike } from "@/db/client";
 import { MANUAL_PROVIDER } from "@/lib/payment-methods";
 import { RESERVE_HOURS } from "./payments";
@@ -48,7 +48,7 @@ export async function paidAtStudioCents(db: DbLike, bookingId: string): Promise<
 
 /**
  * What each booking still owes, of those given: for one that stands, its
- * price less what it received and what a card holds reserved for it, which is
+ * price and the extra charges added to it since (`chargesCentsByBooking`), less what it received and what a card holds reserved for it, which is
  * taken shortly; nothing for one that ended. A booking made online is paid
  * when it is made, so it owes only when its card's amount was reserved and
  * never taken: once the reservation has lapsed (`RESERVE_HOURS`), the card
@@ -63,11 +63,17 @@ export async function owedCentsByBooking(
   const standing = rows.filter((row) => STANDS.includes(row.status));
   if (standing.length === 0) return new Map(rows.map((row) => [row.id, 0]));
   const ids = standing.map((row) => row.id);
-  const [received, held] = await together(db, [() => receivedCentsByBooking(db, ids), () => heldCentsByBooking(db, ids, now)]);
+  const [received, held, charged] = await together(db, [
+    () => receivedCentsByBooking(db, ids),
+    () => heldCentsByBooking(db, ids, now),
+    () => chargesCentsByBooking(db, ids),
+  ]);
   return new Map(
     rows.map((row) => [
       row.id,
-      STANDS.includes(row.status) ? Math.max(0, row.totalCents - (received.get(row.id) ?? 0) - (held.get(row.id) ?? 0)) : 0,
+      STANDS.includes(row.status)
+        ? Math.max(0, row.totalCents + (charged.get(row.id) ?? 0) - (received.get(row.id) ?? 0) - (held.get(row.id) ?? 0))
+        : 0,
     ]),
   );
 }
@@ -110,5 +116,19 @@ export async function receivedCentsByBooking(db: DbLike, bookingIds: string[], w
       ),
     )
     .groupBy(payments.bookingId);
+  return new Map(rows.map((row) => [row.bookingId, row.total]));
+}
+
+/**
+ * For several bookings at once: the extra charges added to each (overtime, cleaning, damage) and not taken back. A
+ * booking with none is not in the map. See src/server/charges.ts.
+ */
+export async function chargesCentsByBooking(db: DbLike, bookingIds: string[]): Promise<Map<string, number>> {
+  if (bookingIds.length === 0) return new Map();
+  const rows = await db
+    .select({ bookingId: bookingCharges.bookingId, total: sql<number>`coalesce(sum(${bookingCharges.amountCents}), 0)::int` })
+    .from(bookingCharges)
+    .where(and(inArray(bookingCharges.bookingId, bookingIds), isNull(bookingCharges.voidedAt)))
+    .groupBy(bookingCharges.bookingId);
   return new Map(rows.map((row) => [row.bookingId, row.total]));
 }

@@ -26,6 +26,8 @@ const PAID_ONLINE: BookingView = {
   madeByAdmin: false,
   photography: null,
   totalCents: 17600,
+  charges: [],
+  chargesCents: 0,
   receivedCents: 17600,
   receivedAtStudioCents: 0,
   dueCents: 0,

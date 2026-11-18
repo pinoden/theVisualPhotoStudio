@@ -25,6 +25,7 @@ import {
   type CreateBookingResult,
 } from "./bookings";
 import { loadCatalog } from "./catalog";
+import { chargesOf, hourlyRateOf, type ChargeLine } from "./charges";
 import { bookingMovedEmail, queueEmail } from "./email";
 import { listEvents, recordEvent, withoutAmounts, type BookingEvent } from "./history";
 import { openPayLinkOf, type PayLinkView } from "./pay-links";
@@ -75,6 +76,12 @@ export interface Appointment {
    * owners' decision.
    */
   /** `returnedCents`: what its credit was issued for, which is part of the fee when only part was paid. */
+  /**
+   * Extra charges (src/server/charges.ts), for a viewer who may record payments, and for the owners. `canAdd` once the
+   * appointment has started; `hourlyCents` is the rate overtime is worked out from, null for a photography session or
+   * a studio with no one-hour price that day.
+   */
+  charges: { lines: ChargeLine[]; canAdd: boolean; overtime: boolean; hourlyCents: number | null; missingRate: string[] } | null;
   petFee: { cents: number; creditCode: string | null; returnedCents: number; canReturn: boolean; why: string } | null;
   history: BookingEvent[];
   /** Each label that can be set by hand, and whether it can be set right now. */
@@ -102,6 +109,8 @@ export async function getAppointment(db: DbLike, viewer: AuthUser, ref: string, 
   const money = await moneyOf(db, booking, now);
   const seesPayments = may("seePrices") || (may("recordPayments") && money.dueCents > 0);
   const pet = viewer.role === "owner" ? await petCreditStanding(db, booking) : null;
+  const seesCharges = may("recordPayments") || viewer.role === "owner";
+  const rate = seesCharges && booking.photographerId === null ? await hourlyRateOf(db, booking) : null;
 
   return {
     ref: booking.ref,
@@ -120,6 +129,15 @@ export async function getAppointment(db: DbLike, viewer: AuthUser, ref: string, 
     money: may("seePrices") ? view : null,
     payments: seesPayments ? money : null,
     payLink: seesPayments ? await openPayLinkOf(db, booking.id) : null,
+    charges: seesCharges
+      ? {
+          lines: await chargesOf(db, booking.id),
+          canAdd: active && now.getTime() >= booking.startAt.getTime() && may("recordPayments"),
+          overtime: booking.photographerId === null,
+          hourlyCents: rate?.ok ? rate.cents : null,
+          missingRate: rate && !rate.ok ? rate.missing : [],
+        }
+      : null,
     petFee:
       pet && pet.feeCents > 0
         ? {
