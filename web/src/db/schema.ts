@@ -349,6 +349,12 @@ export const bookings = pgTable(
     membershipId: uuid("membership_id").references((): AnyPgColumn => memberships.id, { onDelete: "restrict" }),
     membershipMinutes: integer("membership_minutes").notNull().default(0),
     membershipCents: integer("membership_cents").notNull().default(0),
+    /**
+     * The kind of day the booking is priced as: its day's kind when it was made, or the new day's when a move priced it
+     * again (follow-up 5). A move compares the new day with this, not with what the owners make the old day later (a
+     * special date added since). Null for a booking made before it was kept (migration 0046 filled those in).
+     */
+    pricedAs: dayType("priced_as"),
 
     /** A booking that has been moved can no longer be refunded. */
     rescheduledCount: integer("rescheduled_count").notNull().default(0),
@@ -598,27 +604,37 @@ export const bookingCharges = pgTable(
   ],
 );
 
-export const refunds = pgTable("refunds", {
-  id: id(),
-  paymentId: uuid("payment_id")
-    .notNull()
-    .references(() => payments.id, { onDelete: "restrict" }),
-  amountCents: integer("amount_cents").notNull(),
-  /** pending until the processor confirms; failed ones need the owner's attention. */
-  status: refundStatus("status").notNull().default("pending"),
-  providerRefundId: text("provider_refund_id"),
-  reason: text("reason").notNull().default(""),
-  /** True when the system refunded by policy without the owner's involvement. */
-  automatic: boolean("automatic").notNull().default(false),
-  error: text("error"),
-  /**
-   * When the processor said the refund was complete. A refund it accepted as
-   * pending has none until the scheduled task asks again; one it rejects
-   * then becomes failed (`checkUnsettledRefunds` in manage.ts).
-   */
-  settledAt: ts("settled_at"),
-  createdAt: createdAt(),
-});
+export const refunds = pgTable(
+  "refunds",
+  {
+    id: id(),
+    paymentId: uuid("payment_id")
+      .notNull()
+      .references(() => payments.id, { onDelete: "restrict" }),
+    amountCents: integer("amount_cents").notNull(),
+    /** pending until the processor confirms; failed ones need the owner's attention. */
+    status: refundStatus("status").notNull().default("pending"),
+    providerRefundId: text("provider_refund_id"),
+    reason: text("reason").notNull().default(""),
+    /**
+     * The part of this refund that gave back what the booking was paid beyond its price then (its remaining credit, after
+     * a move to a day that costs less: follow-up 5). That part is money paid back, not a gift: should the price go up
+     * again, the booking owes it again. The rest of a refund (goodwill, a cancellation's) never makes a booking owe.
+     */
+    creditCents: integer("credit_cents").notNull().default(0),
+    /** True when the system refunded by policy without the owner's involvement. */
+    automatic: boolean("automatic").notNull().default(false),
+    error: text("error"),
+    /**
+     * When the processor said the refund was complete. A refund it accepted as
+     * pending has none until the scheduled task asks again; one it rejects
+     * then becomes failed (`checkUnsettledRefunds` in manage.ts).
+     */
+    settledAt: ts("settled_at"),
+    createdAt: createdAt(),
+  },
+  (t) => [check("refunds_credit_cents", sql`${t.creditCents} >= 0 and ${t.creditCents} <= ${t.amountCents}`)],
+);
 
 /** Every email the system wants to send. A sender delivers the unsent rows. */
 export const emailOutbox = pgTable("email_outbox", {

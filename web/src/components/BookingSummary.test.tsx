@@ -35,6 +35,7 @@ const PAID_ONLINE: BookingView = {
   dueCents: 0,
   heldCents: 0,
   creditLeftCents: 0,
+  creditReturnedCents: 0,
   rescheduledCount: 0,
 };
 

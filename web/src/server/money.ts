@@ -48,11 +48,13 @@ export async function paidAtStudioCents(db: DbLike, bookingId: string): Promise<
 
 /**
  * What each booking still owes, of those given: for one that stands, its
- * price and the extra charges added to it since (`chargesCentsByBooking`), less what it received and what a card holds reserved for it, which is
+ * price and the extra charges added to it since (`chargesCentsByBooking`), less what it was paid toward them
+ * (`paidTowardPriceCentsByBooking`) and what a card holds reserved for it, which is
  * taken shortly; nothing for one that ended. A booking made online is paid
  * when it is made, so it owes only when its card's amount was reserved and
  * never taken: once the reservation has lapsed (`RESERVE_HOURS`), the card
- * holds nothing, and the studio collects the price. One made in the admin
+ * holds nothing, and the studio collects the price; or when its price went up
+ * after it was paid (a move to a day that costs more). One made in the admin
  * owes until it is paid.
  */
 export async function owedCentsByBooking(
@@ -64,7 +66,7 @@ export async function owedCentsByBooking(
   if (standing.length === 0) return new Map(rows.map((row) => [row.id, 0]));
   const ids = standing.map((row) => row.id);
   const [received, held, charged] = await together(db, [
-    () => receivedCentsByBooking(db, ids),
+    () => paidTowardPriceCentsByBooking(db, ids),
     () => heldCentsByBooking(db, ids, now),
     () => chargesCentsByBooking(db, ids),
   ]);
@@ -119,6 +121,38 @@ export async function receivedCentsByBooking(db: DbLike, bookingIds: string[], w
   return new Map(rows.map((row) => [row.bookingId, row.total]));
 }
 
+/** The refunds that count, of the payments that count: made, on their way, or owed (one that failed is tried again). */
+const REFUNDS_THAT_COUNT = ["pending", "succeeded", "failed"] as const;
+
+/**
+ * For several bookings at once: the part of their refunds that gave back what each was paid beyond its price then
+ * (`refunds.credit_cents`: its remaining credit, after a move to a day that costs less). A booking with none is not in
+ * the map.
+ */
+export async function creditReturnedCentsByBooking(db: DbLike, bookingIds: string[]): Promise<Map<string, number>> {
+  if (bookingIds.length === 0) return new Map();
+  const rows = await db
+    .select({ bookingId: payments.bookingId, total: sql<number>`coalesce(sum(${refunds.creditCents}), 0)::int` })
+    .from(refunds)
+    .innerJoin(payments, eq(payments.id, refunds.paymentId))
+    .where(and(inArray(payments.bookingId, bookingIds), eq(payments.status, "succeeded"), inArray(refunds.status, [...REFUNDS_THAT_COUNT]), gt(refunds.creditCents, 0)))
+    .groupBy(payments.bookingId);
+  return new Map(rows.map((row) => [row.bookingId, row.total]));
+}
+
+/**
+ * For several bookings at once: what each was paid toward its price: every payment that succeeded, less what was given
+ * back of what it was paid beyond its price (`creditReturnedCentsByBooking`). Another refund (goodwill, by hand or to
+ * the card) is the studio's to give and does not count: it never makes a booking owe (the tester's finding of
+ * 2026-11-18: credit refunded and the booking moved back to a day that costs more must owe the difference again). A
+ * booking that received nothing is not in the map.
+ */
+export async function paidTowardPriceCentsByBooking(db: DbLike, bookingIds: string[]): Promise<Map<string, number>> {
+  if (bookingIds.length === 0) return new Map();
+  const [received, returned] = await together(db, [() => receivedCentsByBooking(db, bookingIds), () => creditReturnedCentsByBooking(db, bookingIds)]);
+  return new Map([...received].map(([id, cents]) => [id, cents - (returned.get(id) ?? 0)]));
+}
+
 /**
  * For several bookings at once: what each was paid and kept, by card or at the studio: every payment that succeeded,
  * less every refund of it, made or on its way (a refund that failed counts too: it is owed, and tried again). A
@@ -140,7 +174,7 @@ export async function netPaidCentsByBooking(db: DbLike, bookingIds: string[]): P
         .select({ bookingId: payments.bookingId, total: sql<number>`coalesce(sum(${refunds.amountCents}), 0)::int` })
         .from(refunds)
         .innerJoin(payments, eq(payments.id, refunds.paymentId))
-        .where(and(counted, inArray(refunds.status, ["pending", "succeeded", "failed"])))
+        .where(and(counted, inArray(refunds.status, [...REFUNDS_THAT_COUNT])))
         .groupBy(payments.bookingId),
   ]);
   const returned = new Map(back.map((row) => [row.bookingId, row.total]));
@@ -148,20 +182,22 @@ export async function netPaidCentsByBooking(db: DbLike, bookingIds: string[]): P
 }
 
 /**
- * For several bookings at once: what each that stands was paid beyond what it costs now, its price and its extra
- * charges: after a move to a day that costs less (follow-up 5, src/server/reprice.ts), or a charge taken back once it
- * was paid. It is the client's, refunded by hand or when the studio agrees to (the owners' decision of 2026-11-17):
- * nothing gives it back by itself. Nothing for a booking that ended, whose money a cancellation or a reschedule code
- * dealt with. A booking with none is not in the map.
+ * For several bookings at once: what each that stands was paid toward its price beyond what it costs now, its price and
+ * its extra charges (`paidTowardPriceCentsByBooking`): after a move to a day that costs less (follow-up 5,
+ * src/server/reprice.ts), or a charge taken back once it was paid. A goodwill refund given before does not lessen it: it
+ * was a gift. It is the client's, refunded by hand or when the studio agrees to (the owners' decision of 2026-11-17):
+ * nothing gives it back by itself, and a refund recorded while there is some gives it back first
+ * (`refunds.credit_cents`). Nothing for a booking that ended, whose money a cancellation or a reschedule code dealt
+ * with. A booking with none is not in the map.
  */
 export async function creditLeftCentsByBooking(db: DbLike, rows: { id: string; totalCents: number; status: string }[]): Promise<Map<string, number>> {
   const standing = rows.filter((row) => STANDS.includes(row.status));
   if (standing.length === 0) return new Map();
   const ids = standing.map((row) => row.id);
-  const [net, charged] = await together(db, [() => netPaidCentsByBooking(db, ids), () => chargesCentsByBooking(db, ids)]);
+  const [paid, charged] = await together(db, [() => paidTowardPriceCentsByBooking(db, ids), () => chargesCentsByBooking(db, ids)]);
   const left = new Map<string, number>();
   for (const row of standing) {
-    const cents = (net.get(row.id) ?? 0) - row.totalCents - (charged.get(row.id) ?? 0);
+    const cents = (paid.get(row.id) ?? 0) - row.totalCents - (charged.get(row.id) ?? 0);
     if (cents > 0) left.set(row.id, cents);
   }
   return left;

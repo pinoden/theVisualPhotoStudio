@@ -2,9 +2,9 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { membershipMinutes, membershipPayments, memberships } from "@/db/schema";
-import { joinMembership, listPlans, membershipsOf, runMembershipBilling, type JoinDeps } from "./memberships";
+import { cancelMembership, joinMembership, listPlans, membershipsOf, runMembershipBilling, type JoinDeps } from "./memberships";
 import { MOCK_TOKEN_OK, type PaymentProvider } from "./payments";
-import { BASE_URL, createTestWorld, NOW, OWNER_EMAIL, type TestWorld } from "./testing";
+import { BASE_URL, createTestWorld, expectOk, NOW, OWNER_EMAIL, type TestWorld } from "./testing";
 
 /** Follow-up 3, step 4 of the plan of 2026-11-18: each month of a membership. */
 let world: TestWorld;
@@ -32,6 +32,7 @@ async function join(email = "jane@example.com") {
   return row;
 }
 const rowOf = async (id: string) => (await world.db.select().from(memberships).where(eq(memberships.id, id)))[0];
+const monthsOf = async (id: string) => world.db.select().from(membershipPayments).where(eq(membershipPayments.membershipId, id));
 
 describe("each month of a membership", () => {
   it("records each month Square was paid, once, with its minutes and an email to the member", async () => {
@@ -137,6 +138,56 @@ describe("each month of a membership", () => {
     const [unfinished] = await world.emails("owner_membership_unfinished");
     expect(unfinished.subject).toMatch(/^CHECK SQUARE: membership MEMBER-.+ was not finished$/);
     expect(unfinished.body).toContain("Look in Square for a payment of $300 with the reference MEMBER-");
+  });
+
+  it("records a month Square took before the member cancelled, with its hours, at the cancelling or by the task (the tester's finding)", async () => {
+    const row = await join();
+    // 14 December: Square takes the second month. That morning, before the task has asked, Jane cancels.
+    world.billMonth(row.subscriptionId!);
+    const cancelled = await cancelMembership(world.db, { email: "jane@example.com", role: "customer" }, row.id, { now: at("2026-12-14", 9), payments: world.provider, baseUrl: BASE_URL });
+    expect(cancelled).toMatchObject({ ok: true, membership: { status: "cancelled", endsOn: "2027-01-14", minutesLeft: 600 } });
+    // The month is recorded at once, before the email about the cancelling, which counts its hours.
+    expect(await monthsOf(row.id)).toHaveLength(2);
+    expect((await world.emails("membership_cancelled")).at(-1)!.body).toContain("January 14, 2027");
+    expect(await world.emails("membership_month_paid")).toHaveLength(1);
+    // Nothing is recorded twice afterwards.
+    await bill(at("2026-12-14", 12));
+    await bill(at("2027-01-10", 12));
+    expect(await monthsOf(row.id)).toHaveLength(2);
+    expect((await membershipsOf(world.db, "jane@example.com"))[0].minutesLeft).toBe(600);
+  });
+
+  it("records such a month later when Square cannot say at the cancelling, and stops asking once it is", async () => {
+    const row = await join("bob@example.com");
+    world.billMonth(row.subscriptionId!);
+    // Square cancels, then cannot say what it billed.
+    const subscriptionState = world.provider.memberships.subscriptionState;
+    world.provider.memberships.subscriptionState = async () => ({ state: "unknown", message: "No answer from Square" });
+    expectOk(await cancelMembership(world.db, { email: "bob@example.com", role: "customer" }, row.id, { now: at("2026-12-14", 9), payments: world.provider, baseUrl: BASE_URL }));
+    world.provider.memberships.subscriptionState = subscriptionState;
+    expect(await monthsOf(row.id)).toHaveLength(1);
+    // The task asks about the cancelled membership until its months up to its end are recorded.
+    expect(await bill(at("2026-12-14", 12))).toMatchObject({ monthsPaid: 1 });
+    expect((await membershipsOf(world.db, "bob@example.com"))[0]).toMatchObject({ status: "cancelled", minutesLeft: 600 });
+    const asked = (await rowOf(row.id)).billingCheckedAt;
+    await bill(at("2026-12-20", 12));
+    expect((await rowOf(row.id)).billingCheckedAt).toEqual(asked);
+  });
+
+  it("tells a month that was not paid once, even after a later month is paid, and clears it once none is left unpaid", async () => {
+    const row = await join();
+    world.billMonth(row.subscriptionId!, false); // 14 December: not paid
+    expect(await bill(at("2026-12-15", 12))).toMatchObject({ problems: 1 });
+    world.billMonth(row.subscriptionId!); // 14 January: paid
+    for (const hour of [12, 14, 16]) await bill(at("2027-01-14", hour));
+    expect(await world.emails("membership_payment_problem")).toHaveLength(1);
+    expect(await world.emails("owner_membership_problem")).toHaveLength(1);
+    expect((await rowOf(row.id)).problem).toContain("December 14, 2026 did not go through");
+    // Square takes December on a later try: nothing is left unpaid.
+    world.subscriptions[0].invoices.find((invoice) => invoice.day === "2026-12-14")!.paid = true;
+    await bill(at("2027-01-16", 12));
+    expect((await rowOf(row.id)).problem).toBeNull();
+    expect(await world.emails("membership_payment_problem")).toHaveLength(1);
   });
 
   it("asks only about memberships of the processor set up now", async () => {

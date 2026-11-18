@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { membershipMinutes, membershipPayments, memberships } from "@/db/schema";
-import { cancelMembership, joinMembership, listPlans, membershipPaymentsOf, membershipsOf, setPlanActive, type JoinDeps, type PlanView } from "./memberships";
+import { cancelMembership, joinMembership, listPlans, membershipPaymentsOf, membershipsOf, savePlan, setPlanActive, type JoinDeps, type PlanView } from "./memberships";
 import { MOCK_TOKEN_DECLINED, MOCK_TOKEN_OK, monthsAfter, type PaymentProvider } from "./payments";
 import { BASE_URL, createTestWorld, expectOk, NOW, OWNER_EMAIL, type TestWorld } from "./testing";
 
@@ -87,6 +87,33 @@ describe("buying a membership", () => {
     expect(world.planPrices.size).toBe(2);
     expect(second.membership).toMatchObject({ minutesPerMonth: 600, priceCents: 60000, minutesLeft: 600 });
     expect((await membershipsOf(world.db, "jane@example.com")).map((view) => view.planName)).toEqual(["Studio Dayglow, 10 hours a month", "Studio Paris, 5 hours a month"]);
+  });
+
+  it("charges nothing when the owners changed the plan after the page showed it, and asks the client to look again (the tester's finding)", async () => {
+    // The page showed $300 for 5 hours; an owner raises it to $350 before the client presses.
+    const shown = { priceCents: paris5.priceCents, minutes: paris5.minutes };
+    expect(await savePlan(world.db, paris5.id, { name: paris5.name, description: paris5.description, minutes: paris5.minutes, priceCents: 35000 })).toMatchObject({ ok: true });
+    expect(await joinMembership(world.db, input({ expected: shown }), deps())).toEqual({
+      ok: false,
+      status: 409,
+      code: "price_changed",
+      message: "This membership has changed since the page was opened: it is now $350 a month for 5 hours of studio time. Nothing was charged. Please look at it again, and agree to the terms at that price.",
+    });
+    expect(world.charges).toEqual([]);
+    expect(await world.db.select().from(memberships)).toEqual([]);
+    // Agreed to at the new price, it is bought at that price.
+    expect(expectOk(await joinMembership(world.db, input({ expected: { priceCents: 35000, minutes: paris5.minutes } }), deps())).membership).toMatchObject({ priceCents: 35000 });
+    expect(world.charges.map((charge) => charge.amountCents)).toEqual([35000]);
+  });
+
+  it("buys one membership and charges once when pressed twice at the same moment (the tester's check)", async () => {
+    const once = input();
+    const [a, b] = await Promise.all([joinMembership(world.db, once, deps()), joinMembership(world.db, once, deps())]);
+    expect([a.ok, b.ok]).toEqual([true, true]);
+    expect(world.charges).toHaveLength(1);
+    expect(world.subscriptions).toHaveLength(1);
+    expect(await world.db.select().from(memberships)).toHaveLength(1);
+    expect((await membershipsOf(world.db, "jane@example.com"))[0].minutesLeft).toBe(300);
   });
 
   it("starts nothing with a declined card, and a new attempt can buy it", async () => {

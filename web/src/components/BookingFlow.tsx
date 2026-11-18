@@ -78,9 +78,12 @@ interface AppliedCode {
    * A membership's code (follow-up 3): the minutes left on it, and whether weekends pay the difference. It pays with
    * minutes, never as a discount: `kind` and `value` are not used then.
    */
-  membership?: { minutesLeft: number; weekendDifference: boolean };
+  membership?: { minutesLeft: number; weekendDifference: boolean; studioIds: string[]; studioNames: string[] };
   email: string;
 }
+
+/** "Studio Blanche or Studio Paris". */
+const orList = (names: string[]) => (names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} or ${names[names.length - 1]}`);
 
 /** Today's date is only known in the browser, on the studio's clock wherever the device is; the server renders without it. */
 const browserToday = () => studioToday();
@@ -242,7 +245,11 @@ export function BookingFlow({
   const normalizedEmail = email.trim().toLowerCase();
   const current = applied && applied.email === normalizedEmail ? applied : null;
   const promo = current && !current.membership ? current : null;
-  const member = current?.membership ? current : null;
+  // A membership's hours pay only for the studios of its plan, never a photography session: chosen otherwise after the
+  // code was applied, they are left out of the price, and the screen says why (the tester's finding of 2026-11-18).
+  const memberApplied = current?.membership ? current : null;
+  const memberFits = memberApplied !== null && !photography && studioIds.every((id) => memberApplied.membership!.studioIds.includes(id));
+  const member = memberFits ? memberApplied : null;
 
   const price: Quote | null = useMemo(() => {
     if (studioIds.length === 0 || duration <= 0 || combinationError) return null;
@@ -344,7 +351,7 @@ export function BookingFlow({
         ok?: boolean;
         message?: string;
         promo?: Omit<AppliedCode, "email"> | null;
-        membership?: { code: string; minutesLeft: number; weekendDifference: boolean } | null;
+        membership?: { code: string; minutesLeft: number; weekendDifference: boolean; studioIds: string[]; studioNames: string[] } | null;
       };
       if (response.ok && data.ok && data.membership) {
         const { code: memberCode, ...membership } = data.membership;
@@ -610,6 +617,14 @@ export function BookingFlow({
       {promo && price.promoMisfit && (
         <p className="field-error" role="status" style={{ margin: ".75rem 0 0" }}>
           {PROMO_MISFIT_TEXT[price.promoMisfit]} Code {promo.code} is not used on this booking and stays yours.
+        </p>
+      )}
+      {memberApplied && !member && (
+        <p className="field-error" role="status" style={{ margin: ".75rem 0 0" }}>
+          {photography
+            ? "Membership hours are for studio rentals: they cannot pay for a photography session."
+            : `The hours of membership ${memberApplied.code} are for ${orList(memberApplied.membership!.studioNames)}: they cannot pay for these studios.`}{" "}
+          They are not used on this booking and stay yours.
         </p>
       )}
     </div>

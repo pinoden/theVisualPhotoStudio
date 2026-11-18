@@ -24,7 +24,7 @@ import {
   type BookingView,
   type CreateBookingResult,
 } from "./bookings";
-import { loadCatalog } from "./catalog";
+import { dayTypeFor, loadCatalog } from "./catalog";
 import { chargesOf, hourlyRateOf, type ChargeLine } from "./charges";
 import { storedTerms, termsChangedSince, termsFor, type BookingTerms } from "./terms";
 import { bookingMovedEmail, queueEmail } from "./email";
@@ -343,7 +343,8 @@ export async function moveOptions(
   if (!free.ok) return free;
   const price = await priceOnNewDay(db, booking, date, await loadCatalog(db));
   if (price.kind === "refused") return { ok: false, message: price.message };
-  if (price.kind === "same") return { ...free, price: null };
+  // Nothing the client reads changes (a free hour still pays all of it): no price to show.
+  if (price.kind === "same" || !price.announced) return { ...free, price: null };
   return {
     ...free,
     price: {
@@ -456,6 +457,8 @@ export async function moveBooking(
           // A reminder comes again before the new time; to a time closer than the reminder's hours, the email about
           // the move tells the new time, and no reminder follows it (queueReminders).
           reminderSentAt: startAt.getTime() - now.getTime() > catalog.settings.reminderHours * 3_600_000 ? null : now,
+          // Its new day's kind, which the next move compares with: priced for it, or both kinds priced alike.
+          pricedAs: dayTypeFor(catalog, input.date),
           ...(repriced
             ? {
                 studiosSubtotalCents: repriced.quote.studiosSubtotalCents,
@@ -502,7 +505,7 @@ export async function moveBooking(
         at: now,
         note: `Moved from ${was} to ${is}${clientMove ? ", at the client's request" : ""}${repriced ? repriceNote(repriced, booking) : ""}`,
       });
-      const priceNote = repriced
+      const priceNote = repriced?.announced
         ? movePriceText({
             dayType: repriced.dayType,
             wasCents: totalBeforeCredit(booking),

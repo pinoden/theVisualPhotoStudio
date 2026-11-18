@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { and, eq } from "drizzle-orm";
-import { bookings, priceRules, promoCodes, studioHolds } from "@/db/schema";
-import { cardReceiptOf, getAppointment, moveBooking, moveOptions } from "./appointments";
+import { and, eq, sql } from "drizzle-orm";
+import { bookings, priceRules, promoCodes, specialDates, studioHolds } from "@/db/schema";
+import { cardReceiptOf, createAdminBooking, getAppointment, moveBooking, moveOptions } from "./appointments";
 import type { AuthUser } from "./auth";
 import { toBookingViews } from "./bookings";
 import { loadCatalog } from "./catalog";
@@ -13,6 +15,7 @@ import { MOCK_TOKEN_OK, mockProvider } from "./payments";
 import { issuePromo } from "./promos";
 import { priceOnNewDay } from "./reprice";
 import { saveSetting } from "./settings";
+import { recordHandRefund, recordStudioPayment } from "./studio-payments";
 import { BASE_URL, createTestWorld, daysAfter, expectOk, FAR, h, NOW, OWNER_EMAIL, type TestWorld } from "./testing";
 
 /** Follow-up 5: a booking the studio moves to a day of the other kind takes that day's price. */
@@ -178,6 +181,127 @@ describe("moving a booking to a day of the other kind", () => {
   it("never reprices a photography session, whose price is the same any day", async () => {
     const { ref } = expectOk(await world.book({ photography: true, date: "2026-12-02", durationMinutes: 60 }));
     expect(await priceOnNewDay(world.db, await rowOf(ref), SATURDAY, await loadCatalog(world.db))).toEqual({ kind: "same" });
+  });
+});
+
+describe("money given back, and the price changing again (the tester's findings of 2026-11-18)", () => {
+  it("owes again the remaining credit refunded to the card when the booking is moved back to the dearer day", async () => {
+    const { ref } = expectOk(await world.book({ date: SATURDAY }));
+    expectOk(await moveBooking(world.db, owner, ref, to(FAR), NOW));
+    expect(await paymentCard(ref)).toMatchObject({ totalCents: 17600, paidCents: 19000, creditLeftCents: 1400, dueCents: 0 });
+    expectOk(await ownerRefund(world.db, ref, { amountCents: 1400, reason: "The difference" }, world.manageDeps()));
+    expect(await paymentCard(ref)).toMatchObject({ paidCents: 17600, creditReturnedCents: 1400, creditLeftCents: 0, dueCents: 0 });
+
+    expect(await moveOptions(world.db, owner, ref, SATURDAY, NOW)).toMatchObject({ ok: true, price: { owedCents: 1400, creditLeftCents: 0 } });
+    expectOk(await moveBooking(world.db, owner, ref, to(SATURDAY), NOW));
+    expect(await paymentCard(ref)).toMatchObject({ totalCents: 19000, paidCents: 17600, dueCents: 1400, creditLeftCents: 0 });
+    const [view] = await toBookingViews(world.db, [await rowOf(ref)], NOW);
+    expect(view).toMatchObject({ dueCents: 1400, receivedCents: 19000, creditReturnedCents: 1400 });
+    expect((await movedEmail()).body).toContain("Still to pay: $14, at the studio or with a payment link we email you.");
+  });
+
+  it("owes again what was given back by hand of a payment at the studio, once moved back", async () => {
+    const made = expectOk(
+      await createAdminBooking(
+        world.db,
+        owner,
+        { studioIds: [world.ids.blanche], date: SATURDAY, startMinute: h(10), durationMinutes: 120, customer: { name: "Jane Smith", email: "jane@example.com", phone: "407-555-0100" } },
+        { now: NOW, baseUrl: BASE_URL, processor: "mock" },
+      ),
+    );
+    expectOk(await recordStudioPayment(world.db, owner, made.ref, { amountCents: 19000, method: "cash", note: "" }, NOW));
+    expectOk(await moveBooking(world.db, owner, made.ref, to(FAR), NOW));
+    const moved = await paymentCard(made.ref);
+    expectOk(await recordHandRefund(world.db, owner, moved.payments[0].id, { amountCents: 1400, note: "The difference, in cash" }, NOW));
+    expectOk(await moveBooking(world.db, owner, made.ref, to(SATURDAY), NOW));
+    expect(await paymentCard(made.ref)).toMatchObject({ totalCents: 19000, paidCents: 17600, dueCents: 1400 });
+  });
+
+  it("never makes a booking owe a goodwill refund, before or after a move to a dearer day", async () => {
+    const { ref } = expectOk(await world.book({ date: FAR }));
+    // $20 back for a broken light, while nothing was paid beyond the price: the studio's gift.
+    expectOk(await ownerRefund(world.db, ref, { amountCents: 2000, reason: "Goodwill" }, world.manageDeps()));
+    expect(await paymentCard(ref)).toMatchObject({ paidCents: 15600, creditReturnedCents: 0, dueCents: 0, creditLeftCents: 0 });
+    // Moved to the Saturday: it owes what its price went up by, not the gift as well.
+    expectOk(await moveBooking(world.db, owner, ref, to(SATURDAY), NOW));
+    expect(await paymentCard(ref)).toMatchObject({ totalCents: 19000, dueCents: 1400, creditLeftCents: 0 });
+    // And moved back, what it was paid beyond the price is the client's: the gift does not use it up.
+    expectOk(await moveBooking(world.db, owner, ref, to(FAR, h(12)), NOW));
+    expect(await paymentCard(ref)).toMatchObject({ totalCents: 17600, dueCents: 0, creditLeftCents: 0 });
+  });
+
+  it("says nothing of a new price when a free hour still pays all of it, and keeps the new prices", async () => {
+    const hour = (await issuePromo(world.db, { kind: "free_hour", value: 60, source: "loyalty", email: "jane@example.com", expiresAt: daysAfter(NOW, 60) }))!.code;
+    const { ref } = expectOk(await world.book({ studioIds: [world.ids.paris], date: FAR, durationMinutes: 60, promoCode: hour, paymentToken: undefined }));
+    expect(await moveOptions(world.db, owner, ref, SATURDAY, NOW)).toMatchObject({ ok: true, price: null });
+    expectOk(await moveBooking(world.db, owner, ref, to(SATURDAY), NOW));
+    expect(await rowOf(ref)).toMatchObject({ studiosSubtotalCents: 7200, promoDiscountCents: 7200, totalCents: 0, pricedAs: "weekend" });
+    expect((await movedEmail()).body).not.toContain("priced as");
+    expect(await lastNote(ref)).toMatch(/\. Priced as a weekend day: what the client pays is unchanged$/);
+  });
+
+  it("does not tell a client of a booking the studio made that a card was charged, when their hours paid all of it", async () => {
+    const plan = (await listPlans(world.db)).find((candidate) => candidate.name === "Studio Paris, 5 hours a month")!;
+    const joined = expectOk(
+      await joinMembership(
+        world.db,
+        { planId: plan.id, customer: { name: "Jane Smith", email: "jane@example.com", phone: "407-555-0100" }, acceptTerms: true, paymentToken: MOCK_TOKEN_OK, requestId: randomUUID() },
+        { now: NOW, payments: world.provider, baseUrl: BASE_URL, ownerEmail: OWNER_EMAIL },
+      ),
+    );
+    expectOk(
+      await createAdminBooking(
+        world.db,
+        owner,
+        { studioIds: [world.ids.paris], date: FAR, startMinute: h(9), durationMinutes: 60, customer: { name: "Jane Smith", email: "jane@example.com", phone: "407-555-0100" }, promoCode: joined.membership.code },
+        { now: NOW, baseUrl: BASE_URL, processor: "mock" },
+      ),
+    );
+    const confirmation = (await world.emails("booking_confirmation")).at(-1)!.body;
+    expect(confirmation).toContain("Total: $68\nPaid with your membership hours (1 hour): $68\n");
+    expect(confirmation).not.toContain("Charged to your card");
+    expect(confirmation).not.toContain("To pay at the studio");
+  });
+});
+
+describe("the kind of day a booking is priced as (the tester's finding of 2026-11-18)", () => {
+  it("is kept with the booking: a special date added later does not change how a move prices it", async () => {
+    const { ref } = expectOk(await world.book({ date: FAR }));
+    expect(await rowOf(ref)).toMatchObject({ pricedAs: "weekday" });
+    // Later the owners price that Wednesday as a weekend (a holiday), and raise the weekday price of 2 hours.
+    await world.db.insert(specialDates).values({ day: FAR, dayType: "weekend", note: "A holiday" });
+    await setPrice("blanche", "weekday", 120, 20000);
+    // To the Thursday: a weekday, as it was priced: the price stays.
+    expectOk(await moveBooking(world.db, owner, ref, to(THURSDAY), NOW));
+    expect(await rowOf(ref)).toMatchObject({ totalCents: 17600, pricedAs: "weekday" });
+  });
+
+  it("was filled in for the bookings made before it was kept, from their day (migration 0046)", async () => {
+    const weekday = expectOk(await world.book({ date: FAR }));
+    const saturday = expectOk(await world.book({ date: SATURDAY }));
+    const holiday = expectOk(await world.book({ date: THURSDAY }));
+    await world.db.insert(specialDates).values({ day: THURSDAY, dayType: "weekend", note: "A holiday" });
+    await world.db.update(bookings).set({ pricedAs: null });
+    const statements = readFileSync(path.join(process.cwd(), "drizzle", "0046_priced_as_credit_refunds.sql"), "utf8")
+      .split("--> statement-breakpoint")
+      .map((statement) => statement.trim())
+      .filter((statement) => statement.includes('UPDATE "bookings"'));
+    expect(statements).toHaveLength(1);
+    await world.db.execute(sql.raw(statements[0]));
+    for (const [ref, kind] of [
+      [weekday.ref, "weekday"],
+      [saturday.ref, "weekend"],
+      [holiday.ref, "weekend"],
+    ] as const) {
+      expect((await rowOf(ref)).pricedAs).toBe(kind);
+    }
+  });
+
+  it("is what a move to the other kind is priced against, whatever its old day became", async () => {
+    const { ref } = expectOk(await world.book({ date: FAR }));
+    await world.db.insert(specialDates).values({ day: FAR, dayType: "weekend", note: "A holiday" });
+    expectOk(await moveBooking(world.db, owner, ref, to(SATURDAY), NOW));
+    expect(await rowOf(ref)).toMatchObject({ totalCents: 19000, pricedAs: "weekend" });
   });
 });
 

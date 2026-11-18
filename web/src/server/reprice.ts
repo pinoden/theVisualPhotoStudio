@@ -37,6 +37,12 @@ export type MovePrice =
       creditAppliedCents: number;
       /** The part of the credit the new price no longer needs: it goes back onto its code. */
       codeBack: { codeId: string; code: string; source: PromoSource; cents: number } | null;
+      /**
+       * Whether anything the client reads changes: their total, what is left to pay after credit and minutes, or credit
+       * back on their code. Not when a free hour or a full discount still pays all of it (the tester's finding of
+       * 2026-11-18: "its total is now $0 instead of $0"): the booking's prices change, and nobody is told.
+       */
+      announced: boolean;
     }
   /** The booking cannot be priced for the new day: no price for its length in one of its studios. */
   | { kind: "refused"; message: string };
@@ -54,7 +60,9 @@ export const PRICED_AS: Record<DayType, string> = { weekday: "a weekday", weeken
 export async function priceOnNewDay(db: DbLike, booking: BookingRow, date: IsoDate, catalog: Catalog): Promise<MovePrice> {
   if (booking.photographerId !== null) return { kind: "same" };
   const dayType = dayTypeFor(catalog, date);
-  if (dayType === dayTypeFor(catalog, localDateOf(booking.startAt))) return { kind: "same" };
+  // The kind it is priced as, whatever the owners have made its day since (a special date added later: the tester's
+  // finding of 2026-11-18). A booking from before that was kept: its day's kind now.
+  if (dayType === (booking.pricedAs ?? dayTypeFor(catalog, localDateOf(booking.startAt)))) return { kind: "same" };
 
   const codeId = booking.promoCodeId;
   const [holds, addonRows, codeRows] = await together(db, [
@@ -113,13 +121,18 @@ export async function priceOnNewDay(db: DbLike, booking: BookingRow, date: IsoDa
     priced.multiStudioDiscountCents === booking.multiStudioDiscountCents &&
     priced.studioLines.every((line) => holds.find((hold) => hold.studioId === line.studioId)?.priceCents === line.priceCents);
   if (unchanged) return { kind: "same" };
+  const codeBack = back > 0 && code ? { codeId: code.id, code: code.code, source: code.source, cents: back } : null;
   return {
     kind: "new",
     dayType,
     wasCents: booking.totalCents,
     quote: priced,
     creditAppliedCents,
-    codeBack: back > 0 && code ? { codeId: code.id, code: code.code, source: code.source, cents: back } : null,
+    codeBack,
+    announced:
+      codeBack !== null ||
+      priced.totalCents !== booking.totalCents ||
+      totalBeforeCredit({ totalCents: priced.totalCents, creditAppliedCents, membershipCents: priced.membershipCents }) !== totalBeforeCredit(booking),
   };
 }
 
@@ -127,6 +140,7 @@ export async function priceOnNewDay(db: DbLike, booking: BookingRow, date: IsoDa
 export function repriceNote(price: Extract<MovePrice, { kind: "new" }>, before: { totalCents: number; creditAppliedCents: number; membershipCents: number }): string {
   const was = totalBeforeCredit(before);
   const now = totalBeforeCredit({ totalCents: price.quote.totalCents, creditAppliedCents: price.creditAppliedCents, membershipCents: price.quote.membershipCents });
+  if (!price.announced) return `. Priced as ${PRICED_AS[price.dayType]}: what the client pays is unchanged`;
   // Credit or membership hours paid part of it: what is left after them, when that changed too.
   const paidPart = was !== price.wasCents || now !== price.quote.totalCents;
   return `. Priced as ${PRICED_AS[price.dayType]}: ${formatCents(now)} instead of ${formatCents(was)}${

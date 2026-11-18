@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { joinMembershipAction } from "@/app/book/membership/actions";
 import { formatCents } from "@/lib/domain/pricing";
@@ -39,6 +40,7 @@ export function MembershipCheckout({
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const [joined, setJoined] = useState<MembershipView | null>(null);
+  const router = useRouter();
   const card = useCardForm(joined === null, CARD_CONTAINER);
   const price = formatCents(plan.priceCents);
 
@@ -63,6 +65,8 @@ export function MembershipCheckout({
         acceptTerms: true,
         paymentToken: token.token,
         requestId,
+        // What the client sees and agrees to: changed meanwhile, nothing is charged and the page shows the new price.
+        expected: { priceCents: plan.priceCents, minutes: plan.minutes },
       });
       if (result.ok) {
         setJoined(result.membership);
@@ -71,6 +75,11 @@ export function MembershipCheckout({
       // Without an answer the same attempt is sent again, so that the card is charged once; any answer starts anew.
       if (result.code !== "no_answer") setRequestId(crypto.randomUUID());
       setError(result.message);
+      if (result.code === "price_changed") {
+        // The terms name the monthly price: they are agreed to again at the new one.
+        setTerms(false);
+        router.refresh();
+      }
     } catch {
       setError("We could not reach the studio's site. Please press the button again: your card will not be charged twice.");
     } finally {

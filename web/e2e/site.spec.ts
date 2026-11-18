@@ -992,7 +992,25 @@ test("a client buys a membership, gets its code, sees it in their account and ca
   await bookStudioFirstToPayment(page, { studios: ["Studio Paris"], date: MEMBER_DAY, duration: "1 hr", time: "11:00 AM", customer: max, code });
   await expect(byText(page, "Nothing to pay: your code covers this booking. No card is needed.")).toBeVisible();
   await expect(totalRow(page)).toContainText("$0");
-  await confirmAndGetRef(page, "Confirm booking");
+  // Studio Blanche chosen instead after the code was applied: its hours are for Paris, so they are not used, and the
+  // screen says why (the tester's finding of 2026-11-18). Back to Paris, they pay for it again.
+  const swapStudio = async (from: string, to: string) => {
+    for (let step = 0; step < 4; step++) await page.getByRole("button", { name: "← Back" }).click();
+    await pickStudio(page, from);
+    await pickStudio(page, to);
+    await next(page);
+    await next(page);
+    await page.getByRole("button", { name: "11:00 AM", exact: true }).click();
+    await next(page);
+    await agreeToPolicies(page);
+    await next(page);
+  };
+  await swapStudio("Studio Paris", "Studio Blanche");
+  await expect(byText(page, `The hours of membership ${code} are for Studio Paris: they cannot pay for these studios. They are not used on this booking and stay yours.`)).toBeVisible();
+  await expect(totalRow(page)).toContainText("$88");
+  await swapStudio("Studio Blanche", "Studio Paris");
+  await expect(byText(page, "Nothing to pay: your code covers this booking. No card is needed.")).toBeVisible();
+  const memberRef = await confirmAndGetRef(page, "Confirm booking");
   await expect(byText(page, "Membership hours (1 hour)")).toBeVisible();
 
   // The owners see the member and the hour the booking took, and give an hour back.
@@ -1015,10 +1033,17 @@ test("a client buys a membership, gets its code, sees it in their account and ca
   await expect(card).toContainText("Active. The next month is billed on");
   await expect(card).toContainText(code);
   await expect(card.locator(".reward-facts dd").first()).toHaveText("5 hours");
+  // Every change to the hours, the booking that used one among them (the tester's finding of 2026-11-18).
+  await expect(card.getByRole("listitem").filter({ hasText: "The first month paid" })).toContainText("+5 hours");
+  await expect(card.getByRole("listitem").filter({ hasText: `Booking ${memberRef}` })).toContainText("−1 hour");
+  await expect(card.getByRole("link", { name: memberRef })).toHaveAttribute("href", `/account/appointments#${memberRef}`);
+  await expect(card.getByRole("listitem").filter({ hasText: "Changed by the studio" })).toContainText("+1 hour");
   await card.getByRole("button", { name: "Cancel membership" }).click();
   await card.getByRole("button", { name: "Yes, cancel it" }).click();
   await expect(card).toContainText("Cancelled: no more monthly payments.");
   await expect(card.getByRole("button", { name: "Cancel membership" })).toHaveCount(0);
+  // The message saying so stays once the page is drawn again (the tester's finding).
+  await expect(card.locator(".flash-success")).toHaveText("Your membership is cancelled. No more monthly payments will be taken, and your hours stay on your code.");
   const goodbye = await latestEmail(page, "membership_cancelled", max.email);
   expect(goodbye.body).toContain(`The hours left on your code ${code} stay yours to use: 5 hours.`);
 });
@@ -1622,4 +1647,17 @@ test("the studio moves a Saturday booking to a weekday, which costs less, and th
   await expect(onScreen(page.locator(".payment-facts")).locator("div", { hasText: "Paid" })).toContainText("$68 after $4 refunded");
   await expect(page.getByRole("heading", { name: "Refund the remaining credit" })).toHaveCount(0);
   await expect(totalRow(page)).toContainText("Charged to card");
+
+  // Moved back to the Saturday, it owes again the $4 that was refunded (the tester's finding of 2026-11-18), and the
+  // card says why, not that the card was never charged.
+  await byLabel(page, "New date").fill(REPRICE_SATURDAY);
+  await page.getByRole("button", { name: "Show free times" }).click();
+  await expect(byText(page, /is priced as a weekend day: the booking’s total becomes \$72 instead of \$68\. The client will then owe \$4\./)).toBeVisible();
+  await page.getByLabel(/Free start times on/).selectOption({ label: "10:00 AM – 11:00 AM" });
+  await page.getByRole("checkbox", { name: /The client asked for this move/ }).uncheck();
+  await page.getByRole("button", { name: "Move booking" }).click();
+  await expect(byText(page, /Moved to .* The client has been emailed\./)).toBeVisible();
+  await expect(onScreen(page.locator(".payment-facts")).locator("div", { hasText: "Outstanding balance" })).toContainText("$4");
+  await expect(byText(page, /Its card paid \$68: the rest is what its price went up by afterwards, when it was moved to a day that costs more\. Collect it at the studio/)).toBeVisible();
+  expect((await latestEmail(page, "booking_moved", wes.email)).body).toContain("Still to pay: $4, at the studio or with a payment link we email you.");
 });

@@ -8,8 +8,9 @@ import { CopyCode } from "@/components/CopyCode";
 import { getDb } from "@/db/client";
 import { formatCents } from "@/lib/domain/pricing";
 import { durationLabel, longDateLabel } from "@/lib/domain/time";
-import { membershipPaymentsOf, membershipsOf, type MembershipView } from "@/server/memberships";
+import { membershipPaymentsOf, membershipsOf, minutesLinesOf, type MembershipView, type MinutesLine } from "@/server/memberships";
 import { requireUser } from "@/server/session";
+import { formatInstant } from "@/server/tz";
 
 export const metadata: Metadata = { title: "My Membership", robots: { index: false } };
 
@@ -47,14 +48,34 @@ function standing(membership: MembershipView): string {
   }
 }
 
-/** A member's memberships: each one's hours left, its code, how it is billed, its payments, and cancelling it. */
+/** What a change to the member's hours was, in their words. The studio's reason for a correction is its own. */
+function hoursWhat(line: MinutesLine) {
+  const booking = (ref: string) => <Link href={`/account/appointments#${ref}`}>{ref}</Link>;
+  switch (line.kind) {
+    case "month":
+      // "The first month paid", "The month from Monday, December 14, 2026 paid".
+      return <>{line.note} paid</>;
+    case "booking":
+      return line.bookingRef ? <>Booking {booking(line.bookingRef)}</> : <>A booking</>;
+    case "returned":
+      return line.bookingRef ? <>Given back: booking {booking(line.bookingRef)} was cancelled</> : <>Given back</>;
+    default:
+      return <>Changed by the studio</>;
+  }
+}
+
+/** A member's memberships: each one's hours left, its code, how it is billed, its payments, every change to its hours, and cancelling it. */
 async function Membership() {
   await connection();
   const user = await requireUser("/account/membership");
   const db = await getDb();
   const found = await membershipsOf(db, user.email);
   const payments = new Map<string, Awaited<ReturnType<typeof membershipPaymentsOf>>>();
-  for (const membership of found) payments.set(membership.id, await membershipPaymentsOf(db, membership.id));
+  const hours = new Map<string, MinutesLine[]>();
+  for (const membership of found) {
+    payments.set(membership.id, await membershipPaymentsOf(db, membership.id));
+    hours.set(membership.id, await minutesLinesOf(db, membership.id));
+  }
 
   return (
     <AccountFrame user={user} active="/account/membership">
@@ -99,9 +120,23 @@ async function Membership() {
               </li>
             ))}
           </ul>
-          {membership.status === "active" && (
-            <CancelMembership membershipId={membership.id} planName={membership.planName} endsOn={membership.nextBilling ? longDateLabel(membership.nextBilling) : null} />
-          )}
+
+          <h4>Your hours</h4>
+          <ul className="stamp-days">
+            {(hours.get(membership.id) ?? []).map((line, index) => (
+              <li key={index}>
+                {formatInstant(line.at)}: {line.minutes > 0 ? "+" : "−"}
+                {durationLabel(Math.abs(line.minutes))} · {hoursWhat(line)}
+              </li>
+            ))}
+          </ul>
+          {/* In place once cancelled too: its message stays after the page is drawn again. */}
+          <CancelMembership
+            membershipId={membership.id}
+            planName={membership.planName}
+            endsOn={membership.nextBilling ? longDateLabel(membership.nextBilling) : null}
+            active={membership.status === "active"}
+          />
         </div>
       ))}
     </AccountFrame>

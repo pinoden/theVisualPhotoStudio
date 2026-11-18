@@ -60,7 +60,9 @@ describe("paying for a booking with membership minutes", () => {
     const view = (await getBookingByToken(world.db, booked.ref, booked.manageToken))!;
     expect(view).toMatchObject({ membershipMinutes: 120, membershipCents: 13600, totalCents: 0 });
     const [mail] = await world.emails("booking_confirmation");
-    expect(mail.body).toContain("Total: $136\nPaid with your membership hours (2 hours): $136\nCharged to your card: $0");
+    expect(mail.body).toContain("Total: $136\nPaid with your membership hours (2 hours): $136\n");
+    // Nothing was left to pay, and no card was charged: no line says one was.
+    expect(mail.body).not.toContain("Charged to your card");
   });
 
   it("uses what is left on a longer booking, which pays the share of the time it does not cover", async () => {
@@ -145,6 +147,17 @@ describe("paying for a booking with membership minutes", () => {
     const [membership] = await membershipsOf(world.db, JANE.email);
     const other = await rowOf(held.ref);
     expect(await takeBookingMinutes(world.db, { membershipId: membership.id, bookingId: other.id, minutes: 90, ref: held.ref })).toBe(false);
+    expect(await left()).toBe(60);
+  });
+
+  it("never spends the same minutes twice when two bookings are made at the same moment (the tester's check)", async () => {
+    const code = await join();
+    // Two 4-hour bookings at once, each paid in full by the 5 hours on the code: one is made.
+    const [a, b] = await Promise.all([
+      world.book({ studioIds: [world.ids.paris], date: FAR, startMinute: h(9), durationMinutes: 240, customer: JANE, promoCode: code, paymentToken: undefined }),
+      world.book({ studioIds: [world.ids.paris], date: FAR, startMinute: h(14), durationMinutes: 240, customer: JANE, promoCode: code, paymentToken: undefined }),
+    ]);
+    expect([a.ok, b.ok].filter(Boolean)).toHaveLength(1);
     expect(await left()).toBe(60);
   });
 

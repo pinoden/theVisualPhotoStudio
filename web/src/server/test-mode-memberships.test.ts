@@ -3,6 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { bookings, membershipMinutes, membershipPayments, membershipPlanPrices, membershipPlans, memberships, payments } from "@/db/schema";
 import { queueEmail } from "./email";
+import { listEvents } from "./history";
 import { joinMembership, listPlans, membershipsOf } from "./memberships";
 import { MOCK_TOKEN_OK, type PaymentProvider } from "./payments";
 import {
@@ -49,7 +50,7 @@ describe("memberships bought in test mode", () => {
     expect(contents).toMatchObject({
       bookings: 1,
       memberships: [{ code: jane.membership.code, customer: "Jane Smith", planName: "Studio Paris, 5 hours a month", status: "active", sandbox: false }],
-      keptMemberships: [],
+      detached: [],
     });
     expect(describeTestMode(contents).join("\n")).toContain("Removed: 1 membership bought in test mode, with its months paid and hours.");
     const plans = await world.db.select().from(membershipPlans);
@@ -94,24 +95,32 @@ describe("memberships bought in test mode", () => {
     expect((await membershipsOf(world.db, "bob@example.com"))[0]).toMatchObject({ minutesLeft: 300 });
   });
 
-  it("keep one that pays for a booking counted as real from now on, which gets back what a removed booking took", async () => {
+  it("go even when one paid part of a booking counted as real from now on, which keeps in its price what the hours paid", async () => {
     const jane = await join("jane@example.com", "Jane Smith");
     const book = (startMinute: number, durationMinutes: number) =>
       world.book({ studioIds: [world.ids.paris], date: FAR, startMinute, durationMinutes, promoCode: jane.membership.code, paymentToken: undefined });
     const madeReal = expectOk(await book(h(10), 120));
     expectOk(await book(h(14), 60));
-    expect((await membershipsOf(world.db, "jane@example.com"))[0].minutesLeft).toBe(120);
     // Square's live account took money for the first: it stays, and is real from now on.
     const [row] = await world.db.select().from(bookings).where(eq(bookings.ref, madeReal.ref));
     await world.db.insert(payments).values({ bookingId: row.id, provider: "square", providerPaymentId: "live-payment", amountCents: 800, status: "succeeded" });
 
     const cleared = await clearTestMode(world.db, NOW);
-    expect(cleared).toMatchObject({ bookings: 1, memberships: [], keptMemberships: [{ code: jane.membership.code, customer: "Jane Smith" }] });
+    expect(cleared).toMatchObject({ bookings: 1, memberships: [{ code: jane.membership.code }], detached: [{ ref: madeReal.ref, customer: "Jane Smith", code: jane.membership.code }] });
     expect(describeTestMode(cleared).join("\n")).toContain(
-      `Kept: 1 membership bought in test mode that pays for a booking counted as real from now on. Look at it under Memberships:\n    ${jane.membership.code}, Jane Smith`,
+      `Kept, as real: 1 booking that a membership bought in test mode paid part of. The membership goes; the booking keeps in its price what the hours paid. Look at it:\n    ${madeReal.ref}, Jane Smith: hours of ${jane.membership.code}`,
     );
-    expect(await world.db.select({ ref: bookings.ref }).from(bookings)).toEqual([{ ref: madeReal.ref }]);
-    // The removed booking's hour comes back.
-    expect((await membershipsOf(world.db, "jane@example.com"))[0].minutesLeft).toBe(180);
+    const [kept] = await world.db.select().from(bookings);
+    expect(kept).toMatchObject({ ref: madeReal.ref, membershipId: null, membershipMinutes: 120, membershipCents: 13600 });
+    expect(await world.db.select().from(memberships)).toEqual([]);
+    expect((await listEvents(world.db, kept.id)).map((event) => event.note)).toContain(
+      `Its membership ${jane.membership.code} was bought in test mode and was removed with test mode: what its hours paid stays counted in the price`,
+    );
+    // Nothing of test mode is left: the live account opens the database, and a second clear changes nothing (the
+    // tester's finding of 2026-11-18, when the membership was kept and the database refused for good).
+    expect(nothingOfTestMode(await testModeContents(world.db, NOW))).toBe(true);
+    await expect(assertOneKindOfMoney(world.db, "square")).resolves.toBeUndefined();
+    expect(nothingOfTestMode(await clearTestMode(world.db, NOW))).toBe(true);
+    await expect(assertOneKindOfMoney(world.db, "square")).resolves.toBeUndefined();
   });
 });

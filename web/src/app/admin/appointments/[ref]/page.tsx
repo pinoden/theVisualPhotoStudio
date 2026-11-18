@@ -100,6 +100,8 @@ async function AppointmentDetails({
   const otherMoney = processorName !== null && moneyKindOf(processorName) !== appointment.moneyKind ? appointment.moneyKind : null;
   // A payment link can be made: a card processor is set up, and it moves the booking's own kind of money (sendPayLink).
   const linkPossible = cardProcessor !== "disabled" && payLinkPossible(processorName, appointment.moneyKind);
+  // What was paid toward its price: received, less what was given back of a payment beyond it (follow-up 5).
+  const paidTowardPrice = appointment.payments ? appointment.payments.receivedCents - appointment.payments.creditReturnedCents : 0;
 
   return (
     <AdminFrame
@@ -507,11 +509,13 @@ async function AppointmentDetails({
               <>
                 <strong>{formatCents(appointment.payments.dueCents)} is still to pay.</strong>{" "}
                 {appointment.payments.chargesCents > 0 &&
-                appointment.payments.receivedCents >= appointment.payments.totalCents - appointment.payments.chargesCents
+                paidTowardPrice >= appointment.payments.totalCents - appointment.payments.chargesCents
                   ? `That is for the extra charges: collect it at the studio${linkPossible ? ", or with a payment link" : ""}.`
                   : appointment.payments.madeInAdmin
-                  ? "This booking was made in the admin, so nothing was charged online."
-                  : `The amount its card held lapsed before it was taken, so the card was not charged: collect the price at the studio${linkPossible ? ", or with a payment link" : ""}.`}
+                    ? "This booking was made in the admin, so nothing was charged online."
+                    : paidTowardPrice > 0
+                      ? `Its card paid ${formatCents(paidTowardPrice)}: the rest is what its price went up by afterwards, when it was moved to a day that costs more. Collect it at the studio${linkPossible ? ", or with a payment link" : ""}.`
+                      : `The amount its card held lapsed before it was taken, so the card was not charged: collect the price at the studio${linkPossible ? ", or with a payment link" : ""}.`}
               </>
             ) : appointment.payments.held && appointment.payments.ended ? (
               <>

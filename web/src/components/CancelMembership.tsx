@@ -13,12 +13,18 @@ export function CancelMembership({
   endsOn,
   action: cancel = cancelMembershipAction,
   who = "member",
+  active = true,
 }: {
   membershipId: string;
   planName: string;
   endsOn: string | null;
   action?: (previous: CancelMembershipState, formData: FormData) => Promise<CancelMembershipState>;
   who?: "member" | "owner";
+  /**
+   * Whether there is anything to cancel. The member's page keeps this in place once the membership is cancelled, so that
+   * the message saying so stays after the page is drawn again (the tester's finding of 2026-11-18).
+   */
+  active?: boolean;
 }) {
   const [state, action, pending] = useActionState(cancel, { status: "idle", message: "" } as CancelMembershipState);
   const your = who === "member" ? "your" : "the member's";
@@ -30,6 +36,7 @@ export function CancelMembership({
       </div>
     );
   }
+  if (!active) return null;
   return (
     <form action={action} className="membership-cancel">
       <input type="hidden" name="membershipId" value={membershipId} />

@@ -10,7 +10,7 @@ import { isBookingRef } from "./bookings";
 import { codeRefundEmail, paymentReceivedEmail, queueEmail } from "./email";
 import { recordEvent } from "./history";
 import { openPayLinkOf } from "./pay-links";
-import { chargesCentsByBooking, creditLeftCentsByBooking, netCardPaidCents, netPaidCentsByBooking, owedCents, paidAtStudioCents, STANDS } from "./money";
+import { chargesCentsByBooking, creditLeftCentsByBooking, creditReturnedCentsByBooking, netCardPaidCents, netPaidCentsByBooking, owedCents, paidAtStudioCents, STANDS } from "./money";
 import { RESERVE_HOURS } from "./payments";
 import { petFeeCentsOf, petFeeReturnedCents, studioRefundableCents } from "./pet-fee";
 import { codeStanding, rescheduleCodeOf, spendable, takeOffRescheduleCode } from "./promos";
@@ -64,6 +64,11 @@ export interface BookingMoney {
   chargesCents: number;
   /** Every payment that succeeded, before refunds. */
   receivedCents: number;
+  /**
+   * What was given back of what the booking was paid beyond its price (`creditReturnedCentsByBooking`): `receivedCents`
+   * less this is what it was paid toward its price.
+   */
+  creditReturnedCents: number;
   /** What was paid and kept: every payment that succeeded, less every refund of it (`netPaidCentsByBooking`). */
   paidCents: number;
   /** What is still to pay (`owedCents`): nothing once the booking has ended. */
@@ -119,6 +124,7 @@ export async function moneyOf(
     totalCents: booking.totalCents + charged,
     chargesCents: charged,
     receivedCents,
+    creditReturnedCents: (await creditReturnedCentsByBooking(db, [booking.id])).get(booking.id) ?? 0,
     paidCents: (await netPaidCentsByBooking(db, [booking.id])).get(booking.id) ?? 0,
     dueCents: await owedCents(db, booking, now),
     creditLeftCents: (await creditLeftCentsByBooking(db, [booking])).get(booking.id) ?? 0,
@@ -407,9 +413,13 @@ export async function recordHandRefund(
       );
     }
     const why = input.note.trim().slice(0, 180);
+    // Given back while the booking was paid beyond its price: that part first, which it owes again should its price go
+    // up again (`paidTowardPriceCentsByBooking`); the rest is the studio's goodwill.
+    const creditLeft = (await creditLeftCentsByBooking(tx, [booking])).get(booking.id) ?? 0;
     await tx.insert(refunds).values({
       paymentId: payment.id,
       amountCents: input.amountCents,
+      creditCents: Math.min(creditLeft, input.amountCents),
       status: "succeeded",
       reason: why || `Refunded by hand for ${booking.ref}`,
       automatic: false,

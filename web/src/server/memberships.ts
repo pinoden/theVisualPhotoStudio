@@ -1,5 +1,5 @@
 import { randomInt } from "node:crypto";
-import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Db, DbLike } from "@/db/client";
 import { bookings, MEMBERSHIP_STATUSES, membershipMinutes, membershipPayments, membershipPlanPrices, membershipPlans, membershipPlanStudios, memberships, studios } from "@/db/schema";
@@ -18,7 +18,7 @@ import {
   queueEmail,
 } from "./email";
 import { minutesLeftOf } from "./membership-minutes";
-import { monthsAfter, type PaymentProvider } from "./payments";
+import { monthsAfter, type PaymentProvider, type SubscriptionState } from "./payments";
 import { normalizeCode, PROMO_PROBLEM_TEXT } from "./promos";
 import { localDateOf } from "./tz";
 
@@ -165,6 +165,11 @@ const joinInput = z.object({
   paymentToken: z.string().min(1).max(1000),
   /** The buying page's id for this attempt, a random UUID, sent again unchanged only when no answer came. */
   requestId: z.uuid(),
+  /**
+   * The monthly price and minutes the page showed, which the client agreed to: when the owners changed the plan since,
+   * nothing is charged and the client is asked to look again (the tester's finding of 2026-11-18), as a booking is.
+   */
+  expected: z.object({ priceCents: z.number().int().positive(), minutes: z.number().int().positive() }).optional(),
 });
 
 export interface JoinDeps {
@@ -191,7 +196,16 @@ export interface MembershipView {
   minutesLeft: number;
 }
 
-export type JoinProblem = "invalid_input" | "not_offered" | "payments_unavailable" | "declined" | "no_answer" | "not_set_up" | "failed_before" | "rate_limited";
+export type JoinProblem =
+  | "invalid_input"
+  | "not_offered"
+  | "price_changed"
+  | "payments_unavailable"
+  | "declined"
+  | "no_answer"
+  | "not_set_up"
+  | "failed_before"
+  | "rate_limited";
 export type JoinResult = { ok: true; membership: MembershipView } | { ok: false; status: number; code: JoinProblem; message: string };
 
 const CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
@@ -282,6 +296,14 @@ export async function joinMembership(db: Db, raw: unknown, deps: JoinDeps): Prom
   if (!row) {
     const [plan] = await db.select().from(membershipPlans).where(and(eq(membershipPlans.id, input.planId), eq(membershipPlans.active, true)));
     if (!plan) return { ok: false, status: 409, code: "not_offered", message: "This membership is no longer offered. Please choose another." };
+    if (input.expected && (input.expected.priceCents !== plan.priceCents || input.expected.minutes !== plan.minutes)) {
+      return {
+        ok: false,
+        status: 409,
+        code: "price_changed",
+        message: `This membership has changed since the page was opened: it is now ${formatCents(plan.priceCents)} a month for ${durationLabel(plan.minutes)} of studio time. Nothing was charged. Please look at it again, and agree to the terms at that price.`,
+      };
+    }
     for (let attempt = 0; attempt < 5 && !row; attempt++) {
       [row] = await db
         .insert(memberships)
@@ -472,6 +494,12 @@ export async function cancelMembership(
   const stopped = await deps.payments.memberships.cancelSubscription(row.subscriptionId);
   if (!stopped.ok) return { ok: false, code: "no_answer", message: "We could not reach the card processor, so nothing was changed. Please try again in a moment." };
   const endsOn = stopped.endsOn ?? row.paidThrough;
+  // Square took a month the site has not recorded yet (it ends later than what is recorded paid): its hours are put on
+  // the code first, so that the email says what is left. When Square cannot say now, the scheduled task records it.
+  if (endsOn && row.paidThrough && endsOn > row.paidThrough) {
+    const state = await deps.payments.memberships.subscriptionState(row.subscriptionId);
+    if (state.state !== "unknown") await recordPaidMonths(db, { ...row, endsOn }, state, deps);
+  }
   await db.transaction(async (tx) => {
     const [cancelled] = await tx
       .update(memberships)
@@ -504,6 +532,10 @@ export interface UsableMembership {
   code: string;
   minutesLeft: number;
   provider: string;
+  /** The studios its plan is for, each alone or together: the booking screen applies the hours only to those. */
+  studioIds: string[];
+  /** Their names, in the studios' order, for the screen to say what the hours are for. */
+  studioNames: string[];
 }
 
 /** True for a membership's code (`MEMBER-XXXX-XXXX`), which the code field takes as it takes the others. */
@@ -540,7 +572,10 @@ export async function findUsableMembership(
   }
   const minutesLeft = await minutesLeftOf(db, row.id);
   if (minutesLeft <= 0) return { ok: false, message: "No hours are left on this membership. Each month paid adds its hours." };
-  return { ok: true, membership: { id: row.id, code: row.code, minutesLeft, provider: row.provider } };
+  return {
+    ok: true,
+    membership: { id: row.id, code: row.code, minutesLeft, provider: row.provider, studioIds: covered.map((studio) => studio.studioId), studioNames: covered.map((studio) => studio.name) },
+  };
 }
 
 // ── Each month (step 4) ──────────────────────────────────────────────────────
@@ -580,15 +615,27 @@ export async function runMembershipBilling(db: Db, deps: JoinDeps): Promise<Memb
     .where(and(eq(memberships.status, "starting"), eq(memberships.provider, payments.name), lt(memberships.createdAt, new Date(deps.now.getTime() - CARRY_ON_AFTER_MS))));
   for (const row of stuck) if (await carryOn(db, payments, row, deps)) summary.carriedOn++;
 
+  const today = localDateOf(deps.now);
   const due = await db
     .select()
     .from(memberships)
     .where(
       and(
-        eq(memberships.status, "active"),
+        or(
+          // Its next month has come, or a month was not paid: asked until Square takes it, which it may on a later try.
+          and(eq(memberships.status, "active"), or(lte(memberships.paidThrough, today), isNotNull(memberships.problem))),
+          // Cancelled with a month Square took before the cancelling not recorded yet (the tester's finding of
+          // 2026-11-18): asked until the months up to its end are, for a while after it ends at most.
+          and(
+            eq(memberships.status, "cancelled"),
+            isNotNull(memberships.endsOn),
+            lte(memberships.paidThrough, today),
+            lt(memberships.paidThrough, memberships.endsOn),
+            gte(memberships.endsOn, monthsAfter(today, -2)),
+          ),
+        ),
         eq(memberships.provider, payments.name),
         isNotNull(memberships.subscriptionId),
-        lte(memberships.paidThrough, localDateOf(deps.now)),
         or(isNull(memberships.billingCheckedAt), lt(memberships.billingCheckedAt, new Date(deps.now.getTime() - CHECK_EVERY_MS))),
       ),
     );
@@ -625,59 +672,19 @@ async function carryOn(db: Db, payments: PaymentProvider, row: MembershipRow, de
   return false;
 }
 
-/** One active membership whose next month has come: its months paid, a problem with one, and what Square did with it. */
+/**
+ * One membership whose next month has come, or a cancelled one with a month taken before the cancelling not recorded
+ * yet: its months paid, a problem with one, and what Square did with it.
+ */
 async function settleMonths(db: Db, payments: PaymentProvider, row: MembershipRow, deps: JoinDeps): Promise<{ months: number; problems: number }> {
   await db.update(memberships).set({ billingCheckedAt: deps.now }).where(eq(memberships.id, row.id));
   const state = await payments.memberships.subscriptionState(row.subscriptionId!);
   if (state.state === "unknown") return { months: 0, problems: 0 };
-  const accountUrl = `${deps.baseUrl.replace(/\/$/, "")}/account/membership`;
-  const known = new Set((await db.select({ id: membershipPayments.processorId }).from(membershipPayments).where(eq(membershipPayments.membershipId, row.id))).map((payment) => payment.id));
+  const months = await recordPaidMonths(db, row, state, deps);
   const counts = (day: string) => day !== "" && !(row.endsOn !== null && day >= row.endsOn);
 
-  let months = 0;
-  let paidThrough = row.paidThrough ?? monthsAfter(row.startedOn, 1);
-  for (const invoice of [...state.invoices].sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0))) {
-    if (!invoice.paid || known.has(invoice.id) || !counts(invoice.day)) continue;
-    const through = [paidThrough, monthsAfter(invoice.day, 1), state.paidThrough ?? ""].reduce((latest, day) => (day > latest ? day : latest));
-    const recorded = await db.transaction(async (tx) => {
-      const [payment] = await tx
-        .insert(membershipPayments)
-        .values({ membershipId: row.id, processorId: invoice.id, amountCents: invoice.amountCents > 0 ? invoice.amountCents : row.priceCents, periodStart: invoice.day, paidAt: deps.now })
-        .onConflictDoNothing()
-        .returning();
-      if (!payment) return false;
-      await tx.insert(membershipMinutes).values({
-        membershipId: row.id,
-        minutes: row.minutesPerMonth,
-        kind: "month",
-        paymentId: payment.id,
-        note: `The month from ${longDateLabel(invoice.day)}`,
-        actor: "the site",
-      });
-      await tx.update(memberships).set({ paidThrough: through, problem: null }).where(eq(memberships.id, row.id));
-      await queueEmail(
-        tx,
-        membershipMonthPaidEmail({
-          to: row.email,
-          name: row.name,
-          planName: row.planName,
-          minutes: row.minutesPerMonth,
-          priceCents: payment.amountCents,
-          code: row.code,
-          minutesLeft: await minutesLeftOf(tx, row.id),
-          nextBilling: through,
-          accountUrl,
-        }),
-      );
-      return true;
-    });
-    if (recorded) {
-      months++;
-      paidThrough = through;
-    }
-  }
-
-  // What went wrong, told once: payments Square stopped, or a month not paid by the day after it was due.
+  // What went wrong, told once: payments Square stopped, or a month not paid by the day after it was due. A later month
+  // paid does not put the earlier one right: the problem stays, untold again, until no month is left unpaid.
   const today = localDateOf(deps.now);
   const unpaid = state.invoices.filter((invoice) => !invoice.paid && counts(invoice.day) && invoice.day < today).sort((a, b) => (a.day < b.day ? -1 : 1))[0];
   const problem =
@@ -687,6 +694,7 @@ async function settleMonths(db: Db, payments: PaymentProvider, row: MembershipRo
         ? `The payment of ${formatCents(unpaid.amountCents > 0 ? unpaid.amountCents : row.priceCents)} for the month from ${longDateLabel(unpaid.day)} did not go through.`
         : null;
   const [now] = await db.select().from(memberships).where(eq(memberships.id, row.id));
+  if (!problem && now.problem) await db.update(memberships).set({ problem: null }).where(eq(memberships.id, row.id));
   if (problem && now.problem !== problem) {
     await db.transaction(async (tx) => {
       await tx.update(memberships).set({ problem, ...(state.state === "stopped" ? { status: "stopped" as const } : {}) }).where(eq(memberships.id, row.id));
@@ -722,6 +730,65 @@ async function settleMonths(db: Db, payments: PaymentProvider, row: MembershipRo
     });
   }
   return { months, problems: 0 };
+}
+
+/**
+ * Every month Square was paid for that the site has not recorded, once each, with its minutes and the member's email;
+ * never one from the day a cancelled membership ends. Answers how many were recorded.
+ */
+async function recordPaidMonths(
+  db: Db,
+  row: MembershipRow,
+  state: Exclude<SubscriptionState, { state: "unknown" }>,
+  deps: Pick<JoinDeps, "now" | "baseUrl">,
+): Promise<number> {
+  const accountUrl = `${deps.baseUrl.replace(/\/$/, "")}/account/membership`;
+  const known = new Set((await db.select({ id: membershipPayments.processorId }).from(membershipPayments).where(eq(membershipPayments.membershipId, row.id))).map((payment) => payment.id));
+  const counts = (day: string) => day !== "" && !(row.endsOn !== null && day >= row.endsOn);
+
+  let months = 0;
+  let paidThrough = row.paidThrough ?? monthsAfter(row.startedOn, 1);
+  for (const invoice of [...state.invoices].sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0))) {
+    if (!invoice.paid || known.has(invoice.id) || !counts(invoice.day)) continue;
+    const through = [paidThrough, monthsAfter(invoice.day, 1), state.paidThrough ?? ""].reduce((latest, day) => (day > latest ? day : latest));
+    const recorded = await db.transaction(async (tx) => {
+      const [payment] = await tx
+        .insert(membershipPayments)
+        .values({ membershipId: row.id, processorId: invoice.id, amountCents: invoice.amountCents > 0 ? invoice.amountCents : row.priceCents, periodStart: invoice.day, paidAt: deps.now })
+        .onConflictDoNothing()
+        .returning();
+      if (!payment) return false;
+      await tx.insert(membershipMinutes).values({
+        membershipId: row.id,
+        minutes: row.minutesPerMonth,
+        kind: "month",
+        paymentId: payment.id,
+        note: `The month from ${longDateLabel(invoice.day)}`,
+        actor: "the site",
+      });
+      await tx.update(memberships).set({ paidThrough: through }).where(eq(memberships.id, row.id));
+      await queueEmail(
+        tx,
+        membershipMonthPaidEmail({
+          to: row.email,
+          name: row.name,
+          planName: row.planName,
+          minutes: row.minutesPerMonth,
+          priceCents: payment.amountCents,
+          code: row.code,
+          minutesLeft: await minutesLeftOf(tx, row.id),
+          nextBilling: through,
+          accountUrl,
+        }),
+      );
+      return true;
+    });
+    if (recorded) {
+      months++;
+      paidThrough = through;
+    }
+  }
+  return months;
 }
 
 // ── The owners' view (step 5) ────────────────────────────────────────────────
@@ -787,11 +854,12 @@ export interface MemberDetail extends MemberRow {
   payments: MembershipPaymentView[];
 }
 
-/** One membership in full for the owners: every change to its minutes and every month paid. */
-export async function memberDetail(db: DbLike, membershipId: string): Promise<MemberDetail | null> {
-  if (!UUID.test(membershipId)) return null;
-  const [row] = await db.select().from(memberships).where(eq(memberships.id, membershipId));
-  if (!row) return null;
+/**
+ * Every change to a membership's minutes, newest first: each month's, each booking that spent some, each given back, and
+ * each correction. For the owners' member page, and the member's own account (follow-up 3's step 5: the tester's
+ * finding of 2026-11-18 that the account did not list the bookings). The caller checks who may see it.
+ */
+export async function minutesLinesOf(db: DbLike, membershipId: string): Promise<MinutesLine[]> {
   const lines = await db
     .select({
       at: membershipMinutes.createdAt,
@@ -803,15 +871,23 @@ export async function memberDetail(db: DbLike, membershipId: string): Promise<Me
     })
     .from(membershipMinutes)
     .leftJoin(bookings, eq(bookings.id, membershipMinutes.bookingId))
-    .where(eq(membershipMinutes.membershipId, row.id))
+    .where(eq(membershipMinutes.membershipId, membershipId))
     .orderBy(desc(membershipMinutes.createdAt));
+  return lines.map((line) => ({ ...line, bookingRef: line.bookingRef ?? null }));
+}
+
+/** One membership in full for the owners: every change to its minutes and every month paid. */
+export async function memberDetail(db: DbLike, membershipId: string): Promise<MemberDetail | null> {
+  if (!UUID.test(membershipId)) return null;
+  const [row] = await db.select().from(memberships).where(eq(memberships.id, membershipId));
+  if (!row) return null;
   const [listed] = (await listMembers(db)).filter((member) => member.id === row.id);
   return {
     ...listed,
     phone: row.phone,
     minutesPerMonth: row.minutesPerMonth,
     cancelledAt: row.cancelledAt,
-    lines: lines.map((line) => ({ ...line, bookingRef: line.bookingRef ?? null })),
+    lines: await minutesLinesOf(db, row.id),
     payments: await membershipPaymentsOf(db, row.id),
   };
 }

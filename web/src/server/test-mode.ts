@@ -273,8 +273,12 @@ export interface TestModeContents {
    * `active`, with no money moving.
    */
   memberships: { code: string; customer: string; planName: string; status: string; sandbox: boolean }[];
-  /** Memberships bought in test mode that pay for a booking that stays (made in test mode, then real): they stay too. */
-  keptMemberships: { code: string; customer: string }[];
+  /**
+   * Bookings that stay (made in test mode, then real) whose membership of test mode goes: each keeps in its price what
+   * the hours paid, and is named for the owners to look at. Kept, the membership would leave test money that the live
+   * account refuses the database for (the tester's finding of 2026-11-18).
+   */
+  detached: { ref: string; customer: string; code: string }[];
 }
 
 /** Whether the database holds nothing of test mode: no booking or membership of it, and nothing its processors made for another. */
@@ -303,6 +307,8 @@ interface ClearPlan {
   madeReal: { bookingId: string; status: string; label: LabelFacts["label"] }[];
   /** The memberships of test mode that go, with their months and their hours. */
   membershipIds: string[];
+  /** The bookings that stay whose membership goes, with what their history says. */
+  detached: { bookingId: string; code: string; status: string; label: LabelFacts["label"] }[];
 }
 
 /**
@@ -445,22 +451,22 @@ async function planClear(db: DbLike, now: Date): Promise<ClearPlan> {
     if (booking.promoDiscountCents > 0) creditBack.set(booking.promoCodeId!, (creditBack.get(booking.promoCodeId!) ?? 0) + booking.creditAppliedCents);
   }
 
-  // Memberships bought in test mode (follow-up 3). One that pays for a booking that stays (made in test mode, then made
-  // real by the live account) stays with it, named for the owners; the others go, with their months and hours.
-  const testMembers = await db
+  // Memberships bought in test mode (follow-up 3) go, with their months and hours. A booking that stays (made in test
+  // mode, then made real by the live account) that one paid part of keeps what its hours paid, and is named.
+  const removedMembers = await db
     .select({ id: memberships.id, code: memberships.code, email: memberships.email, name: memberships.name, planName: memberships.planName, status: memberships.status, provider: memberships.provider })
     .from(memberships)
     .where(inArray(memberships.provider, tests))
     .orderBy(asc(memberships.createdAt));
-  const usedByStaying =
-    testMembers.length > 0
+  const detached =
+    removedMembers.length > 0
       ? await db
-          .select({ id: bookings.membershipId })
+          .select({ id: bookings.id, ref: bookings.ref, customer: bookings.customerName, status: bookings.status, label: bookings.label, membershipId: bookings.membershipId })
           .from(bookings)
-          .where(and(inArray(bookings.membershipId, testMembers.map((member) => member.id)), some ? notInArray(bookings.id, bookingIds) : undefined))
+          .where(and(inArray(bookings.membershipId, removedMembers.map((member) => member.id)), some ? notInArray(bookings.id, bookingIds) : undefined))
+          .orderBy(asc(bookings.startAt))
       : [];
-  const keptMemberIds = new Set(usedByStaying.map((row) => row.id));
-  const removedMembers = testMembers.filter((member) => !keptMemberIds.has(member.id));
+  const codeOfMember = (id: string | null) => removedMembers.find((member) => member.id === id)?.code ?? "";
   // A member's own emails are told by their address when the member keeps no membership: the owners' wording may leave the code out.
   const staying = removedMembers.length > 0 ? await db.select({ email: memberships.email }).from(memberships).where(notInArray(memberships.id, removedMembers.map((member) => member.id))) : [];
   const membersGone = new Set(removedMembers.map((member) => member.email).filter((email) => !staying.some((row) => row.email === email)));
@@ -553,9 +559,10 @@ async function planClear(db: DbLike, now: Date): Promise<ClearPlan> {
         status: member.status,
         sandbox: member.provider === "square-sandbox",
       })),
-      keptMemberships: testMembers.filter((member) => keptMemberIds.has(member.id)).map((member) => ({ code: member.code, customer: member.name })),
+      detached: detached.map((booking) => ({ ref: booking.ref, customer: booking.customer, code: codeOfMember(booking.membershipId) })),
     },
     membershipIds: removedMembers.map((member) => member.id),
+    detached: detached.map((booking) => ({ bookingId: booking.id, code: codeOfMember(booking.membershipId), status: booking.status, label: booking.label })),
     bookingIds,
     paymentIds: paid.map((payment) => payment.id),
     linkIds: links.map((link) => link.id),
@@ -632,11 +639,11 @@ export function describeTestMode(contents: TestModeContents): string[] {
       lines.push(...listed(billing, (member) => `${member.code}, ${member.customer}, ${member.planName}`));
     }
   }
-  if (contents.keptMemberships.length > 0) {
+  if (contents.detached.length > 0) {
     lines.push(
-      `Kept: ${count(contents.keptMemberships.length, "membership")} bought in test mode that ${contents.keptMemberships.length === 1 ? "pays" : "pay"} for a booking counted as real from now on. Look at ${contents.keptMemberships.length === 1 ? "it" : "each"} under Memberships:`,
+      `Kept, as real: ${count(contents.detached.length, "booking")} that a membership bought in test mode paid part of. The membership goes; ${contents.detached.length === 1 ? "the booking keeps" : "each keeps"} in its price what the hours paid. Look at ${contents.detached.length === 1 ? "it" : "each"}:`,
     );
-    lines.push(...listed(contents.keptMemberships, (member) => `${member.code}, ${member.customer}`));
+    lines.push(...listed(contents.detached, (booking) => `${booking.ref}, ${booking.customer}: hours of ${booking.code}`));
   }
   if (contents.pretend.length > 0) {
     lines.push(
@@ -754,8 +761,23 @@ export async function clearTestMode(db: Db, now: Date): Promise<TestModeContents
       await tx.delete(promoCodes).where(inArray(promoCodes.id, plan.codeIds));
       await renumberFreeHours(tx);
     }
+    // A booking that stays lets go of its membership of test mode, and keeps in its price what the hours paid.
+    if (plan.detached.length > 0) {
+      await tx.update(bookings).set({ membershipId: null }).where(inArray(bookings.id, plan.detached.map((entry) => entry.bookingId)));
+      for (const entry of plan.detached) {
+        const label = labelOf(entry);
+        await recordEvent(tx, {
+          bookingId: entry.bookingId,
+          from: label,
+          to: label,
+          actor: BY_SYSTEM,
+          at: now,
+          note: `Its membership ${entry.code} was bought in test mode and was removed with test mode: what its hours paid stays counted in the price`,
+        });
+      }
+    }
     // Membership hours spent on the bookings that go, and every line of the memberships that go: a line keeps its
-    // booking and its month from being removed. A membership that stays gets back what such a booking took of it.
+    // booking and its month from being removed. A real membership gets back what such a booking took of it.
     const linesGoing: SQL[] = [
       ...(plan.bookingIds.length > 0 ? [inArray(membershipMinutes.bookingId, plan.bookingIds)] : []),
       ...(plan.membershipIds.length > 0 ? [inArray(membershipMinutes.membershipId, plan.membershipIds)] : []),

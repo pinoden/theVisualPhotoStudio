@@ -112,10 +112,11 @@ export function BookingSummary({ booking }: { booking: BookingView }) {
         </div>
       ))}
       {/* A booking paid in parts (made in the admin, or one whose card was never charged): what was received, then what is owed. */}
-      {paidStatus && booking.receivedCents > 0 && booking.dueCents > 0 && (
+      {paidStatus && booking.receivedCents - booking.creditReturnedCents > 0 && booking.dueCents > 0 && (
         <div className="price-row">
           <span>{byCard > 0 ? "Paid so far" : "Paid at the studio so far"}</span>
-          <span>{formatCents(booking.receivedCents)}</span>
+          {/* Toward its price: what was given back of a payment beyond it does not count (follow-up 5). */}
+          <span>{formatCents(booking.receivedCents - booking.creditReturnedCents)}</span>
         </div>
       )}
       {creditLeft > 0 && (

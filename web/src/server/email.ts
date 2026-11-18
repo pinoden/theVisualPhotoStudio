@@ -256,14 +256,16 @@ export function bookingConfirmationEmail(input: {
 }): QueuedEmail {
   // Part paid with a code or membership hours: the whole, that part, and the rest, paid by card or, for a booking the
   // studio made, at the studio.
+  // Nothing left after the code or the hours: no line says a card was charged, or that anything is to pay (the tester's
+  // finding of 2026-11-18: "Charged to your card: $0" for a booking the studio made).
   const payment =
     input.creditCents > 0
       ? [
           `Total: ${money(input.totalCents)}`,
           `Paid with your ${input.creditName ?? "reschedule code"}: ${money(input.creditCents)}`,
-          input.payAtStudio ? `To pay at the studio: ${money(input.cardCents)}` : `Charged to your card: ${money(input.cardCents)}`,
+          ...(input.cardCents > 0 ? [input.payAtStudio ? `To pay at the studio: ${money(input.cardCents)}` : `Charged to your card: ${money(input.cardCents)}`] : []),
         ]
-      : [input.payAtStudio ? `To pay at the studio: ${money(input.totalCents)}` : `Total: ${money(input.totalCents)}`];
+      : [input.payAtStudio && input.totalCents > 0 ? `To pay at the studio: ${money(input.totalCents)}` : `Total: ${money(input.totalCents)}`];
   return written(
     "booking_confirmation",
     { to: input.to, kind: "booking_confirmation" },

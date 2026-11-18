@@ -6,8 +6,9 @@ import { formatDay, formatInstant, formatRange } from "@/server/tz";
 
 /**
  * One receipt on the screen, laid out to print cleanly: the studio, the
- * booking, what was booked at the prices it was booked at, and every payment
- * and refund. The PDF file is drawn from the same `Receipt`.
+ * booking, what was booked at its prices (its new day's after a move that
+ * priced it again), and every payment and refund. The PDF file is drawn from
+ * the same `Receipt`.
  */
 export function ReceiptView({ receipt, business }: { receipt: Receipt; business: Business }) {
   const when = formatRange(new Date(receipt.visitStart), new Date(receipt.visitEnd));
@@ -117,8 +118,9 @@ export function ReceiptView({ receipt, business }: { receipt: Receipt; business:
         </div>
       </div>
       <p className="receipt-foot">
-        This receipt shows what was actually paid for this booking, at the prices it was booked at. Amounts are in US
-        dollars. Times are Eastern Time.
+        {/* Its prices are the new day's when the studio moved it to a day priced differently (follow-up 5). */}
+        This receipt shows the booking at its prices, and what was actually paid and given back for it. Amounts are in
+        US dollars. Times are Eastern Time.
       </p>
     </article>
   );

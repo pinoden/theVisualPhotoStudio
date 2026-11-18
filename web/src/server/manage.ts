@@ -37,7 +37,7 @@ import {
 } from "./email";
 import { BY_CUSTOMER, BY_STUDIO, BY_SYSTEM, recordEvent } from "./history";
 import { releaseHolds } from "./holds";
-import { heldCentsByBooking, netCardPaidCents, paidAtStudioCents } from "./money";
+import { creditLeftCentsByBooking, heldCentsByBooking, netCardPaidCents, paidAtStudioCents } from "./money";
 import {
   closePayLinkOf,
   lookAtPayLink,
@@ -824,8 +824,11 @@ async function recordRefunds(
   totalCents: number,
   reason: string,
   automatic: boolean,
+  /** The part of it that gives back what the booking was paid beyond its price (`refunds.credit_cents`, follow-up 5). */
+  creditCents = 0,
 ): Promise<string[]> {
   if (totalCents <= 0) return [];
+  let credit = Math.min(creditCents, totalCents);
   // Only card payments made through the site: money taken at the studio cannot be sent back from here.
   const paid = await tx
     .select()
@@ -843,12 +846,14 @@ async function recordRefunds(
       .where(and(eq(refunds.paymentId, payment.id), inArray(refunds.status, ["pending", "succeeded", "failed"])));
     const amount = Math.min(left, payment.amountCents - already);
     if (amount <= 0) continue;
+    const ofCredit = Math.min(credit, amount);
     const [refund] = await tx
       .insert(refunds)
-      .values({ paymentId: payment.id, amountCents: amount, reason, automatic, status: "pending" })
+      .values({ paymentId: payment.id, amountCents: amount, creditCents: ofCredit, reason, automatic, status: "pending" })
       .returning({ id: refunds.id });
     ids.push(refund.id);
     left -= amount;
+    credit -= ofCredit;
   }
   if (left > 0) throw new Error("Refund exceeds what was paid.");
   return ids;
@@ -1447,7 +1452,10 @@ export async function ownerRefund(
         }
       : null;
     const toldId = told ? await queueEmail(tx, codeRefundEmail({ ...told, state: "sent" })) : null;
-    const refundIds = await recordRefunds(tx, booking.id, input.amountCents, reason || `Refund for ${booking.ref}`, false);
+    // A refund while the booking was paid beyond its price gives that back first: should its price go up again, it owes
+    // that part again, and not the rest, which is the studio's goodwill (`paidTowardPriceCentsByBooking`).
+    const creditLeft = (await creditLeftCentsByBooking(tx, [booking])).get(booking.id) ?? 0;
+    const refundIds = await recordRefunds(tx, booking.id, input.amountCents, reason || `Refund for ${booking.ref}`, false, creditLeft);
     const label = labelOf(booking);
     await recordEvent(tx, {
       bookingId: booking.id,

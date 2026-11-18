@@ -25,7 +25,7 @@ import { BY_CUSTOMER, recordEvent } from "./history";
 import { releaseHolds } from "./holds";
 import { giveBackReserved, takeReserved } from "./reserved";
 import { activeChargesByBooking } from "./charges";
-import { creditLeftCentsByBooking, heldCentsByBooking, owedCentsByBooking, receivedCentsByBooking } from "./money";
+import { creditLeftCentsByBooking, creditReturnedCentsByBooking, heldCentsByBooking, owedCentsByBooking, receivedCentsByBooking } from "./money";
 import { emailField, hashToken, textField } from "./input-fields";
 import { giveBackUnmadeMinutes, takeBookingMinutes } from "./membership-minutes";
 import { findUsableMembership, isMembershipCode, type UsableMembership } from "./memberships";
@@ -219,8 +219,11 @@ export type QuoteResult =
       ok: true;
       quote: Quote;
       promo: Pick<UsablePromo, "code" | "kind" | "value" | "source" | "photographyOnly"> | null;
-      /** A membership's code: what is left on it, and whether weekends pay the difference, for the screen's own price. */
-      membership: { code: string; minutesLeft: number; weekendDifference: boolean } | null;
+      /**
+       * A membership's code: what is left on it, whether weekends pay the difference, and the studios its plan is for,
+       * for the screen's own price (which drops the hours when other studios are chosen afterwards).
+       */
+      membership: { code: string; minutesLeft: number; weekendDifference: boolean; studioIds: string[]; studioNames: string[] } | null;
     }
   | { ok: false; status: number; code: "invalid_input" | "invalid_price" | "invalid_code"; message: string };
 
@@ -282,7 +285,7 @@ export async function quoteSelection(db: DbLike, rawInput: unknown, now: Date, p
       ok: true,
       quote: price,
       promo: promo ? { code: promo.code, kind: promo.kind, value: promo.value, source: promo.source, photographyOnly: promo.photographyOnly } : null,
-      membership: member && membership ? { code: member.code, ...membership } : null,
+      membership: member && membership ? { code: member.code, ...membership, studioIds: member.studioIds, studioNames: member.studioNames } : null,
     };
   } catch (error) {
     if (error instanceof PricingError) return fail(422, "invalid_price", error.message);
@@ -479,6 +482,8 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
             membershipId: spendsMinutes ? member!.id : null,
             membershipMinutes: spendsMinutes ? price.membershipMinutes : 0,
             membershipCents: spendsMinutes ? price.membershipCents : 0,
+            // The kind of day it is priced as, which a move by the studio compares the new day with (follow-up 5).
+            pricedAs: day.dayType,
             // Money that was already moved once stays "moved" on the new booking.
             rescheduledCount: spendsCode && promo!.source === "reschedule" ? promo!.rescheduleGeneration : 0,
             manageTokenHash: hashToken(manageToken),
@@ -655,7 +660,8 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
         creditCents: spendsCode && promo!.kind === "amount" ? price.promoDiscountCents : price.membershipCents,
         creditName: spendsMinutes ? `membership hours (${durationLabel(price.membershipMinutes)})` : promo ? creditName(promo.source) : undefined,
         cardCents: price.totalCents,
-        payAtStudio: Boolean(deps.madeBy) && price.totalCents > 0,
+        // A booking the studio made is paid at the studio, whatever a code or membership hours left to pay: no card is charged.
+        payAtStudio: Boolean(deps.madeBy),
         photoIncludes: session ? session.includes : undefined,
         manageUrl: manageUrl(deps.baseUrl, ref, manageToken),
         access: await loadAccessInstructions(db),
@@ -713,6 +719,8 @@ export interface BookingView {
   receivedCents: number;
   /** The part of it taken at the studio and recorded by hand; the rest came by card (online, or through a payment link). */
   receivedAtStudioCents: number;
+  /** What was given back of what it was paid beyond its price (follow-up 5): `receivedCents` less this was paid toward it. */
+  creditReturnedCents: number;
   /**
    * What is still to pay (`owedCents` in money.ts): until it is paid for a
    * booking made in the admin; for one made online, only once the amount its
@@ -736,7 +744,7 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[], now: Date =
   if (rows.length === 0) return [];
   const ids = rows.map((r) => r.id);
   const codeIds = rows.map((r) => r.promoCodeId).filter((id): id is string => id !== null);
-  const [holdRows, addonRows, codeRows, received, atStudio, owed, held, charged, creditLeft] = await together(db, [
+  const [holdRows, addonRows, codeRows, received, atStudio, owed, held, charged, creditLeft, creditReturned] = await together(db, [
     () => db
       .select({ bookingId: studioHolds.bookingId, name: studios.name, priceCents: studioHolds.priceCents, sort: studios.sortOrder })
       .from(studioHolds)
@@ -755,6 +763,7 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[], now: Date =
     () => heldCentsByBooking(db, ids, now),
     () => activeChargesByBooking(db, ids),
     () => creditLeftCentsByBooking(db, rows),
+    () => creditReturnedCentsByBooking(db, ids),
   ]);
   return rows.map((booking) => ({
     id: booking.id,
@@ -790,6 +799,7 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[], now: Date =
     chargesCents: (charged.get(booking.id) ?? []).reduce((sum, charge) => sum + charge.cents, 0),
     receivedCents: received.get(booking.id) ?? 0,
     receivedAtStudioCents: atStudio.get(booking.id) ?? 0,
+    creditReturnedCents: creditReturned.get(booking.id) ?? 0,
     dueCents: owed.get(booking.id) ?? 0,
     heldCents: held.get(booking.id) ?? 0,
     creditLeftCents: creditLeft.get(booking.id) ?? 0,
