@@ -8,7 +8,10 @@ export interface PolicySettings {
   refundWindowHours: number;
   refundFeePercent: number;
   rescheduleCutoffHours: number;
+  /** How many moves are free of charge. 0: moving is switched off. */
   maxReschedules: number;
+  /** What each move after the free ones costs, taken off the code. 0: none is offered after them. */
+  rescheduleFeeCents: number;
 }
 
 export interface BookingFacts {
@@ -118,7 +121,10 @@ export type RescheduleBlock =
   /** The owner has switched moving off (`maxReschedules` is 0). */
   | "not_offered"
   | "too_late"
+  /** The free moves are used, and the owners offer none for a fee (`rescheduleFeeCents` is 0). */
   | "limit_reached"
+  /** The fee for moving again is as much as the booking is worth, or more: no credit would be left. */
+  | "fee_not_covered"
   | "nothing_paid";
 
 export type RescheduleOutcome =
@@ -129,6 +135,8 @@ export type RescheduleOutcome =
       creditCents: number;
       /** The part of it that is the discount a percent code gave on this booking, not money paid. */
       discountCents: number;
+      /** The fee for a move after the free ones, already taken off `creditCents`. 0 for a free move. */
+      feeCents: number;
     };
 
 /**
@@ -138,12 +146,18 @@ export type RescheduleOutcome =
  * code was spent on this booking and does not come back, and checkout takes
  * one code, so without its value the same booking at a new time would cost
  * the discount a second time.
+ *
+ * The first moves are free (`maxReschedules` of them: one, by the owner's
+ * terms). Each further one costs `rescheduleFeeCents`, which is taken off
+ * the code: the client pays it when the new booking is made, as the
+ * difference the code no longer covers (the owner's answer of 2026-11-17).
  */
 export function rescheduleOutcome(booking: BookingFacts, now: Date, settings: PolicySettings): RescheduleOutcome {
   if (booking.status !== "confirmed") return { allowed: false, reason: "not_confirmed" };
   if (now.getTime() >= booking.startAt.getTime()) return { allowed: false, reason: "already_started" };
   if (settings.maxReschedules <= 0) return { allowed: false, reason: "not_offered" };
-  if (booking.rescheduledCount >= settings.maxReschedules) return { allowed: false, reason: "limit_reached" };
+  const free = booking.rescheduledCount < settings.maxReschedules;
+  if (!free && settings.rescheduleFeeCents <= 0) return { allowed: false, reason: "limit_reached" };
   if (hoursUntil(booking.startAt, now) < settings.rescheduleCutoffHours) return { allowed: false, reason: "too_late" };
   // Money taken at the studio is held for the booking like any other, so it moves with it. A pet fee
   // already returned as studio credit was given back once: it does not move with the booking a second time.
@@ -152,5 +166,8 @@ export function rescheduleOutcome(booking: BookingFacts, now: Date, settings: Po
   // A booking that cost nothing is cancelled instead: that gives its code back.
   if (paidCents <= 0) return { allowed: false, reason: "nothing_paid" };
   const discountCents = Math.max(0, booking.discountCents);
-  return { allowed: true, creditCents: paidCents + discountCents, discountCents };
+  const feeCents = free ? 0 : settings.rescheduleFeeCents;
+  const creditCents = paidCents + discountCents - feeCents;
+  if (creditCents <= 0) return { allowed: false, reason: "fee_not_covered" };
+  return { allowed: true, creditCents, discountCents, feeCents };
 }

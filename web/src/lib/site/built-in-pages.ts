@@ -320,7 +320,9 @@ function faq(): BuiltInPage {
     ),
     question(
       "{if moving}Can I move my booking to another time?",
-      "<p>Yes, {reschedules allowed}, until {reschedule cutoff} before it starts. Press Reschedule on your booking page or in My Bookings. We release your time and email you a code worth what you paid, plus anything a discount code took off that booking, so the same booking at a new time costs nothing more. Book the new time and enter the code at checkout: if the new booking costs more you pay the difference, and if it costs less the rest stays on the code. The code is valid for {reschedule code valid}.</p>",
+      "<p>Yes, until {reschedule cutoff} before it starts. Press Reschedule on your booking page or in My Bookings. We release your time and email you a code worth what you paid, plus anything a discount code took off that booking, so the same booking at a new time costs nothing more. Book the new time and enter the code at checkout: if the new booking costs more you pay the difference, and if it costs less the rest stays on the code. The code is valid for {reschedule code valid}.</p>" +
+        "<p>{if reschedule fee}You can move a booking {reschedules allowed} free of charge. Moving it again costs {reschedule fee} each time, which is taken off the code.</p>" +
+        "<p>{if not reschedule fee}A booking can be moved {reschedules allowed}.</p>",
     ),
     question("What if I have an emergency and cannot make it?", '<p><a href="/contact">Contact us</a> as soon as possible and we will reschedule your appointment free of charge.</p>'),
     question(
@@ -424,6 +426,7 @@ function policies(): BuiltInPage {
     "<li>Cancellations made {refund window with hours} or more before the appointment are eligible for a full refund, excluding the non-refundable payment processing fee ({refund fee}).</li>" +
     "<li>{if moving}Cancellations made less than {refund window} before the appointment are non-refundable, but may be rescheduled at no additional charge until {reschedule cutoff} before the appointment.</li>" +
     "<li>{if not moving}Cancellations made less than {refund window} before the appointment are non-refundable.</li>" +
+    "<li>{if reschedule fee}An appointment may be rescheduled {reschedules allowed} at no additional charge. Each additional reschedule costs {reschedule fee}, which is deducted from the reschedule credit.</li>" +
     "<li>{if moving}Once an appointment has been rescheduled, it is no longer eligible for a refund.</li>" +
     "<li>{if photography}Photography sessions with our in-house photographer follow the same terms: a session cancelled {photography refund window} or more before the appointment is refunded, and one cancelled later is not. Sessions are booked at least {photography notice} ahead.</li>" +
     "</ul>" +

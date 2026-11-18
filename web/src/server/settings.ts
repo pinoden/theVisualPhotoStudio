@@ -34,8 +34,14 @@ export interface Settings {
   refundFeePercent: number;
   /** A customer can ask for a reschedule code until this many hours before the start. */
   rescheduleCutoffHours: number;
-  /** How many times the same money can be moved to a new booking. */
+  /** How many times the same money can be moved to a new booking free of charge. 0 switches moving off. */
   maxReschedules: number;
+  /**
+   * What each further move costs, in cents, taken off the reschedule code (the owner's answer of
+   * 2026-11-17: $20 for each additional reschedule). 0: after the free ones a booking cannot be moved
+   * online again, as before that answer.
+   */
+  rescheduleFeeCents: number;
   /** Days a reschedule code stays valid. */
   creditValidDays: number;
 
@@ -107,6 +113,7 @@ export const DEFAULT_SETTINGS: Settings = {
   refundFeePercent: 5,
   rescheduleCutoffHours: 24,
   maxReschedules: 1,
+  rescheduleFeeCents: 2000, // the owner's answer of 2026-11-17: the first reschedule is free, each further one $20
   creditValidDays: 90,
 
   loyaltyEnabled: true,
@@ -164,6 +171,16 @@ export const NUMBER_SETTING_RANGES = {
 } as const satisfies Partial<Record<keyof Settings, readonly [number, number]>>;
 
 export type NumberSettingKey = keyof typeof NUMBER_SETTING_RANGES;
+
+/**
+ * The amounts of money the owners set under Settings, in cents, each with the
+ * lowest and highest it may be. The form shows and reads them in dollars.
+ */
+export const MONEY_SETTING_RANGES = {
+  rescheduleFeeCents: [0, 100_000],
+} as const satisfies Partial<Record<keyof Settings, readonly [number, number]>>;
+
+export type MoneySettingKey = keyof typeof MONEY_SETTING_RANGES;
 const bool = (v: unknown) => typeof v === "boolean";
 const instantOrNull = (v: unknown) => v === null || (typeof v === "string" && v.length <= 40 && Number.isFinite(Date.parse(v)));
 
@@ -191,6 +208,7 @@ const VALIDATORS: { [K in Exclude<keyof Settings, "multiStudioPercent">]: (v: un
   refundFeePercent: int(NUMBER_SETTING_RANGES.refundFeePercent),
   rescheduleCutoffHours: int(NUMBER_SETTING_RANGES.rescheduleCutoffHours),
   maxReschedules: int(NUMBER_SETTING_RANGES.maxReschedules),
+  rescheduleFeeCents: int(MONEY_SETTING_RANGES.rescheduleFeeCents),
   creditValidDays: int(NUMBER_SETTING_RANGES.creditValidDays),
   loyaltyEnabled: bool,
   loyaltyVisits: int(NUMBER_SETTING_RANGES.loyaltyVisits),

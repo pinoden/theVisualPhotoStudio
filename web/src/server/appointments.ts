@@ -29,7 +29,7 @@ import { bookingMovedEmail, queueEmail } from "./email";
 import { listEvents, recordEvent, withoutAmounts, type BookingEvent } from "./history";
 import { openPayLinkOf, type PayLinkView } from "./pay-links";
 import { PET_CREDIT_BLOCK_TEXT, petCreditStanding, petFeeReturnedCents } from "./pet-fee";
-import { loadSettings } from "./settings";
+import { loadSettings, type Settings } from "./settings";
 import { canViewDay } from "./staff";
 import { moneyOf, type BookingMoney } from "./studio-payments";
 import { formatInstant, localDateOf, localToUtc } from "./tz";
@@ -269,9 +269,11 @@ export type MoveResult =
  *
  * `countsAsClientMove` says the client asked for the move. While moving is
  * offered (`maxReschedules` above 0), it then counts as
- * their one reschedule: the booking is no longer refunded automatically and
- * the client cannot move it again themselves, as the rental terms say. Leave
- * it off when the studio is the one that needs the change.
+ * a reschedule of theirs: the booking is no longer refunded automatically,
+ * and once the free moves are used the client moves it again themselves only
+ * for the fee (`rescheduleFeeCents`), or not at all while that is 0, as the
+ * rental terms say. Leave it off when the studio is the one that needs the
+ * change.
  */
 export async function moveBooking(
   db: Db,
@@ -382,7 +384,7 @@ export async function moveBooking(
           was,
           now: is,
           duration: durationLabel(booking.durationMinutes),
-          ...(clientMove ? { clientAsked: { canMoveAgain: booking.rescheduledCount + 1 < settings.maxReschedules } } : {}),
+          ...(clientMove ? { clientAsked: movesLeft(booking.rescheduledCount + 1, settings) } : {}),
         }),
       );
       return { ok: true, startAt, endAt };
@@ -392,6 +394,12 @@ export async function moveBooking(
     if (pgErrorCode(error) === PG_EXCLUSION_VIOLATION) return refuse("slot_taken", "That time was just taken. Choose another.");
     throw error;
   }
+}
+
+/** After `count` moves: whether the client can move the booking again online, and what that costs. */
+function movesLeft(count: number, settings: Pick<Settings, "maxReschedules" | "rescheduleFeeCents">): { canMoveAgain: boolean; againFeeCents: number } {
+  const free = count < settings.maxReschedules;
+  return { canMoveAgain: free || settings.rescheduleFeeCents > 0, againFeeCents: free ? 0 : settings.rescheduleFeeCents };
 }
 
 // ── A booking made in the admin for a client ─────────────────────────────────

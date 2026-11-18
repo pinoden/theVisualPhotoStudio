@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { connection } from "next/server";
 import { Suspense } from "react";
 import { getDb } from "@/db/client";
+import { centsToInput, MONEY_FIELD } from "@/lib/parse";
 import { requireOwner } from "@/server/session";
 import { ACCESS_INSTRUCTIONS_MAX, loadAccessInstructions, loadSettings, NUMBER_SETTING_RANGES } from "@/server/settings";
 import { formatDay } from "@/server/tz";
@@ -73,17 +74,29 @@ async function SettingsForm({ searchParams }: Pick<PageProps<"/admin/settings">,
                   <label className="form-label" htmlFor={field.key}>
                     {field.label}
                   </label>
-                  <input
-                    id={field.key}
-                    name={field.key}
-                    className="form-control"
-                    type="number"
-                    min={NUMBER_SETTING_RANGES[field.key][0]}
-                    max={NUMBER_SETTING_RANGES[field.key][1]}
-                    step={1}
-                    defaultValue={settings[field.key]}
-                    required
-                  />
+                  {field.money ? (
+                    <input
+                      id={field.key}
+                      name={field.key}
+                      className="form-control"
+                      defaultValue={centsToInput(settings[field.key])}
+                      maxLength={12}
+                      {...MONEY_FIELD}
+                      required
+                    />
+                  ) : (
+                    <input
+                      id={field.key}
+                      name={field.key}
+                      className="form-control"
+                      type="number"
+                      min={NUMBER_SETTING_RANGES[field.key][0]}
+                      max={NUMBER_SETTING_RANGES[field.key][1]}
+                      step={1}
+                      defaultValue={settings[field.key]}
+                      required
+                    />
+                  )}
                   {field.help && <div style={{ fontSize: ".78rem", marginTop: ".25rem" }}>{field.help}</div>}
                 </div>
               ))}

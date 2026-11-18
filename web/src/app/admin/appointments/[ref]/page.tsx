@@ -252,8 +252,12 @@ async function AppointmentDetails({
               {settings.maxReschedules > 0 ? (
                 <label style={{ display: "block", fontSize: ".85rem" }}>
                   <input type="checkbox" name="countsAsClientMove" defaultChecked /> The client asked for this move. It
-                  counts as their one reschedule: the booking is then no longer refunded automatically, as the rental
-                  terms say. Untick it when the studio needs the change.
+                  counts as a reschedule of theirs: the booking is then no longer refunded automatically, as the rental
+                  terms say
+                  {settings.rescheduleFeeCents > 0
+                    ? `, and once their free ${settings.maxReschedules === 1 ? "reschedule is" : "reschedules are"} used, moving it online costs them ${formatCents(settings.rescheduleFeeCents)}`
+                    : ""}
+                  . Untick it when the studio needs the change.
                 </label>
               ) : (
                 <p style={{ fontSize: ".85rem", margin: 0 }}>

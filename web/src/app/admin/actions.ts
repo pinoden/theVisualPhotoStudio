@@ -33,7 +33,17 @@ import { flushEmailsSoon, manageDeps } from "@/server/runtime";
 import { notFound } from "next/navigation";
 import { can, type Ability } from "@/lib/abilities";
 import { requireManager, requireOwner } from "@/server/session";
-import { ACCESS_INSTRUCTIONS_MAX, loadSettings, NUMBER_SETTING_RANGES, saveAccessInstructions, saveSetting, switchLoyalty, type NumberSettingKey } from "@/server/settings";
+import {
+  ACCESS_INSTRUCTIONS_MAX,
+  loadSettings,
+  MONEY_SETTING_RANGES,
+  NUMBER_SETTING_RANGES,
+  saveAccessInstructions,
+  saveSetting,
+  switchLoyalty,
+  type MoneySettingKey,
+  type NumberSettingKey,
+} from "@/server/settings";
 import { settingLabel } from "./settings/fields";
 import { addStudioPhotos, moveStudioPhoto, removeStudioPhoto, setStudioFloorPlan } from "@/server/studio-photos";
 import { includedList } from "@/lib/studio-facts";
@@ -361,6 +371,7 @@ export async function voidCodeAction(formData: FormData): Promise<void> {
 // ── Settings ─────────────────────────────────────────────────────────────────
 
 const NUMBER_SETTINGS = Object.keys(NUMBER_SETTING_RANGES) as NumberSettingKey[];
+const MONEY_SETTINGS = Object.keys(MONEY_SETTING_RANGES) as MoneySettingKey[];
 // What staff can do is set on the Staff page (saveStaffAbilitiesAction), not here.
 
 export async function saveSettingsAction(formData: FormData): Promise<void> {
@@ -372,6 +383,13 @@ export async function saveSettingsAction(formData: FormData): Promise<void> {
     if (value === null || !(await saveSetting(db, key, value))) {
       const [min, max] = NUMBER_SETTING_RANGES[key];
       rejected.push(`${settingLabel(key)} is a whole number from ${min} to ${max}`);
+    }
+  }
+  for (const key of MONEY_SETTINGS) {
+    const cents = dollarsToCents(text(formData, key));
+    if (cents === null || !(await saveSetting(db, key, cents))) {
+      const [min, max] = MONEY_SETTING_RANGES[key];
+      rejected.push(`${settingLabel(key)} is an amount from ${formatCents(min)} to ${formatCents(max)}`);
     }
   }
   // Loyalty has a switch of its own: switching it on after it was off starts the stamps over (`switchLoyalty`).

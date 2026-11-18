@@ -1,7 +1,10 @@
-import type { NumberSettingKey } from "@/server/settings";
+import type { MoneySettingKey, NumberSettingKey } from "@/server/settings";
+
+/** A whole number of the Settings page, or an amount of money (`money`), typed in dollars and kept in cents. */
+export type SettingField = { key: NumberSettingKey; label: string; help: string; money?: undefined } | { key: MoneySettingKey; label: string; help: string; money: true };
 
 /** The numbers of the Settings page, in its groups, with the words the page shows for each. */
-export const SETTING_GROUPS: { title: string; fields: { key: NumberSettingKey; label: string; help: string }[] }[] = [
+export const SETTING_GROUPS: { title: string; fields: SettingField[] }[] = [
   {
     title: "Booking",
     fields: [
@@ -19,7 +22,13 @@ export const SETTING_GROUPS: { title: string; fields: { key: NumberSettingKey; l
       { key: "photoRefundWindowHours", label: "Refund window for photography (hours before start)", help: "336 is 14 days." },
       { key: "refundFeePercent", label: "Processing fee kept (%)", help: "0 refunds in full." },
       { key: "rescheduleCutoffHours", label: "Reschedule cut-off (hours before start)", help: "After this, customers must call." },
-      { key: "maxReschedules", label: "Reschedules allowed per booking", help: "0 switches reschedule codes off." },
+      { key: "maxReschedules", label: "Free reschedules per booking", help: "0 switches reschedule codes off." },
+      {
+        key: "rescheduleFeeCents",
+        label: "Fee for each further reschedule ($)",
+        help: "Taken off the reschedule code. With 0, a booking cannot be moved online again after the free ones.",
+        money: true,
+      },
       { key: "creditValidDays", label: "Reschedule code valid for (days)", help: "" },
     ],
   },
@@ -34,7 +43,7 @@ export const SETTING_GROUPS: { title: string; fields: { key: NumberSettingKey; l
 ];
 
 /** What the Settings page calls a number, for a message about it. */
-export function settingLabel(key: NumberSettingKey): string {
+export function settingLabel(key: NumberSettingKey | MoneySettingKey): string {
   for (const group of SETTING_GROUPS) {
     const field = group.fields.find((entry) => entry.key === key);
     if (field) return field.label;
