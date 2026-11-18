@@ -60,4 +60,4 @@ Copy `.env.example` to `.env.local` and fill it in. Each variable is explained t
 - `e2e/`: browser tests.
 - `drizzle/`: database migrations. After changing `src/db/schema.ts`, run `npm run db:generate`.
 
-Open decisions and known gaps are listed in `CLAUDE.md` at the repository root, under "Rebuild decisions".
+Open decisions and known gaps are listed in `ProjectLibrary.md` at the repository root, under "Rebuild decisions".

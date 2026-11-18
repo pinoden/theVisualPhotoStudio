@@ -8,7 +8,7 @@ import { BLOCKS, type BlockName } from "./registry";
 
 /**
  * Two blocks taken from another studio's website (see "Ideas from another
- * studio's website" in CLAUDE.md): reviews, and a row of the logos of the
+ * studio's website" in ProjectLibrary.md): reviews, and a row of the logos of the
  * brands the studio has worked for. Drawn as visitors get them.
  */
 

@@ -356,7 +356,7 @@ describe("money taken at the studio and the site's own refunds", () => {
     const paid = await madeInAdmin(); // four days ahead
     expectOk(await recordStudioPayment(world.db, owner, paid.ref, cash(17600), NOW));
     const late = expectOk(await cancelBooking(world.db, paid.ref, { kind: "customer", email: "dana@example.com" }, world.manageDeps()));
-    expect(late.message).toBe("No refund is due, because the booking starts in less than 14 days.");
+    expect(late.message).toBe("No refund is due, because the booking starts in less than 7 days.");
 
     const unpaid = await madeInAdmin(FAR);
     const none = expectOk(await cancelBooking(world.db, unpaid.ref, { kind: "customer", email: "dana@example.com" }, world.manageDeps()));

@@ -320,7 +320,9 @@ function faq(): BuiltInPage {
     ),
     question(
       "{if moving}Can I move my booking to another time?",
-      "<p>Yes, {reschedules allowed}, until {reschedule cutoff} before it starts. Press Reschedule on your booking page or in My Bookings. We release your time and email you a code worth what you paid, plus anything a discount code took off that booking, so the same booking at a new time costs nothing more. Book the new time and enter the code at checkout: if the new booking costs more you pay the difference, and if it costs less the rest stays on the code. The code is valid for {reschedule code valid}.</p>",
+      "<p>Yes, until {reschedule cutoff} before it starts. Press Reschedule on your booking page or in My Bookings. We release your time and email you a code worth what you paid, plus anything a discount code took off that booking, so the same booking at a new time costs nothing more. Book the new time and enter the code at checkout: if the new booking costs more you pay the difference, and if it costs less the rest stays on the code. The code is valid for {reschedule code valid}.</p>" +
+        "<p>{if reschedule fee}You can move a booking {reschedules allowed} free of charge. Moving it again costs {reschedule fee} each time, which is taken off the code.</p>" +
+        "<p>{if not reschedule fee}A booking can be moved {reschedules allowed}.</p>",
     ),
     question("What if I have an emergency and cannot make it?", '<p><a href="/contact">Contact us</a> as soon as possible and we will reschedule your appointment free of charge.</p>'),
     question(
@@ -343,7 +345,7 @@ function faq(): BuiltInPage {
     question(
       "What are the rules during a session?",
       "<ul>" +
-        "<li>Food and drinks are not permitted on furniture.</li>" +
+        "<li>Food and drinks are not allowed inside the studios.</li>" +
         "<li>Furniture may be moved unless noted otherwise. Lift it, never drag it. Mirrors and glass items may not be moved.</li>" +
         "<li>Return all furniture and props to where you found them before you leave.</li>" +
         "<li>Children are welcome and must be supervised by an adult at all times.</li>" +
@@ -424,6 +426,7 @@ function policies(): BuiltInPage {
     "<li>Cancellations made {refund window with hours} or more before the appointment are eligible for a full refund, excluding the non-refundable payment processing fee ({refund fee}).</li>" +
     "<li>{if moving}Cancellations made less than {refund window} before the appointment are non-refundable, but may be rescheduled at no additional charge until {reschedule cutoff} before the appointment.</li>" +
     "<li>{if not moving}Cancellations made less than {refund window} before the appointment are non-refundable.</li>" +
+    "<li>{if reschedule fee}An appointment may be rescheduled {reschedules allowed} at no additional charge. Each additional reschedule costs {reschedule fee}, which is deducted from the reschedule credit.</li>" +
     "<li>{if moving}Once an appointment has been rescheduled, it is no longer eligible for a refund.</li>" +
     "<li>{if photography}Photography sessions with our in-house photographer follow the same terms: a session cancelled {photography refund window} or more before the appointment is refunded, and one cancelled later is not. Sessions are booked at least {photography notice} ahead.</li>" +
     "</ul>" +
@@ -447,7 +450,7 @@ function policies(): BuiltInPage {
     "<li>{if not pets}Pets are not permitted.</li>" +
     "<li>No smoking or vaping. No confetti or popping champagne. No fog or haze machines.</li>" +
     "<li>No live bands or performances. Full nudity is not permitted.</li>" +
-    "<li>Food and drinks are not permitted on furniture.</li>" +
+    "<li>Food and drinks are not allowed inside the studios.</li>" +
     "<li>Filming or photography in hallways and common areas is not permitted.</li>" +
     "<li>Furniture may be moved, but mirrors and glass items may not. Furniture must be lifted, never dragged.</li>" +
     "</ul>" +

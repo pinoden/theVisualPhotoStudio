@@ -14,7 +14,7 @@ import { listStampChanges, loyaltyStandingOf } from "@/server/loyalty";
 import { listCodesForEmail } from "@/server/promos";
 import { listRewards } from "@/server/rewards";
 import { requireUser } from "@/server/session";
-import { loadSettings } from "@/server/settings";
+import { loadSettings, loyaltyStart } from "@/server/settings";
 import { formatDay } from "@/server/tz";
 
 export const metadata: Metadata = { title: "My Rewards", robots: { index: false } };
@@ -47,12 +47,14 @@ async function Rewards() {
   const user = await requireUser("/account/rewards");
   const db = await getDb();
   const now = new Date();
-  const [settings, rewards, codes, changes] = await Promise.all([
+  const [settings, rewards, codes] = await Promise.all([
     loadSettings(db),
     listRewards(db, user.email, now),
     listCodesForEmail(db, user.email, now),
-    listStampChanges(db, user.email),
   ]);
+  // After loyalty started over, the stamps are counted from that day: the changes from before it are not listed.
+  const since = loyaltyStart(settings);
+  const changes = await listStampChanges(db, user.email, since);
   const standing = settings.loyaltyEnabled ? await loyaltyStandingOf(db, user.email, settings) : null;
   const credits = codes.filter((code) => code.kind !== "free_hour");
   const perReward = settings.loyaltyVisits;
@@ -67,6 +69,7 @@ async function Rewards() {
             You collect one stamp for each day you visit, and {count(perReward, "stamp")} earn a free studio hour. We
             email you the code, and it appears below. Two bookings on one day are one stamp. A visit made with a free
             hour does not give a stamp, and neither does a photography session with our photographer.
+            {since && <> Stamps are counted from {formatDay(since)}, when the program started again. Free hours you already have stay valid.</>}
           </p>
           <dl className="reward-facts stamp-facts">
             <div>

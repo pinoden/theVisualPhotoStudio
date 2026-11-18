@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { asc, eq } from "drizzle-orm";
-import { bookings, promoCodes, settings } from "@/db/schema";
+import { bookings, loyaltyLedger, promoCodes, settings } from "@/db/schema";
 import { PROMO_MISFIT_TEXT } from "@/lib/domain/pricing";
 import { createManualCode } from "./admin";
 import { quoteSelection, toBookingViews, type BookingInput } from "./bookings";
@@ -8,7 +8,8 @@ import { loadCatalog } from "./catalog";
 import { FREE_HOUR_MINUTES, loyaltyStandingOf } from "./loyalty";
 import { cancelBooking, getManageOptions } from "./manage";
 import { issuePromo } from "./promos";
-import { DEFAULT_SETTINGS } from "./settings";
+import { listRewards } from "./rewards";
+import { DEFAULT_SETTINGS, loadSettings, switchLoyalty } from "./settings";
 import { completeVisits } from "./tasks";
 import { clearTestMode, moneyKindOfCode } from "./test-mode";
 import type { PaymentProvider } from "./payments";
@@ -188,16 +189,77 @@ describe("earning a free hour", () => {
     expect(await completeVisits(world.db, hoursAfter(ended, 3), BASE_URL)).toEqual({ completed: 0, codes: 1 });
   });
 
-  it("sends nothing while loyalty is switched off, and what was earned at the customer's next visit once it is on", async () => {
-    await world.db.insert(settings).values({ key: "loyaltyEnabled", value: false });
+});
+
+describe("loyalty switched off and on again (the owner's answer of 2026-11-17)", () => {
+  const standing = async () => loyaltyStandingOf(world.db, JANE, await loadSettings(world.db));
+  /** An hour after that evening's task, so before the next day's visit. */
+  const lateOn = (date: string) => hoursAfter(evening(date), 1);
+
+  it("sends nothing while it is off, and starts the stamps over when it is switched on again", async () => {
+    await switchLoyalty(world.db, false, hoursAfter(NOW, 1));
     expect(await visitOn(DAYS.slice(0, 5))).toEqual([0, 0, 0, 0, 0]);
     expect(await codes()).toHaveLength(0);
 
-    await world.db.update(settings).set({ value: true }).where(eq(settings.key, "loyaltyEnabled"));
-    // Switching it on does not mail people about visits of long ago.
+    await switchLoyalty(world.db, true, lateOn(DAYS[4]));
+    // The five visits made before it do not count: no stamp, and no mail about them, then or later.
+    expect(await standing()).toMatchObject({ stamps: 0, earned: 0, needed: 5 });
     expect((await completeVisits(world.db, daysAfter(evening(DAYS[4]), 8), BASE_URL)).codes).toBe(0);
-    // Their next visit does.
-    expect(await visitOn([DAYS[10]])).toEqual([1]);
+    // The next visit is the first stamp, and the fifth after the restart earns the free hour.
+    expect(await visitOn(DAYS.slice(5, 10))).toEqual([0, 0, 0, 0, 1]);
+    expect(await standing()).toMatchObject({ stamps: 5, earned: 1 });
+    expect((await standing()).days.map((entry) => entry.day)).toEqual(DAYS.slice(5, 10));
+  });
+
+  it("keeps the free hours already sent, and numbers the next one after them", async () => {
+    // Six visits: a free hour for the first five, and one stamp towards the next.
+    expect(await visitOn(DAYS.slice(0, 6))).toEqual([0, 0, 0, 0, 1, 0]);
+    const [first] = await codes();
+    expect(first).toMatchObject({ loyaltySeq: 1, voidedAt: null, usedCount: 0 });
+
+    await switchLoyalty(world.db, false, lateOn(DAYS[5]));
+    await switchLoyalty(world.db, true, hoursAfter(lateOn(DAYS[5]), 1));
+    expect(await standing()).toMatchObject({ stamps: 0, earned: 0 });
+    // The free hour sent before is as it was: valid until the date its email gave.
+    expect((await codes())[0]).toEqual(first);
+    expect(await listRewards(world.db, JANE, lateOn(DAYS[6]))).toMatchObject([{ code: first.code, status: "available" }]);
+
+    // Four more visits would have made five with the stamp left over. It does not count: the fifth visit after the restart does.
+    expect(await visitOn(DAYS.slice(6, 11))).toEqual([0, 0, 0, 0, 1]);
+    const all = await codes();
+    expect(all.map((code) => code.loyaltySeq)).toEqual([1, 2]);
+    expect(all[0]).toEqual(first);
+    // Nothing is sent twice.
+    expect((await completeVisits(world.db, hoursAfter(evening(DAYS[10]), 2), BASE_URL)).codes).toBe(0);
+    expect(await codes()).toHaveLength(2);
+  });
+
+  it("leaves out the stamps added by hand before it, and counts the ones added since", async () => {
+    const restart = hoursAfter(NOW, 2);
+    const change = (stamps: number, createdAt: Date) =>
+      world.db.insert(loyaltyLedger).values({ email: JANE, kind: "stamps", stamps, reason: "Visits on the old system", actor: "owner@studio.test", createdAt });
+    await change(3, hoursAfter(NOW, 1));
+    expect(await standing()).toMatchObject({ stamps: 3, adjustment: 3 });
+
+    await switchLoyalty(world.db, false, hoursAfter(NOW, 1.5));
+    await switchLoyalty(world.db, true, restart);
+    expect(await standing()).toMatchObject({ stamps: 0, adjustment: 0 });
+    await change(2, hoursAfter(restart, 1));
+    expect(await standing()).toMatchObject({ stamps: 2, adjustment: 2 });
+  });
+
+  it("starts over only when it was off: saving the switch as it was changes nothing", async () => {
+    await switchLoyalty(world.db, true, hoursAfter(NOW, 1)); // it is on from the start
+    expect(await loadSettings(world.db)).toMatchObject({ loyaltyEnabled: true, loyaltyStartedAt: null });
+
+    await switchLoyalty(world.db, false, hoursAfter(NOW, 2));
+    await switchLoyalty(world.db, false, hoursAfter(NOW, 3));
+    expect(await loadSettings(world.db)).toMatchObject({ loyaltyEnabled: false, loyaltyStartedAt: null });
+
+    const restart = hoursAfter(NOW, 4);
+    await switchLoyalty(world.db, true, restart);
+    await switchLoyalty(world.db, true, hoursAfter(NOW, 5));
+    expect(await loadSettings(world.db)).toMatchObject({ loyaltyEnabled: true, loyaltyStartedAt: restart.toISOString() });
   });
 });
 
@@ -290,6 +352,7 @@ describe("using a free hour", () => {
       allowed: true,
       creditCents: 13200,
       discountCents: 8800,
+      feeCents: 0,
     });
   });
 

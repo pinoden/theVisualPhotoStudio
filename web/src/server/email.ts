@@ -295,8 +295,11 @@ export function bookingMovedEmail(input: {
   was: string;
   now: string;
   duration: string;
-  /** Set when the client asked for the move: it counts as their reschedule, which the rental terms do not refund. */
-  clientAsked?: { canMoveAgain: boolean };
+  /**
+   * Set when the client asked for the move: it counts as their reschedule, which the rental terms do not refund.
+   * `againFeeCents`: what moving it again online costs, 0 when the next move is free.
+   */
+  clientAsked?: { canMoveAgain: boolean; againFeeCents?: number };
 }): QueuedEmail {
   return {
     to: input.to,
@@ -314,7 +317,13 @@ export function bookingMovedEmail(input: {
       "",
       ...(input.clientAsked
         ? [
-            `As you asked for this change, it counts as your reschedule under the rental terms: if the booking is cancelled now, it is not refunded${input.clientAsked.canMoveAgain ? "" : ", and it cannot be moved again online"}.`,
+            `As you asked for this change, it counts as your reschedule under the rental terms: if the booking is cancelled now, it is not refunded${
+              !input.clientAsked.canMoveAgain
+                ? ", and it cannot be moved again online."
+                : (input.clientAsked.againFeeCents ?? 0) > 0
+                  ? `. Moving it again online costs ${money(input.clientAsked.againFeeCents!)}.`
+                  : "."
+            }`,
             "",
           ]
         : []),
@@ -643,15 +652,20 @@ export function rescheduleCodeEmail(input: {
   valueCents: number;
   /** The part of the value that is a discount the customer's code gave, not money paid. */
   discountCents?: number;
+  /** The fee for a move after the free ones, already taken off the value. */
+  feeCents?: number;
   expires: string;
   bookUrl: string;
   /** What the client is told of a payment link the site could not check (`UNSEEN_LINK`, `FOREIGN_LINK`). */
   unseenNote?: string | null;
 }): QueuedEmail {
+  const fee = (input.feeCents ?? 0) > 0 ? `less the ${money(input.feeCents!)} fee for moving a booking again` : "";
   const credit =
     (input.discountCents ?? 0) > 0
-      ? `Your booking ${input.ref} has been released. What you paid, plus the ${money(input.discountCents!)} your discount code took off, is now a credit of ${money(input.valueCents)}.`
-      : `Your booking ${input.ref} has been released, and what you paid is now a credit of ${money(input.valueCents)}.`;
+      ? `Your booking ${input.ref} has been released. What you paid, plus the ${money(input.discountCents!)} your discount code took off${fee ? `, ${fee}` : ""}, is now a credit of ${money(input.valueCents)}.`
+      : fee
+        ? `Your booking ${input.ref} has been released. What you paid, ${fee}, is now a credit of ${money(input.valueCents)}.`
+        : `Your booking ${input.ref} has been released, and what you paid is now a credit of ${money(input.valueCents)}.`;
   return {
     to: input.to,
     kind: "reschedule_code",

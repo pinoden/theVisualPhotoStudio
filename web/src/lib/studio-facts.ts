@@ -4,7 +4,7 @@
  * cyclorama, what comes with it, and a floor plan. The owners write them
  * under Studios & add-ons; the studios page shows the ones that are written.
  * An idea taken from another studio's website (see "Ideas from another
- * studio's website" in CLAUDE.md).
+ * studio's website" in ProjectLibrary.md).
  *
  * Kept in one JSON column, `studios.facts`, and always read through
  * `parseStudioFacts`, so that whatever is stored comes out complete and

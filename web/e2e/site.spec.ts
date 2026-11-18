@@ -26,8 +26,8 @@ import {
  */
 test.describe.configure({ mode: "serial" });
 
-const NEAR = dateAhead(3); // inside the 14-day refund window
-const FAR = dateAhead(15); // refundable: more than 14 days ahead
+const NEAR = dateAhead(3); // inside the 7-day refund window
+const FAR = dateAhead(15); // refundable: more than 7 days ahead
 const LATER = dateAhead(21);
 const SATURDAY = dateAhead(3, "saturday");
 const DOOR_DAY = dateAhead(24); // a day no other test books
@@ -102,8 +102,10 @@ test("public pages show the studios and the live price list", async ({ page }) =
   await page.goto("/policies");
   const afterHours = byText(page, /After-hours bookings are available by request/);
   await expect(afterHours.getByRole("link", { name: "contact form" })).toHaveAttribute("href", "/contact");
-  // The terms follow the settings: 14 days and a 5% fee since the owner's answers of 2026-11-15.
-  await expect(byText(page, /Cancellations made 14 days \(336 hours\) or more before the appointment/)).toBeVisible();
+  // The terms follow the settings: 7 days for a rental (the owner's answer of 2026-11-17) and a 5% fee.
+  await expect(byText(page, /Cancellations made 7 days \(168 hours\) or more before the appointment/)).toBeVisible();
+  // Food and drinks stay outside the studios (the same answers).
+  await expect(byText(page, "Food and drinks are not allowed inside the studios.")).toBeVisible();
   await expect(byText(page, /excluding the non-refundable payment processing fee \(5%\)/)).toBeVisible();
   await expect(byText(page, /Sessions are booked at least 14 days ahead\./)).toBeVisible();
   await expect(byText(page, /A pet fee of \$40 applies per reservation.* If your pet does not come, the fee is returned to you as\s+studio credit/)).toBeVisible();
@@ -131,12 +133,13 @@ test("guest information answers with the current rules and prices", async ({ pag
   const refunds = page.locator("details.faq-item", { hasText: "Can I cancel, and do I get a refund?" });
   await expect(refunds.locator(".faq-answer")).toBeHidden();
   await refunds.locator("summary").click();
-  await expect(refunds.locator(".faq-answer")).toContainText("Cancel 14 days (336 hours) or more before your start time");
+  await expect(refunds.locator(".faq-answer")).toContainText("Cancel 7 days (168 hours) or more before your start time");
   await expect(refunds.locator(".faq-answer")).toContainText("less the 5% payment processing fee");
 
   const moving = page.locator("details.faq-item", { hasText: "Can I move my booking to another time?" });
   await moving.locator("summary").click();
-  await expect(moving.locator(".faq-answer")).toContainText("Yes, once, until 24 hours before it starts.");
+  await expect(moving.locator(".faq-answer")).toContainText("Yes, until 24 hours before it starts.");
+  await expect(moving.locator(".faq-answer")).toContainText("You can move a booking once free of charge. Moving it again costs $20 each time, which is taken off the code.");
 
   const loyalty = page.locator("details.faq-item", { hasText: "Do returning guests get anything?" });
   await loyalty.locator("summary").click();
@@ -415,8 +418,13 @@ test("the released time is bookable again, and the code pays for a new booking w
   await page.getByRole("button", { name: "Cancel booking" }).click();
   await expect(byText(page, "No refund is due, because this booking was made with a reschedule code.")).toBeVisible();
   await page.getByRole("button", { name: "Keep my booking" }).click();
+  // Moving it again is offered for the $20 fee, which comes off the new code (the owner's answer of 2026-11-17).
   await page.getByRole("button", { name: "Reschedule" }).click();
-  await expect(byText(page, /already moved and cannot be moved again online/)).toBeVisible();
+  await expect(
+    byText(page, /you will get a code worth \$[\d.,]+, valid for 90 days, to book a new time\. That is what you paid less the \$20 fee for moving a booking again\./),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Yes, release it and send my code" })).toBeEnabled();
+  await page.getByRole("button", { name: "Keep my booking" }).click();
 
   // The code is spent.
   await page.goto("/book");
@@ -450,7 +458,7 @@ test("a code only works for the person it was sent to", async ({ page }) => {
   await expect(byText(page, /belongs to a different email address/)).toBeVisible();
 });
 
-test("cancelling two weeks or more ahead refunds the card automatically", async ({ page }) => {
+test("cancelling a week or more ahead refunds the card automatically", async ({ page }) => {
   await bookStudioFirstToPayment(page, { studios: ["Studio Paris"], date: FAR, duration: "1 hr", time: "10:00 AM", customer: bob });
   await confirmAndGetRef(page, "Confirm & pay $68");
 
@@ -1181,6 +1189,34 @@ test("the owners look a customer up, see what they paid, and correct their stamp
   await expect(page.getByRole("heading", { name: "Jane Smith", level: 1 })).toBeVisible();
   await onScreen(page.locator(".detail-list")).getByRole("link", { name: "Jane Smith" }).click();
   await expect(page).toHaveURL(new RegExp(`/admin/customers/${encodeURIComponent(jane.email).replace(/[.]/g, "\\.")}`));
+
+  // Loyalty switched off and on again starts every client's stamps over, and the free hours they hold stay valid
+  // (the owner's answer of 2026-11-17). The fee for a further reschedule is on the same page, in dollars.
+  await page.goto("/admin/settings");
+  await expect(byLabel(page, "Fee for each further reschedule ($)")).toHaveValue("20");
+  const loyaltySwitch = page.getByRole("checkbox", { name: /Email a free hour to customers/ });
+  await expect(loyaltySwitch).toBeChecked();
+  await loyaltySwitch.uncheck();
+  await page.getByRole("button", { name: "Save settings" }).click();
+  await expect(byText(page, "Settings saved.")).toBeVisible();
+  await page.goto(janesPage);
+  await expect(onScreen(page.locator("#loyalty"))).toContainText("Loyalty is switched off in Settings, so no stamps are counted.");
+  await page.goto("/admin/settings");
+  await expect(loyaltySwitch).not.toBeChecked();
+  await expect(byText(page, /Stamps are counted from/)).toHaveCount(0);
+  await loyaltySwitch.check();
+  await page.getByRole("button", { name: "Save settings" }).click();
+  await expect(byText(page, "Settings saved.")).toBeVisible();
+  await expect(byText(page, /Free hours already\s+sent stay valid\. Stamps are counted from \w+ \d+, \d{4}\./)).toBeVisible();
+  await expect(byLabel(page, "Fee for each further reschedule ($)")).toHaveValue("20");
+  await page.goto(janesPage);
+  const loyalty = onScreen(page.locator("#loyalty"));
+  await expect(loyalty).toContainText("when loyalty was switched on again");
+  await expect(loyalty.locator(".stamp-facts div", { hasText: "Stamps in all" })).toContainText("0");
+  // The five stamps added before are still on record, marked as not counted, and her free hours are as they were.
+  await expect(loyalty).toContainText("Five visits on the old booking system (Before loyalty started again: not counted.)");
+  await expect(rewards.locator("li.reward")).toHaveCount(4);
+  await expect(rewards.locator("li.reward", { hasText: /THANKS-/ })).toContainText("Available");
 });
 
 test("a Studio Manager runs the calendar and looks clients up, and sees no prices until the owners say so", async ({ page }) => {

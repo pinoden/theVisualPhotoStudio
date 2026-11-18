@@ -1,10 +1,10 @@
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { bookings, loyaltyLedger, promoCodes } from "@/db/schema";
 import type { DbLike } from "@/db/client";
 import { loyaltyStanding, type LoyaltyStanding } from "@/lib/domain/loyalty";
 import { freeHourEmail, queueEmail } from "./email";
 import { issuePromo } from "./promos";
-import type { Settings } from "./settings";
+import { loyaltyStart, type Settings } from "./settings";
 import { formatInstant, localDateOf } from "./tz";
 
 /**
@@ -16,6 +16,11 @@ import { formatInstant, localDateOf } from "./tz";
  * customer. Each one stays valid for `loyaltyValidDays` on its own, and a
  * customer can hold several. Checkout takes one code, so one booking uses one
  * free hour.
+ *
+ * Loyalty switched off and on again starts over (the owner's answer of
+ * 2026-11-17): stamps are counted from `loyaltyStartedAt`, so visits and
+ * changes by hand from before it are left out. Free hours sent before it
+ * stay valid, and keep their numbers.
  */
 
 /** What one reward is worth: the minutes of one studio that are free. */
@@ -23,12 +28,18 @@ export const FREE_HOUR_MINUTES = 60;
 
 const DAY = 86_400_000;
 
-/** The stamps an administrator added or took away for a customer, in total. */
-export async function stampAdjustmentOf(db: DbLike, email: string): Promise<number> {
+/** The stamps an administrator added or took away for a customer, in total: since `since`, when loyalty started over. */
+export async function stampAdjustmentOf(db: DbLike, email: string, since: Date | null = null): Promise<number> {
   const [row] = await db
     .select({ total: sql<number>`coalesce(sum(${loyaltyLedger.stamps}), 0)::int` })
     .from(loyaltyLedger)
-    .where(and(eq(loyaltyLedger.email, email.trim().toLowerCase()), eq(loyaltyLedger.kind, "stamps")));
+    .where(
+      and(
+        eq(loyaltyLedger.email, email.trim().toLowerCase()),
+        eq(loyaltyLedger.kind, "stamps"),
+        since ? gte(loyaltyLedger.createdAt, since) : undefined,
+      ),
+    );
   return row.total;
 }
 
@@ -37,19 +48,21 @@ export async function stampAdjustmentOf(db: DbLike, email: string): Promise<numb
  * changed by hand, and the free hours earned. Customers are told apart by
  * email address. Only completed visits count, so a cancelled booking or a
  * no-show adds nothing, and photography sessions do not count (the rule is in
- * the domain function).
+ * the domain function). After loyalty was switched off and on again, only
+ * visits that began since then count, and only the changes made since.
  */
 export async function loyaltyStandingOf(
   db: DbLike,
   email: string,
-  settings: Pick<Settings, "loyaltyVisits">,
+  settings: Pick<Settings, "loyaltyVisits" | "loyaltyStartedAt">,
 ): Promise<LoyaltyStanding> {
   const address = email.trim().toLowerCase();
+  const since = loyaltyStart(settings);
   const rows = await db
     .select({ id: bookings.id, startAt: bookings.startAt, codeKind: promoCodes.kind, photographerId: bookings.photographerId })
     .from(bookings)
     .leftJoin(promoCodes, eq(promoCodes.id, bookings.promoCodeId))
-    .where(and(eq(bookings.customerEmail, address), eq(bookings.status, "completed")));
+    .where(and(eq(bookings.customerEmail, address), eq(bookings.status, "completed"), since ? gte(bookings.startAt, since) : undefined));
   return loyaltyStanding(
     rows.map((row) => ({
       bookingId: row.id,
@@ -59,7 +72,7 @@ export async function loyaltyStandingOf(
       photography: row.photographerId !== null,
     })),
     settings.loyaltyVisits,
-    await stampAdjustmentOf(db, address),
+    await stampAdjustmentOf(db, address, since),
   );
 }
 
@@ -72,23 +85,40 @@ export interface StampChange {
   actor: string;
 }
 
-/** The changes an administrator made to a customer's stamps by hand, newest first. */
-export async function listStampChanges(db: DbLike, email: string): Promise<StampChange[]> {
+/**
+ * The changes an administrator made to a customer's stamps by hand, newest
+ * first. With `since`, only those made from then on: the ones that count
+ * after loyalty started over.
+ */
+export async function listStampChanges(db: DbLike, email: string, since: Date | null = null): Promise<StampChange[]> {
   const rows = await db
     .select()
     .from(loyaltyLedger)
-    .where(and(eq(loyaltyLedger.email, email.trim().toLowerCase()), eq(loyaltyLedger.kind, "stamps")))
+    .where(
+      and(
+        eq(loyaltyLedger.email, email.trim().toLowerCase()),
+        eq(loyaltyLedger.kind, "stamps"),
+        since ? gte(loyaltyLedger.createdAt, since) : undefined,
+      ),
+    )
     .orderBy(desc(loyaltyLedger.createdAt));
   return rows.map((row) => ({ at: row.createdAt.toISOString(), stamps: row.stamps, reason: row.reason, actor: row.actor }));
 }
 
-/** Free hours ever sent to this address for its visits. Used, expired and cancelled ones count too. */
-async function freeHoursSentTo(db: DbLike, email: string): Promise<number> {
+/**
+ * Free hours ever sent to this address for its visits: how many before
+ * loyalty started over, and how many since. Used, expired and cancelled ones
+ * count too. While loyalty has never started over, all of them are "since".
+ */
+async function freeHoursSentTo(db: DbLike, email: string, since: Date | null): Promise<{ before: number; since: number }> {
   const [row] = await db
-    .select({ n: sql<number>`count(*)::int` })
+    .select({
+      all: sql<number>`count(*)::int`,
+      since: since ? sql<number>`(count(*) filter (where ${promoCodes.createdAt} >= ${since.toISOString()}::timestamptz))::int` : sql<number>`count(*)::int`,
+    })
     .from(promoCodes)
     .where(and(eq(promoCodes.email, email), eq(promoCodes.source, "loyalty"), eq(promoCodes.kind, "free_hour")));
-  return row.n;
+  return { before: row.all - row.since, since: row.since };
 }
 
 /**
@@ -96,20 +126,20 @@ async function freeHoursSentTo(db: DbLike, email: string): Promise<number> {
  * return how many that was. Runs in the caller's transaction.
  *
  * Safe to repeat, and safe to run twice at once. What is owed is the number
- * earned less the number ever sent, so a visit that stops counting later (a
- * late no-show) cannot lead to a second reward for the same five days. And
- * each free hour is numbered (a customer's first, second, third), and the
- * database allows each number once per customer, so two runs cannot both
- * send it.
+ * earned less the number sent, both counted since loyalty last started, so a
+ * visit that stops counting later (a late no-show) cannot lead to a second
+ * reward for the same five days. And each free hour is numbered (a customer's
+ * first, second, third, over every start of loyalty), and the database allows
+ * each number once per customer, so two runs cannot both send it.
  */
 export async function sendEarnedFreeHours(
   tx: DbLike,
   customer: { email: string; name: string },
-  deps: { now: Date; baseUrl: string; settings: Pick<Settings, "loyaltyVisits" | "loyaltyValidDays"> },
+  deps: { now: Date; baseUrl: string; settings: Pick<Settings, "loyaltyVisits" | "loyaltyValidDays" | "loyaltyStartedAt"> },
 ): Promise<number> {
   const email = customer.email.trim().toLowerCase();
   const standing = await loyaltyStandingOf(tx, email, deps.settings);
-  const alreadySent = await freeHoursSentTo(tx, email);
+  const alreadySent = await freeHoursSentTo(tx, email, loyaltyStart(deps.settings));
   // A free hour that visits of test mode helped to earn (a server in test mode beside the live one) is test mode's: a
   // code is of its booking's kind of money (`moneyKindOfCode`), so such a visit stands for it, a real booking refuses
   // it, and clearing test mode removes it. Which visits a free hour counted: the days the milestones are taken from.
@@ -135,7 +165,7 @@ export async function sendEarnedFreeHours(
   };
 
   let sent = 0;
-  for (let index = alreadySent; index < standing.earned; index++) {
+  for (let index = alreadySent.since; index < standing.earned; index++) {
     const expiresAt = new Date(deps.now.getTime() + deps.settings.loyaltyValidDays * DAY);
     const promo = await issuePromo(tx, {
       kind: "free_hour",
@@ -144,7 +174,7 @@ export async function sendEarnedFreeHours(
       email,
       expiresAt,
       originBookingId: originOf(index),
-      loyaltySeq: index + 1,
+      loyaltySeq: alreadySent.before + index + 1,
       note: `Free hour for ${deps.settings.loyaltyVisits} visits`,
       issuedAt: deps.now,
     });

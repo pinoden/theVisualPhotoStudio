@@ -176,10 +176,14 @@ export function rescheduleOfferText(
   outcome: Extract<RescheduleOutcome, { allowed: true }>,
   settings: Pick<Settings, "creditValidDays">,
 ): string {
+  // A move after the free ones: the fee is taken off the code, and the words say so, with the amount.
+  const fee = outcome.feeCents > 0 ? `less the ${formatCents(outcome.feeCents)} fee for moving a booking again` : "";
   const discount =
     outcome.discountCents > 0
-      ? ` That is what you paid plus the ${formatCents(outcome.discountCents)} your discount code took off.`
-      : "";
+      ? ` That is what you paid plus the ${formatCents(outcome.discountCents)} your discount code took off${fee ? `, ${fee}` : ""}.`
+      : fee
+        ? ` That is what you paid ${fee}.`
+        : "";
   return `This booking will be released and you will get a code worth ${formatCents(outcome.creditCents)}, valid for ${count(settings.creditValidDays, "day")}, to book a new time.${discount} A booking made with the code cannot be refunded.`;
 }
 
@@ -215,7 +219,11 @@ export function cancelBlockText(reason: CancelBlock): string {
   return reason === "already_started" ? "This booking has already started." : NOT_CHANGEABLE;
 }
 
-export function rescheduleBlockText(reason: RescheduleBlock, settings: Pick<Settings, "rescheduleCutoffHours">, heldCents = 0): string {
+export function rescheduleBlockText(
+  reason: RescheduleBlock,
+  settings: Pick<Settings, "rescheduleCutoffHours" | "rescheduleFeeCents">,
+  heldCents = 0,
+): string {
   switch (reason) {
     case "already_started":
       return "This booking has already started.";
@@ -227,6 +235,8 @@ export function rescheduleBlockText(reason: RescheduleBlock, settings: Pick<Sett
       return `Bookings can be moved online until ${hoursInWords(settings.rescheduleCutoffHours)} before they start. Please call the studio.`;
     case "limit_reached":
       return "This booking was already moved and cannot be moved again online. Please call the studio.";
+    case "fee_not_covered":
+      return `Moving a booking again costs ${formatCents(settings.rescheduleFeeCents)}, and this booking is not worth more than that, so no credit would be left to move. Please call the studio.`;
     case "nothing_paid":
       // The card holds the amount, and taking it did not go through yet: it is not money paid.
       return heldCents > 0
@@ -1039,7 +1049,10 @@ export async function requestRescheduleCode(db: Db, ref: string, actor: Actor, d
       to: "cancelled",
       actor: actor.kind === "owner" ? BY_STUDIO : BY_CUSTOMER,
       at: deps.now,
-      note: `Released for a reschedule code worth ${formatCents(decision.creditCents)}`,
+      note:
+        decision.feeCents > 0
+          ? `Released for a reschedule code worth ${formatCents(decision.creditCents)}, after the ${formatCents(decision.feeCents)} fee for moving a booking again`
+          : `Released for a reschedule code worth ${formatCents(decision.creditCents)}`,
     });
 
     const expiresAt = new Date(deps.now.getTime() + settings.creditValidDays * 86_400_000);
@@ -1070,6 +1083,7 @@ export async function requestRescheduleCode(db: Db, ref: string, actor: Actor, d
         code: issued.code,
         valueCents: decision.creditCents,
         discountCents: decision.discountCents,
+        feeCents: decision.feeCents,
         expires: formatInstant(expiresAt),
         bookUrl: `${deps.baseUrl.replace(/\/$/, "")}${bookPath}`,
         unseenNote,

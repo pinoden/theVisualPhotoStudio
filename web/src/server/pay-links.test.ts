@@ -396,7 +396,7 @@ describe("a booking that stops being active", () => {
     clientPays();
     // Paid on the processor's page, not seen yet: the cancellation asks first, and counts it.
     const cancelled = expectOk(await cancelBooking(world.db, made.ref, dana, world.manageDeps({ payments: square })));
-    expect(cancelled.message).toBe("No refund is due, because the booking starts in less than 14 days.");
+    expect(cancelled.message).toBe("No refund is due, because the booking starts in less than 7 days.");
     expect((await links())[0].status).toBe("paid");
     expect(await world.db.select().from(refunds)).toEqual([]);
     expect(await netCardPaidCents(world.db, made.id)).toBe(17600);
@@ -527,7 +527,7 @@ describe("what a client is told before cancelling or moving", () => {
     clientPays();
     // The booking's page asks the processor before it says what cancelling would do.
     await noticeBookingPayments(world.db, made.ref, dana, deps());
-    expect((await getManageChoices(world.db, made.ref, dana, NOW))!.cancel.text).toBe("No refund is due, because the booking starts in less than 14 days.");
+    expect((await getManageChoices(world.db, made.ref, dana, NOW))!.cancel.text).toBe("No refund is due, because the booking starts in less than 7 days.");
     expect(await netCardPaidCents(world.db, made.id)).toBe(17600);
     // Nobody else's link is asked about from a booking's page.
     const other = await madeInAdmin(FAR, h(9));

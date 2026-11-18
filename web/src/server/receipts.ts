@@ -18,7 +18,7 @@ import { localDateOf } from "./tz";
  * as "to pay", and one that a code paid for in full cost nothing.
  *
  * No tax is shown: the site's prices are final amounts, and whether they
- * include tax, and at what rate, is the accountant's to say (see CLAUDE.md).
+ * include tax, and at what rate, is the accountant's to say (see ProjectLibrary.md).
  */
 
 export interface ReceiptLine {

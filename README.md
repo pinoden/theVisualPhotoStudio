@@ -17,6 +17,8 @@ Open http://localhost:3000. Locally the site uses an embedded database and a pre
 ## Read more
 
 - [`web/README.md`](web/README.md): running, testing and the settings for production.
-- [`CLAUDE.md`](CLAUDE.md): how the code is organised and, under "Rebuild decisions", what has been decided, what is still open and the known gaps.
+- [`HANDOFF.md`](HANDOFF.md): where the work stands now, what is next and what waits on the owners. One page.
+- [`ProjectLibrary.md`](ProjectLibrary.md): how the code is organised and, under "Rebuild decisions", what has been decided, what is still open and the known gaps.
+- [`AGENTS.md`](AGENTS.md): the rules for coding tools (Codex, Claude Code) that work on this repository.
 
 The site is not connected to a real card processor, an email service or a host yet.
