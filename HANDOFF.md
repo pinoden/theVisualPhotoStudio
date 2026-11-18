@@ -74,11 +74,12 @@ Agreed with the owner on 2026-11-17. Each item is done once it is checked off he
 - [x] A scheduler heartbeat: each scheduled run is recorded. `GET /api/health` answers 503 when the database does not answer or, in production, the scheduler has not run for 15 minutes. The admin overview says when the scheduler stopped.
 - [x] Security alerts looked at (2026-11-17): `npm audit --omit=dev` finds nothing in what the live site runs. Two medium alerts stay open, both in development tools only (`esbuild` inside `drizzle-kit`, `minimatch` inside ESLint); both go once those tools move on.
 - [ ] A tester pass over everything built since 2026-11-17. Done for follow-ups 6 and 9, the refund window, the food rule and the heartbeat; still to do for the list under "Verified" above.
-- [ ] A one-page runbook for the owners: who to call, how to roll back, how to restore.
+- [x] A one-page runbook for the owners: `RUNBOOK.md` (2026-11-18): who to call, the morning check, what to do when the site or a payment misbehaves, rolling back and restoring.
 
 **Needs the hosting choice first**
 
 - [ ] A staging copy: the same host, its own database branch, Square's sandbox. Every change goes there before production.
+- [ ] Fill in the lines of `RUNBOOK.md` marked "(at go-live)": who to call, the site's address, how the host rolls back and the database restores.
 - [ ] Monitoring that alerts a phone: an uptime check on `/` and `/api/health`, and error tracking on bookings and payments.
 - [ ] Backups: the provider's point-in-time restore, plus a daily export to a second provider. A practice restore before launch, then each quarter.
 - [ ] `DATABASE_URL` through the database's connection pooler: a serverless host opens many connections.
@@ -95,8 +96,7 @@ Agreed with the owner on 2026-11-17. Each item is done once it is checked off he
 ## Next, in this order
 
 1. **A tester pass** (`.claude/agents/tester.md`) over what has not had one, memberships and follow-up 5 first: buying a membership in the sandbox and in test mode, spending its minutes (in full, in part, at weekends), cancelling bookings either side of 48 hours, cancelling the membership, the owners' pages and corrections, the scheduled task a month on; then moving bookings between weekdays and weekends with codes, credit and minutes, the payment card and its refund. Then the rest of the list under "Verified". It needs the owner's go-ahead to start the tester agent.
-2. The owners' runbook.
-3. On the first real booking at go-live (go-live question 4), open its "Receipt in Square" link once with the live keys.
+2. On the first real booking at go-live (go-live question 4), open its "Receipt in Square" link once with the live keys, and fill in the runbook's "(at go-live)" lines.
 
 ## Waiting on the owners
 
