@@ -6,10 +6,11 @@ import { getDb } from "@/db/client";
 import { formatCents } from "@/lib/domain/pricing";
 import { countUpcoming, listBookings, listRefundProblems } from "@/server/admin";
 import { resolveEmailTransport } from "@/server/email";
+import { SCHEDULER_STALE_MINUTES, schedulerLastRun, schedulerState } from "@/server/heartbeat";
 import { resolvePayments } from "@/server/payments";
 import { requireOwner } from "@/server/session";
 import { otherMoneyNotice } from "@/server/test-mode";
-import { localDateOf } from "@/server/tz";
+import { formatInstant, localDateOf } from "@/server/tz";
 import { recordRefundMadeInSquareAction } from "./actions";
 import { AdminFrame, AdminLoading } from "./frame";
 
@@ -30,13 +31,24 @@ async function Overview({ searchParams }: Pick<PageProps<"/admin">, "searchParam
   const now = new Date();
   const today = localDateOf(now);
   const processor = resolvePayments().provider?.name ?? null;
-  const [upcoming, todays, problems, otherMoney] = await Promise.all([
+  const [upcoming, todays, problems, otherMoney, lastRun] = await Promise.all([
     countUpcoming(db, now),
     listBookings(db, { from: today, to: today }),
     listRefundProblems(db),
     // Bookings of the other kind of money, written by a server of the other mode since this one started.
     otherMoneyNotice(db, processor),
+    schedulerLastRun(db),
   ]);
+  // The scheduler is the host's to call. A site that never had one is told so in production only: in development
+  // nothing calls it. One that ran and stopped is told so everywhere.
+  const scheduler = schedulerState(lastRun, now);
+  const schedulerProblem = lastRun
+    ? scheduler.fresh
+      ? null
+      : `The scheduled tasks last ran ${formatInstant(lastRun)}, more than ${SCHEDULER_STALE_MINUTES} minutes ago. Until they run again, free hours, review requests, refund retries and emails wait. Check the host's scheduler.`
+    : process.env.NODE_ENV === "production"
+      ? "The scheduled tasks have never run. The host's scheduler must call /api/cron/tick every few minutes: until it does, free hours, review requests, refund retries and emails wait."
+      : null;
   const { mode: payments, problem: paymentsProblem } = resolvePayments().client;
   const sandbox = processor === "square-sandbox";
   const email = resolveEmailTransport()?.name ?? null;
@@ -69,7 +81,7 @@ async function Overview({ searchParams }: Pick<PageProps<"/admin">, "searchParam
         </div>
       )}
 
-      {(payments !== "square" || sandbox || email !== "resend") && (
+      {(payments !== "square" || sandbox || email !== "resend" || schedulerProblem) && (
         <div className="admin-card">
           <h3>Set-up still needed</h3>
           <ul style={{ margin: 0 }}>
@@ -85,6 +97,7 @@ async function Overview({ searchParams }: Pick<PageProps<"/admin">, "searchParam
             )}
             {email === "log" && <li>Emails are written to the server log instead of being sent. Add an email service to send them.</li>}
             {email === null && <li>No email service is configured, so emails (including sign-in codes) wait unsent.</li>}
+            {schedulerProblem && <li>{schedulerProblem}</li>}
           </ul>
         </div>
       )}

@@ -48,7 +48,7 @@ Sections of `ProjectLibrary.md` worth knowing:
 
 ## Git
 
-- Work on `rebuild`. `master` changes only through a pull request, and a pull request is merged only when the owner says so for that one.
+- Work on `rebuild`. `master` changes only through a pull request, and a pull request is merged only when the owner says so for that one, and only once CI has passed (GitHub refuses it before).
 - Commit and push to `rebuild` at each verified checkpoint without asking. Never force-push.
 - Check staged files for keys and local data before each commit. `.env*` files are ignored and stay that way.
 - The repository is public. Do not write personal details, addresses or keys into any file.
@@ -56,7 +56,7 @@ Sections of `ProjectLibrary.md` worth knowing:
 
 ## Commands
 
-Run from `web/`. A shell that did not load the login profile needs `. ~/.nvm/nvm.sh` first.
+Run from `web/`. A shell that did not load the login profile needs `. ~/.nvm/nvm.sh` first. `web/.nvmrc` holds the one Node version (CI reads it too): `nvm use` in `web/` picks it.
 
 ```bash
 npm run dev          # http://localhost:3000, embedded database, pretend card processor
@@ -76,6 +76,8 @@ To show the owner the site: `OWNER_EMAILS=owner@studio.test npm run dev -- --hos
 Before a commit of code: `npm run typecheck`, `npm run lint` and `npm test`, all clean. Before a pull request, and after any change to pages, forms or booking: the whole browser suite too. Read the last lines of a test log before saying it passed. Say in `HANDOFF.md` exactly what was run.
 
 A migration is tried on a copy of a database that holds real rows before it is committed (see "Conventions and gotchas").
+
+GitHub runs the same checks (`.github/workflows/ci.yml`) on every pull request into `master` and every push to `rebuild`: the job `checks` (type check, lint, unit and integration tests) and the job `browser` (the whole browser suite). Branch protection on `master` requires both to pass before a pull request can be merged, for everyone, the owner included, and refuses direct pushes to `master`. A failed browser run keeps its screenshots and traces as an artifact for 14 days. Dependabot opens update pull requests into `rebuild` once a month (`.github/dependabot.yml`); CI runs on them too, and they are merged like any other change. CI runs in UTC, as the host will. Running the suites locally before pushing is still expected: CI is the gate, not the first check.
 
 ## Rules that are easy to break
 

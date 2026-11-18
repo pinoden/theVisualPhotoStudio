@@ -6,7 +6,7 @@ name: CI
 
 on:
   pull_request:
-    branches: [master]
+    branches: [master, rebuild] # rebuild: Dependabot's update pull requests
   push:
     branches: [rebuild, master]
   workflow_dispatch:
@@ -31,7 +31,7 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
-          node-version: 24
+          node-version-file: web/.nvmrc # the one Node version: on developers' machines, here and on the host
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: npm ci
@@ -50,7 +50,7 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
-          node-version: 24
+          node-version-file: web/.nvmrc # the one Node version: on developers' machines, here and on the host
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: npm ci

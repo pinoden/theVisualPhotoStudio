@@ -19,9 +19,11 @@ Nothing. No tool has unfinished changes in the tree.
 On the tree of this commit, 2026-11-17:
 
 - `npm run typecheck` and `npm run lint`: clean.
-- `npm test`: 896 tests pass.
+- `npm test`: 902 tests pass (locally, and in UTC as CI runs them).
 - `npm run test:e2e`: the whole browser suite, 59 cases, passes.
 - Migrations `0035` and `0036` were each tried on copies of two browser-test databases. `0030` to `0033` were checked against older data by Codex.
+- CI on GitHub: the first run (commit `ae4cc99`, Node 24, UTC) passed both jobs: `checks` in 3 minutes, `browser` (59 cases) in 14 minutes. The run on this commit is the first with Node 26 from `web/.nvmrc`.
+- Branch protection on `master` requires the CI jobs `checks` and `browser` to pass, for everyone, and refuses direct pushes (set 2026-11-17).
 
 Not yet through an independent tester pass: the follow-ups built on 2026-11-17 (1, 4, 6, 7, 8, 9, 12, 15), the 7-day refund window and the food rule.
 
@@ -49,6 +51,41 @@ Details and status of each are under "Katya's answers to the 16 follow-up questi
 | 16 | Discount by yearly spend | Decided: not offered |
 
 Also built from the answers of 2026-11-17: rentals refunded when cancelled 7 days ahead (photography 14), and no food or drinks inside the studios.
+
+## Go-live plan: keeping the site from failing
+
+Agreed with the owner on 2026-11-17. Each item is done once it is checked off here.
+
+**Already in place**
+
+- [x] 896 unit and integration tests and 59 browser tests.
+- [x] CI on GitHub (`.github/workflows/ci.yml`): type check, lint, unit tests and the browser suite on every pull request and every push to `rebuild`.
+- [x] Branch protection on `master`: pull requests only, both CI jobs must pass, no exception for administrators, no force-push or deletion.
+- [x] Payments that cannot be charged twice, prices recomputed on the server, double bookings refused by the database, background jobs safe to run late or twice, an email queue that retries.
+
+**Can be done now (no decision needed)**
+
+- [x] Dependabot: monthly update pull requests into `rebuild` (`.github/dependabot.yml`), and security alerts switched on.
+- [x] One Node version everywhere: `web/.nvmrc` (26), read by CI. The host must use the same, or `.nvmrc` changes to the host's.
+- [x] A scheduler heartbeat: each scheduled run is recorded. `GET /api/health` answers 503 when the database does not answer or, in production, the scheduler has not run for 15 minutes. The admin overview says when the scheduler stopped.
+- [ ] A tester pass over everything built since 2026-11-17 (follow-ups 1, 4, 6, 7, 8, 9, 12, 15, the refund window, the food rule, the heartbeat).
+- [ ] A one-page runbook for the owners: who to call, how to roll back, how to restore.
+
+**Needs the hosting choice first**
+
+- [ ] A staging copy: the same host, its own database branch, Square's sandbox. Every change goes there before production.
+- [ ] Monitoring that alerts a phone: an uptime check on `/` and `/api/health`, and error tracking on bookings and payments.
+- [ ] Backups: the provider's point-in-time restore, plus a daily export to a second provider. A practice restore before launch, then each quarter.
+- [ ] `DATABASE_URL` through the database's connection pooler: a serverless host opens many connections.
+- [ ] Database migrations as a step of each release: back up, migrate, then deploy.
+- [ ] Two-factor sign-in on GitHub, the host, the database, Square, the email service and the domain registrar, with at least two owners able to get in.
+
+**At launch and after**
+
+- [ ] Keep the Acuity booking page running for the first weeks, so customers can book if the new site has to be switched off.
+- [ ] Deploy Monday to Wednesday mornings, never before or during a weekend; watch the site for 30 minutes after each deploy.
+- [ ] Monthly: merge Dependabot's update pull request once CI passes. Security fixes as soon as they come.
+- [ ] After every incident: a short note, and a test that reproduces it.
 
 ## Next, in this order
 
