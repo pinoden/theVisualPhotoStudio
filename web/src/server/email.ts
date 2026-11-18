@@ -285,6 +285,50 @@ export function bookingConfirmationEmail(input: {
   };
 }
 
+/** The reminder before a visit (`queueReminders` in tasks.ts), with how to get in as it is now. */
+export function bookingReminderEmail(input: {
+  to: string;
+  name: string;
+  ref: string;
+  studios: string;
+  when: string;
+  duration: string;
+  /** A photography session: what it includes. */
+  photoIncludes?: string;
+  /** What is still to pay, if anything; `atStudio` for a booking the studio made, which is paid there. */
+  dueCents: number;
+  atStudio: boolean;
+  /** How to get into the building, when the owner has set it. */
+  access?: string;
+}): QueuedEmail {
+  return {
+    to: input.to,
+    kind: "booking_reminder",
+    subject: `Reminder: your booking at ${STUDIO}, ${input.when}`,
+    body: [
+      `Hi ${input.name},`,
+      "",
+      `This is a reminder of your booking at ${STUDIO}.`,
+      "",
+      `Reference: ${input.ref}`,
+      `Studio: ${input.studios}`,
+      `When: ${input.when} (${input.duration})`,
+      ...(input.photoIncludes !== undefined
+        ? [`Photography session with our in-house photographer, studio included${input.photoIncludes ? `: ${input.photoIncludes}` : ""}.`]
+        : []),
+      ...(input.dueCents > 0 ? [input.atStudio ? `To pay at the studio: ${money(input.dueCents)}` : `Still to pay: ${money(input.dueCents)}`] : []),
+      `Address: ${ADDRESS}`,
+      "",
+      ...(input.access ? ["Getting in:", input.access, ""] : []),
+      "Your booking begins at the scheduled start time. Please arrive no more than five minutes early.",
+      "",
+      "The link in your confirmation email opens your booking. If you cannot come, please reply to this email or call us.",
+      "",
+      SIGN_OFF,
+    ].join("\n"),
+  };
+}
+
 /** An administrator moved the booking to a new time. The customer's link stays the same. */
 export function bookingMovedEmail(input: {
   to: string;

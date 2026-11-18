@@ -378,6 +378,11 @@ export const bookings = pgTable(
     loyaltyIssuedAt: ts("loyalty_issued_at"),
     /** When the review request was queued, or the rollout skipped an older appointment. */
     reviewRequestedAt: ts("review_requested_at"),
+    /**
+     * When the reminder before the visit was queued (`queueReminders` in tasks.ts). Set at once, with nothing sent, for
+     * a booking moved by the studio to a time closer than the reminder: the email about the move tells the new time.
+     */
+    reminderSentAt: ts("reminder_sent_at"),
     cancelledAt: ts("cancelled_at"),
     createdAt: createdAt(),
   },

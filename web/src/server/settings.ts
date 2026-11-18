@@ -45,6 +45,12 @@ export interface Settings {
   /** Days a reschedule code stays valid. */
   creditValidDays: number;
 
+  /**
+   * How many hours before the start the reminder email goes out (the owner's answer of 2026-11-17: 24). 0 sends none.
+   * A booking made closer to its start than this gets none: its confirmation has only just been sent.
+   */
+  reminderHours: number;
+
   // ── Guests ──
   /**
    * The most guests in all, those included and the extra ones, for two studios booked together, and for all three
@@ -124,6 +130,7 @@ export const DEFAULT_SETTINGS: Settings = {
   rescheduleFeeCents: 2000, // the owner's answer of 2026-11-17: the first reschedule is free, each further one $20
   creditValidDays: 90,
 
+  reminderHours: 24,
   twoStudioGuestLimit: 10,
   threeStudioGuestLimit: 20,
 
@@ -176,6 +183,7 @@ export const NUMBER_SETTING_RANGES = {
   rescheduleCutoffHours: [0, 24 * 365],
   maxReschedules: [0, 20],
   creditValidDays: [1, 730],
+  reminderHours: [0, 24 * 7],
   twoStudioGuestLimit: [1, 200],
   threeStudioGuestLimit: [1, 200],
   loyaltyVisits: [1, 100],
@@ -223,6 +231,7 @@ const VALIDATORS: { [K in Exclude<keyof Settings, "multiStudioPercent">]: (v: un
   maxReschedules: int(NUMBER_SETTING_RANGES.maxReschedules),
   rescheduleFeeCents: int(MONEY_SETTING_RANGES.rescheduleFeeCents),
   creditValidDays: int(NUMBER_SETTING_RANGES.creditValidDays),
+  reminderHours: int(NUMBER_SETTING_RANGES.reminderHours),
   twoStudioGuestLimit: int(NUMBER_SETTING_RANGES.twoStudioGuestLimit),
   threeStudioGuestLimit: int(NUMBER_SETTING_RANGES.threeStudioGuestLimit),
   loyaltyEnabled: bool,

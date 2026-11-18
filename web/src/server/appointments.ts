@@ -362,6 +362,9 @@ export async function moveBooking(
           endAt,
           label: "rescheduled",
           rescheduledCount: booking.rescheduledCount + (clientMove ? 1 : 0),
+          // A reminder comes again before the new time; to a time closer than the reminder's hours, the email about
+          // the move tells the new time, and no reminder follows it (queueReminders).
+          reminderSentAt: startAt.getTime() - now.getTime() > catalog.settings.reminderHours * 3_600_000 ? null : now,
         })
         .where(eq(bookings.id, booking.id));
       // Each studio keeps its own gap after the booking, as when the booking was made.

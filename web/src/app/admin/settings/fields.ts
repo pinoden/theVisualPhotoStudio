@@ -14,6 +14,11 @@ export const SETTING_GROUPS: { title: string; fields: SettingField[] }[] = [
       { key: "slotIncrementMinutes", label: "Start times every (minutes)", help: "15 offers 9:00, 9:15, 9:30 and so on." },
       { key: "holdMinutes", label: "Hold while paying (minutes)", help: "How long a slot is kept for a customer at checkout." },
       {
+        key: "reminderHours",
+        label: "Reminder email (hours before the start)",
+        help: "0 sends none. A booking made closer to its start than this gets none: its confirmation was just sent.",
+      },
+      {
         key: "twoStudioGuestLimit",
         label: "Most guests for two studios together",
         help: "Every guest counts, those included and the extra ones. Each studio's included and extra guests are set under Studios.",
