@@ -1,5 +1,17 @@
-import { and, asc, eq, inArray, isNotNull, isNull, notInArray, or, sql } from "drizzle-orm";
-import { bookings, emailOutbox, loyaltyLedger, paymentLinks, payments, promoCodes, refunds } from "@/db/schema";
+import { and, asc, eq, inArray, isNotNull, isNull, notInArray, or, sql, type SQL } from "drizzle-orm";
+import {
+  bookings,
+  emailOutbox,
+  loyaltyLedger,
+  membershipMinutes,
+  membershipPayments,
+  membershipPlanPrices,
+  memberships,
+  paymentLinks,
+  payments,
+  promoCodes,
+  refunds,
+} from "@/db/schema";
 import { together, type Db, type DbLike } from "@/db/client";
 import { labelOf, type LabelFacts } from "@/lib/domain/labels";
 import type { PromoKind } from "@/lib/domain/pricing";
@@ -102,7 +114,7 @@ export const OTHER_MONEY_LINK: Record<MoneyKind, string> = {
   live: "This is a real booking, and this site is in test mode: a payment link made here would take a pretend payment for it. Send the link from the live site.",
 };
 
-/** Whether the database holds bookings of this kind of money, or card payments or links of its processors. */
+/** Whether the database holds bookings of this kind of money, or card payments, links or memberships of its processors. */
 async function holdsMoney(db: DbLike, kind: MoneyKind): Promise<boolean> {
   const [booking] = await db.select({ id: bookings.id }).from(bookings).where(eq(bookings.moneyKind, kind)).limit(1);
   if (booking) return true;
@@ -110,14 +122,17 @@ async function holdsMoney(db: DbLike, kind: MoneyKind): Promise<boolean> {
   const [payment] = await db.select({ id: payments.id }).from(payments).where(inArray(payments.provider, processors)).limit(1);
   if (payment) return true;
   const [link] = await db.select({ id: paymentLinks.id }).from(paymentLinks).where(inArray(paymentLinks.provider, processors)).limit(1);
-  return link !== undefined;
+  if (link) return true;
+  // A membership is money too: its months, and the minutes they put on its code (follow-up 3).
+  const [member] = await db.select({ id: memberships.id }).from(memberships).where(inArray(memberships.provider, processors)).limit(1);
+  return member !== undefined;
 }
 
 export const LIVE_ON_TEST =
-  "Square's live account is set up, and this database holds what test mode recorded, when no money moved: bookings made then, or payments and payment links of its card processor. With the live account they would count as money (payments, cash recorded by hand, credit and codes). Remove them with `npm run db:clear-test-mode`, which lists them first and removes them when run again with `-- --yes`: it removes only what test mode made, and keeps every other booking, the website, the studios, prices, settings and staff. No server in test mode may use this database: what it books is test mode's again.";
+  "Square's live account is set up, and this database holds what test mode recorded, when no money moved: bookings made then, memberships bought then, or payments and payment links of its card processor. With the live account they would count as money (payments, cash recorded by hand, credit, codes and membership hours). Remove them with `npm run db:clear-test-mode`, which lists them first and removes them when run again with `-- --yes`: it removes only what test mode made, and keeps every other booking, the website, the studios, prices, settings and staff. No server in test mode may use this database: what it books is test mode's again.";
 
 export const TEST_ON_LIVE =
-  "Test mode is set up (the pretend processor, or Square's sandbox), and this database holds real bookings, or payments of Square's live account. Test bookings would mix with them. Set up the live account's credentials here, or test with a new, empty database.";
+  "Test mode is set up (the pretend processor, or Square's sandbox), and this database holds real bookings or memberships, or payments of Square's live account. Test bookings would mix with them. Set up the live account's credentials here, or test with a new, empty database.";
 
 /**
  * Refuses a database that holds the other kind of money than the processor
@@ -144,14 +159,19 @@ export async function otherMoneyNotice(db: DbLike, processor: string | null): Pr
   if (processor === null) return null;
   const number = sql<number>`count(*)::int`;
   if (moneyKindOf(processor) === "test") {
-    const [real] = await db.select({ n: number }).from(bookings).where(eq(bookings.moneyKind, "live"));
-    if (real.n === 0) return null;
-    return `${count(real.n, "real booking")} ${real.n === 1 ? "is" : "are"} in this database (made with Square's live account, or while no card processor was set up on the live site) beside test mode's. Test mode must not use a database with real bookings: the site refuses to start again on it.`;
+    const [[real], [members]] = await together(db, [
+      () => db.select({ n: number }).from(bookings).where(eq(bookings.moneyKind, "live")),
+      () => db.select({ n: number }).from(memberships).where(eq(memberships.provider, LIVE_PROCESSOR)),
+    ]);
+    if (real.n === 0 && members.n === 0) return null;
+    const realOnes = [...(real.n > 0 ? [count(real.n, "real booking")] : []), ...(members.n > 0 ? [count(members.n, "real membership")] : [])].join(" and ");
+    return `${realOnes} ${real.n + members.n === 1 ? "is" : "are"} in this database (made with Square's live account, or while no card processor was set up on the live site) beside test mode's. Test mode must not use a database with real money: the site refuses to start again on it.`;
   }
-  // Test mode's bookings, and what its card processor recorded for real ones.
+  // Test mode's bookings and memberships, and what its card processor recorded for real bookings.
   const tests: string[] = [...TEST_PROCESSORS];
-  const [[made], paid, linked] = await together(db, [
+  const [[made], [bought], paid, linked] = await together(db, [
     () => db.select({ n: number }).from(bookings).where(eq(bookings.moneyKind, "test")),
+    () => db.select({ n: number }).from(memberships).where(inArray(memberships.provider, tests)),
     () => db
       .select({ id: payments.bookingId })
       .from(payments)
@@ -164,9 +184,10 @@ export async function otherMoneyNotice(db: DbLike, processor: string | null): Pr
       .where(and(inArray(paymentLinks.provider, tests), eq(bookings.moneyKind, "live"))),
   ]);
   const touched = new Set([...paid, ...linked].map((row) => row.id)).size;
-  if (made.n === 0 && touched === 0) return null;
+  if (made.n === 0 && bought.n === 0 && touched === 0) return null;
   const left = [
     ...(made.n > 0 ? [`${count(made.n, "booking")} made in test mode`] : []),
+    ...(bought.n > 0 ? [`${count(bought.n, "membership")} bought in test mode`] : []),
     ...(touched > 0 ? [`pretend payments or payment links for ${count(touched, "real booking")}`] : []),
   ].join(", and ");
   return `A server in test mode is using this database beside this one. It left ${left}: none of it is real money. Stop that server, then remove it with npm run db:clear-test-mode: until then the site refuses to start again.`;
@@ -246,12 +267,23 @@ export interface TestModeContents {
   keptCodes: KeptCode[];
   /** What the owners added to or took off clients' stamps by hand: it stays. */
   stampCorrections: { email: string; stamps: number; reason: string }[];
+  /**
+   * Memberships bought in test mode, which go with their months, their hours and the plans' prices at test mode's
+   * processors (follow-up 3). `sandbox`: Square's sandbox billed it, and its subscription there still does while
+   * `active`, with no money moving.
+   */
+  memberships: { code: string; customer: string; planName: string; status: string; sandbox: boolean }[];
+  /** Memberships bought in test mode that pay for a booking that stays (made in test mode, then real): they stay too. */
+  keptMemberships: { code: string; customer: string }[];
 }
 
-/** Whether the database holds nothing of test mode: no booking of it, and nothing its processors made for another. */
+/** Whether the database holds nothing of test mode: no booking or membership of it, and nothing its processors made for another. */
 export function nothingOfTestMode(contents: TestModeContents): boolean {
-  return contents.bookings === 0 && contents.pretend.length === 0 && contents.madeReal.length === 0;
+  return contents.bookings === 0 && contents.memberships.length === 0 && contents.pretend.length === 0 && contents.madeReal.length === 0;
 }
+
+/** The kinds of the emails to a member: one that leaves the membership's code out (the owners' wording may) is told by its address. */
+const MEMBERSHIP_MAIL = ["membership_started", "membership_month_paid", "membership_payment_problem", "membership_cancelled"];
 
 interface ClearPlan {
   contents: TestModeContents;
@@ -269,6 +301,8 @@ interface ClearPlan {
   pretend: (PretendMoney & { bookingId: string; status: string; label: LabelFacts["label"] })[];
   /** The bookings made in test mode that are real from now on: their history says so. */
   madeReal: { bookingId: string; status: string; label: LabelFacts["label"] }[];
+  /** The memberships of test mode that go, with their months and their hours. */
+  membershipIds: string[];
 }
 
 /**
@@ -411,22 +445,44 @@ async function planClear(db: DbLike, now: Date): Promise<ClearPlan> {
     if (booking.promoDiscountCents > 0) creditBack.set(booking.promoCodeId!, (creditBack.get(booking.promoCodeId!) ?? 0) + booking.creditAppliedCents);
   }
 
-  // Mail that has not gone out and is about test bookings or their codes only: it would reach a client after the
-  // clear. One that names a booking that stays is about it, and stays.
+  // Memberships bought in test mode (follow-up 3). One that pays for a booking that stays (made in test mode, then made
+  // real by the live account) stays with it, named for the owners; the others go, with their months and hours.
+  const testMembers = await db
+    .select({ id: memberships.id, code: memberships.code, email: memberships.email, name: memberships.name, planName: memberships.planName, status: memberships.status, provider: memberships.provider })
+    .from(memberships)
+    .where(inArray(memberships.provider, tests))
+    .orderBy(asc(memberships.createdAt));
+  const usedByStaying =
+    testMembers.length > 0
+      ? await db
+          .select({ id: bookings.membershipId })
+          .from(bookings)
+          .where(and(inArray(bookings.membershipId, testMembers.map((member) => member.id)), some ? notInArray(bookings.id, bookingIds) : undefined))
+      : [];
+  const keptMemberIds = new Set(usedByStaying.map((row) => row.id));
+  const removedMembers = testMembers.filter((member) => !keptMemberIds.has(member.id));
+  // A member's own emails are told by their address when the member keeps no membership: the owners' wording may leave the code out.
+  const staying = removedMembers.length > 0 ? await db.select({ email: memberships.email }).from(memberships).where(notInArray(memberships.id, removedMembers.map((member) => member.id))) : [];
+  const membersGone = new Set(removedMembers.map((member) => member.email).filter((email) => !staying.some((row) => row.email === email)));
+
+  // Mail that has not gone out and is about test bookings, their codes or test mode's memberships only: it would reach
+  // a client after the clear. One that names a booking that stays is about it, and stays.
   const removedRefs = new Set(removed.map((booking) => booking.ref));
-  const removedCodeNames = removedCodes.map((code) => code.code);
-  const waiting = some
-    ? await db
-        .select({ id: emailOutbox.id, subject: emailOutbox.subject, body: emailOutbox.body })
-        .from(emailOutbox)
-        .where(and(isNull(emailOutbox.sentAt), notInArray(emailOutbox.kind, KEPT_MAIL)))
-    : [];
+  const removedCodeNames = [...removedCodes.map((code) => code.code), ...removedMembers.map((member) => member.code)];
+  const waiting =
+    some || removedMembers.length > 0
+      ? await db
+          .select({ id: emailOutbox.id, subject: emailOutbox.subject, body: emailOutbox.body, toEmail: emailOutbox.toEmail, kind: emailOutbox.kind })
+          .from(emailOutbox)
+          .where(and(isNull(emailOutbox.sentAt), notInArray(emailOutbox.kind, KEPT_MAIL)))
+      : [];
   const mailIds = waiting
     .filter((mail) => {
       const text = `${mail.subject}\n${mail.body}`;
       const refs = text.match(BOOKING_REF_IN_TEXT) ?? [];
       if (refs.some((ref) => !removedRefs.has(ref))) return false;
-      return refs.length > 0 || removedCodeNames.some((code) => text.includes(code));
+      if (refs.length > 0 || removedCodeNames.some((code) => text.includes(code))) return true;
+      return MEMBERSHIP_MAIL.includes(mail.kind) && membersGone.has(mail.toEmail);
     })
     .map((mail) => mail.id);
 
@@ -490,7 +546,16 @@ async function planClear(db: DbLike, now: Date): Promise<ClearPlan> {
         earnedWithTestVisits: code.source === "loyalty" && code.kind === "free_hour" && code.email !== null && visitors.includes(code.email),
       })),
       stampCorrections,
+      memberships: removedMembers.map((member) => ({
+        code: member.code,
+        customer: member.name,
+        planName: member.planName,
+        status: member.status,
+        sandbox: member.provider === "square-sandbox",
+      })),
+      keptMemberships: testMembers.filter((member) => keptMemberIds.has(member.id)).map((member) => ({ code: member.code, customer: member.name })),
     },
+    membershipIds: removedMembers.map((member) => member.id),
     bookingIds,
     paymentIds: paid.map((payment) => payment.id),
     linkIds: links.map((link) => link.id),
@@ -555,7 +620,23 @@ export function describeTestMode(contents: TestModeContents): string[] {
       lines.push(`Removed: ${their} ${count(contents.byHand.count, "payment")} recorded by hand, ${formatCents(contents.byHand.cents)} in all.`);
     }
     lines.push(`Removed: ${count(contents.codes, "code")} ${one ? "it" : "they"} issued (reschedule codes, pet fees' credit, free hours visits earned).`);
-    lines.push(`Removed: ${count(contents.mail, "email")} about ${one ? "it" : "them"} that had not gone out.`);
+    lines.push(`Removed: ${count(contents.mail, "email")} about ${one ? "it" : "them"}${contents.memberships.length > 0 ? " and test mode's memberships" : ""} that had not gone out.`);
+  }
+  if (contents.memberships.length > 0) {
+    lines.push(`Removed: ${count(contents.memberships.length, "membership")} bought in test mode, with ${contents.memberships.length === 1 ? "its" : "their"} months paid and hours.`);
+    const billing = contents.memberships.filter((member) => member.sandbox && member.status === "active");
+    if (billing.length > 0) {
+      lines.push(
+        `  Square's sandbox goes on billing ${billing.length === 1 ? "this one" : "these"} each month, with no money moving: cancel ${billing.length === 1 ? "its subscription" : "their subscriptions"} in the sandbox's dashboard if you like:`,
+      );
+      lines.push(...listed(billing, (member) => `${member.code}, ${member.customer}, ${member.planName}`));
+    }
+  }
+  if (contents.keptMemberships.length > 0) {
+    lines.push(
+      `Kept: ${count(contents.keptMemberships.length, "membership")} bought in test mode that ${contents.keptMemberships.length === 1 ? "pays" : "pay"} for a booking counted as real from now on. Look at ${contents.keptMemberships.length === 1 ? "it" : "each"} under Memberships:`,
+    );
+    lines.push(...listed(contents.keptMemberships, (member) => `${member.code}, ${member.customer}`));
   }
   if (contents.pretend.length > 0) {
     lines.push(
@@ -609,7 +690,9 @@ export function describeTestMode(contents: TestModeContents): string[] {
       ),
     );
   }
-  lines.push("Kept: the website, its pictures and fonts, the studios, hours, prices, add-ons, settings, blocked time, photography, staff and accounts, sent mail and the contact form's messages.");
+  lines.push(
+    "Kept: the website, its pictures and fonts, the studios, hours, prices, add-ons, membership plans, settings, blocked time, photography, staff and accounts, sent mail and the contact form's messages.",
+  );
   return lines;
 }
 
@@ -641,7 +724,9 @@ async function renumberFreeHours(tx: DbLike): Promise<void> {
  * Removes test mode's bookings and what they made (payments, refunds, links,
  * history, holds, the codes they issued and the entries about those, mail
  * about them that has not gone out), and gives the codes that stay what test
- * bookings still held of them. A pretend payment or link that test mode's
+ * bookings still held of them. Memberships bought in test mode go too, with
+ * their months, their hours and mail about them, unless a booking that stays
+ * was paid with one. A pretend payment or link that test mode's
  * processor made for a real booking goes too; the booking stays, and its
  * history says so. A booking made in test mode for which the live account
  * took money stays, and counts as real from then on. Nothing else changes:
@@ -669,8 +754,21 @@ export async function clearTestMode(db: Db, now: Date): Promise<TestModeContents
       await tx.delete(promoCodes).where(inArray(promoCodes.id, plan.codeIds));
       await renumberFreeHours(tx);
     }
+    // Membership hours spent on the bookings that go, and every line of the memberships that go: a line keeps its
+    // booking and its month from being removed. A membership that stays gets back what such a booking took of it.
+    const linesGoing: SQL[] = [
+      ...(plan.bookingIds.length > 0 ? [inArray(membershipMinutes.bookingId, plan.bookingIds)] : []),
+      ...(plan.membershipIds.length > 0 ? [inArray(membershipMinutes.membershipId, plan.membershipIds)] : []),
+    ];
+    if (linesGoing.length > 0) await tx.delete(membershipMinutes).where(or(...linesGoing));
     // Their history, holds and add-ons go with them.
     if (plan.bookingIds.length > 0) await tx.delete(bookings).where(inArray(bookings.id, plan.bookingIds));
+    if (plan.membershipIds.length > 0) {
+      await tx.delete(membershipPayments).where(inArray(membershipPayments.membershipId, plan.membershipIds));
+      await tx.delete(memberships).where(inArray(memberships.id, plan.membershipIds));
+    }
+    // The plans' prices at test mode's processors: made again there when a membership is next bought in test mode.
+    await tx.delete(membershipPlanPrices).where(inArray(membershipPlanPrices.provider, [...TEST_PROCESSORS]));
     for (const entry of plan.pretend) {
       const label = labelOf(entry);
       await recordEvent(tx, {
