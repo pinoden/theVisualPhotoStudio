@@ -42,7 +42,7 @@ Details and status of each are under "Katya's answers to the 16 follow-up questi
 | 2 | Extra people, $5 each with a quantity | Built; the bundle limit confirmed 2026-11-18 (question 37) |
 | 3 | Memberships | Built (2026-11-18), in five steps. Questions 41 to 46 wait on the owners |
 | 4 | Unused pet fee as credit, issued by hand | Built |
-| 5 | Changes made by the studio: repricing, payment section | **Built (2026-11-18)**: a move to a day of the other kind reprices at today's prices; the payment card shows Paid, Outstanding balance and Remaining credit, refunds the credit to the card, and links Square payments to their receipts. Readings: question 47 |
+| 5 | Changes made by the studio: repricing, payment section | **Built (2026-11-18)**: a move to a day of the other kind reprices at today's prices; the payment card shows Paid, Outstanding balance and Remaining credit, refunds the credit to the card, and links Square payments to their receipts. Readings: question 47, confirmed 2026-11-18 |
 | 6 | $20 for each reschedule after the free one | Built |
 | 7 | Review request 24 hours after a visit | Built |
 | 8 | No Blanche + Dayglow without Paris | Built |
@@ -101,7 +101,6 @@ Agreed with the owner on 2026-11-17. Each item is done once it is checked off he
 
 ## Waiting on the owners
 
-- **Question 47 (follow-up 5, as built):** a move to a day of the same kind keeps the price, one to the other kind takes that day's price at today's prices; codes, credit and minutes pay the same part again, credit no longer needed goes back on its code; the difference is owed, or refunded only when the studio agrees; a card payment's link opens Square's receipt (Square documents no address of a payment in its Dashboard). An "OK" settles it.
 - **Questions 41 to 46 (memberships):** 41, weekends, is a switch the owners set themselves (Settings → Memberships), on as decided on 2026-11-17: they only need to say whether to switch it off. 42 and 43 are built on the builder's readings (the rest of a longer booking pays its share; a member's booking is not moved online, but cancelled and booked again, or moved by the studio): an "OK" settles each. 44: are Blanche's plans $380 and $700 (the table) or $370 and $670 (the live site)? 45: the readings of buying one (no account needed, more than one per client, the studio not emailed for each new member, the page not put into the menu). 46: each month as built (a month's hours come once Square has taken it; a month late or failed is told to the member and the studio once; Square, not the site, tries the card again).
 - **Question 40 (the emails' templates):** built on readings: only the emails to clients can be changed (the studio's notices keep the site's wording), only by owners, and the site still writes the parts that state money, codes and refunds. An "OK" settles it.
 - **Follow-up 14:** the Instagram account has to be connected by an owner. It blocks nothing else and can wait until go-live.
