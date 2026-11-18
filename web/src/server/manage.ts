@@ -37,7 +37,7 @@ import {
 } from "./email";
 import { BY_CUSTOMER, BY_STUDIO, BY_SYSTEM, recordEvent } from "./history";
 import { releaseHolds } from "./holds";
-import { creditLeftCentsByBooking, heldCentsByBooking, netCardPaidCents, paidAtStudioCents } from "./money";
+import { chargesCentsByBooking, creditLeftCentsByBooking, heldCentsByBooking, netCardPaidCents, paidAtStudioCents, paidTowardPriceCentsByBooking } from "./money";
 import {
   closePayLinkOf,
   lookAtPayLink,
@@ -95,18 +95,28 @@ async function factsFor(db: DbLike, booking: BookingRow): Promise<BookingFacts> 
   const [code] = booking.promoCodeId
     ? await db.select({ source: promoCodes.source }).from(promoCodes).where(eq(promoCodes.id, booking.promoCodeId)).limit(1)
     : [];
+  // What paid the extra charges never travels into a refund or a reschedule code (question 36), also once the studio
+  // has moved a booking that had started (the tester's finding of 2026-11-18). The price is taken as paid first, and
+  // what was paid toward it beyond, up to the charges, paid them: off money taken at the studio first, where charges are
+  // mostly paid, then off the card.
+  const card = await netCardPaidCents(db, booking.id);
+  const atStudio = await paidAtStudioCents(db, booking.id);
+  const charges = (await chargesCentsByBooking(db, [booking.id])).get(booking.id) ?? 0;
+  const toward = charges > 0 ? ((await paidTowardPriceCentsByBooking(db, [booking.id])).get(booking.id) ?? 0) : 0;
+  const forCharges = Math.min(charges, Math.max(0, toward - booking.totalCents));
+  const offStudio = Math.min(forCharges, Math.max(0, atStudio));
   return {
     status: booking.status,
     startAt: booking.startAt,
     rescheduledCount: booking.rescheduledCount,
     madeWithRescheduleCode: code?.source === "reschedule",
-    cardPaidCents: await netCardPaidCents(db, booking.id),
+    cardPaidCents: Math.max(0, card - (forCharges - offStudio)),
     creditAppliedCents: booking.creditAppliedCents,
     // promoDiscountCents holds whatever the code took off: for a credit code that is the credit itself.
     discountCents: booking.promoDiscountCents - booking.creditAppliedCents,
     petFeeCents,
     petCreditGiven: petFeeCents > 0 && (await petCreditOf(db, booking.id)) !== null,
-    paidAtStudioCents: await paidAtStudioCents(db, booking.id),
+    paidAtStudioCents: atStudio - offStudio,
     membershipMinutes: booking.membershipMinutes,
   };
 }
@@ -158,10 +168,11 @@ async function manageContext(
   if (!isBookingRef(ref)) return null;
   const [booking] = await db.select().from(bookings).where(eq(bookings.ref, ref)).limit(1);
   if (!booking || !mayAct(booking, actor)) return null;
-  const terms = termsFor(booking, await loadSettings(db));
+  const settings = await loadSettings(db);
+  const terms = termsFor(booking, settings);
   const facts = await factsFor(db, booking);
   return {
-    options: { cancel: cancellationOutcome(facts, now, terms), reschedule: rescheduleOutcome(facts, now, terms) },
+    options: { cancel: cancellationOutcome(facts, now, terms), reschedule: rescheduleOutcome(facts, now, terms, settings) },
     terms,
     heldCents: await heldCentsOf(db, booking.id, now),
     booking,
@@ -1169,7 +1180,7 @@ export async function requestRescheduleCode(db: Db, ref: string, actor: Actor, d
 
     // The terms the booking was made under: its moving rules, and how long the code it gives stays valid.
     const terms = termsFor(booking, settings);
-    const decision = rescheduleOutcome(await factsFor(tx, booking), deps.now, terms);
+    const decision = rescheduleOutcome(await factsFor(tx, booking), deps.now, terms, settings);
     if (!decision.allowed) {
       return {
         kind: "blocked" as const,

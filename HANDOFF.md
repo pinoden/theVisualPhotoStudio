@@ -19,8 +19,8 @@ Nothing. No tool has unfinished changes in the tree.
 On the tree of this commit, 2026-11-18:
 
 - `npm run typecheck` and `npm run lint`: clean.
-- `npm test`: 1,026 tests pass.
-- `npm run test:e2e`: the whole browser suite, 63 cases, passes (12.6 minutes), with its cases extended for the fixes. Near its end the development server again logged "Worker terminated due to reaching memory limit: JS heap out of memory" from one of its worker processes, and went on: it has now done so near the end of both full runs since the follow-up 5 work, and once in the tester's long session (a known gap in `ProjectLibrary.md`). It is the development server's, not the site's, and every test passed each time; if it starts failing tests, on CI above all, find which worker it is (the browser tests run `next dev`, never a production build).
+- `npm test`: 1,034 tests pass.
+- `npm run test:e2e`: the whole browser suite, 63 cases, passes (11.1 minutes), with its cases extended for the fixes of both tester passes. Near its end the development server again logged "Worker terminated due to reaching memory limit: JS heap out of memory" from one of its worker processes, and went on: it has now done so near the end of each full run since the follow-up 5 work, and once in the tester's long session (a known gap in `ProjectLibrary.md`). It is the development server's, not the site's, and every test passed each time; if it starts failing tests, on CI above all, find which worker it is (the browser tests run `next dev`, never a production build).
 - Follow-up 5 (repricing a booking the studio moves, the payment card): nine tests of their own (a day of the same kind keeps the price even after the prices changed; a weekend costs more and is owed, and moving back owes nothing; a weekday costs less, the difference is Remaining credit until the owner refunds it to the card; a percent code and a free hour on the new price; credit back on its code, never taken again; membership minutes with the weekend switch on and off; a day with no price refused, two kinds priced alike unchanged; a photography session never repriced; a card payment's receipt, and who may open it), and a summary test for "To be refunded". The browser suite has a new case: a Saturday booking moved to a weekday, the price shown before the move, the payment card, the client's email and booking page, and the refund of the difference to the card. `npm run check:square` (all steps pass) now asks Square's sandbox for a payment's receipt: none while the amount is only reserved, `https://squareupsandbox.com/receipt/preview/…` once it is taken.
 - The clear of test mode and memberships: four tests of their own (memberships of test mode go with their months, hours, bookings and mail; one alone is test money to the live account; a real one and its member's mail stay, and test mode refuses a database holding one; one that pays for a booking made real stays, and gets back what a removed booking took). The old code was checked to fail the clear on a member's test booking (the foreign key of `membership_minutes`). The clear was run on a copy of the browser suite's database: 28 bookings, the membership with its month and three lines of hours, and the plan price removed; the twelve plans kept. The browser suite did not run again for it: it changes no page.
 - Memberships (follow-up 3, steps 1 to 5): verified at their commits, as recorded in the decision log of `ProjectLibrary.md`: their own tests, migrations `0041` to `0045` on copies of browser-test databases, every call to Square in its sandbox, and a membership bought, spent and cancelled with Square's own card form on a server holding the sandbox keys in its environment only.
@@ -30,9 +30,10 @@ On the tree of this commit, 2026-11-18:
 
 Tester passes (`.claude/agents/tester.md`), 2026-11-18:
 - On follow-ups 6 and 9, the 7-day refund window, the food rule, the Settings fee field and `/api/health`: four low defects, all fixed in commit `3a76abc`.
-- On memberships and follow-up 5 (at `67c6740`; the suites passed there): 13 defects, all fixed in the commit that holds this file, each listed in the decision log of `ProjectLibrary.md`. The worst: a month Square took before the member cancelled was never recorded; credit refunded and the booking moved back to the dearer day owed nothing; the membership checkout charged a price changed after it was shown; the clear of test mode could leave a database the live account refuses. The tester's probe tests are folded into the suites (`membership-billing`, `membership-join`, `membership-bookings`, `move-reprice`, `test-mode-memberships`), and the browser suite now also checks the studio swap on the booking screen, the hours list in the account, the cancel message, and a move back after the credit was refunded. Migration `0046` was tried on copies of two browser-test databases (weekday and weekend bookings filled in, a credit above its refund refused, a second run changing nothing) and its filling in by a test with a special date.
+- On memberships and follow-up 5 (at `67c6740`; the suites passed there): 13 defects, all fixed in commit `5ea5457`, each listed in the decision log of `ProjectLibrary.md`. The worst: a month Square took before the member cancelled was never recorded; credit refunded and the booking moved back to the dearer day owed nothing; the membership checkout charged a price changed after it was shown; the clear of test mode could leave a database the live account refuses. The tester's probe tests are folded into the suites (`membership-billing`, `membership-join`, `membership-bookings`, `move-reprice`, `test-mode-memberships`), and the browser suite now also checks the studio swap on the booking screen, the hours list in the account, the cancel message, and a move back after the credit was refunded. Migration `0046` was tried on copies of two browser-test databases (weekday and weekend bookings filled in, a credit above its refund refused, a second run changing nothing) and its filling in by a test with a special date.
+- On follow-ups 1, 2, 4, 7, 8, 12, 13 and 15, the reminder email, bookings keeping their terms, asking the studio to move a booking, the emails' templates, and the 13 fixes of the first pass again (at `5ea5457`; the suites passed there): 12 of the 13 fixes held, and 8 defects were found, all fixed in the commit that holds this file and listed in the decision log of `ProjectLibrary.md`. The worst: what a cleaning or damage charge is for never reached the client, and a paid extra charge travelled into a cancellation refund or a reschedule code once the studio moved a booking that had started. The tester's probes are folded into the suites.
 
-Not yet through an independent tester pass: follow-ups 1, 2, 4, 7, 8, 12, 13 and 15, the reminder email, bookings keeping their terms, asking the studio to move a booking, the emails' templates, and the fixes of the 13 findings of 2026-11-18 (to be checked again by the next pass).
+Not yet through an independent tester pass: the fixes of the second pass's 8 findings. Covered only by the suites and the builder's reading, never in a browser by the tester: the monthly billing at Square (fixes 1 and 9 of the first pass), the clear of test mode on a real PostgreSQL, an attendant adding a charge, the days the clocks change, Safari and real phones.
 
 ## Done from the owner's 16 follow-up answers
 
@@ -40,21 +41,21 @@ Details and status of each are under "Katya's answers to the 16 follow-up questi
 
 | # | Subject | Status |
 | --- | --- | --- |
-| 1 | Weekend prices for longer bookings | Built |
-| 2 | Extra people, $5 each with a quantity | Built; the bundle limit confirmed 2026-11-18 (question 37) |
+| 1 | Weekend prices for longer bookings | Built; tested 2026-11-18 |
+| 2 | Extra people, $5 each with a quantity | Built; the bundle limit confirmed 2026-11-18 (question 37); tested 2026-11-18 |
 | 3 | Memberships | Built (2026-11-18), in five steps; tested, and its defects fixed, the same day. Questions 41 to 46 wait on the owners |
-| 4 | Unused pet fee as credit, issued by hand | Built |
+| 4 | Unused pet fee as credit, issued by hand | Built; tested 2026-11-18 |
 | 5 | Changes made by the studio: repricing, payment section | **Built (2026-11-18)**: a move to a day of the other kind reprices at today's prices; the payment card shows Paid, Outstanding balance and Remaining credit, refunds the credit to the card, and links Square payments to their receipts. Readings: question 47, confirmed 2026-11-18; tested, and its defects fixed, the same day |
 | 6 | $20 for each reschedule after the free one | Built |
-| 7 | Review request 24 hours after a visit | Built |
-| 8 | No Blanche + Dayglow without Paris | Built |
+| 7 | Review request 24 hours after a visit | Built; tested 2026-11-18 |
+| 8 | No Blanche + Dayglow without Paris | Built; tested 2026-11-18 |
 | 9 | Loyalty starts over when switched on again | Built |
 | 10 | Photographer's last start at 4 p.m. | Already built, verified |
 | 11 | Photography needs 336 hours of notice | Already built, verified |
-| 12 | Photography-only codes | Built |
-| 13 | Overtime, cleaning and damage charges | Built; confirmed 2026-11-18 (question 36) |
+| 12 | Photography-only codes | Built; tested 2026-11-18 |
+| 13 | Overtime, cleaning and damage charges | Built; confirmed 2026-11-18 (question 36); tested, and its defects fixed, 2026-11-18 |
 | 14 | Instagram feed on the home page | **Waits on the owner** (connecting the account) |
-| 15 | After-hours requests through the contact form | Built |
+| 15 | After-hours requests through the contact form | Built; tested 2026-11-18 |
 | 16 | Discount by yearly spend | Decided: not offered |
 
 Also built from the answers of 2026-11-17: rentals refunded when cancelled 7 days ahead (photography 14), no food or drinks inside the studios, the reminder before a visit (question 29, confirmed as question 38), bookings keeping their terms (question 10), asking the studio to move a booking (question 20, confirmed as question 39), and the emails' templates (question 33, Admin → Emails).
@@ -65,7 +66,7 @@ Agreed with the owner on 2026-11-17. Each item is done once it is checked off he
 
 **Already in place**
 
-- [x] 1,026 unit and integration tests and 63 browser tests.
+- [x] 1,034 unit and integration tests and 63 browser tests.
 - [x] CI on GitHub (`.github/workflows/ci.yml`): type check, lint, unit tests and the browser suite on every pull request and every push to `rebuild`.
 - [x] Branch protection on `master`: pull requests only, both CI jobs must pass, no exception for administrators, no force-push or deletion.
 - [x] Payments that cannot be charged twice, prices recomputed on the server, double bookings refused by the database, background jobs safe to run late or twice, an email queue that retries.
@@ -98,7 +99,7 @@ Agreed with the owner on 2026-11-17. Each item is done once it is checked off he
 
 ## Next, in this order
 
-1. **The second tester pass** (`.claude/agents/tester.md`; the owner gave the go-ahead for tester passes on 2026-11-18): the rest of the list under "Verified" (follow-ups 1, 2, 4, 7, 8, 12, 13 and 15, the reminder email, bookings keeping their terms, asking the studio to move a booking, the emails' templates), and the fixes of the 13 findings of the first pass checked again.
+1. **A short tester pass** (`.claude/agents/tester.md`; the owner gave the go-ahead for tester passes on 2026-11-18) over the fixes of the second pass's 8 findings, and an attendant adding a charge in a browser.
 2. On the first real booking at go-live (go-live question 4), open its "Receipt in Square" link once with the live keys, and fill in the runbook's "(at go-live)" lines.
 
 ## Waiting on the owners

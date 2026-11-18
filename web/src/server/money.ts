@@ -1,6 +1,7 @@
-import { and, eq, gt, inArray, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull, ne, sql } from "drizzle-orm";
 import { bookingCharges, payments, refunds } from "@/db/schema";
 import { together, type DbLike } from "@/db/client";
+import { clientChargeLabel } from "@/lib/charge-label";
 import { MANUAL_PROVIDER } from "@/lib/payment-methods";
 import { RESERVE_HOURS } from "./payments";
 
@@ -201,6 +202,23 @@ export async function creditLeftCentsByBooking(db: DbLike, rows: { id: string; t
     if (cents > 0) left.set(row.id, cents);
   }
   return left;
+}
+
+/**
+ * For several bookings at once: the charges that count (not taken back), as lines the client reads on their booking,
+ * their receipt and a payment link, a cleaning or damage charge with what it is for (`clientChargeLabel`). A booking with
+ * none is not in the map. See src/server/charges.ts.
+ */
+export async function activeChargesByBooking(db: DbLike, bookingIds: string[]): Promise<Map<string, { label: string; cents: number }[]>> {
+  if (bookingIds.length === 0) return new Map();
+  const rows = await db
+    .select()
+    .from(bookingCharges)
+    .where(and(inArray(bookingCharges.bookingId, bookingIds), isNull(bookingCharges.voidedAt)))
+    .orderBy(asc(bookingCharges.createdAt));
+  const map = new Map<string, { label: string; cents: number }[]>();
+  for (const row of rows) map.set(row.bookingId, [...(map.get(row.bookingId) ?? []), { label: clientChargeLabel(row), cents: row.amountCents }]);
+  return map;
 }
 
 /**

@@ -514,8 +514,10 @@ async function AppointmentDetails({
                   : appointment.payments.madeInAdmin
                     ? "This booking was made in the admin, so nothing was charged online."
                     : paidTowardPrice > 0
-                      ? `Its card paid ${formatCents(paidTowardPrice)}: the rest is what its price went up by afterwards, when it was moved to a day that costs more. Collect it at the studio${linkPossible ? ", or with a payment link" : ""}.`
-                      : `The amount its card held lapsed before it was taken, so the card was not charged: collect the price at the studio${linkPossible ? ", or with a payment link" : ""}.`}
+                      ? `That is what its price went up by after it was paid, when it was moved to a day that costs more. Collect it at the studio${linkPossible ? ", or with a payment link" : ""}.`
+                      : appointment.payments.cardLapsed
+                        ? `The amount its card held lapsed before it was taken, so the card was not charged: collect the price at the studio${linkPossible ? ", or with a payment link" : ""}.`
+                        : `Its code or membership hours paid what it cost when it was booked; that is what its price went up by afterwards, when it was moved to a day that costs more. Collect it at the studio${linkPossible ? ", or with a payment link" : ""}.`}
               </>
             ) : appointment.payments.held && appointment.payments.ended ? (
               <>

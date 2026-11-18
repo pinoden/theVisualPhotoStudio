@@ -125,7 +125,10 @@ export async function createAdminBookingAction(formData: FormData): Promise<void
     withMessage(
       `/admin/appointments/${result.ref}`,
       "notice",
-      "Booked. The client has been emailed their confirmation. Nothing was charged: the price is paid at the studio.",
+      // A code or membership hours may have paid all of it (the tester's finding of 2026-11-18).
+      result.totalCents > 0
+        ? "Booked. The client has been emailed their confirmation. Nothing was charged: the price is paid at the studio."
+        : "Booked. The client has been emailed their confirmation. Nothing was charged, and nothing is left to pay: their code or membership hours paid for it.",
     ),
   );
 }

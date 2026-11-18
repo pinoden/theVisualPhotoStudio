@@ -86,6 +86,30 @@ describe("what stops a template from being used", () => {
     // In the subject is in the email.
     expect(templateProblems(EMAIL_TEMPLATES.login_code, { subject: "Code {{code}}", body: "Hello" })).toEqual([]);
   });
+
+  it("keeps every part that states money (question 40; the tester's finding of 2026-11-18)", () => {
+    const money = [
+      ["booking_reminder", "to_pay"],
+      // reschedule_code states its value in {{credit}}, which it keeps already.
+      ["reschedule_code", "credit"],
+      ["payment_link", "amount"],
+      ["payment_link", "charges"],
+      ["payment_received", "amount"],
+      ["payment_received", "balance"],
+      ["reservation_lapsed", "due"],
+      // The late payment's emails state it in {{refund}}, which they keep already.
+      ["late_payment_refunded", "refund"],
+      ["late_payment_due", "refund"],
+      ["pet_credit", "amount"],
+      ["membership_started", "price"],
+      ["membership_month_paid", "price"],
+    ] as const;
+    for (const [key, part] of money) {
+      const spec = EMAIL_TEMPLATES[key];
+      const without = { subject: spec.subject, body: spec.body.split("\n").filter((line) => !line.includes(`{{${part}}}`)).join("\n") };
+      expect(templateProblems(spec, without), `${key} without {{${part}}}`).toContain(`{{${part}}} must stay in this email.`);
+    }
+  });
 });
 
 describe("the templates", () => {

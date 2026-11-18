@@ -7,6 +7,7 @@ import { askStudioToMove, cancelBooking, requestRescheduleCode, type Actor } fro
 import { flushEmailsSoon, manageDeps } from "@/server/runtime";
 import { getCurrentUser } from "@/server/session";
 import { formatInstant } from "@/server/tz";
+import { formText } from "@/lib/parse";
 
 export interface ManageState {
   status: "idle" | "cancelled" | "rescheduled" | "requested" | "error";
@@ -75,7 +76,9 @@ export async function rescheduleBookingAction(_previous: ManageState, formData: 
 export async function askStudioToMoveAction(_previous: ManageState, formData: FormData): Promise<ManageState> {
   const actor = await actorFrom(formData);
   if (!actor) return SIGNED_OUT;
-  const result = await askStudioToMove(await getDb(), String(formData.get("ref") ?? ""), actor, String(formData.get("message") ?? ""), await manageDeps());
+  // As every form's text: a browser sends each line break as \r\n, which counted twice refused a message the box allowed
+  // (the tester's finding of 2026-11-18).
+  const result = await askStudioToMove(await getDb(), formText(formData.get("ref")), actor, formText(formData.get("message")), await manageDeps());
   if (!result.ok) {
     if (result.code === "already_asked") refresh();
     return { status: "error", message: result.message };

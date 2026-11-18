@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import { bookings, paymentLinks, payments, promoCodes, refunds } from "@/db/schema";
 import type { Db, DbLike } from "@/db/client";
 import { labelOf } from "@/lib/domain/labels";
@@ -81,6 +81,8 @@ export interface BookingMoney {
   creditLeftCents: number;
   /** What a refund to the card can still give back: what the card paid and kept, less a pet fee returned as credit. */
   cardRefundableCents: number;
+  /** A card's amount for the booking was reserved and never taken, the reservation lapsing: then no card paid it. */
+  cardLapsed: boolean;
   /** How the booking ended, if it has: then nothing more is to pay, whatever was received. */
   ended: "cancelled" | "released" | null;
   /** Made in the admin, and so paid at the studio or through a payment link; else made online, and paid by card then. */
@@ -129,6 +131,14 @@ export async function moneyOf(
     dueCents: await owedCents(db, booking, now),
     creditLeftCents: (await creditLeftCentsByBooking(db, [booking])).get(booking.id) ?? 0,
     cardRefundableCents: Math.max(0, card - Math.min(card, await petFeeReturnedCents(db, booking.id))),
+    cardLapsed:
+      (
+        await db
+          .select({ id: payments.id })
+          .from(payments)
+          .where(and(eq(payments.bookingId, booking.id), eq(payments.status, "failed"), ne(payments.provider, MANUAL_PROVIDER)))
+          .limit(1)
+      ).length > 0,
     madeInAdmin: booking.madeBy !== null,
     ended: STANDS.includes(booking.status) ? null : booking.cancelReason === "rescheduled" ? "released" : "cancelled",
     held:

@@ -1,9 +1,10 @@
-import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { bookingCharges, bookings, priceRules, specialDates, studioHolds, studios } from "@/db/schema";
 import type { Db, DbLike } from "@/db/client";
 import { can } from "@/lib/abilities";
 import { labelOf } from "@/lib/domain/labels";
 import { formatCents } from "@/lib/domain/pricing";
+import { chargeLabel, type ChargeKind } from "@/lib/charge-label";
 import { defaultDayType, durationLabel } from "@/lib/domain/time";
 import type { AuthUser } from "./auth";
 import { isBookingRef } from "./bookings";
@@ -28,7 +29,8 @@ import { localDateOf } from "./tz";
  * Whoever may record payments may add one; one added by mistake is taken back by an owner, while it is still unpaid.
  */
 
-export type ChargeKind = "overtime" | "cleaning" | "damage";
+export type { ChargeKind } from "@/lib/charge-label";
+export { chargeLabel } from "@/lib/charge-label";
 
 export const CHARGE_KINDS: Record<ChargeKind, string> = { overtime: "Overtime", cleaning: "Cleaning", damage: "Damage" };
 
@@ -52,11 +54,6 @@ export function overtimeCents(hourlyCents: number, minutes: number): number {
   return Math.round((hourlyCents * overtimeBlocks(minutes)) / 4);
 }
 
-/** How a charge is named, to the client and on the receipt. */
-export function chargeLabel(charge: { kind: ChargeKind; minutes: number | null }): string {
-  if (charge.kind === "overtime") return charge.minutes ? `Overtime, ${durationLabel(charge.minutes)}` : "Overtime";
-  return charge.kind === "cleaning" ? "Cleaning charge" : "Damage charge";
-}
 
 export interface ChargeLine {
   id: string;
@@ -92,18 +89,6 @@ export async function chargesOf(db: DbLike, bookingId: string): Promise<ChargeLi
   }));
 }
 
-/** For several bookings at once: the charges that count (not taken back), as lines for a summary or a receipt. */
-export async function activeChargesByBooking(db: DbLike, bookingIds: string[]): Promise<Map<string, { label: string; cents: number }[]>> {
-  if (bookingIds.length === 0) return new Map();
-  const rows = await db
-    .select()
-    .from(bookingCharges)
-    .where(and(inArray(bookingCharges.bookingId, bookingIds), isNull(bookingCharges.voidedAt)))
-    .orderBy(asc(bookingCharges.createdAt));
-  const map = new Map<string, { label: string; cents: number }[]>();
-  for (const row of rows) map.set(row.bookingId, [...(map.get(row.bookingId) ?? []), { label: chargeLabel(row), cents: row.amountCents }]);
-  return map;
-}
 
 export type HourlyRate = { ok: true; cents: number } | { ok: false; missing: string[] };
 

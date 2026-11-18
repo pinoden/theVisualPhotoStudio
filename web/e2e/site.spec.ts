@@ -1658,6 +1658,6 @@ test("the studio moves a Saturday booking to a weekday, which costs less, and th
   await page.getByRole("button", { name: "Move booking" }).click();
   await expect(byText(page, /Moved to .* The client has been emailed\./)).toBeVisible();
   await expect(onScreen(page.locator(".payment-facts")).locator("div", { hasText: "Outstanding balance" })).toContainText("$4");
-  await expect(byText(page, /Its card paid \$68: the rest is what its price went up by afterwards, when it was moved to a day that costs more\. Collect it at the studio/)).toBeVisible();
+  await expect(byText(page, /That is what its price went up by after it was paid, when it was moved to a day that costs more\. Collect it at the studio/)).toBeVisible();
   expect((await latestEmail(page, "booking_moved", wes.email)).body).toContain("Still to pay: $4, at the studio or with a payment link we email you.");
 });

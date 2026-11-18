@@ -589,11 +589,21 @@ export function payLinkEmail(input: {
   amountCents: number;
   /** The page on this site that leads to the processor's payment page. */
   payUrl: string;
+  /** The extra charges the booking has (follow-up 13), as the client reads them: each with what it is for. */
+  charges?: { label: string; cents: number }[];
 }): QueuedEmail {
+  const charges = input.charges ?? [];
   return written(
     "payment_link",
     { to: input.to, kind: "payment_link" },
-    { name: input.name, reference: input.ref, when: input.when, pay_link: input.payUrl, amount: money(input.amountCents) },
+    {
+      name: input.name,
+      reference: input.ref,
+      when: input.when,
+      pay_link: input.payUrl,
+      amount: money(input.amountCents),
+      charges: charges.length > 0 ? ["It includes the extra charges of your visit:", ...charges.map((charge) => `${charge.label}, ${money(charge.cents)}`)].join("\n") : "",
+    },
   );
 }
 

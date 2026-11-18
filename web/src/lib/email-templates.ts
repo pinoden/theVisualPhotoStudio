@@ -199,6 +199,7 @@ const TEMPLATES: readonly EmailTemplateSpec[] = [
         key: "to_pay",
         label: "What is left to pay: “Still to pay”, or “To pay at the studio” for a booking the studio made",
         only: "Only when something is left to pay",
+        required: true,
         sample: "To pay at the studio: $176",
       },
       GETTING_IN,
@@ -320,6 +321,7 @@ const TEMPLATES: readonly EmailTemplateSpec[] = [
         required: true,
         sample: "Your booking VS-7K2M9Q has been released, and what you paid is now a credit of $176.",
       },
+      // Not needed: {{credit}}, which this email cannot do without, states the same amount.
       { key: "value", label: "The credit on the code", sample: "$176" },
       {
         key: "link_note",
@@ -443,6 +445,7 @@ const TEMPLATES: readonly EmailTemplateSpec[] = [
       "{{pay_link}}",
       "",
       "Amount: {{amount}}",
+      "{{charges}}",
       "",
       "The card payment page is run by Square, our card processor: your card details never reach us. If you would rather pay at the studio, you still can.",
       "",
@@ -452,7 +455,15 @@ const TEMPLATES: readonly EmailTemplateSpec[] = [
       ...CLIENT,
       WHEN,
       { key: "pay_link", label: "The link to pay by card", link: true, required: true, sample: "/pay/4f9c2a1e" },
-      { key: "amount", label: "The amount to pay", sample: "$176" },
+      { key: "amount", label: "The amount to pay", required: true, sample: "$176" },
+      {
+        key: "charges",
+        label: "The extra charges the amount includes (overtime, cleaning, damage), each with what it is for",
+        only: "Only when the booking has extra charges",
+        lines: true,
+        required: true,
+        sample: "It includes the extra charges of your visit:\nDamage charge: Broken light stand, $100",
+      },
     ],
   },
   {
@@ -474,9 +485,9 @@ const TEMPLATES: readonly EmailTemplateSpec[] = [
     parts: [
       ...CLIENT,
       WHEN,
-      { key: "amount", label: "The amount paid", sample: "$100" },
+      { key: "amount", label: "The amount paid", required: true, sample: "$100" },
       { key: "paid_how", label: "How it was paid: “Paid at the studio: Cash”, or “Paid by: Card, through the payment link”", sample: "Paid at the studio: Cash" },
-      { key: "balance", label: "What is still to pay, or “Your booking is paid in full.”", sample: "Still to pay: $76" },
+      { key: "balance", label: "What is still to pay, or “Your booking is paid in full.”", required: true, sample: "Still to pay: $76" },
     ],
   },
   {
@@ -494,7 +505,7 @@ const TEMPLATES: readonly EmailTemplateSpec[] = [
       "",
       ...SIGN_OFF,
     ),
-    parts: [...CLIENT, WHEN, { key: "due", label: "What is still to pay", sample: "$176" }],
+    parts: [...CLIENT, WHEN, { key: "due", label: "What is still to pay", required: true, sample: "$176" }],
   },
   {
     key: "reschedule_code_refund",
@@ -523,6 +534,7 @@ const TEMPLATES: readonly EmailTemplateSpec[] = [
     body: lines("Hi {{name}},", "", "{{refund}}", "", ...SIGN_OFF),
     parts: [
       ...CLIENT,
+      // Not needed: {{refund}}, which this email cannot do without, states the payment.
       { key: "amount", label: "The amount paid", sample: "$176" },
       {
         key: "refund",
@@ -542,6 +554,7 @@ const TEMPLATES: readonly EmailTemplateSpec[] = [
     body: lines("Hi {{name}},", "", "{{refund}}", "", ...SIGN_OFF),
     parts: [
       ...CLIENT,
+      // Not needed: {{refund}}, which this email cannot do without, states the payment.
       { key: "amount", label: "The amount paid", sample: "$176" },
       {
         key: "refund",
@@ -572,7 +585,7 @@ const TEMPLATES: readonly EmailTemplateSpec[] = [
     ),
     parts: [
       ...CLIENT,
-      { key: "amount", label: "The pet fee returned", sample: "$25" },
+      { key: "amount", label: "The pet fee returned", required: true, sample: "$25" },
       { key: "code", label: "The code that holds the credit", required: true, sample: "PET-8M3Q2Z" },
       VALID_UNTIL,
       BOOK_LINK,
@@ -651,7 +664,7 @@ const TEMPLATES: readonly EmailTemplateSpec[] = [
       FIRST_NAME,
       { key: "plan", label: "The membership's name", sample: "Studio Paris, 5 hours a month" },
       { key: "hours", label: "The studio time each month", sample: "5 hours" },
-      { key: "price", label: "What it costs a month", sample: "$300" },
+      { key: "price", label: "What it costs a month", required: true, sample: "$300" },
       { key: "code", label: "The membership code the member books with", required: true, sample: "MEMBER-4K7P-2XQ9" },
       BOOK_LINK,
       { key: "next_billing", label: "The day the next month is billed", sample: "Friday, December 18, 2026" },
@@ -678,7 +691,7 @@ const TEMPLATES: readonly EmailTemplateSpec[] = [
       FIRST_NAME,
       { key: "plan", label: "The membership's name", sample: "Studio Paris, 5 hours a month" },
       { key: "hours", label: "The studio time the month adds", sample: "5 hours" },
-      { key: "price", label: "What the month cost", sample: "$300" },
+      { key: "price", label: "What the month cost", required: true, sample: "$300" },
       { key: "code", label: "The membership code", required: true, sample: "MEMBER-4K7P-2XQ9" },
       { key: "hours_left", label: "The studio time on the code now, this month's with what was left", sample: "6 hours 30 minutes" },
       { key: "next_billing", label: "The day the next month is billed", sample: "Monday, January 18, 2027" },

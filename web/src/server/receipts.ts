@@ -222,8 +222,18 @@ export async function loadReceipts(db: DbLike, email: string): Promise<{ receipt
       refundedCents,
       netCents: paidCents - refundedCents,
       dueCents: booking.dueCents,
-      // Partly paid: less than the total, whether the rest is still owed or the booking ended before it was.
-      status: refundedCents >= paidCents ? "refunded" : refundedCents > 0 ? "partly_refunded" : paidCents < booking.totalCents + booking.chargesCents ? "partly_paid" : "paid",
+      // Partly paid: something is still owed (first: a refund must not hide it, the tester's finding of 2026-11-18), or
+      // less than the total was paid before the booking ended.
+      status:
+        booking.dueCents > 0
+          ? "partly_paid"
+          : refundedCents >= paidCents
+            ? "refunded"
+            : refundedCents > 0
+              ? "partly_refunded"
+              : paidCents < booking.totalCents + booking.chargesCents
+                ? "partly_paid"
+                : "paid",
       paidAt: list[0].at,
     });
   }

@@ -31,7 +31,7 @@ import type { AuthUser } from "./auth";
 import { adjustStamps, cancelReward } from "./rewards";
 import { contactMessageEmail, loginCodeEmail, queueEmail } from "./email";
 import { owedCents } from "./money";
-import { DEFAULT_SETTINGS } from "./settings";
+import { DEFAULT_SETTINGS, saveSetting } from "./settings";
 import { createTestWorld, daysAfter, expectOk, FAR, h, hoursAfter, NEAR, NOW, OWNER_EMAIL, type TestWorld } from "./testing";
 
 let world: TestWorld;
@@ -414,6 +414,18 @@ describe("a refund the processor accepted without completing it", () => {
 });
 
 describe("the reschedule code", () => {
+  it("says what moving the new booking again costs by today's settings, which the new booking takes (the tester's finding of 2026-11-18)", async () => {
+    const first = expectOk(await world.book({ date: FAR }));
+    // The owners raise the fee for a further move from $20 to $35 after the booking was made.
+    expect(await saveSetting(world.db, "rescheduleFeeCents", 3500)).toBe(true);
+    const told = (await getManageChoices(world.db, first.ref, byToken(first.manageToken), NOW))!.reschedule.text;
+    expect(told).toContain("Moving the new booking again would cost $35.");
+    const released = expectOk(await requestRescheduleCode(world.db, first.ref, byToken(first.manageToken), world.manageDeps()));
+    const second = expectOk(await world.book({ date: FAR, startMinute: h(14), promoCode: released.code, paymentToken: undefined }));
+    // The new booking was made under today's terms: what it was told is what it costs.
+    expect((await getManageChoices(world.db, second.ref, byToken(second.manageToken), NOW))!.reschedule.text).toContain("less the $35 fee");
+  });
+
   it("releases the booking and emails a code worth what was paid", async () => {
     const booked = expectOk(await world.book({ date: NEAR })); // inside the refund window
     const row = await bookingRow(booked.ref);

@@ -161,7 +161,16 @@ export type RescheduleOutcome =
  * the code: the client pays it when the new booking is made, as the
  * difference the code no longer covers (the owner's answer of 2026-11-17).
  */
-export function rescheduleOutcome(booking: BookingFacts, now: Date, settings: PolicySettings): RescheduleOutcome {
+export function rescheduleOutcome(
+  booking: BookingFacts,
+  now: Date,
+  settings: PolicySettings,
+  /**
+   * The terms the new booking will be made under: the settings of today, as a booking made with the code takes them
+   * (question 10). What moving it again costs is theirs, not the released booking's (the tester's finding of 2026-11-18).
+   */
+  nextTerms: Pick<PolicySettings, "maxReschedules" | "rescheduleFeeCents"> = settings,
+): RescheduleOutcome {
   if (booking.status !== "confirmed") return { allowed: false, reason: "not_confirmed" };
   if (now.getTime() >= booking.startAt.getTime()) return { allowed: false, reason: "already_started" };
   if ((booking.membershipMinutes ?? 0) > 0) return { allowed: false, reason: "membership" };
@@ -179,6 +188,6 @@ export function rescheduleOutcome(booking: BookingFacts, now: Date, settings: Po
   const feeCents = free ? 0 : settings.rescheduleFeeCents;
   const creditCents = paidCents + discountCents - feeCents;
   if (creditCents <= 0) return { allowed: false, reason: "fee_not_covered" };
-  const nextFeeCents = booking.rescheduledCount + 1 < settings.maxReschedules ? 0 : settings.rescheduleFeeCents;
+  const nextFeeCents = booking.rescheduledCount + 1 < nextTerms.maxReschedules ? 0 : nextTerms.rescheduleFeeCents;
   return { allowed: true, creditCents, discountCents, feeCents, nextFeeCents };
 }

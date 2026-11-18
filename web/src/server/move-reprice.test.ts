@@ -14,6 +14,7 @@ import { joinMembership, listPlans } from "./memberships";
 import { MOCK_TOKEN_OK, mockProvider } from "./payments";
 import { issuePromo } from "./promos";
 import { priceOnNewDay } from "./reprice";
+import { loadReceipts } from "./receipts";
 import { saveSetting } from "./settings";
 import { recordHandRefund, recordStudioPayment } from "./studio-payments";
 import { BASE_URL, createTestWorld, daysAfter, expectOk, FAR, h, NOW, OWNER_EMAIL, type TestWorld } from "./testing";
@@ -261,6 +262,38 @@ describe("money given back, and the price changing again (the tester's findings 
     expect(confirmation).toContain("Total: $68\nPaid with your membership hours (1 hour): $68\n");
     expect(confirmation).not.toContain("Charged to your card");
     expect(confirmation).not.toContain("To pay at the studio");
+  });
+});
+
+describe("the payment card and the receipt after a move (the tester's second pass of 2026-11-18)", () => {
+  it("does not say a card's hold lapsed when membership hours or credit paid what the booking cost", async () => {
+    const plan = (await listPlans(world.db)).find((candidate) => candidate.name === "Studio Paris, 5 hours a month")!;
+    const joined = expectOk(
+      await joinMembership(
+        world.db,
+        { planId: plan.id, customer: { name: "Jane Smith", email: "jane@example.com", phone: "407-555-0100" }, acceptTerms: true, paymentToken: MOCK_TOKEN_OK, requestId: randomUUID() },
+        { now: NOW, payments: world.provider, baseUrl: BASE_URL, ownerEmail: OWNER_EMAIL },
+      ),
+    );
+    const member = expectOk(await world.book({ studioIds: [world.ids.paris], date: FAR, promoCode: joined.membership.code, paymentToken: undefined }));
+    expectOk(await moveBooking(world.db, owner, member.ref, to(SATURDAY), NOW));
+    expect(await paymentCard(member.ref)).toMatchObject({ dueCents: 800, cardLapsed: false, receivedCents: 0 });
+
+    const credit = (await issuePromo(world.db, { kind: "amount", value: 6800, source: "manual", email: "jane@example.com", expiresAt: daysAfter(NOW, 90) }))!.code;
+    const paidWithCredit = expectOk(await world.book({ studioIds: [world.ids.paris], date: FAR, startMinute: h(14), durationMinutes: 60, promoCode: credit, paymentToken: undefined }));
+    expectOk(await moveBooking(world.db, owner, paidWithCredit.ref, to(SATURDAY, h(14)), NOW));
+    expect(await paymentCard(paidWithCredit.ref)).toMatchObject({ dueCents: 400, cardLapsed: false });
+  });
+
+  it("calls a receipt that still owes partly paid, whatever was refunded of it", async () => {
+    const { ref } = expectOk(await world.book({ studioIds: [world.ids.paris], date: SATURDAY, durationMinutes: 60 }));
+    expectOk(await moveBooking(world.db, owner, ref, to(FAR), NOW));
+    // $10 back: the $4 of credit, and $6 of goodwill. Moved back to the Saturday, it owes the $4 again, not the gift.
+    expectOk(await ownerRefund(world.db, ref, { amountCents: 1000, reason: "The difference, and a little more" }, world.manageDeps()));
+    expectOk(await moveBooking(world.db, owner, ref, to(SATURDAY), NOW));
+    expect(await paymentCard(ref)).toMatchObject({ dueCents: 400, creditReturnedCents: 400, paidCents: 6200 });
+    const [receipt] = (await loadReceipts(world.db, "jane@example.com")).receipts;
+    expect(receipt).toMatchObject({ totalCents: 7200, paidCents: 7200, refundedCents: 1000, dueCents: 400, status: "partly_paid" });
   });
 });
 

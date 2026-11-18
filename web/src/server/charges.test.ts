@@ -4,11 +4,11 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { BookingSummary } from "@/components/BookingSummary";
 import { bookingCharges, bookingEvents, bookings, priceRules, settings, specialDates, staffShifts } from "@/db/schema";
-import { createAdminBooking, getAppointment } from "./appointments";
+import { createAdminBooking, getAppointment, moveBooking } from "./appointments";
 import type { AuthUser } from "./auth";
 import { toBookingViews } from "./bookings";
 import { addCharge, CHARGE_MAX_CENTS, hourlyRateOf, overtimeCents, voidCharge } from "./charges";
-import { ownerCancelBooking } from "./manage";
+import { getManageChoices, getManageOptions, ownerCancelBooking, type Actor } from "./manage";
 import { owedCents } from "./money";
 import { sendPayLink, type PayLinkDeps } from "./pay-links";
 import { loadReceipts } from "./receipts";
@@ -194,6 +194,44 @@ describe("paying a charge", () => {
     expectOk(await recordStudioPayment(world.db, owner, made.ref, { amountCents: 4400, method: "cash", note: "" }, ENDS));
     [receipt] = (await loadReceipts(world.db, "dana@example.com")).receipts;
     expect(receipt).toMatchObject({ totalCents: 22000, paidCents: 22000, dueCents: 0, status: "paid" });
+  });
+});
+
+describe("what a charge is for, and where its money goes (the tester's findings of 2026-11-18)", () => {
+  it("names what a cleaning or damage charge is for, on the client's booking, receipt and payment link", async () => {
+    const made = await madeInAdmin();
+    expectOk(await recordStudioPayment(world.db, owner, made.ref, { amountCents: 17600, method: "cash", note: "" }, STARTS));
+    expectOk(await addCharge(world.db, owner, made.ref, { kind: "damage", amountCents: 10000, note: "Broken light stand" }, ENDS));
+    expectOk(await addCharge(world.db, owner, made.ref, overtime(20, "Packing up"), ENDS));
+    const [view] = await toBookingViews(world.db, [await row(made.ref)], ENDS);
+    // Overtime says how long; its note is the studio's own.
+    expect(view.charges.map((charge) => charge.label)).toEqual(["Damage charge: Broken light stand", "Overtime, 20 minutes"]);
+    const [receipt] = (await loadReceipts(world.db, "dana@example.com")).receipts;
+    expect(receipt.lines.slice(-2)).toEqual([
+      { label: "Damage charge: Broken light stand", cents: 10000 },
+      { label: "Overtime, 20 minutes", cents: 4400 },
+    ]);
+    expectOk(await sendPayLink(world.db, owner, made.ref, { now: ENDS, baseUrl: BASE_URL, payments: { ...world.provider, name: "square" } }));
+    expect((await world.emails("payment_link")).at(-1)!.body).toContain(
+      "Amount: $144\nIt includes the extra charges of your visit:\nDamage charge: Broken light stand, $100\nOvertime, 20 minutes, $44\n",
+    );
+  });
+
+  it("never travels into a reschedule code or a cancellation refund, even once the studio moved the booking after it started", async () => {
+    const made = await madeInAdmin();
+    expectOk(await recordStudioPayment(world.db, owner, made.ref, { amountCents: 17600, method: "cash", note: "" }, STARTS));
+    // Half an hour in, a stand breaks: $100 of damage, paid at once. The shoot is cut short, and moved to a later day.
+    expectOk(await addCharge(world.db, owner, made.ref, { kind: "damage", amountCents: 10000, note: "Broken light stand" }, minutesAfter(STARTS, 30)));
+    expectOk(await recordStudioPayment(world.db, owner, made.ref, { amountCents: 10000, method: "cash", note: "" }, minutesAfter(STARTS, 31)));
+    expectOk(await moveBooking(world.db, owner, made.ref, { date: "2026-12-09", startMinute: h(10), countsAsClientMove: false }, minutesAfter(STARTS, 45)));
+    const actor: Actor = { kind: "token", token: made.manageToken };
+    const later = minutesAfter(STARTS, 50);
+    // The reschedule code carries the $176 the booking was paid, not the damage.
+    expect((await getManageOptions(world.db, made.ref, actor, later))!.reschedule).toMatchObject({ allowed: true, creditCents: 17600 });
+    // A cancellation in time gives back what was paid at the studio for the booking: 95% of $176, not of $276.
+    const choices = (await getManageChoices(world.db, made.ref, actor, later))!;
+    expect(choices.cancel.text).toContain("$167.20");
+    expect(choices.cancel.text).not.toContain("$262.20");
   });
 });
 

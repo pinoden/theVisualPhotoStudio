@@ -68,6 +68,7 @@ describe("a booking made in the admin", () => {
       dueCents: 17600,
       creditLeftCents: 0,
       cardRefundableCents: 0,
+      cardLapsed: false,
       ended: null,
       madeInAdmin: true,
       held: null,
