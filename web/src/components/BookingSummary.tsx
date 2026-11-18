@@ -25,6 +25,19 @@ export function BookingSummary({ booking }: { booking: BookingView }) {
   const paidStatus = STANDS.includes(booking.status);
   /** What came by card: online, or through a payment link. */
   const byCard = booking.receivedCents - booking.receivedAtStudioCents;
+  /** How a booking that owes nothing was paid. */
+  const paidHow =
+    booking.heldCents > 0
+      ? "Held on card"
+      : booking.receivedAtStudioCents > 0
+        ? byCard > 0
+          ? "Paid by card and at the studio"
+          : "Paid at the studio"
+        : booking.madeByAdmin
+          ? "Paid by card"
+          : "Charged to card";
+  /** Paid beyond what it costs now, after a move to a day that costs less (follow-up 5): the studio refunds it. */
+  const creditLeft = paidStatus ? booking.creditLeftCents : 0;
   return (
     <div className="price-summary">
       <div className="price-row">
@@ -105,27 +118,31 @@ export function BookingSummary({ booking }: { booking: BookingView }) {
           <span>{formatCents(booking.receivedCents)}</span>
         </div>
       )}
+      {creditLeft > 0 && (
+        <div className="price-row">
+          <span>{paidHow}</span>
+          <span>{formatCents(booking.totalCents + booking.chargesCents + creditLeft)}</span>
+        </div>
+      )}
       <div className="price-row total">
         <span>
           {/* A booking made online owes only when the amount its card held lapsed before it was taken. While the card
               holds it, it is not charged yet: taking it did not go through, and is tried again. */}
-          {!paidStatus || booking.totalCents + booking.chargesCents === 0
-            ? "Total"
-            : booking.dueCents > 0
-              ? booking.madeByAdmin
-                ? "To pay at the studio"
-                : "To pay"
-              : booking.heldCents > 0
-                ? "Held on card"
-                : booking.receivedAtStudioCents > 0
-                ? byCard > 0
-                  ? "Paid by card and at the studio"
-                  : "Paid at the studio"
-                : booking.madeByAdmin
-                  ? "Paid by card"
-                  : "Charged to card"}
+          {creditLeft > 0
+            ? "To be refunded"
+            : !paidStatus || booking.totalCents + booking.chargesCents === 0
+              ? "Total"
+              : booking.dueCents > 0
+                ? booking.madeByAdmin
+                  ? "To pay at the studio"
+                  : "To pay"
+                : paidHow}
         </span>
-        <span>{formatCents(paidStatus && booking.dueCents > 0 ? booking.dueCents : booking.totalCents + booking.chargesCents)}</span>
+        <span>
+          {formatCents(
+            creditLeft > 0 ? creditLeft : paidStatus && booking.dueCents > 0 ? booking.dueCents : booking.totalCents + booking.chargesCents,
+          )}
+        </span>
       </div>
     </div>
   );

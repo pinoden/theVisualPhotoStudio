@@ -10,9 +10,9 @@ import { isBookingRef } from "./bookings";
 import { codeRefundEmail, paymentReceivedEmail, queueEmail } from "./email";
 import { recordEvent } from "./history";
 import { openPayLinkOf } from "./pay-links";
-import { chargesCentsByBooking, netCardPaidCents, owedCents, paidAtStudioCents, STANDS } from "./money";
+import { chargesCentsByBooking, creditLeftCentsByBooking, netCardPaidCents, netPaidCentsByBooking, owedCents, paidAtStudioCents, STANDS } from "./money";
 import { RESERVE_HOURS } from "./payments";
-import { petFeeCentsOf, studioRefundableCents } from "./pet-fee";
+import { petFeeCentsOf, petFeeReturnedCents, studioRefundableCents } from "./pet-fee";
 import { codeStanding, rescheduleCodeOf, spendable, takeOffRescheduleCode } from "./promos";
 import { loadSettings } from "./settings";
 import { canViewDay } from "./staff";
@@ -50,6 +50,11 @@ export interface PaymentLine {
   held: boolean;
   recordedBy: string | null;
   note: string;
+  /**
+   * The card processor that took it (`PaymentProvider.name`): "square" or "square-sandbox" for Square, whose receipt
+   * the appointment's page opens; "mock" for the pretend one of test mode. Null for money taken at the studio.
+   */
+  processor: string | null;
 }
 
 export interface BookingMoney {
@@ -59,8 +64,18 @@ export interface BookingMoney {
   chargesCents: number;
   /** Every payment that succeeded, before refunds. */
   receivedCents: number;
+  /** What was paid and kept: every payment that succeeded, less every refund of it (`netPaidCentsByBooking`). */
+  paidCents: number;
   /** What is still to pay (`owedCents`): nothing once the booking has ended. */
   dueCents: number;
+  /**
+   * What was paid beyond what the booking costs now (`creditLeftCentsByBooking`), for example after a move to a day
+   * that costs less (follow-up 5). It is the client's, refunded by hand or once the studio agrees. Nothing for a
+   * booking that ended.
+   */
+  creditLeftCents: number;
+  /** What a refund to the card can still give back: what the card paid and kept, less a pet fee returned as credit. */
+  cardRefundableCents: number;
   /** How the booking ended, if it has: then nothing more is to pay, whatever was received. */
   ended: "cancelled" | "released" | null;
   /** Made in the admin, and so paid at the studio or through a payment link; else made online, and paid by card then. */
@@ -99,11 +114,15 @@ export async function moneyOf(
     ).map((row) => row.paymentId),
   );
   const charged = (await chargesCentsByBooking(db, [booking.id])).get(booking.id) ?? 0;
+  const card = await netCardPaidCents(db, booking.id);
   return {
     totalCents: booking.totalCents + charged,
     chargesCents: charged,
     receivedCents,
+    paidCents: (await netPaidCentsByBooking(db, [booking.id])).get(booking.id) ?? 0,
     dueCents: await owedCents(db, booking, now),
+    creditLeftCents: (await creditLeftCentsByBooking(db, [booking])).get(booking.id) ?? 0,
+    cardRefundableCents: Math.max(0, card - Math.min(card, await petFeeReturnedCents(db, booking.id))),
     madeInAdmin: booking.madeBy !== null,
     ended: STANDS.includes(booking.status) ? null : booking.cancelReason === "rescheduled" ? "released" : "cancelled",
     held:
@@ -135,6 +154,7 @@ export async function moneyOf(
       held: row.status === "authorized",
       recordedBy: row.recordedBy,
       note: row.note,
+      processor: row.provider === MANUAL_PROVIDER ? null : row.provider,
     })),
   };
 }

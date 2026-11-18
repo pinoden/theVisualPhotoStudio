@@ -227,6 +227,10 @@ export async function createTestWorld(): Promise<TestWorld> {
         if (link) link.state = { state: "cancelled" };
         return { ok: true };
       },
+      // A processor with receipts of its own, as Square has.
+      async receiptOf(paymentId) {
+        return { ok: true, url: `https://squareup.test/receipt/preview/${paymentId}` };
+      },
     },
 
     async reset() {

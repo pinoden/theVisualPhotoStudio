@@ -120,8 +120,17 @@ async function main() {
   const held = await reserve(randomUUID());
   report(held.ok, "$68.00 is reserved on a good card, not taken", held.ok ? `payment ${held.paymentId}` : held.message);
   if (held.ok) {
+    // The appointment's page opens Square's receipt of a card payment (follow-up 5): there is none before it is taken.
+    const early = await square.receiptOf(held.paymentId);
+    console.log(`NOTE  a receipt asked for before the amount is taken\n      ${early.ok ? `Square gave one: ${new URL(early.url).host}` : early.message}`);
     const taken = await square.capture(held.paymentId);
     report(taken.ok, "the reserved amount is taken", taken.ok ? "Square completed the payment" : taken.message);
+    const receipt = await square.receiptOf(held.paymentId);
+    report(
+      receipt.ok,
+      "the payment's receipt in Square is found, for the appointment's page",
+      receipt.ok ? `receipt at https://${new URL(receipt.url).host}${new URL(receipt.url).pathname.replace(/[^/]+$/, "…")}` : receipt.message,
+    );
     const takenAgain = await square.capture(held.paymentId);
     report(takenAgain.ok, "taking it again changes nothing and is not an error", takenAgain.ok ? "counted as done" : takenAgain.message);
     const late = await square.release(held.paymentId);

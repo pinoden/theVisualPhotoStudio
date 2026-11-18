@@ -74,10 +74,13 @@ async function requireAbility(ability: Ability, next: string): Promise<void> {
   if (!can(viewer, ability, await loadSettings(await getDb()))) notFound();
 }
 
-/** Where to return after a bookings action. Only the bookings list itself is accepted. */
+/**
+ * Where to return after a bookings action: the bookings list, or an appointment's page, whose payment card refunds
+ * what a booking was paid beyond its price (follow-up 5). Nothing else is followed.
+ */
 function bookingsBack(formData: FormData): string {
   const back = text(formData, "back");
-  return /^\/admin\/bookings(\?[A-Za-z0-9=&%_.-]*)?$/.test(back) ? back : "/admin/bookings";
+  return /^\/admin\/bookings(\?[A-Za-z0-9=&%_.-]*)?$/.test(back) || /^\/admin\/appointments\/VS-[0-9A-Z]{6}$/.test(back) ? back : "/admin/bookings";
 }
 
 // ── Staff ────────────────────────────────────────────────────────────────────

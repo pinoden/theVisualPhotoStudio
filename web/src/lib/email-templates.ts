@@ -239,6 +239,8 @@ const TEMPLATES: readonly EmailTemplateSpec[] = [
       "New time: {{when}} ({{duration}})",
       "It was: {{old_time}}",
       "",
+      "{{price_note}}",
+      "",
       "{{reschedule_note}}",
       "",
       "The link in your confirmation email still opens this booking. If the new time does not suit you, please reply to this email or call us.",
@@ -251,6 +253,15 @@ const TEMPLATES: readonly EmailTemplateSpec[] = [
       { ...WHEN, label: "The new day and start time" },
       DURATION,
       { key: "old_time", label: "The day and start time it had before", sample: "Fri, Dec 11, 2026, 2:00 PM" },
+      {
+        key: "price_note",
+        label:
+          "The booking's new total when its new day is priced differently (a weekday for a weekend, or the other way round), and what follows: what is still to pay, what is refunded, or what went back on the client's code",
+        only: "Only when the new day changed the price",
+        lines: true,
+        required: true,
+        sample: "Its new day is priced as a weekend day, so its total is now $190 instead of $176.\nStill to pay: $14, at the studio or with a payment link we email you.",
+      },
       {
         key: "reschedule_note",
         label: "That the move counts as the client's reschedule, so the booking is no longer refunded, and what moving it again costs",

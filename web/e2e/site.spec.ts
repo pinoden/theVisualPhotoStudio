@@ -40,6 +40,8 @@ const LOST_DAY = dateAhead(66); // and for the booking whose answer is lost on t
 const REFUSED_DAY = dateAhead(73); // and for the booking whose refund the card processor refuses
 const EMAIL_DAY = dateAhead(129); // and for the booking whose confirmation the owners reworded
 const MEMBER_DAY = dateAhead(143); // and for the booking a membership's hours pay for
+const REPRICE_SATURDAY = dateAhead(150, "saturday"); // and for the booking the studio moves to a day that costs less
+const REPRICE_WEEKDAY = dateAhead(164);
 
 const jane = { name: "Jane Smith", email: "jane.e2e@example.com", phone: "407-555-0100" };
 const bob = { name: "Bob Brown", email: "bob.e2e@example.com", phone: "407-555-0111" };
@@ -52,6 +54,8 @@ const THIRD_OWNER = "owner3@studio.test";
 const FIFTH_OWNER = "owner5@studio.test";
 // This one rewords an email, changes a membership plan and gives a member an hour.
 const EMAILS_OWNER = "owner13@studio.test";
+// This one moves a booking to a day that costs less, and refunds the difference.
+const PRICES_OWNER = "owner14@studio.test";
 const STAFF = "sam.e2e@studio.test";
 const MANAGER = "mia.e2e@studio.test";
 
@@ -1569,4 +1573,53 @@ test("a refund the card processor refuses is shown to the owner, who records it 
   // The booking's history says who recorded it.
   await page.goto(`/admin/appointments/${ref}`);
   await expect(byText(page, "A refund of $20 that the site could not make was made by hand in Square")).toBeVisible();
+});
+
+test("the studio moves a Saturday booking to a weekday, which costs less, and the owner refunds the difference to the card", async ({ page }) => {
+  const wes = { name: "Wes Weekend", email: "wes.weekend@example.com", phone: "407-555-0188" };
+  // Paris for an hour on a Saturday: $72 (a weekday hour is $68).
+  await bookStudioFirstToPayment(page, { studios: ["Studio Paris"], date: REPRICE_SATURDAY, duration: "1 hr", time: "10:00 AM", customer: wes });
+  const ref = await confirmAndGetRef(page, "Confirm & pay $72");
+  const clientPage = page.url();
+
+  // The owner chooses a weekday: before moving, the page says what the price becomes.
+  await signIn(page, PRICES_OWNER, `/admin/appointments/${ref}`);
+  await byLabel(page, "New date").fill(REPRICE_WEEKDAY);
+  await page.getByRole("button", { name: "Show free times" }).click();
+  await expect(
+    byText(page, /is priced as a weekday: the booking’s total becomes \$68 instead of \$72\. The client will then have paid \$4 more than its price: it is theirs, to refund\./),
+  ).toBeVisible();
+  await page.getByLabel(/Free start times on/).selectOption({ label: "10:00 AM – 11:00 AM" });
+  await page.getByRole("checkbox", { name: /The client asked for this move/ }).uncheck();
+  await page.getByRole("button", { name: "Move booking" }).click();
+  await expect(byText(page, /Moved to .* The client has been emailed\./)).toBeVisible();
+
+  // The payment card: what was paid, nothing owed, and the $4 paid beyond the new price. No receipt link in test mode.
+  const facts = onScreen(page.locator(".payment-facts"));
+  await expect(facts.locator("div", { hasText: "Paid" })).toContainText("$72");
+  await expect(facts.locator("div", { hasText: "Outstanding balance" })).toContainText("None");
+  await expect(facts.locator("div", { hasText: "Remaining credit" })).toContainText("$4");
+  await expect(totalRow(page)).toContainText("To be refunded");
+  await expect(page.getByRole("link", { name: "Receipt in Square" })).toHaveCount(0);
+  await expect(page.getByRole("row", { name: /Rescheduled/ })).toContainText("Priced as a weekday: $68 instead of $72");
+  expect((await latestEmail(page, "booking_moved", wes.email)).body).toContain(
+    "Its new day is priced as a weekday, so its total is now $68 instead of $72.\nYou have paid $4 more than that: we will refund it to you.",
+  );
+  expect(await accessibilityProblems(page), "an appointment with credit left").toEqual([]);
+  await shot(page, "17g-appointment-credit-left");
+
+  // The client's page says so too.
+  await page.goto(clientPage);
+  await expect(totalRow(page)).toContainText("To be refunded");
+  await expect(totalRow(page)).toContainText("$4");
+
+  // The studio agrees: the owner refunds it to the card.
+  await page.goto(`/admin/appointments/${ref}`);
+  await expect(byLabel(page, "Refund to the card ($)")).toHaveValue("4");
+  await page.getByRole("button", { name: "Refund to the card" }).click();
+  await expect(byText(page, "$4 refunded to the card.")).toBeVisible();
+  await expect(onScreen(page.locator(".payment-facts")).locator("div", { hasText: "Remaining credit" })).toContainText("None");
+  await expect(onScreen(page.locator(".payment-facts")).locator("div", { hasText: "Paid" })).toContainText("$68 after $4 refunded");
+  await expect(page.getByRole("heading", { name: "Refund the remaining credit" })).toHaveCount(0);
+  await expect(totalRow(page)).toContainText("Charged to card");
 });

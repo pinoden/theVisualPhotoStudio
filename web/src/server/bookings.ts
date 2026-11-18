@@ -25,7 +25,7 @@ import { BY_CUSTOMER, recordEvent } from "./history";
 import { releaseHolds } from "./holds";
 import { giveBackReserved, takeReserved } from "./reserved";
 import { activeChargesByBooking } from "./charges";
-import { heldCentsByBooking, owedCentsByBooking, receivedCentsByBooking } from "./money";
+import { creditLeftCentsByBooking, heldCentsByBooking, owedCentsByBooking, receivedCentsByBooking } from "./money";
 import { emailField, hashToken, textField } from "./input-fields";
 import { giveBackUnmadeMinutes, takeBookingMinutes } from "./membership-minutes";
 import { findUsableMembership, isMembershipCode, type UsableMembership } from "./memberships";
@@ -721,6 +721,11 @@ export interface BookingView {
   dueCents: number;
   /** What the card holds reserved for the booking, not taken yet (`heldCentsByBooking` in money.ts). */
   heldCents: number;
+  /**
+   * What was paid beyond what the booking costs now (`creditLeftCentsByBooking` in money.ts): after a move to a day
+   * that costs less, until the studio refunds it. Nothing for a booking that ended.
+   */
+  creditLeftCents: number;
   rescheduledCount: number;
 }
 
@@ -731,7 +736,7 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[], now: Date =
   if (rows.length === 0) return [];
   const ids = rows.map((r) => r.id);
   const codeIds = rows.map((r) => r.promoCodeId).filter((id): id is string => id !== null);
-  const [holdRows, addonRows, codeRows, received, atStudio, owed, held, charged] = await together(db, [
+  const [holdRows, addonRows, codeRows, received, atStudio, owed, held, charged, creditLeft] = await together(db, [
     () => db
       .select({ bookingId: studioHolds.bookingId, name: studios.name, priceCents: studioHolds.priceCents, sort: studios.sortOrder })
       .from(studioHolds)
@@ -749,6 +754,7 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[], now: Date =
     () => owedCentsByBooking(db, rows, now),
     () => heldCentsByBooking(db, ids, now),
     () => activeChargesByBooking(db, ids),
+    () => creditLeftCentsByBooking(db, rows),
   ]);
   return rows.map((booking) => ({
     id: booking.id,
@@ -786,6 +792,7 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[], now: Date =
     receivedAtStudioCents: atStudio.get(booking.id) ?? 0,
     dueCents: owed.get(booking.id) ?? 0,
     heldCents: held.get(booking.id) ?? 0,
+    creditLeftCents: creditLeft.get(booking.id) ?? 0,
     rescheduledCount: booking.rescheduledCount,
   }));
 }

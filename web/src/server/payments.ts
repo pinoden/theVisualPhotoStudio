@@ -160,6 +160,12 @@ export interface PaymentProvider {
   payLinkState(link: { linkId: string; orderId: string }): Promise<PayLinkState>;
   /** Withdraw a link so that it can no longer be paid. Succeeds for a link that is already gone. */
   cancelPayLink(linkId: string): Promise<{ ok: true } | { ok: false; message: string }>;
+  /**
+   * The processor's own page of a payment it took: Square's receipt, which shows the receipt number its Dashboard finds
+   * the payment by (follow-up 5). Square documents no address of a payment's page in its Dashboard, and gives the
+   * receipt's only once the payment is completed.
+   */
+  receiptOf(paymentId: string): Promise<Made<{ url: string }>>;
 }
 
 export const MOCK_TOKEN_OK = "mock-card-ok";
@@ -259,6 +265,9 @@ export const mockProvider: PaymentProvider = {
   async cancelPayLink() {
     return { ok: true };
   },
+  async receiptOf() {
+    return { ok: false, message: "This payment was made in test mode, with the pretend card processor, which has no receipt page: no card was charged." };
+  },
 };
 
 interface SquareConfig {
@@ -288,7 +297,7 @@ interface SquareAnswer {
   ok: boolean;
   status: number;
   data: {
-    payment?: { id?: string; status?: string; amount_money?: SquareMoney };
+    payment?: { id?: string; status?: string; amount_money?: SquareMoney; receipt_url?: string; receipt_number?: string };
     refund?: { id?: string; status?: string };
     payment_link?: { id?: string; order_id?: string; url?: string };
     order?: {
@@ -635,8 +644,26 @@ export function squareProvider(config: SquareConfig): PaymentProvider {
       if (answer.ok || answer.status === 404) return { ok: true };
       return { ok: false, message: inSquaresWords(answer.data.errors ?? []) || `Square answered HTTP ${answer.status}` };
     },
+
+    async receiptOf(paymentId) {
+      const answer = await send("GET", `/v2/payments/${encodeURIComponent(paymentId)}`);
+      if (!answer?.ok) return { ok: false, message: refused(answer) };
+      const url = answer.data.payment?.receipt_url;
+      // Only Square's own pages are opened: the address comes from Square, and the admin is sent to it.
+      if (url && SQUARE_RECEIPT.test(url)) return { ok: true, url };
+      return {
+        ok: false,
+        message:
+          answer.data.payment?.status === "COMPLETED"
+            ? "Square gave no receipt for this payment."
+            : `Square has no receipt for this payment, as it is not completed (Square says ${answer.data.payment?.status ?? "nothing of it"}).`,
+      };
+    },
   };
 }
+
+/** The receipts of Square's live account and of its sandbox. */
+const SQUARE_RECEIPT = /^https:\/\/(?:[a-z0-9-]+\.)*squareup(?:sandbox)?\.com\/receipt\//i;
 
 export interface PaymentClientConfig {
   mode: "square" | "mock" | "disabled";

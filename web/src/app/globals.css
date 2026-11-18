@@ -1332,6 +1332,11 @@ button { font-family: inherit; }
 .reward-facts dt { font-size: .7rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .reward-facts dd { margin: 0; color: var(--color-dark); }
 .reward-note { font-size: .82rem; margin: .5rem 0 0; }
+/* An appointment's payment card: paid, outstanding balance, remaining credit (follow-up 5). */
+.payment-facts { margin: 0 0 .75rem; }
+.payment-facts small { font-size: .78rem; }
+/* What a move to the chosen day does to the price (follow-up 5). */
+.move-price { font-size: .88rem; margin: .5rem 0; padding: .5rem .75rem; border-left: 3px solid var(--color-rose-dark); background: var(--color-cream); color: var(--color-dark); }
 
 /* Appointments in the account. */
 .appointment-card h3 { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }

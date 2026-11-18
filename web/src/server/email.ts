@@ -373,6 +373,11 @@ export function bookingMovedEmail(input: {
    * `againFeeCents`: what moving it again online costs, 0 when the next move is free.
    */
   clientAsked?: { canMoveAgain: boolean; againFeeCents?: number };
+  /**
+   * Set when the new day priced the booking differently (follow-up 5, `movePriceText` in reprice.ts): its new total, and
+   * what is still to pay, what comes back to the client, or what went back on their code.
+   */
+  priceNote?: string;
 }): QueuedEmail {
   const asked = input.clientAsked;
   const again = !asked
@@ -395,6 +400,7 @@ export function bookingMovedEmail(input: {
       reschedule_note: asked
         ? `As you asked for this change, it counts as a reschedule under the rental terms: if the booking is cancelled now, it is not refunded${again}`
         : "",
+      price_note: input.priceNote ?? "",
     },
   );
 }

@@ -34,6 +34,7 @@ const PAID_ONLINE: BookingView = {
   receivedAtStudioCents: 0,
   dueCents: 0,
   heldCents: 0,
+  creditLeftCents: 0,
   rescheduledCount: 0,
 };
 
@@ -64,5 +65,16 @@ describe("a booking's summary", () => {
     expect(lastRow({ status: "no_show", receivedCents: 0, dueCents: 17600 })).toEqual(["To pay", "$176"]);
     expect(lastRow({ status: "no_show", madeByAdmin: true, receivedCents: 5000, dueCents: 12600 })).toEqual(["To pay at the studio", "$126"]);
     expect(lastRow({ status: "no_show" })).toEqual(["Charged to card", "$176"]);
+  });
+
+  it("says what was paid and what is to be refunded, once a move made the booking cost less (follow-up 5)", () => {
+    // $176 paid; moved to a day where it costs $168.
+    const moved = { studios: [{ name: "Studio Blanche", priceCents: 16800 }], studiosSubtotalCents: 16800, totalCents: 16800, creditLeftCents: 800 };
+    expect(lastRow(moved)).toEqual(["To be refunded", "$8"]);
+    const html = renderToStaticMarkup(<BookingSummary booking={{ ...PAID_ONLINE, ...moved }} />);
+    expect(html).toContain('<div class="price-row"><span>Charged to card</span><span>$176</span></div>');
+    expect(lastRow({ ...moved, receivedAtStudioCents: 17600 })).toEqual(["To be refunded", "$8"]);
+    // Once it ended, it shows what it cost: a cancellation dealt with the money.
+    expect(lastRow({ ...moved, status: "cancelled" })).toEqual(["Total", "$168"]);
   });
 });

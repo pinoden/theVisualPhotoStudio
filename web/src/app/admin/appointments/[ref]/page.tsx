@@ -12,14 +12,16 @@ import { durationLabel, isIsoDate, longDateLabel, minutesToLabel } from "@/lib/d
 import { centsToInput, CHARGE_FIELD, MONEY_FIELD } from "@/lib/parse";
 import { PAYMENT_METHODS } from "@/lib/payment-methods";
 import { hoursInWords } from "@/lib/words";
-import { getAppointment, moveOptions } from "@/server/appointments";
+import { getAppointment, moveOptions, type MovePricePreview } from "@/server/appointments";
 import { CHARGE_NOTE_MAX, OVERTIME_MAX_MINUTES, overtimeBlocks, overtimeCents } from "@/server/charges";
 import { BY_CUSTOMER, BY_SYSTEM } from "@/server/history";
 import { resolvePayments } from "@/server/payments";
+import { PRICED_AS } from "@/server/reprice";
 import { requireStaff } from "@/server/session";
 import { loadSettings } from "@/server/settings";
 import { moneyKindOf, payLinkPossible } from "@/server/test-mode";
 import { formatInstant, formatRange, localDateOf } from "@/server/tz";
+import { ownerRefundAction } from "../../actions";
 import { AdminFrame, AdminLoading } from "../../frame";
 import {
   addChargeAction,
@@ -46,6 +48,22 @@ export default function AppointmentPage(props: PageProps<"/admin/appointments/[r
 }
 
 const WHO: Record<string, string> = { [BY_CUSTOMER]: "The customer", [BY_SYSTEM]: "The site" };
+
+/** Square's Dashboard, where a payment is found by the receipt number on its receipt (Square's help: "View and search transactions"). */
+const SQUARE_TRANSACTIONS = "https://squareup.com/dashboard/sales/transactions";
+
+/** What moving the booking to `date` does to its price (follow-up 5), in a sentence: its amounts only for a viewer who sees prices. */
+function movePriceSentence(price: MovePricePreview, date: string, seesPrices: boolean): string {
+  const day = `${longDateLabel(date)} is priced as ${PRICED_AS[price.dayType]}`;
+  if (!seesPrices) return `${day}, so the booking’s price changes with the move. The client is emailed the new price.`;
+  return [
+    `${day}: the booking’s total becomes ${formatCents(price.nowCents)} instead of ${formatCents(price.wasCents)}.`,
+    ...(price.codeBackCents > 0 ? [`${formatCents(price.codeBackCents)} of the credit it was paid with goes back on its code.`] : []),
+    ...(price.owedCents > 0 ? [`The client will then owe ${formatCents(price.owedCents)}.`] : []),
+    ...(price.creditLeftCents > 0 ? [`The client will then have paid ${formatCents(price.creditLeftCents)} more than its price: it is theirs, to refund.`] : []),
+    "The client is emailed the new price.",
+  ].join(" ");
+}
 
 /**
  * One appointment, for every level of the admin. `getAppointment` decides
@@ -257,6 +275,11 @@ async function AppointmentDetails({
               {appointment.studios.join(" + ")}.
             </p>
           )}
+          {moveDate && moveTimes?.ok && moveTimes.starts.length > 0 && moveTimes.price && (
+            <p className="move-price" role="status">
+              {movePriceSentence(moveTimes.price, moveDate, appointment.money !== null)}
+            </p>
+          )}
           {moveDate && moveTimes?.ok && moveTimes.starts.length > 0 && (
             <form action={moveBookingAction}>
               <input type="hidden" name="ref" value={appointment.ref} />
@@ -297,9 +320,10 @@ async function AppointmentDetails({
             </form>
           )}
           <p style={{ fontSize: ".78rem", margin: ".75rem 0 0" }}>
-            The studio and the length stay the same, and what was paid stays as it is. Only times that are free are
-            offered: inside opening hours, and at least 15 minutes from any other appointment in the studio. The client
-            is emailed the new time.
+            The studio and the length stay the same. Moved to a day of the other kind (a weekday or a weekend), the
+            booking takes that day&rsquo;s price, from today&rsquo;s prices: the client then owes the difference, or has
+            paid more than its price, which the studio refunds. Only times that are free are offered: inside opening
+            hours, and at least 15 minutes from any other appointment in the studio. The client is emailed the new time.
           </p>
         </div>
       )}
@@ -449,8 +473,37 @@ async function AppointmentDetails({
       {appointment.payments && (appointment.payments.payments.length > 0 || appointment.payments.dueCents > 0 || appointment.payLink) && (
         <div className="admin-card" id="payment">
           <h3>Payment</h3>
+          {/* What was paid, what is owed and what was paid beyond the price (question 14 of 2026-11-17, follow-up 5). */}
+          {!ended && (
+            <dl className="reward-facts payment-facts">
+              <div>
+                <dt>Paid</dt>
+                <dd>
+                  {formatCents(appointment.payments.paidCents)}
+                  {appointment.payments.receivedCents > appointment.payments.paidCents && (
+                    <small> after {formatCents(appointment.payments.receivedCents - appointment.payments.paidCents)} refunded</small>
+                  )}
+                </dd>
+              </div>
+              <div>
+                <dt>Outstanding balance</dt>
+                <dd>{appointment.payments.dueCents > 0 ? formatCents(appointment.payments.dueCents) : "None"}</dd>
+              </div>
+              <div>
+                <dt>Remaining credit</dt>
+                <dd>{appointment.payments.creditLeftCents > 0 ? formatCents(appointment.payments.creditLeftCents) : "None"}</dd>
+              </div>
+            </dl>
+          )}
           <p>
-            {appointment.payments.dueCents > 0 ? (
+            {appointment.payments.creditLeftCents > 0 && !ended ? (
+              <>
+                <strong>{formatCents(appointment.payments.creditLeftCents)} was paid beyond the price.</strong> The
+                booking costs less than the client paid for it, as its price went down afterwards (a move to a day that
+                costs less, or a charge taken back). It is the client&rsquo;s: it is refunded when the studio agrees, to
+                the card below, or given back at the studio and recorded against its payment.
+              </>
+            ) : appointment.payments.dueCents > 0 ? (
               <>
                 <strong>{formatCents(appointment.payments.dueCents)} is still to pay.</strong>{" "}
                 {appointment.payments.chargesCents > 0 &&
@@ -513,6 +566,15 @@ async function AppointmentDetails({
                         <span style={payment.voided ? { textDecoration: "line-through" } : undefined}>
                           {formatCents(payment.amountCents)} · {payment.how}
                         </span>
+                        {/* Square's own page of the payment, asked for when the link is followed (follow-up 5). */}
+                        {!payment.held && (payment.processor === "square" || payment.processor === "square-sandbox") && (
+                          <>
+                            {" · "}
+                            <a href={`/admin/appointments/${appointment.ref}/receipt/${payment.id}`} target="_blank" rel="noopener noreferrer">
+                              Receipt in Square
+                            </a>
+                          </>
+                        )}
                         {payment.voided && <div style={{ fontSize: ".8rem" }}>Taken back: it does not count.</div>}
                         {payment.held && (
                           <div style={{ fontSize: ".8rem" }}>
@@ -571,6 +633,68 @@ async function AppointmentDetails({
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+          {appointment.payments.payments.some((payment) => payment.processor === "square" && !payment.held) && (
+            <p style={{ fontSize: ".78rem", margin: ".5rem 0 0" }}>
+              Square&rsquo;s receipt of a card payment shows its receipt number. Search for it under{" "}
+              <a href={SQUARE_TRANSACTIONS} target="_blank" rel="noopener noreferrer">
+                Transactions in Square&rsquo;s Dashboard
+              </a>{" "}
+              to see the card or refund from there.
+            </p>
+          )}
+
+          {appointment.payments.creditLeftCents > 0 && !ended && (
+            <div className="payment-form" id="credit-left">
+              <h4>Refund the remaining credit</h4>
+              {appointment.may.refund && appointment.payments.cardRefundableCents > 0 ? (
+                <form action={ownerRefundAction}>
+                  <input type="hidden" name="ref" value={appointment.ref} />
+                  <input type="hidden" name="back" value={`/admin/appointments/${appointment.ref}`} />
+                  <div className="admin-form-row">
+                    <div className="form-group">
+                      <label className="form-label" htmlFor="credit-refund">
+                        Refund to the card ($)
+                      </label>
+                      <input
+                        id="credit-refund"
+                        name="amount"
+                        className="form-control"
+                        defaultValue={centsToInput(Math.min(appointment.payments.creditLeftCents, appointment.payments.cardRefundableCents))}
+                        required
+                        {...MONEY_FIELD}
+                      />
+                    </div>
+                    <div className="form-group" style={{ flex: "2 1 16rem" }}>
+                      <label className="form-label" htmlFor="credit-reason">
+                        Reason
+                      </label>
+                      <input
+                        id="credit-reason"
+                        name="reason"
+                        className="form-control"
+                        maxLength={180}
+                        defaultValue="The difference: the booking's price went down after it was paid"
+                      />
+                    </div>
+                    <button type="submit" className="btn btn-dark btn-small">
+                      Refund to the card
+                    </button>
+                  </div>
+                  <p style={{ fontSize: ".78rem", margin: ".5rem 0 0" }}>
+                    {appointment.payments.cardRefundableCents < appointment.payments.creditLeftCents
+                      ? `The card can take back ${formatCents(appointment.payments.cardRefundableCents)} of it; give the rest back at the studio, and record it against its payment above.`
+                      : "Sent to the card through the card processor, as a refund from Bookings is."}
+                  </p>
+                </form>
+              ) : (
+                <p style={{ marginBottom: 0 }}>
+                  {appointment.payments.cardRefundableCents > 0
+                    ? "An owner, or a manager the owners allow to refund, refunds it to the card here."
+                    : "It was paid at the studio: give it back there, then record the refund against its payment above."}
+                </p>
+              )}
             </div>
           )}
 
