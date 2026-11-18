@@ -48,7 +48,7 @@ Details and status of each are under "Katya's answers to the 16 follow-up questi
 | 10 | Photographer's last start at 4 p.m. | Already built, verified |
 | 11 | Photography needs 336 hours of notice | Already built, verified |
 | 12 | Photography-only codes | Built |
-| 13 | Overtime, cleaning and damage charges | Built (2026-11-18). How the rate is worked out is the builder's reading: question 36 |
+| 13 | Overtime, cleaning and damage charges | Built (2026-11-18); how the rate is worked out confirmed the same day (question 36) |
 | 14 | Instagram feed on the home page | **Waits on the owner** (connecting the account) |
 | 15 | After-hours requests through the contact form | Built |
 | 16 | Discount by yearly spend | Decided: not offered |
@@ -102,8 +102,7 @@ Agreed with the owner on 2026-11-17. Each item is done once it is checked off he
 
 ## Waiting on the owners
 
-- **Follow-up 14:** the Instagram account has to be connected by an owner.
-- **Question 36 (extra charges):** how overtime's hourly rate is worked out (the one-hour prices of the booking's studios, added together, without the bundle discount), overtime only for rentals, charges only once the appointment has started, and no email when a charge is added. Built so; an "OK" settles it.
+- **Follow-up 14:** the Instagram account has to be connected by an owner (Instagram gives a feed only after the account's owner signs in and allows it). It blocks nothing else and can wait until go-live.
 - **Policies wording:** the line "Cancellations made less than {refund window} before the appointment are non-refundable, but may be rescheduled at no additional charge until {reschedule cutoff} before the appointment" now sits above the $20 line for further reschedules, and reads as if every reschedule were free. It is the owners' text: they choose the new wording (for example "…may be rescheduled until …, the first time at no charge").
 - **To go live:** hosting, the web address, the email service, live Square keys, a privacy policy and the sales-tax answer. Questions 1 to 6 of "Questions for the owners" in `ProjectLibrary.md`.
 
