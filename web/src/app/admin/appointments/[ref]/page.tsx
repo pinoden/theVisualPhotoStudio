@@ -25,7 +25,6 @@ import {
   closePayLinkByHandAction,
   handRefundAction,
   moveBookingAction,
-  petCreditAction,
   recordPaymentAction,
   sendPayLinkAction,
   setLabelAction,
@@ -544,15 +543,12 @@ async function AppointmentDetails({
             <>
               <p>
                 This booking has a pet fee of {formatCents(appointment.petFee.cents)}. It is not refunded to a card. If the
-                pet did not come, return it to the client as studio credit: they are emailed a code for that amount.
+                pet did not come, an owner can return it as studio credit from Codes.
               </p>
               {appointment.petFee.canReturn ? (
-                <form action={petCreditAction}>
-                  <input type="hidden" name="ref" value={appointment.ref} />
-                  <button type="submit" className="btn btn-outline btn-small">
-                    The pet did not come: return the fee as credit
-                  </button>
-                </form>
+                <Link className="btn btn-outline btn-small" href={`/admin/codes?booking=${appointment.ref}#pet-fee-credit`}>
+                  Go to Codes
+                </Link>
               ) : (
                 <p className="field-error" style={{ marginBottom: 0 }}>
                   {appointment.petFee.why}

@@ -989,6 +989,7 @@ export type RescheduleResult =
   | {
       ok: true;
       code: string;
+      bookPath: "/book" | "/book/photography";
       valueCents: number;
       expiresAt: Date;
       /** The processor could not say whether the booking's payment link was paid. */
@@ -1042,10 +1043,13 @@ export async function requestRescheduleCode(db: Db, ref: string, actor: Actor, d
     });
 
     const expiresAt = new Date(deps.now.getTime() + settings.creditValidDays * 86_400_000);
+    const photographyOnly = booking.photographerId !== null;
+    const bookPath: "/book" | "/book/photography" = photographyOnly ? "/book/photography" : "/book";
     const issued = await issuePromo(tx, {
       kind: "amount",
       value: decision.creditCents,
       source: "reschedule",
+      photographyOnly,
       email: booking.customerEmail,
       expiresAt,
       maxUses: 1_000_000, // limited by the money left on it, not by a count
@@ -1067,11 +1071,11 @@ export async function requestRescheduleCode(db: Db, ref: string, actor: Actor, d
         valueCents: decision.creditCents,
         discountCents: decision.discountCents,
         expires: formatInstant(expiresAt),
-        bookUrl: `${deps.baseUrl.replace(/\/$/, "")}/book`,
+        bookUrl: `${deps.baseUrl.replace(/\/$/, "")}${bookPath}`,
         unseenNote,
       }),
     );
-    return { kind: "done" as const, code: issued.code, valueCents: decision.creditCents, expiresAt, bookingId: booking.id, unseenNote };
+    return { kind: "done" as const, code: issued.code, bookPath, valueCents: decision.creditCents, expiresAt, bookingId: booking.id, unseenNote };
   });
 
   if (outcome.kind === "not_found") return { ok: false, status: 404, code: "not_found", message: "Booking not found." };
@@ -1091,6 +1095,7 @@ export async function requestRescheduleCode(db: Db, ref: string, actor: Actor, d
   return {
     ok: true,
     code: outcome.code,
+    bookPath: outcome.bookPath,
     valueCents: outcome.valueCents,
     expiresAt: outcome.expiresAt,
     unseenLink: outcome.unseenNote !== null,

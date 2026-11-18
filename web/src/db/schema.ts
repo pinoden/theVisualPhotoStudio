@@ -252,6 +252,7 @@ export const promoCodes = pgTable("promo_codes", {
   /** When set, only this customer email may use the code. */
   email: text("email"),
   source: promoSource("source").notNull().default("manual"),
+  photographyOnly: boolean("photography_only").notNull().default(false),
   maxUses: integer("max_uses").notNull().default(1),
   usedCount: integer("used_count").notNull().default(0),
   expiresAt: ts("expires_at"),
@@ -373,6 +374,8 @@ export const bookings = pgTable(
     termsAcceptedAt: ts("terms_accepted_at"),
     /** When this completed visit was counted for loyalty (a free hour may or may not have followed). */
     loyaltyIssuedAt: ts("loyalty_issued_at"),
+    /** When the review request was queued, or the rollout skipped an older appointment. */
+    reviewRequestedAt: ts("review_requested_at"),
     cancelledAt: ts("cancelled_at"),
     createdAt: createdAt(),
   },

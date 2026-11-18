@@ -55,6 +55,25 @@ export async function queueEmail(db: DbLike, message: QueuedEmail): Promise<stri
   return row.id;
 }
 
+export function reviewRequestEmail(input: { email: string; name: string; ref: string }): QueuedEmail {
+  return {
+    to: input.email,
+    kind: "review_request",
+    subject: `How was your visit to ${STUDIO}?`,
+    body: [
+      `Hi ${input.name},`,
+      "",
+      `Thank you for visiting ${STUDIO}. We'd love to hear about your experience.`,
+      "",
+      "Leave a Google review: https://g.page/r/CTQ9ea1fatgnEBM/review",
+      "",
+      `Booking reference: ${input.ref}`,
+      "",
+      SIGN_OFF,
+    ].join("\n"),
+  };
+}
+
 /**
  * Put `message` in the place of a queued one that has not started on its way:
  * for a message written before the outcome it reports was known (a refund

@@ -12,6 +12,7 @@ import {
   type Db,
   type DbLike,
 } from "@/db/client";
+import { studioCombinationError } from "@/lib/catalog-view";
 import { isStartFree, noticeHours } from "@/lib/domain/availability";
 import { labelOf, type LabelKey } from "@/lib/domain/labels";
 import { formatCents, PricingError, PROMO_MISFIT_TEXT, quote, type PromoKind, type Quote } from "@/lib/domain/pricing";
@@ -32,7 +33,6 @@ import {
   PROMO_PROBLEM_TEXT,
   redeemPromo,
   restorePromo,
-  toPromoDef,
   type PromoSource,
   type UsablePromo,
 } from "./promos";
@@ -60,7 +60,7 @@ export const bookingInput = z.object({
   }),
   notes: textField(0, 2000).default(""),
   addons: addonsField,
-  /** A loyalty or reschedule code. */
+  /** A discount, reward or credit code. */
   promoCode: textField(0, 40).optional(),
   /**
    * A photography session with the in-house photographer, in one studio. The
@@ -214,7 +214,7 @@ export const quoteInput = z.object({
 });
 
 export type QuoteResult =
-  | { ok: true; quote: Quote; promo: { code: string; kind: PromoKind; value: number; source: PromoSource } | null }
+  | { ok: true; quote: Quote; promo: Pick<UsablePromo, "code" | "kind" | "value" | "source" | "photographyOnly"> | null }
   | { ok: false; status: number; code: "invalid_input" | "invalid_price" | "invalid_code"; message: string };
 
 /**
@@ -228,6 +228,8 @@ export async function quoteSelection(db: DbLike, rawInput: unknown, now: Date, p
   if (!isIsoDate(input.date)) return fail(400, "invalid_input", "That date is not valid.");
 
   const catalog = await loadCatalog(db);
+  const combinationError = studioCombinationError(catalog.studios, input.studioIds);
+  if (combinationError) return fail(422, "invalid_price", combinationError);
   let promo: UsablePromo | null = null;
   if (input.promoCode) {
     if (!input.email) return fail(422, "invalid_code", "Enter your email address first, then apply the code.");
@@ -251,7 +253,7 @@ export async function quoteSelection(db: DbLike, rawInput: unknown, now: Date, p
       multiStudioPercent: catalog.settings.multiStudioPercent,
       addons: input.addons,
       addonCatalog: catalog.addons,
-      promo: promo ? toPromoDef(promo) : null,
+      promo,
       photoPackage: session,
     });
     // A code that exists but cannot be used on this selection is refused with the reason.
@@ -259,7 +261,7 @@ export async function quoteSelection(db: DbLike, rawInput: unknown, now: Date, p
     return {
       ok: true,
       quote: price,
-      promo: promo ? { code: promo.code, kind: promo.kind, value: promo.value, source: promo.source } : null,
+      promo: promo ? { code: promo.code, kind: promo.kind, value: promo.value, source: promo.source, photographyOnly: promo.photographyOnly } : null,
     };
   } catch (error) {
     if (error instanceof PricingError) return fail(422, "invalid_price", error.message);
@@ -270,7 +272,7 @@ export async function quoteSelection(db: DbLike, rawInput: unknown, now: Date, p
 // ── Creating a booking ───────────────────────────────────────────────────────
 
 /**
- * Create a booking for any set of studios.
+ * Create a booking for a studio or bundle.
  *
  * Order matters:
  *  1. Everything is validated and priced on the server.
@@ -303,6 +305,8 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
 
   const chosen = input.studioIds.map((id) => catalog.studios.find((s) => s.id === id));
   if (chosen.some((s) => !s)) return fail(400, "unknown_studio", "One of the selected studios is not available.");
+  const combinationError = studioCombinationError(catalog.studios, input.studioIds);
+  if (combinationError) return fail(422, "invalid_price", combinationError);
   const studioNames = chosen.map((s) => s!.name).join(" + ");
 
   // A photography session: its package, and the photographer's day beside the studio's.
@@ -346,7 +350,7 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
       multiStudioPercent: catalog.settings.multiStudioPercent,
       addons: input.addons,
       addonCatalog: catalog.addons,
-      promo: promo ? toPromoDef(promo) : null,
+      promo,
       photoPackage: session,
     });
   } catch (error) {

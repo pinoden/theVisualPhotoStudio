@@ -2,6 +2,16 @@ import type { Catalog, CatalogStudio } from "@/server/catalog";
 import { multiStudioPercentFor } from "@/lib/domain/pricing";
 import { weekdayName, minutesToLabel } from "@/lib/domain/time";
 
+/** Blanche and Dayglow can be reserved together as part of the three-studio bundle. */
+export function studioCombinationError(studios: readonly Pick<CatalogStudio, "id" | "slug">[], studioIds: readonly string[]): string | null {
+  if (studioIds.length < 2) return null;
+  const slugs = new Set(studios.filter((studio) => studioIds.includes(studio.id)).map((studio) => studio.slug));
+  if (slugs.has("blanche") && slugs.has("dayglow") && !slugs.has("paris")) {
+    return "To book Blanche and Dayglow together, add Paris or choose a different combination.";
+  }
+  return null;
+}
+
 /** Lowest weekday price for one hour, used for "from $X/hour" labels. */
 export function hourlyFromCents(catalog: Catalog, studioId: string): number | null {
   const prices = catalog.rules

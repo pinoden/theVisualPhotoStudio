@@ -2,7 +2,7 @@ import { and, asc, eq, gt, inArray, isNull, lte, ne, or } from "drizzle-orm";
 import { bookings, payments } from "@/db/schema";
 import type { Db } from "@/db/client";
 import { releaseExpiredHolds } from "./availability";
-import { deliverPendingEmails, type EmailTransport } from "./email";
+import { deliverPendingEmails, queueEmail, reviewRequestEmail, type EmailTransport } from "./email";
 import { labelOf } from "@/lib/domain/labels";
 import { BY_SYSTEM, recordEvent } from "./history";
 import { sendEarnedFreeHours } from "./loyalty";
@@ -35,6 +35,7 @@ export interface TaskSummary {
   visitsCompleted: number;
   /** Free hours sent to customers who reached five visits. */
   loyaltyCodes: number;
+  reviewRequestsQueued: number;
   refundsSucceeded: number;
   refundsFailed: number;
   /** Refunds the processor had accepted as pending, found complete now. */
@@ -52,6 +53,24 @@ export interface TaskSummary {
 }
 
 const DAY = 86_400_000;
+
+async function queueReviewRequests(db: Db, now: Date): Promise<number> {
+  const cutoff = new Date(now.getTime() - DAY);
+  return db.transaction(async (tx) => {
+    const due = await tx
+      .select({ id: bookings.id, ref: bookings.ref, email: bookings.customerEmail, name: bookings.customerName })
+      .from(bookings)
+      .where(and(eq(bookings.status, "completed"), lte(bookings.endAt, cutoff), isNull(bookings.reviewRequestedAt)))
+      .orderBy(asc(bookings.endAt), asc(bookings.id))
+      .limit(100)
+      .for("update", { skipLocked: true });
+    for (const booking of due) {
+      await queueEmail(tx, reviewRequestEmail(booking));
+      await tx.update(bookings).set({ reviewRequestedAt: now }).where(eq(bookings.id, booking.id));
+    }
+    return due.length;
+  });
+}
 
 /**
  * Mark visits that ended a while ago as completed, and send a free hour to
@@ -163,6 +182,7 @@ export async function runScheduledTasks(db: Db, deps: TaskDeps): Promise<TaskSum
   const paymentsFlagged = await flagInterruptedPayments(db);
   const reservations = await settleReservedPayments(db, deps);
   const visits = await completeVisits(db, deps.now, deps.baseUrl);
+  const reviewRequestsQueued = await queueReviewRequests(db, deps.now);
   const refundRuns = await retryOpenRefunds(db, deps);
   const settling = await checkUnsettledRefunds(db, deps);
   const links = await checkOpenPayLinks(db, deps);
@@ -175,6 +195,7 @@ export async function runScheduledTasks(db: Db, deps: TaskDeps): Promise<TaskSum
     reservationsReleased: reservations.released,
     visitsCompleted: visits.completed,
     loyaltyCodes: visits.codes,
+    reviewRequestsQueued,
     refundsSucceeded: refundRuns.succeeded,
     refundsFailed: refundRuns.failed,
     refundsSettled: settling.settled,

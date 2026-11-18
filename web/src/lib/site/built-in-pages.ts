@@ -41,7 +41,7 @@ function maker(key: string) {
   let n = 0;
   return (type: BlockName, props: Props = {}): StoredBlock => ({
     type,
-    props: { ...startProps(BLOCKS[type].fields), ...props, id: `${key}-${++n}` },
+    props: { ...startProps(BLOCKS[type].fields), id: `${key}-${++n}`, ...props },
   });
 }
 
@@ -77,7 +77,7 @@ function home(): BuiltInPage {
           background: "page",
           content: [
             b("Heading", { eyebrow: "Our Spaces", text: "Three Studios, One Vision", line: true }),
-            b("Text", { text: centred("Each studio has its own look. Book one, or any combination of them for the same time."), width: "narrow" }),
+            b("Text", { text: centred("Each studio has its own look. Book a single studio or reserve a bundle for the same time."), width: "narrow" }),
             b("StudioCards", { prices: true, viewLabel: "View Studio", bookLabel: "Book Now" }),
           ],
         }),
@@ -89,7 +89,7 @@ function home(): BuiltInPage {
               cards: [
                 { symbol: "✦", title: "Know the studio?", text: "Pick one or more studios and see every time they are free together." },
                 { symbol: "✦", title: "Know the time?", text: "Pick a date and time and see which studios are free then." },
-                { symbol: "✦", title: "Need more space?", text: "Add any other studio to the same booking. The multi-studio discount applies automatically." },
+                { symbol: "✦", title: "Need more space?", text: "Book Paris with Blanche, Paris with Dayglow or all three studios together." },
               ],
             }),
           ],
@@ -162,9 +162,9 @@ function rates(): BuiltInPage {
           width: "narrow",
           when: "several studios offer",
           content: [
-            b("Heading", { eyebrow: "Several Studios", text: "Book Any Studios Together", line: true }),
+            b("Heading", { eyebrow: "Several Studios", text: "Book Studio Bundles", line: true }),
             b("Text", {
-              text: centred("Select any combination of studios in one booking. Each is reserved for you for the whole session. {several studios offer}."),
+              text: centred("Book Paris with Blanche, Paris with Dayglow or all three. Each studio is reserved for the whole session. {several studios offer}."),
             }),
             b("Buttons", { buttons: [button("Choose Studios →", "/book", "dark")] }),
           ],
@@ -302,7 +302,7 @@ function faq(): BuiltInPage {
     ),
     question(
       "Can I book more than one studio?",
-      "<p>Yes. Select any combination of studios in one booking; each is reserved for you for the whole session.</p><p>{if several studios offer}You get {several studios offer}.</p>",
+      "<p>Yes. Book Paris with Blanche, Paris with Dayglow or all three. Each studio is reserved for you for the whole session.</p><p>{if several studios offer}You get {several studios offer}.</p>",
     ),
     question(
       "What should I check in my confirmation email?",
@@ -483,6 +483,17 @@ function policies(): BuiltInPage {
           background: "page",
           width: "narrow",
           content: [b("Text", { text: terms }), b("Text", { text: pets, when: "pets" }), b("Text", { text: conduct })],
+        }),
+        b("Section", {
+          id: "policies-after-hours",
+          width: "narrow",
+          space: "small",
+          content: [
+            b("Text", {
+              id: "policies-after-hours-note",
+              text: '<p>After-hours bookings are available by request. Use the <a href="/contact">contact form</a> and choose “After-hours booking”.</p>',
+            }),
+          ],
         }),
       ],
     },

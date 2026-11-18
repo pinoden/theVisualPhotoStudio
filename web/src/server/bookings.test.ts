@@ -13,7 +13,7 @@ import {
   studioHours,
   studios,
 } from "@/db/schema";
-import { createBooking, getBookingByToken, hashToken, type BookingInput } from "./bookings";
+import { createBooking, getBookingByToken, hashToken, quoteSelection, type BookingInput } from "./bookings";
 import { loadDayAvailability } from "./availability";
 import { loadCatalog } from "./catalog";
 import { MOCK_TOKEN_DECLINED, MOCK_TOKEN_OK, mockProvider, type PaymentProvider } from "./payments";
@@ -108,14 +108,22 @@ describe("creating a booking", () => {
     expect(mail.body).toContain("Wed, Nov 18, 2026, 10:00 AM");
   });
 
-  it("books any combination of studios in one booking with the multi-studio discount", async () => {
-    // Blanche + Dayglow does not exist as a bundle on the current site.
-    const result = await book({ studioIds: [ids.blanche, ids.dayglow], durationMinutes: 60 });
-    expect(result).toMatchObject({ ok: true, totalCents: 13280 }); // ($88 + $78) less 20%
+  it("quotes and books only the studio bundles that include Paris", async () => {
+    const selection = { studioIds: [ids.dayglow, ids.blanche], durationMinutes: 60, date: WED };
+    const refusal = { ok: false, status: 422, code: "invalid_price", message: "To book Blanche and Dayglow together, add Paris or choose a different combination." };
+    expect(await quoteSelection(db, selection, NOW)).toEqual(refusal);
+    expect(await book(selection)).toEqual(refusal);
+    expect(charges).toHaveLength(0);
+    expect(await db.select().from(studioHolds)).toHaveLength(0);
+
+    const result = await book({ studioIds: [ids.blanche, ids.paris], durationMinutes: 60 });
+    expect(result).toMatchObject({ ok: true, totalCents: 12480 }); // ($88 + $68) less 20%
     const holds = await db.select().from(studioHolds);
-    expect(holds.map((x) => x.studioId).sort()).toEqual([ids.blanche, ids.dayglow].sort());
+    expect(holds.map((x) => x.studioId).sort()).toEqual([ids.blanche, ids.paris].sort());
     expect(holds.every((x) => x.active)).toBe(true);
 
+    const dayglowAndParis = await book({ studioIds: [ids.dayglow, ids.paris], durationMinutes: 60, startMinute: h(12) });
+    expect(dayglowAndParis).toMatchObject({ ok: true, totalCents: 11680 }); // ($78 + $68) less 20%
     const all = await book({ studioIds: [ids.blanche, ids.dayglow, ids.paris], durationMinutes: 60, startMinute: h(14) });
     expect(all).toMatchObject({ ok: true, totalCents: 23400 - Math.round(23400 * 0.22) });
   });
@@ -147,17 +155,11 @@ describe("creating a booking", () => {
 });
 
 describe("weekday and weekend prices", () => {
-  it("charges the weekend price on Saturday and the weekday price on Wednesday", async () => {
-    await db
-      .update(priceRules)
-      .set({ priceCents: 11000 })
-      .where(and(eq(priceRules.studioId, ids.blanche), eq(priceRules.dayType, "weekend"), eq(priceRules.durationMinutes, 60)));
-    expect(await book({ date: SAT, durationMinutes: 60 })).toMatchObject({ ok: true, totalCents: 11000 });
+  it("charges the approved weekend tiers on Saturday and Sunday and the weekday price on Wednesday", async () => {
+    expect(await book({ date: SAT, durationMinutes: 60 })).toMatchObject({ ok: true, totalCents: 9500 });
+    expect(await book({ date: "2026-11-22", durationMinutes: 90 })).toMatchObject({ ok: true, totalCents: 14250 });
     expect(await book({ date: WED, durationMinutes: 60 })).toMatchObject({ ok: true, totalCents: 8800 });
-    await db
-      .update(priceRules)
-      .set({ priceCents: 8800 })
-      .where(and(eq(priceRules.studioId, ids.blanche), eq(priceRules.dayType, "weekend"), eq(priceRules.durationMinutes, 60)));
+    expect(charges.map((charge) => charge.amountCents)).toEqual([9500, 14250, 8800]);
   });
 
   it("prices a holiday on a weekday as a weekend day", async () => {
@@ -169,7 +171,7 @@ describe("weekday and weekend prices", () => {
     expect(await book({ studioIds: [ids.paris], durationMinutes: 60 })).toMatchObject({ ok: true, totalCents: 9900 });
     await db
       .update(priceRules)
-      .set({ priceCents: 6800 })
+      .set({ priceCents: 7200 })
       .where(and(eq(priceRules.studioId, ids.paris), eq(priceRules.dayType, "weekend"), eq(priceRules.durationMinutes, 60)));
   });
 });
@@ -189,7 +191,7 @@ describe("double booking is impossible", () => {
     expect((await book({ startMinute: h(12) + 15, durationMinutes: 60 })).ok).toBe(true); // exactly 15 minutes later
     expect((await book({ studioIds: [ids.paris] })).ok).toBe(true); // other studio, same time
     // A bundle that includes the taken studio is refused as a whole.
-    expect(await book({ studioIds: [ids.blanche, ids.dayglow], durationMinutes: 60 })).toMatchObject({ code: "slot_taken" });
+    expect(await book({ studioIds: [ids.blanche, ids.dayglow, ids.paris], durationMinutes: 60 })).toMatchObject({ code: "slot_taken" });
     expect(await db.select().from(studioHolds).where(eq(studioHolds.studioId, ids.dayglow))).toHaveLength(0);
   });
 

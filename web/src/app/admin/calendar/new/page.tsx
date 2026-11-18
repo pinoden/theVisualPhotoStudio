@@ -7,6 +7,7 @@ import { getDb } from "@/db/client";
 import { bookableDurations, formatCents, PricingError, quote } from "@/lib/domain/pricing";
 import { durationLabel, isIsoDate, longDateLabel, minutesToLabel } from "@/lib/domain/time";
 import { can } from "@/lib/abilities";
+import { studioCombinationError } from "@/lib/catalog-view";
 import { EMAIL_FIELD } from "@/lib/parse";
 import { freeStartsFor } from "@/server/appointments";
 import { dayTypeFor, loadCatalog } from "@/server/catalog";
@@ -55,7 +56,8 @@ async function NewBooking({ searchParams }: Pick<PageProps<"/admin/calendar/new"
       : [...new Set(catalog.rules.map((rule) => rule.durationMinutes))].sort((a, b) => a - b);
   const duration = lengths.find((minutes) => String(minutes) === query.duration) ?? null;
 
-  const ready = studioIds.length > 0 && duration !== null;
+  const combinationError = studioCombinationError(catalog.studios, studioIds);
+  const ready = studioIds.length > 0 && duration !== null && !combinationError;
   // The add-ons the booking screen would offer for these studios: those for any booking, and those of a chosen studio.
   const addons = catalog.addons.filter((addon) => addon.studioId === null || studioIds.includes(addon.studioId));
   const free = ready ? await freeStartsFor(db, { studioIds, date, durationMinutes: duration }, now) : null;
@@ -114,7 +116,8 @@ async function NewBooking({ searchParams }: Pick<PageProps<"/admin/calendar/new"
             Show free times
           </button>
         </div>
-        {studioIds.length > 0 && query.duration !== undefined && duration === null && (
+        {combinationError && <p className="field-error" role="alert">{combinationError}</p>}
+        {!combinationError && studioIds.length > 0 && query.duration !== undefined && duration === null && (
           <p className="field-error">That length is not sold for the chosen studios on that day. Choose another.</p>
         )}
       </form>

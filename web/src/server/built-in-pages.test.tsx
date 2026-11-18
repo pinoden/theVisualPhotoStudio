@@ -138,7 +138,7 @@ describe("the pages the website was built with", () => {
     expect(services).not.toContain("Ask About a Session");
 
     const rates = await words("rates");
-    expect(rates).toContain("Book Any Studios Together");
+    expect(rates).toContain("Book Studio Bundles");
     expect(rates).toContain("Add-ons");
 
     const home = await words("");
@@ -175,7 +175,7 @@ describe("the pages the website was built with", () => {
     expect(services).toContain("Ask About a Session");
     expect(services).not.toContain("Book a Photographer");
 
-    expect(await words("rates")).not.toContain("Book Any Studios Together");
+    expect(await words("rates")).not.toContain("Book Studio Bundles");
   });
 
   it("name each studio's pet fee when they differ, and say so when every studio takes pets", async () => {

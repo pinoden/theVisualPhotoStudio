@@ -129,9 +129,9 @@ async function Rewards() {
             <div className="account-code" key={code.code}>
               <strong>
                 {code.kind === "percent"
-                  ? `${code.value}% off your next studio rental`
+                  ? `${code.value}% off your next ${code.photographyOnly ? "photography session" : "studio rental"}`
                   : code.source === "reschedule"
-                    ? `${formatCents(code.value)} credit from a rescheduled booking`
+                    ? `${formatCents(code.value)} ${code.photographyOnly ? "photography " : ""}credit from a rescheduled booking`
                     : code.source === "pet_fee"
                       ? `${formatCents(code.value)} studio credit, from a pet fee`
                       : `${formatCents(code.value)} studio credit`}

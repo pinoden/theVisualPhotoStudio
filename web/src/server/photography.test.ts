@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
-import { bookings, photographerHolds, photographers, settings, studioHolds } from "@/db/schema";
+import { bookings, photographerHolds, photographers, promoCodes, settings, studioHolds } from "@/db/schema";
 import { PROMO_MISFIT_TEXT } from "@/lib/domain/pricing";
+import { createManualCode, listCodes, voidCode } from "./admin";
 import { moveBooking } from "./appointments";
 import type { AuthUser } from "./auth";
 import { loadDayAvailability } from "./availability";
@@ -150,21 +151,44 @@ describe("booking a photography session", () => {
     expect((await session({ studioIds: [world.ids.paris] })).ok).toBe(true);
   });
 
-  it("takes money already paid, but not a discount code or a free hour", async () => {
-    const percent = (await issuePromo(world.db, { kind: "percent", value: 10, source: "manual", email: null, expiresAt: daysAfter(NOW, 30) }))!;
-    const freeHour = (await issuePromo(world.db, { kind: "free_hour", value: 60, source: "loyalty", email: "jane@example.com", expiresAt: daysAfter(NOW, 30) }))!;
-    const refusal = { ok: false, status: 422, code: "invalid_code", message: PROMO_MISFIT_TEXT.photography };
-    expect(await session({ promoCode: percent.code })).toEqual(refusal);
-    expect(await session({ promoCode: freeHour.code })).toEqual(refusal);
-    expect(
-      await quoteSelection(world.db, { studioIds: [world.ids.blanche], date: SESSION_DAY, durationMinutes: 60, photography: true, promoCode: freeHour.code, email: "jane@example.com" }, NOW),
-    ).toEqual(refusal);
-
-    // A reschedule credit is the customer's own money: it pays for a session like for anything else.
+  it("rejects rental discounts, free hours and all studio credit before spending or charging anything", async () => {
+    const forJane = { email: jane.email, expiresAt: daysAfter(NOW, 30) };
+    const percent = (await issuePromo(world.db, { ...forJane, kind: "percent", value: 10, source: "manual" }))!;
+    const freeHour = (await issuePromo(world.db, { ...forJane, kind: "free_hour", value: 60, source: "loyalty" }))!;
+    const manual = (await issuePromo(world.db, { ...forJane, kind: "amount", value: 4000, source: "manual" }))!;
+    const pet = (await issuePromo(world.db, { ...forJane, kind: "amount", value: 4000, source: "pet_fee" }))!;
     const paid = expectOk(await world.book({ date: FAR }));
     const credit = expectOk(await requestRescheduleCode(world.db, paid.ref, byToken(paid.manageToken), world.manageDeps()));
-    const booked = expectOk(await session({ promoCode: credit.code }));
-    expect(booked.totalCents).toBe(37500 - 17600);
+    const refusal = { ok: false, status: 422, code: "invalid_code", message: PROMO_MISFIT_TEXT.photography };
+    for (const { code } of [percent, freeHour, manual, pet, credit]) {
+      expect(await session({ promoCode: code })).toEqual(refusal);
+      expect(
+        await quoteSelection(world.db, { studioIds: [world.ids.blanche], date: SESSION_DAY, durationMinutes: 60, photography: true, promoCode: code, email: jane.email }, NOW),
+      ).toEqual(refusal);
+    }
+    expect(world.charges).toHaveLength(1); // only the rental
+    expect((await world.db.select().from(promoCodes)).every((code) => code.usedCount === 0)).toBe(true);
+    expect(expectOk(await rental({ promoCode: credit.code })).totalCents).toBe(0);
+  });
+
+  it("applies an owner-created photography discount only to photography and honours a cancellation of the code", async () => {
+    const discount = expectOk(await createManualCode(world.db, {
+      kind: "percent", value: 20, photographyOnly: true, email: jane.email, validDays: 30, maxUses: 2, note: "",
+    }, NOW));
+    const input = { studioIds: [world.ids.blanche], date: SESSION_DAY, durationMinutes: 60, promoCode: discount.code, email: jane.email };
+    expect(await quoteSelection(world.db, input, NOW)).toMatchObject({ ok: false, message: PROMO_MISFIT_TEXT.rental });
+    expect(await rental({ promoCode: discount.code })).toMatchObject({ ok: false, message: PROMO_MISFIT_TEXT.rental });
+    expect(await quoteSelection(world.db, { ...input, photography: true }, NOW)).toMatchObject({
+      ok: true,
+      promo: { photographyOnly: true },
+      quote: { totalCents: 30000 },
+    });
+    expect(expectOk(await session({ promoCode: discount.code })).totalCents).toBe(30000);
+    expect(world.charges.at(-1)?.amountCents).toBe(30000);
+    const [listed] = await listCodes(world.db);
+    expect(listed).toMatchObject({ code: discount.code, photographyOnly: true, usedCount: 1 });
+    await voidCode(world.db, listed.id, NOW);
+    expect(await session({ date: NEXT_DAY, promoCode: discount.code })).toMatchObject({ ok: false, message: "That code is not valid." });
   });
 });
 
@@ -355,10 +379,15 @@ describe("after a session is booked", () => {
     expect(expectOk(await cancelBooking(world.db, booked.ref, byToken(booked.manageToken), deps)).refundCents).toBe(0);
   });
 
-  it("frees the photographer when the customer takes a reschedule code", async () => {
+  it("frees the photographer and sends a credit to rebook photography when a customer reschedules", async () => {
     const booked = expectOk(await session());
-    expectOk(await requestRescheduleCode(world.db, booked.ref, byToken(booked.manageToken), world.manageDeps()));
+    const credit = expectOk(await requestRescheduleCode(world.db, booked.ref, byToken(booked.manageToken), world.manageDeps()));
     expect(await world.db.select().from(photographerHolds).where(eq(photographerHolds.active, true))).toHaveLength(0);
+    expect(credit.bookPath).toBe("/book/photography");
+    expect((await world.emails("reschedule_code"))[0].body).toContain("https://studio.test/book/photography");
+    expect(await rental({ promoCode: credit.code })).toMatchObject({ ok: false, message: PROMO_MISFIT_TEXT.rental });
+    expect(expectOk(await session({ date: NEXT_DAY, promoCode: credit.code })).totalCents).toBe(0);
+    expect(world.charges).toHaveLength(1);
   });
 
   it("is moved by an administrator together with its photographer, only to a time when both are free", async () => {

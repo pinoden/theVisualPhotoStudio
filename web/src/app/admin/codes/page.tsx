@@ -6,9 +6,11 @@ import { formatCents } from "@/lib/domain/pricing";
 import { durationLabel } from "@/lib/domain/time";
 import { EMAIL_FIELD } from "@/lib/parse";
 import { listCodes } from "@/server/admin";
+import { isBookingRef } from "@/server/bookings";
 import { requireOwner } from "@/server/session";
 import { formatInstant } from "@/server/tz";
 import { createCodeAction, voidCodeAction } from "../actions";
+import { petCreditAction } from "../appointments/actions";
 import { CodeKindAndValue } from "./CodeKindAndValue";
 import { AdminFrame, AdminLoading } from "../frame";
 
@@ -34,9 +36,11 @@ async function Codes({ searchParams }: Pick<PageProps<"/admin/codes">, "searchPa
   await requireOwner("/admin/codes");
   const now = new Date();
   const codes = await listCodes(await getDb());
+  const query = await searchParams;
+  const bookingRef = typeof query.booking === "string" && isBookingRef(query.booking) ? query.booking : "";
 
   return (
-    <AdminFrame active="/admin/codes" title="Codes" query={await searchParams}>
+    <AdminFrame active="/admin/codes" title="Codes" query={query}>
       <div className="admin-card">
         <h3>Create a code</h3>
         <form action={createCodeAction} className="admin-form-row" style={{ marginBottom: 0 }}>
@@ -71,6 +75,27 @@ async function Codes({ searchParams }: Pick<PageProps<"/admin/codes">, "searchPa
         </form>
       </div>
 
+      <div className="admin-card" id="pet-fee-credit">
+        <h3>Return a pet fee as studio credit</h3>
+        <p>Use this once you know the pet did not attend. The client receives the credit code by email.</p>
+        <form action={petCreditAction} className="admin-form-row" style={{ marginBottom: 0 }}>
+          <div className="form-group">
+            <label className="form-label" htmlFor="pet-credit-booking">Booking reference</label>
+            <input
+              id="pet-credit-booking"
+              name="ref"
+              className="form-control"
+              defaultValue={bookingRef}
+              pattern="[Vv][Ss]-[A-Za-z0-9]{6}"
+              maxLength={9}
+              autoCapitalize="characters"
+              required
+            />
+          </div>
+          <button type="submit" className="btn btn-dark btn-small">Issue studio credit</button>
+        </form>
+      </div>
+
       {codes.length === 0 ? (
         <div className="admin-card">No codes yet. Free hours and reschedule codes appear here as they are issued.</div>
       ) : (
@@ -96,6 +121,7 @@ async function Codes({ searchParams }: Pick<PageProps<"/admin/codes">, "searchPa
                   <tr key={code.id}>
                     <td>
                       <strong style={{ color: "var(--color-dark)" }}>{code.code}</strong>
+                      <div style={{ fontSize: ".8rem" }}>{code.photographyOnly ? "Photography sessions" : "Studio rentals"}</div>
                       {code.note && <div style={{ fontSize: ".8rem" }}>{code.note}</div>}
                     </td>
                     <td>

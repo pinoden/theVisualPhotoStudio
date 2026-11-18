@@ -6,7 +6,7 @@ import type { PromoDef, PromoKind } from "@/lib/domain/pricing";
 
 /**
  * Codes customers enter at checkout. Three kinds:
- *  - percent: a discount on the studio rental, usable `maxUses` times.
+ *  - percent: a discount on a rental or photography session, usable `maxUses` times.
  *  - amount: money the customer already paid (a reschedule credit, or a pet
  *    fee returned as studio credit), or credit the studio gave. `value` is
  *    what is left on it and goes down as it is spent.
@@ -20,11 +20,10 @@ export function creditName(source: PromoSource): string {
   return source === "reschedule" ? "reschedule code" : "studio credit";
 }
 
-export interface UsablePromo {
+export interface UsablePromo extends PromoDef {
   id: string;
   code: string;
-  kind: PromoKind;
-  value: number;
+  photographyOnly: boolean;
   source: PromoSource;
   rescheduleGeneration: number;
 }
@@ -71,20 +70,16 @@ export async function findUsablePromo(
       code: row.code,
       kind: row.kind,
       value: row.value,
+      photographyOnly: row.photographyOnly,
       source: row.source,
       rescheduleGeneration: row.rescheduleGeneration,
     },
   };
 }
 
-export function toPromoDef(promo: UsablePromo): PromoDef {
-  return { kind: promo.kind, value: promo.value };
-}
-
-export interface CustomerCode {
+export interface CustomerCode extends PromoDef {
   code: string;
-  kind: PromoKind;
-  value: number;
+  photographyOnly: boolean;
   source: PromoSource;
   expiresAt: string | null;
 }
@@ -108,6 +103,7 @@ export async function listCodesForEmail(db: DbLike, email: string, now: Date): P
       code: row.code,
       kind: row.kind,
       value: row.value,
+      photographyOnly: row.photographyOnly,
       source: row.source,
       expiresAt: row.expiresAt ? row.expiresAt.toISOString() : null,
     }));
@@ -173,6 +169,7 @@ export interface IssuePromoInput {
   kind: PromoKind;
   value: number;
   source: PromoSource;
+  photographyOnly?: boolean;
   email: string | null;
   expiresAt: Date | null;
   maxUses?: number;
@@ -207,6 +204,7 @@ export async function issuePromo(tx: DbLike, given: IssuePromoInput): Promise<{ 
         value: input.value,
         issuedCents: input.value,
         source: input.source,
+        photographyOnly: input.photographyOnly ?? false,
         email,
         expiresAt: input.expiresAt,
         maxUses: input.maxUses ?? 1,

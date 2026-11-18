@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { CREDIT_FIELD } from "@/lib/parse";
 
-type Kind = "percent" | "amount" | "free_hour";
+type Kind = "percent" | "photo_percent" | "amount" | "free_hour";
 
 /**
  * The kind of a new code and its value, which the kind decides: a whole
@@ -14,6 +14,7 @@ type Kind = "percent" | "amount" | "free_hour";
  */
 export function CodeKindAndValue() {
   const [kind, setKind] = useState<Kind>("percent");
+  const isPercent = kind === "percent" || kind === "photo_percent";
   return (
     <>
       <div className="form-group">
@@ -22,15 +23,16 @@ export function CodeKindAndValue() {
         </label>
         <select id="code-kind" name="kind" className="form-control" value={kind} onChange={(event) => setKind(event.target.value as Kind)}>
           <option value="percent">Percent off the rental</option>
+          <option value="photo_percent">Percent off a photography session</option>
           <option value="amount">Credit in dollars</option>
           <option value="free_hour">One free hour (one studio)</option>
         </select>
       </div>
       <div className="form-group">
         <label className="form-label" htmlFor="code-value">
-          {kind === "percent" ? "Percent off (1 to 100)" : kind === "amount" ? "Amount ($)" : "Value (none for a free hour)"}
+          {isPercent ? "Percent off (1 to 100)" : kind === "amount" ? "Amount ($)" : "Value (none for a free hour)"}
         </label>
-        {kind === "percent" && <input id="code-value" key="percent" name="value" className="form-control" type="number" min={1} max={100} step={1} required />}
+        {isPercent && <input id="code-value" key="percent" name="value" className="form-control" type="number" min={1} max={100} step={1} required />}
         {kind === "amount" && <input id="code-value" key="amount" name="value" className="form-control" {...CREDIT_FIELD} required />}
         {kind === "free_hour" && <input id="code-value" key="free" className="form-control" disabled placeholder="The price of one hour" />}
       </div>

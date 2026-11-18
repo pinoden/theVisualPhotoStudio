@@ -10,7 +10,7 @@ import {
   studiosFreeAt,
   type SlotOptions,
 } from "@/lib/domain/availability";
-import { multiStudioOffer } from "@/lib/catalog-view";
+import { multiStudioOffer, studioCombinationError } from "@/lib/catalog-view";
 import {
   bookableDurations,
   findPrice,
@@ -70,6 +70,7 @@ interface AppliedCode {
   code: string;
   kind: PromoKind;
   value: number;
+  photographyOnly?: boolean;
   /** Where the code came from: "reschedule" for a moved booking's money. */
   source?: string;
   email: string;
@@ -246,13 +247,14 @@ export function BookingFlow({
 
   const availableAddons = catalog.addons.filter((a) => a.studioId === null || studioIds.includes(a.studioId));
   const studioOffer = multiStudioOffer(catalog);
+  const combinationError = studioCombinationError(catalog.studios, studioIds);
 
   // A code is tied to an email address, so it stops applying if the address changes.
   const normalizedEmail = email.trim().toLowerCase();
   const promo = applied && applied.email === normalizedEmail ? applied : null;
 
   const price: Quote | null = useMemo(() => {
-    if (studioIds.length === 0 || duration <= 0) return null;
+    if (studioIds.length === 0 || duration <= 0 || combinationError) return null;
     if (photography && !session) return null;
     try {
       return quote({
@@ -265,7 +267,7 @@ export function BookingFlow({
         addons: addonIds
           .filter((id) => availableAddons.some((a) => a.id === id))
           .map((addonId) => ({ addonId, quantity: 1 })),
-        promo: promo ? { kind: promo.kind, value: promo.value } : null,
+        promo,
         photoPackage: session ? { priceCents: session.priceCents } : null,
       });
     } catch {
@@ -273,7 +275,7 @@ export function BookingFlow({
     }
     // availableAddons is derived from studioIds and the catalog.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [studioIds, dayType, duration, rules, settings.multiStudioPercent, catalog.addons, addonIds, promo, photography, session]);
+  }, [studioIds, dayType, duration, rules, settings.multiStudioPercent, catalog.addons, addonIds, promo, photography, session, combinationError]);
 
   const needsCard = price !== null && price.totalCents > 0;
 
@@ -351,7 +353,7 @@ export function BookingFlow({
       const data = (await response.json().catch(() => ({}))) as {
         ok?: boolean;
         message?: string;
-        promo?: { code: string; kind: PromoKind; value: number; source?: string } | null;
+        promo?: Omit<AppliedCode, "email"> | null;
       };
       if (response.ok && data.ok && data.promo) {
         setApplied({ ...data.promo, email: normalizedEmail });
@@ -389,6 +391,7 @@ export function BookingFlow({
   }
 
   function toggleStudio(id: string) {
+    setError("");
     if (photography) {
       // A session is in one studio: choosing another replaces the choice.
       setStudioIds([id]);
@@ -424,7 +427,7 @@ export function BookingFlow({
   function validate(current: Step): string {
     switch (current) {
       case "studios":
-        return studioIds.length === 0 ? "Please select at least one studio." : "";
+        return studioIds.length === 0 ? "Please select at least one studio." : (combinationError ?? "");
       case "when":
         if (!date) return "Please select a date.";
         if (!duration) return "Please select a duration.";
@@ -578,7 +581,7 @@ export function BookingFlow({
         <div className="price-row price-discount">
           <span>
             {promo.kind === "percent"
-              ? `Code ${promo.code} (${promo.value}% off rental)`
+              ? `Code ${promo.code} (${promo.value}% off ${photography ? "session" : "rental"})`
               : promo.kind === "free_hour"
                 ? `Free hour, code ${promo.code}`
                 : promo.source === "reschedule" || promo.source === undefined
@@ -683,7 +686,7 @@ export function BookingFlow({
               ? "Your session takes place in one studio. The price of a session includes the studio."
               : mode === "time" && start !== null
                 ? `${longDateLabel(date)}, ${minutesToLabel(start)} – ${minutesToLabel(start + duration)}. Choose one or more.`
-                : "Choose one studio, or any combination for the same time."}
+                : "Choose one studio or a bundle for the same time."}
           </p>
           {mode === "time" && loadingSlots && <p>Checking availability…</p>}
           <div className="studio-selector">
@@ -728,7 +731,11 @@ export function BookingFlow({
               );
             })}
           </div>
-          {studioOffer && !photography && <p style={{ fontSize: ".85rem" }}>Booking several studios together: {studioOffer}.</p>}
+          {!photography && (
+            <p style={{ fontSize: ".85rem" }}>
+              Paris is included in every bundle. {studioOffer && `${studioOffer}.`}
+            </p>
+          )}
           {actions(nextLabelFor("studios"))}
         </div>
       )}
@@ -993,7 +1000,7 @@ export function BookingFlow({
                 <input
                   id="promo-code"
                   className="form-control"
-                  placeholder="Loyalty or reschedule code"
+                  placeholder={photography ? "Photography code" : "Discount, reward or credit code"}
                   autoCapitalize="characters"
                   autoComplete="off"
                   value={codeInput}

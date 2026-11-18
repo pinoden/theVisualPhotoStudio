@@ -34,6 +34,10 @@ export default async function BookPage() {
             </Link>
           </aside>
         )}
+        <p className="booking-request-note">
+          After-hours bookings are available by request. Use the <Link href="/contact">contact form</Link> and choose
+          &ldquo;After-hours booking&rdquo;.
+        </p>
         {/* The flow reads ?studio= from the URL, so it renders on the client. */}
         <Suspense
           fallback={

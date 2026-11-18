@@ -293,6 +293,21 @@ describe("moving a booking to a new time", () => {
     expect((await world.book({ studioIds: [world.ids.paris], startMinute: h(14), durationMinutes: 60 })).ok).toBe(true);
   });
 
+  it("lets the studio move a Blanche and Dayglow booking made before the bundle rule", async () => {
+    const booking = await row(morningRef);
+    // An existing Dayglow booking also held Blanche under the previous rules.
+    await world.db.execute(sql`
+      insert into studio_holds (studio_id, occupied, booking_id)
+      select ${world.ids.blanche}, occupied, booking_id from studio_holds where booking_id = ${booking.id}
+    `);
+
+    const options = expectOk(await moveOptions(world.db, owner, morningRef, NEXT_DAY, NOW));
+    expect(options.starts).toContain(h(14));
+    expect(await moveBooking(world.db, owner, morningRef, to(h(14), NEXT_DAY), NOW)).toMatchObject({ ok: true });
+    const holds = await world.db.select().from(studioHolds).where(eq(studioHolds.bookingId, booking.id));
+    expect(holds.map((hold) => hold.studioId)).toEqual(expect.arrayContaining([world.ids.blanche, world.ids.dayglow]));
+  });
+
   it("offers only the start times that are free for this booking", async () => {
     expectOk(await world.book({ studioIds: [world.ids.dayglow], startMinute: h(14), durationMinutes: 60 }));
     const options = await moveOptions(world.db, owner, morningRef, NEAR, NOW);
@@ -349,11 +364,11 @@ describe("a booking made in the admin for a client", () => {
     const made = expectOk(await createAdminBooking(world.db, owner, { ...request, studioIds: [world.ids.blanche] }, deps));
     expect(world.charges).toHaveLength(chargedBefore); // no card was charged for it
     const booking = await row(made.ref);
-    expect(booking).toMatchObject({ status: "confirmed", madeBy: "owner@studio.test", totalCents: 17600, customerEmail: "dana@example.com", termsAcceptedAt: null });
+    expect(booking).toMatchObject({ status: "confirmed", madeBy: "owner@studio.test", totalCents: 19000, customerEmail: "dana@example.com", termsAcceptedAt: null });
 
     const mail = (await world.emails("booking_confirmation")).at(-1)!;
     expect(mail.toEmail).toBe("dana@example.com");
-    expect(mail.body).toContain("To pay at the studio: $176");
+    expect(mail.body).toContain("To pay at the studio: $190");
     const appointment = (await getAppointment(world.db, owner, made.ref, NOW))!;
     expect(appointment.history).toEqual([
       { at: NOW.toISOString(), from: "new", to: "confirmed", actor: "owner@studio.test", note: "Booked in the admin for the client" },
@@ -373,10 +388,10 @@ describe("a booking made in the admin for a client", () => {
     );
     const booking = await row(made.ref);
     expect(booking.addonsCents).toBe(people.priceCents + pet.priceCents);
-    expect(booking.totalCents).toBe(15600 + people.priceCents + pet.priceCents);
+    expect(booking.totalCents).toBe(16400 + people.priceCents + pet.priceCents);
     const kinds = (await world.db.select().from(bookingAddons).where(eq(bookingAddons.bookingId, booking.id))).map((line) => line.kind).sort();
     expect(kinds).toEqual(["people", "pet"]);
-    expect((await world.emails("booking_confirmation")).at(-1)!.body).toContain(`To pay at the studio: $${(15600 + people.priceCents + pet.priceCents) / 100}`);
+    expect((await world.emails("booking_confirmation")).at(-1)!.body).toContain(`To pay at the studio: $${(16400 + people.priceCents + pet.priceCents) / 100}`);
     // An add-on of another studio is not for this booking.
     expect(await createAdminBooking(world.db, owner, { ...request, studioIds: [world.ids.paris], startMinute: h(17), durationMinutes: 60, addons: [{ addonId: pet.id, quantity: 1 }] }, deps)).toMatchObject({ ok: false });
   });
@@ -391,6 +406,16 @@ describe("a booking made in the admin for a client", () => {
     expect(await again(h(9))).toMatchObject({ ok: false, code: "slot_taken" }); // earlier today: already past
     expect(await again(h(16) + 15)).toMatchObject({ ok: true }); // 15 minutes after
     expect(await again(h(15), world.ids.paris)).toMatchObject({ ok: true }); // another studio's calendar
+  });
+
+  it("refuses a new Blanche and Dayglow booking without Paris even in the admin", async () => {
+    const studioIds = [world.ids.blanche, world.ids.dayglow];
+    expect(await createAdminBooking(world.db, owner, { ...request, studioIds }, deps)).toMatchObject({
+      ok: false,
+      code: "invalid_price",
+      message: "To book Blanche and Dayglow together, add Paris or choose a different combination.",
+    });
+    expect(await createAdminBooking(world.db, owner, { ...request, studioIds: [...studioIds, world.ids.paris] }, deps)).toMatchObject({ ok: true });
   });
 
   it("is the owners' to do, and staff's only once the owners switch it on", async () => {

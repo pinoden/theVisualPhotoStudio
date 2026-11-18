@@ -4,6 +4,7 @@ export const CONTACT_TOPICS = {
   photography: "Photography session",
   membership: "Membership",
   booking: "My booking",
+  after_hours: "After-hours booking",
   other: "Something else",
 } as const;
 

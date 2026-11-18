@@ -164,6 +164,7 @@ describe("the scheduled run", () => {
       reservationsReleased: 0,
       visitsCompleted: 1,
       loyaltyCodes: 1,
+      reviewRequestsQueued: 0,
       refundsSucceeded: 0,
       refundsFailed: 0,
       refundsSettled: 0,
@@ -176,6 +177,22 @@ describe("the scheduled run", () => {
     });
     expect(delivered).toContain(`Booking confirmed: ${booked.ref}`);
     expect(delivered).toContain("You have earned a free hour in the studio");
+  });
+
+  it("queues a single Google review request 24 hours after a completed appointment", async () => {
+    const completed = expectOk(await world.book());
+    const noShow = expectOk(await world.book({ startMinute: h(14) }));
+    await world.db.update(bookings).set({ status: "no_show" }).where(eq(bookings.ref, noShow.ref));
+    const run = (now: Date) => runScheduledTasks(world.db, { ...world.manageDeps({ now }), email: null });
+    const due = hoursAfter(VISIT_END, 24);
+
+    expect((await run(minutesAfter(due, -1))).reviewRequestsQueued).toBe(0);
+    expect((await run(due)).reviewRequestsQueued).toBe(1);
+    expect((await run(daysAfter(due, 1))).reviewRequestsQueued).toBe(0);
+    const requests = await world.emails("review_request");
+    expect(requests).toHaveLength(1);
+    expect(requests[0].body).toContain("https://g.page/r/CTQ9ea1fatgnEBM/review");
+    expect(requests[0].body).toContain(completed.ref);
   });
 });
 

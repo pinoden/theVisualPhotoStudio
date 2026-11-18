@@ -206,9 +206,9 @@ export const RateCards = defineBlock({
                 {weekend && (
                   <thead>
                     <tr>
-                      <td />
-                      <td style={{ textAlign: "right" }}>Mon–Fri</td>
-                      <td>Sat–Sun</td>
+                      <th scope="col"><span className="visually-hidden">Duration</span></th>
+                      <th scope="col" style={{ textAlign: "right" }}>Mon–Fri</th>
+                      <th scope="col">Sat–Sun</th>
                     </tr>
                   </thead>
                 )}

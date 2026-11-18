@@ -165,17 +165,21 @@ async function fillDetails() {
 }
 
 describe("studio-first flow", () => {
-  it("books any two studios together and sends what the customer saw", async () => {
+  it("requires Paris with Blanche and Dayglow and books an allowed pair at the price shown", async () => {
     render(<BookingFlow catalog={catalog} navigate={nav.push} />);
 
     await user.click(studioBox("Studio Blanche"));
     await user.click(studioBox("Studio Dayglow"));
     await next();
+    expect(screen.getByRole("alert").textContent).toContain("add Paris or choose a different combination");
+    await user.click(studioBox("Studio Dayglow"));
+    await user.click(studioBox("Studio Paris"));
+    await next();
 
     pickDate(WED);
     await pickDuration("1 hr");
-    // ($88 + $78) less the 20% two-studio discount
-    expect(screen.getByText("Estimated total").nextElementSibling?.textContent).toBe("$132.80");
+    // ($88 + $68) less the 20% two-studio discount
+    expect(screen.getByText("Estimated total").nextElementSibling?.textContent).toBe("$124.80");
     await next();
 
     await pickTime("10:00 AM");
@@ -186,12 +190,12 @@ describe("studio-first flow", () => {
     await next();
 
     expect(await screen.findByText(/No card processor is connected/)).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Confirm & pay $132.80" }));
+    await user.click(screen.getByRole("button", { name: "Confirm & pay $124.80" }));
 
     await waitFor(() => expect(nav.push).toHaveBeenCalledWith("/booking/VS-TEST22?t=secret-token-1234567890"));
     expect(posted).toHaveLength(1);
     expect(posted[0]).toMatchObject({
-      studioIds: [B, D],
+      studioIds: [B, P],
       date: WED,
       startMinute: h(10),
       durationMinutes: 60,
@@ -199,15 +203,15 @@ describe("studio-first flow", () => {
       addons: [],
       acceptTerms: true,
       paymentToken: "mock-card-ok",
-      expectedTotalCents: 13280,
+      expectedTotalCents: 12480,
     });
   });
 
   it("offers only times when every chosen studio is free", async () => {
-    busy = { [B]: [[h(10), h(12) + 10]], [D]: [[h(15), h(16) + 10]] };
+    busy = { [B]: [[h(10), h(12) + 10]], [P]: [[h(15), h(16) + 10]] };
     render(<BookingFlow catalog={catalog} navigate={nav.push} />);
     await user.click(studioBox("Studio Blanche"));
-    await user.click(studioBox("Studio Dayglow"));
+    await user.click(studioBox("Studio Paris"));
     await next();
     pickDate(WED);
     await pickDuration("1 hr");
@@ -223,10 +227,10 @@ describe("studio-first flow", () => {
   });
 
   it("explains when the chosen studios are never free together that day", async () => {
-    busy = { [B]: [[0, h(14)]], [D]: [[h(13), 1440]] };
+    busy = { [B]: [[0, h(14)]], [P]: [[h(13), 1440]] };
     render(<BookingFlow catalog={catalog} navigate={nav.push} />);
     await user.click(studioBox("Studio Blanche"));
-    await user.click(studioBox("Studio Dayglow"));
+    await user.click(studioBox("Studio Paris"));
     await next();
     pickDate(WED);
     await pickDuration("1 hr");
@@ -394,8 +398,8 @@ describe("studio-first flow", () => {
   it("states the discount for several studios as it is charged, not more", () => {
     const settings = { ...catalog.settings, multiStudioPercent: { 2: 15, 3: 0 } };
     render(<BookingFlow catalog={{ ...catalog, settings }} navigate={nav.push} />);
-    expect(screen.getByText(/Booking several studios together/).textContent).toBe(
-      "Booking several studios together: 15% off when you book exactly 2.",
+    expect(screen.getByText(/Paris is included in every bundle/).textContent).toBe(
+      "Paris is included in every bundle. 15% off when you book exactly 2.",
     );
   });
 
@@ -511,6 +515,24 @@ describe("studio-first flow", () => {
 });
 
 describe("time-first flow", () => {
+  it("allows Blanche and Dayglow together once Paris is added", async () => {
+    render(<BookingFlow catalog={catalog} navigate={nav.push} />);
+    await user.click(screen.getByRole("radio", { name: /I know when I want to come/ }));
+    pickDate(WED);
+    await pickDuration("1 hr");
+    await next();
+    await pickTime("10:00 AM");
+    await next();
+
+    await user.click(studioBox("Studio Blanche"));
+    await user.click(studioBox("Studio Dayglow"));
+    await next();
+    expect(screen.getByRole("alert").textContent).toContain("add Paris or choose a different combination");
+    await user.click(studioBox("Studio Paris"));
+    await next();
+    expect(screen.getByLabelText("Full name *")).toBeTruthy();
+  });
+
   it("shows which studios are free at the chosen time and books from there", async () => {
     busy = { [B]: [[h(10), h(12) + 10]] };
     render(<BookingFlow catalog={catalog} navigate={nav.push} />);

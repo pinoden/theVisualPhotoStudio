@@ -189,13 +189,14 @@ export async function handRefundAction(formData: FormData): Promise<void> {
   redirect(withMessage(page, "notice", `Refund of ${formatCents(amountCents)} recorded. Nothing was sent: this records what you gave back by hand.`));
 }
 
-/** The pet did not come: return the pet fee as studio credit. Owners only. */
+/** Manually issue booking-linked pet-fee credit from Codes. Owners only. */
 export async function petCreditAction(formData: FormData): Promise<void> {
-  const ref = formText(formData.get("ref"));
+  const ref = formText(formData.get("ref")).toUpperCase();
   const page = appointmentPage(ref);
-  const viewer = await requireOwner(page);
+  const retry = /^VS-[0-9A-Z]{6}$/.test(ref) ? `/admin/codes?booking=${ref}` : "/admin/codes";
+  const viewer = await requireOwner(retry);
   const result = await givePetFeeCredit(await getDb(), viewer, ref, { now: new Date(), baseUrl: await siteUrl() });
-  if (!result.ok) redirect(withMessage(page, "error", result.message));
+  if (!result.ok) redirect(withMessage(retry, "error", result.message));
   flushEmailsSoon();
   redirect(withMessage(page, "notice", `The pet fee of ${formatCents(result.cents)} is now studio credit. The client has been emailed the code ${result.code}.`));
 }

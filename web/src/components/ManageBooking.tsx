@@ -48,13 +48,13 @@ export function ManageBooking({
     return (
       <div className="notice" role="status">
         <p style={{ marginTop: 0 }}>{result.message}</p>
-        {result.code && (
+        {result.code && result.bookPath && (
           <>
             <div className="booking-ref" style={{ textAlign: "center", margin: "1rem 0" }}>
               {result.code}
             </div>
             <p style={{ marginBottom: 0 }}>
-              <Link href="/book" className="btn btn-dark">
+              <Link href={result.bookPath} className="btn btn-dark">
                 Book a new time
               </Link>
             </p>

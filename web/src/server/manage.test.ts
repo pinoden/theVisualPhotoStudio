@@ -130,8 +130,8 @@ describe("cancelling", () => {
     // Exactly 14 days before the start is still in time: Saturday 10:00 for a booking on Saturday the 28th at 10:00.
     const onTheLine = expectOk(await world.book({ date: "2026-11-28" }));
     expect(expectOk(await cancelBooking(world.db, onTheLine.ref, byToken(onTheLine.manageToken), world.manageDeps()))).toMatchObject({
-      refundCents: 17600 - 880,
-      feeCents: 880,
+      refundCents: 19000 - 950,
+      feeCents: 950,
       refund: "sent",
     });
   });

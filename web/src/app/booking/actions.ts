@@ -13,6 +13,7 @@ export interface ManageState {
   message: string;
   /** The reschedule code, shown once on screen as well as emailed. */
   code?: string;
+  bookPath?: "/book" | "/book/photography";
 }
 
 /**
@@ -63,6 +64,7 @@ export async function rescheduleBookingAction(_previous: ManageState, formData: 
   return {
     status: "rescheduled",
     code: result.code,
+    bookPath: result.bookPath,
     message: `Your booking was released. Your code is worth ${formatCents(result.valueCents)} and is valid until ${formatInstant(result.expiresAt)}. We also emailed it to you.${
       result.unseenNote ? ` ${result.unseenNote}` : ""
     }`,

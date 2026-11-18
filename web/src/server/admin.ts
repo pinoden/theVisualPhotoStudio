@@ -436,6 +436,7 @@ export interface CodeView {
   kind: PromoKind;
   value: number;
   source: string;
+  photographyOnly: boolean;
   email: string | null;
   usedCount: number;
   maxUses: number;
@@ -452,6 +453,7 @@ export async function listCodes(db: DbLike, limit = 200): Promise<CodeView[]> {
     kind: r.kind,
     value: r.value,
     source: r.source,
+    photographyOnly: r.photographyOnly,
     email: r.email,
     usedCount: r.usedCount,
     maxUses: r.maxUses,
@@ -494,11 +496,14 @@ export type CreateCodeResult = { ok: true; code: string } | { ok: false; message
  */
 export async function createManualCode(
   db: DbLike,
-  input: { kind: PromoKind; value: number; email: string | null; validDays: number; maxUses: number; note: string },
+  input: { kind: PromoKind; value: number; email: string | null; validDays: number; maxUses: number; note: string; photographyOnly?: boolean },
   now: Date,
 ): Promise<CreateCodeResult> {
   if (input.kind !== "percent" && input.kind !== "amount" && input.kind !== "free_hour") {
     return { ok: false, message: "Choose a kind of code." };
+  }
+  if (input.photographyOnly && input.kind !== "percent") {
+    return { ok: false, message: "Only percentage discounts can be created for photography sessions." };
   }
   if (!Number.isInteger(input.value) || input.value <= 0) return { ok: false, message: "Enter a value above zero." };
   if (input.kind === "percent" && input.value > 100) return { ok: false, message: "A discount cannot exceed 100%." };
@@ -517,6 +522,7 @@ export async function createManualCode(
     kind: input.kind,
     value: input.value,
     source: "manual",
+    photographyOnly: input.photographyOnly,
     email,
     expiresAt: new Date(now.getTime() + input.validDays * 86_400_000),
     // Credit is limited by the money left on it. A free hour is a reward, and a reward is used once.
