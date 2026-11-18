@@ -20,6 +20,8 @@ export interface AddonDef {
   /** null = can be added to any booking; otherwise only when that studio is booked. */
   studioId: string | null;
   maxQuantity: number;
+  /** "people" for an extra guest: the guests a booking can take count those (`extraGuestsAllowed`). */
+  kind?: string;
 }
 
 export interface AddonSelection {
@@ -62,6 +64,30 @@ export interface QuoteInput {
    * price list is not consulted.
    */
   photoPackage?: { priceCents: number } | null;
+  /**
+   * How many extra guests (add-ons of kind `people`, in all) this booking can take: `extraGuestsAllowed`. Left out,
+   * only each add-on's own `maxQuantity` limits them.
+   */
+  extraGuestsAllowed?: number | null;
+}
+
+/** The most guests in all for studios booked together, by how many: the owners' settings (10 for two, 20 for three). */
+export type GuestLimits = Record<number, number>;
+
+/**
+ * How many extra guests a booking of these studios can take. One studio: its own number (`extraGuests`). Several
+ * together: every guest counts toward the limit for that many studios (the owner's answer of 2026-11-17), so the
+ * extra ones are what the limit leaves above the guests the studios include, and never more than the studios'
+ * own extra guests added together.
+ */
+export function extraGuestsAllowed(studios: { includedGuests: number; extraGuests: number }[], limits: GuestLimits): number {
+  if (studios.length === 0) return 0;
+  const own = studios.reduce((sum, studio) => sum + Math.max(0, studio.extraGuests), 0);
+  if (studios.length === 1) return own;
+  const limit = limits[studios.length];
+  if (limit === undefined) return own;
+  const included = studios.reduce((sum, studio) => sum + studio.includedGuests, 0);
+  return Math.max(0, Math.min(own, limit - included));
 }
 
 export interface Quote {
@@ -87,6 +113,7 @@ export type PricingErrorCode =
   | "UNKNOWN_ADDON"
   | "ADDON_NOT_ALLOWED"
   | "BAD_QUANTITY"
+  | "TOO_MANY_GUESTS"
   | "BAD_PROMO"
   | "BAD_PACKAGE";
 
@@ -197,6 +224,17 @@ export function quote(input: QuoteInput): Quote {
       };
     });
   const addonsCents = addonLines.reduce((sum, l) => sum + l.totalCents, 0);
+
+  const allowed = input.extraGuestsAllowed;
+  if (allowed !== undefined && allowed !== null) {
+    const guests = addonLines.reduce((sum, line) => sum + (catalog.find((a) => a.id === line.addonId)?.kind === "people" ? line.quantity : 0), 0);
+    if (guests > allowed) {
+      throw new PricingError(
+        "TOO_MANY_GUESTS",
+        allowed === 0 ? "No extra guests can come with this booking." : `At most ${allowed} extra ${allowed === 1 ? "guest" : "guests"} can come with this booking.`,
+      );
+    }
+  }
 
   // A percent code discounts the rental or session price. An amount code
   // can pay for the entire booking, including add-ons, within its scope.

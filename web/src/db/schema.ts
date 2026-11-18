@@ -114,6 +114,8 @@ export const studios = pgTable("studios", {
   description: text("description").notNull().default(""),
   /** Guests included in the price. */
   includedGuests: integer("included_guests").notNull().default(6),
+  /** Guests that can come beyond those included, each paid as an extra guest (an add-on of kind `people`). */
+  extraGuests: integer("extra_guests").notNull().default(0),
   /**
    * Minutes kept free after every booking, so that appointments are at least this far apart.
    * 15 is the owner's rule: 7 minutes before and 7 after each appointment, drawn so in the calendar.

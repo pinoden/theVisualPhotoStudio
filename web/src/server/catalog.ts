@@ -16,6 +16,8 @@ export interface CatalogStudio {
   tagline: string;
   description: string;
   includedGuests: number;
+  /** Guests that can come beyond those included, each an extra guest. */
+  extraGuests: number;
   bufferMinutes: number;
   /** Its colour in the admin calendar. */
   color: string;
@@ -89,6 +91,7 @@ export async function loadCatalog(db: DbLike): Promise<Catalog> {
       tagline: s.tagline,
       description: s.description,
       includedGuests: s.includedGuests,
+      extraGuests: s.extraGuests,
       bufferMinutes: s.bufferMinutes,
       color: s.color,
       hours: Object.fromEntries(

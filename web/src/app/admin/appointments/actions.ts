@@ -88,6 +88,11 @@ export async function createAdminBookingAction(formData: FormData): Promise<void
   const form = `/admin/calendar/new?${again}`;
   if (durationMinutes === null || startMinute === null) redirect(withMessage(form, "error", "Choose a length and a start time."));
 
+  // How many of each add-on taken in a quantity. A number that is not one is refused, never read as none.
+  const counted = [...formData.entries()]
+    .filter(([key]) => key.startsWith("addonCount-"))
+    .map(([key, value]) => ({ addonId: key.slice("addonCount-".length), quantity: intInRange(typeof value === "string" && value.trim() !== "" ? value : "0", 0, 100) }));
+  if (counted.some((selection) => selection.quantity === null)) redirect(withMessage(form, "error", "Enter how many extra guests as a whole number, or 0."));
   const result = await createAdminBooking(
     await getDb(),
     viewer,
@@ -102,8 +107,12 @@ export async function createAdminBookingAction(formData: FormData): Promise<void
         phone: formText(formData.get("phone")),
       },
       notes: formText(formData.get("notes")),
-      // Each add-on once, as on the booking screen; one that does not apply to the studios is refused by the price.
-      addons: [...new Set(formData.getAll("addon").filter((value): value is string => typeof value === "string"))].map((addonId) => ({ addonId, quantity: 1 })),
+      // Each ticked add-on once, and one taken in a quantity as many times as typed (an extra guest), as on the booking
+      // screen. One that does not apply to the studios, or more guests than they take, is refused by the price.
+      addons: [
+        ...[...new Set(formData.getAll("addon").filter((value): value is string => typeof value === "string"))].map((addonId) => ({ addonId, quantity: 1 })),
+        ...counted.flatMap((selection) => (selection.quantity ? [{ addonId: selection.addonId, quantity: selection.quantity }] : [])),
+      ],
       // A reward or credit of the client's, used on their behalf: it is checked and spent as at checkout.
       promoCode: formText(formData.get("code")) || undefined,
     },

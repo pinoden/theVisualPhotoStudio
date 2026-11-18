@@ -561,6 +561,8 @@ export interface StudioDetails {
   description: string;
   /** Guests included in the price. Shown to customers; not enforced. */
   includedGuests: number;
+  /** Guests that can come beyond those, each paid as an extra guest. Left out, it stays as it is. */
+  extraGuests?: number;
   /** Clean-up minutes kept free after each booking. */
   bufferMinutes: number;
   /** Its facts, but the floor plan, which is chosen on its own (`setStudioFloorPlan`). Text the limits do not take is cut. */
@@ -578,13 +580,21 @@ export async function saveStudioDetails(db: DbLike, studioId: string, input: Stu
   if (!UUID.test(studioId) || tagline.length > 200 || description.length > 2000) return false;
   if (!Number.isInteger(input.includedGuests) || input.includedGuests < 1 || input.includedGuests > 100) return false;
   if (!Number.isInteger(input.bufferMinutes) || input.bufferMinutes < 0 || input.bufferMinutes > 240) return false;
+  if (input.extraGuests !== undefined && (!Number.isInteger(input.extraGuests) || input.extraGuests < 0 || input.extraGuests > 100)) return false;
   const [current] = await db.select({ facts: studios.facts }).from(studios).where(eq(studios.id, studioId)).limit(1);
   if (!current) return false;
   // The floor plan stays as it was: it is chosen on its own.
   const facts = input.facts ? parseStudioFacts({ ...input.facts, floorPlan: parseStudioFacts(current.facts).floorPlan }) : parseStudioFacts(current.facts);
   const updated = await db
     .update(studios)
-    .set({ tagline, description, includedGuests: input.includedGuests, bufferMinutes: input.bufferMinutes, facts })
+    .set({
+      tagline,
+      description,
+      includedGuests: input.includedGuests,
+      ...(input.extraGuests !== undefined ? { extraGuests: input.extraGuests } : {}),
+      bufferMinutes: input.bufferMinutes,
+      facts,
+    })
     .where(eq(studios.id, studioId))
     .returning({ id: studios.id });
   return updated.length === 1;

@@ -10,7 +10,7 @@ import {
   studiosFreeAt,
   type SlotOptions,
 } from "@/lib/domain/availability";
-import { multiStudioOffer, studioCombinationError } from "@/lib/catalog-view";
+import { extraGuestsFor, multiStudioOffer, studioCombinationError } from "@/lib/catalog-view";
 import {
   bookableDurations,
   findPrice,
@@ -143,7 +143,8 @@ export function BookingFlow({
   const date = isIsoDate(dateInput) ? dateInput : "";
   const [durationChoice, setDuration] = useState(0);
   const [start, setStart] = useState<number | null>(null);
-  const [addonIds, setAddonIds] = useState<string[]>([]);
+  /** How many of each add-on: 1 for one ticked, more for one taken in a quantity (an extra guest). */
+  const [addonCounts, setAddonCounts] = useState<Record<string, number>>({});
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
@@ -246,6 +247,10 @@ export function BookingFlow({
   );
 
   const availableAddons = catalog.addons.filter((a) => a.studioId === null || studioIds.includes(a.studioId));
+  // Extra guests these studios can take: each studio's own, and the owners' limit for studios booked together.
+  const guestsAllowed = extraGuestsFor(catalog, studioIds);
+  /** The most of an add-on this booking can take. */
+  const mostOf = (addon: (typeof catalog.addons)[number]) => (addon.kind === "people" ? Math.min(addon.maxQuantity, guestsAllowed) : addon.maxQuantity);
   const studioOffer = multiStudioOffer(catalog);
   const combinationError = studioCombinationError(catalog.studios, studioIds);
 
@@ -264,18 +269,20 @@ export function BookingFlow({
         rules,
         multiStudioPercent: settings.multiStudioPercent,
         addonCatalog: catalog.addons,
-        addons: addonIds
-          .filter((id) => availableAddons.some((a) => a.id === id))
-          .map((addonId) => ({ addonId, quantity: 1 })),
+        extraGuestsAllowed: guestsAllowed,
+        // A number chosen before the studios changed is kept within what the booking can now take.
+        addons: availableAddons
+          .map((addon) => ({ addonId: addon.id, quantity: Math.min(addonCounts[addon.id] ?? 0, mostOf(addon)) }))
+          .filter((selection) => selection.quantity > 0),
         promo,
         photoPackage: session ? { priceCents: session.priceCents } : null,
       });
     } catch {
       return null;
     }
-    // availableAddons is derived from studioIds and the catalog.
+    // availableAddons, guestsAllowed and mostOf are derived from studioIds and the catalog.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [studioIds, dayType, duration, rules, settings.multiStudioPercent, catalog.addons, addonIds, promo, photography, session, combinationError]);
+  }, [studioIds, dayType, duration, rules, settings.multiStudioPercent, catalog.addons, addonCounts, promo, photography, session, combinationError]);
 
   const needsCard = price !== null && price.totalCents > 0;
 
@@ -573,7 +580,10 @@ export function BookingFlow({
       )}
       {price.addonLines.map((line) => (
         <div className="price-row" key={line.addonId}>
-          <span>{line.name}</span>
+          <span>
+            {line.name}
+            {line.quantity > 1 ? ` × ${line.quantity}` : ""}
+          </span>
           <span>{formatCents(line.totalCents)}</span>
         </div>
       ))}
@@ -958,16 +968,49 @@ export function BookingFlow({
           {availableAddons.length > 0 && (
             <div className="price-summary">
               <span className="form-label">Add-ons</span>
-              {availableAddons.map((addon) => (
+              {availableAddons.map((addon) =>
+                addon.maxQuantity > 1 ? (
+                  // Taken in a quantity: how many, from none to what this booking can take.
+                  <div className="addon-row addon-quantity" key={addon.id}>
+                    <select
+                      id={`addon-${addon.id}`}
+                      className="form-control addon-count"
+                      value={Math.min(addonCounts[addon.id] ?? 0, mostOf(addon))}
+                      disabled={mostOf(addon) === 0}
+                      aria-describedby={`addon-${addon.id}-limit`}
+                      onChange={(event) => setAddonCounts((current) => ({ ...current, [addon.id]: Number(event.target.value) }))}
+                    >
+                      {Array.from({ length: mostOf(addon) + 1 }, (_, n) => (
+                        <option key={n} value={n}>
+                          {n}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="addon-text">
+                      <span className="addon-head">
+                        <label htmlFor={`addon-${addon.id}`}>
+                          <strong>{addon.name}</strong>
+                        </label>
+                        <span className="addon-price">{formatCents(addon.priceCents)} each</span>
+                      </span>
+                      {addon.description && <span className="addon-description">{addon.description}</span>}
+                      <span className="addon-description" id={`addon-${addon.id}-limit`}>
+                        {addon.kind !== "people"
+                          ? `Up to ${addon.maxQuantity}.`
+                          : guestsAllowed > 0
+                            ? `Up to ${count(guestsAllowed, "extra guest")} with ${studioIds.length > 1 ? "these studios" : "this studio"}.`
+                            : studioIds.length > 1
+                              ? `No extra guests with these studios together: ${count(studioIds.length === 2 ? settings.twoStudioGuestLimit : settings.threeStudioGuestLimit, "guest")} at most in all, and their prices include that many.`
+                              : "No extra guests with this studio."}
+                      </span>
+                    </span>
+                  </div>
+                ) : (
                 <label className="addon-row" key={addon.id}>
                   <input
                     type="checkbox"
-                    checked={addonIds.includes(addon.id)}
-                    onChange={() =>
-                      setAddonIds((current) =>
-                        current.includes(addon.id) ? current.filter((x) => x !== addon.id) : [...current, addon.id],
-                      )
-                    }
+                    checked={(addonCounts[addon.id] ?? 0) > 0}
+                    onChange={(event) => setAddonCounts((current) => ({ ...current, [addon.id]: event.target.checked ? 1 : 0 }))}
                   />
                   {/* The name and its price on one line, which puts the price under the name when both do not fit; the description below. */}
                   <span className="addon-text">
@@ -978,7 +1021,8 @@ export function BookingFlow({
                     {addon.description && <span className="addon-description">{addon.description}</span>}
                   </span>
                 </label>
-              ))}
+                ),
+              )}
             </div>
           )}
 

@@ -30,14 +30,16 @@ beforeEach(async () => {
   jane = await world.addUser("jane@example.com", "customer", "Jane");
   await world.db.insert(staffShifts).values({ userId: sam.id, day: NEAR });
 
-  const people = (await loadCatalog(world.db)).addons.find((a) => a.slug === "extra-people-1-2")!;
+  const people = (await loadCatalog(world.db)).addons.find((a) => a.slug === "extra-guest")!;
+  // Blanche and Paris include 10 guests, the owners' limit for two studios: 12 leaves room for two extra.
+  await world.db.insert(settings).values({ key: "twoStudioGuestLimit", value: 12 });
   const afternoon = expectOk(
     await world.book({
       studioIds: [world.ids.blanche, world.ids.paris],
       startMinute: h(14),
       durationMinutes: 60,
       notes: "Need the white backdrop",
-      addons: [{ addonId: people.id, quantity: 1 }],
+      addons: [{ addonId: people.id, quantity: 2 }],
     }),
   );
   const morning = expectOk(
@@ -64,7 +66,7 @@ describe("the day sheet", () => {
       studios: ["Studio Blanche", "Studio Paris"],
       customerName: "Jane Smith",
       notes: "Need the white backdrop",
-      addons: [{ name: "1 to 2 extra people", quantity: 1 }],
+      addons: [{ name: "Extra guest", quantity: 2 }],
     });
   });
 

@@ -167,10 +167,10 @@ describe("a credit code", () => {
   it("pays for add-ons too", async () => {
     const credit = await creditCode(50000);
     const { loadCatalog } = await import("./catalog");
-    const people = (await loadCatalog(world.db)).addons.find((a) => a.slug === "extra-people-1-2")!;
-    const result = expectOk(await world.book({ promoCode: credit.code, addons: [{ addonId: people.id, quantity: 1 }], paymentToken: undefined }));
+    const people = (await loadCatalog(world.db)).addons.find((a) => a.slug === "extra-guest")!;
+    const result = expectOk(await world.book({ promoCode: credit.code, addons: [{ addonId: people.id, quantity: 3 }], paymentToken: undefined }));
     expect(result.totalCents).toBe(0);
-    expect((await codeRow(credit.id)).value).toBe(50000 - 17600 - 3000);
+    expect((await codeRow(credit.id)).value).toBe(50000 - 17600 - 1500);
   });
 
   it("gets its money back when the card for the difference is declined", async () => {

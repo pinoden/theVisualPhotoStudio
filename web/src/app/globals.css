@@ -1182,6 +1182,10 @@ button { font-family: inherit; }
 .addon-row:last-child { border-bottom: none; }
 .addon-row input { margin-top: .3rem; }
 .addon-row strong { color: var(--color-dark); }
+/* An add-on taken in a quantity (an extra guest): how many, in a narrow box before its name. */
+.addon-quantity { cursor: default; align-items: center; }
+.addon-quantity .addon-count { flex: 0 0 auto; width: 4.75rem; margin-top: 0; }
+.addon-quantity label { cursor: pointer; }
 .addon-price { margin-left: auto; white-space: nowrap; color: var(--color-dark); }
 
 .notice {

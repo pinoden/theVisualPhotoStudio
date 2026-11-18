@@ -25,6 +25,7 @@ const STUDIOS = [
     description:
       "A bright, modern canvas for creative work. Featuring a 10×15 ft seamless white cyclorama wall, a wall-mounted paper backdrop system, large southeast-facing windows and a minimalist aesthetic designed for portraits, branding sessions and editorial work. Shoes come off or get covered here to keep the space white.",
     includedGuests: 6,
+    extraGuests: 6,
     // hours -> dollars
     prices: {
       weekday: { 1: 88, 1.5: 132, 2: 176, 3: 264, 4: 320, 5: 385, 8: 605, 10: 720 },
@@ -41,6 +42,7 @@ const STUDIOS = [
     description:
       "A warm, natural-light studio with a boho feel. The paper backdrop on a floor stand can be switched out during your session. Dayglow is our only pet-friendly studio.",
     includedGuests: 6,
+    extraGuests: 6,
     prices: {
       weekday: { 1: 78, 1.5: 117, 2: 156, 3: 234, 4: 285, 5: 350, 8: 540 },
       weekend: { 1: 82, 1.5: 123, 2: 164, 3: 246, 4: 300, 5: 368, 8: 568 },
@@ -56,6 +58,7 @@ const STUDIOS = [
     description:
       "A romantic, elegant space for timeless visuals. Classic details, a white vintage couch, a fireplace mantel, gold mirrors and soft natural light from large southeast-facing windows. Styled with seasonal setups through the year.",
     includedGuests: 4,
+    extraGuests: 4,
     prices: {
       weekday: { 1: 68, 1.5: 102, 2: 136, 3: 195, 4: 245, 5: 300 },
       weekend: { 1: 72, 1.5: 108, 2: 144, 3: 206, 4: 259, 5: 318 },
@@ -81,6 +84,7 @@ export async function seed(db: Db): Promise<boolean> {
           tagline: s.tagline,
           description: s.description,
           includedGuests: s.includedGuests,
+          extraGuests: s.extraGuests,
           bufferMinutes: 15,
           color: s.color,
           sortOrder: index,
@@ -139,22 +143,16 @@ export async function seed(db: Db): Promise<boolean> {
 
     await tx.insert(addons).values([
       {
-        slug: "extra-people-1-2",
-        name: "1 to 2 extra people",
-        description: "For groups larger than the number of guests included with the studio.",
-        priceCents: 3000,
+        // $5 for each guest beyond those included (follow-up 2, the owner's answer of 2026-11-17). How many a booking
+        // can take is each studio's `extraGuests`, and the settings' limits for studios booked together.
+        slug: "extra-guest",
+        name: "Extra guest",
+        description: "For each guest beyond those included with the studio.",
+        priceCents: 500,
         studioId: null,
+        maxQuantity: 20,
         kind: "people",
         sortOrder: 0,
-      },
-      {
-        slug: "extra-people-3-5",
-        name: "3 to 5 extra people",
-        description: "For groups larger than the number of guests included with the studio.",
-        priceCents: 5000,
-        studioId: null,
-        kind: "people",
-        sortOrder: 1,
       },
       {
         slug: "pet-fee",

@@ -13,6 +13,12 @@ export const SETTING_GROUPS: { title: string; fields: SettingField[] }[] = [
       { key: "photoMinLeadHours", label: "Minimum notice for photography (hours)", help: "336 is two weeks. A session with the photographer cannot be booked closer than this." },
       { key: "slotIncrementMinutes", label: "Start times every (minutes)", help: "15 offers 9:00, 9:15, 9:30 and so on." },
       { key: "holdMinutes", label: "Hold while paying (minutes)", help: "How long a slot is kept for a customer at checkout." },
+      {
+        key: "twoStudioGuestLimit",
+        label: "Most guests for two studios together",
+        help: "Every guest counts, those included and the extra ones. Each studio's included and extra guests are set under Studios.",
+      },
+      { key: "threeStudioGuestLimit", label: "Most guests for all three studios", help: "Every guest counts, as above." },
     ],
   },
   {

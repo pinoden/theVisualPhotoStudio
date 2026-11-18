@@ -12,7 +12,7 @@ import {
   type Db,
   type DbLike,
 } from "@/db/client";
-import { studioCombinationError } from "@/lib/catalog-view";
+import { extraGuestsFor, studioCombinationError } from "@/lib/catalog-view";
 import { isStartFree, noticeHours } from "@/lib/domain/availability";
 import { labelOf, type LabelKey } from "@/lib/domain/labels";
 import { formatCents, PricingError, PROMO_MISFIT_TEXT, quote, type PromoKind, type Quote } from "@/lib/domain/pricing";
@@ -254,6 +254,7 @@ export async function quoteSelection(db: DbLike, rawInput: unknown, now: Date, p
       multiStudioPercent: catalog.settings.multiStudioPercent,
       addons: input.addons,
       addonCatalog: catalog.addons,
+      extraGuestsAllowed: extraGuestsFor(catalog, input.studioIds),
       promo,
       photoPackage: session,
     });
@@ -351,6 +352,7 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
       multiStudioPercent: catalog.settings.multiStudioPercent,
       addons: input.addons,
       addonCatalog: catalog.addons,
+      extraGuestsAllowed: extraGuestsFor(catalog, input.studioIds),
       promo,
       photoPackage: session,
     });

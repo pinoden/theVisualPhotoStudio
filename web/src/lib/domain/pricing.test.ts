@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   bookableDurations,
+  extraGuestsAllowed,
   formatCents,
   multiStudioPercentFor,
   PricingError,
@@ -151,6 +152,36 @@ describe("quote", () => {
     expect(q({ kind: "percent", value: 150 })).toBe("BAD_PROMO");
     expect(q({ kind: "percent", value: -10 })).toBe("BAD_PROMO");
     expect(q({ kind: "amount", value: -500 })).toBe("BAD_PROMO");
+  });
+});
+
+describe("extra guests", () => {
+  const blanche = { includedGuests: 6, extraGuests: 6 };
+  const dayglow = { includedGuests: 6, extraGuests: 6 };
+  const paris = { includedGuests: 4, extraGuests: 4 };
+  const limits = { 2: 10, 3: 20 };
+
+  it("are each studio's own number for one studio, and what the limit leaves above the included guests for several", () => {
+    expect(extraGuestsAllowed([blanche], limits)).toBe(6);
+    expect(extraGuestsAllowed([paris], limits)).toBe(4);
+    expect(extraGuestsAllowed([paris, dayglow], limits)).toBe(0); // 4 + 6 included: the 10 are reached
+    expect(extraGuestsAllowed([blanche, dayglow, paris], limits)).toBe(4); // 16 included, 20 at most
+    expect(extraGuestsAllowed([paris, dayglow], { 2: 13, 3: 20 })).toBe(3);
+    // Never more than the studios' own extra guests added together, nor below none.
+    expect(extraGuestsAllowed([paris, dayglow], { 2: 100, 3: 20 })).toBe(10);
+    expect(extraGuestsAllowed([blanche, dayglow], { 2: 8, 3: 20 })).toBe(0);
+    expect(extraGuestsAllowed([], limits)).toBe(0);
+  });
+
+  it("are refused in the price beyond what the booking can take, counting every add-on for people", () => {
+    const guest: AddonDef = { id: "guest", name: "Extra guest", priceCents: 500, studioId: null, maxQuantity: 20, kind: "people" };
+    const base = { studioIds: [B], dayType: "weekday" as const, durationMinutes: 60, rules, multiStudioPercent: {}, addonCatalog: [guest] };
+    expect(quote({ ...base, addons: [{ addonId: "guest", quantity: 4 }], extraGuestsAllowed: 4 }).addonsCents).toBe(2000);
+    expect(() => quote({ ...base, addons: [{ addonId: "guest", quantity: 5 }], extraGuestsAllowed: 4 })).toThrow("At most 4 extra guests can come with this booking.");
+    expect(() => quote({ ...base, addons: [{ addonId: "guest", quantity: 1 }], extraGuestsAllowed: 0 })).toThrow("No extra guests can come with this booking.");
+    expect(() => quote({ ...base, addons: [{ addonId: "guest", quantity: 2 }], extraGuestsAllowed: 1 })).toThrow("At most 1 extra guest can come with this booking.");
+    // Left out, only the add-on's own most limits it.
+    expect(quote({ ...base, addons: [{ addonId: "guest", quantity: 20 }] }).addonsCents).toBe(10000);
   });
 });
 

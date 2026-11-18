@@ -421,14 +421,16 @@ export async function saveAccessInstructionsAction(formData: FormData): Promise<
 export async function saveStudioDetailsAction(formData: FormData): Promise<void> {
   await requireOwner("/admin/studios");
   const includedGuests = intInRange(text(formData, "includedGuests"), 1, 100);
+  const extraGuests = intInRange(text(formData, "extraGuests"), 0, 100);
   const bufferMinutes = intInRange(text(formData, "bufferMinutes"), 0, 240);
-  if (includedGuests === null || bufferMinutes === null) {
-    failed("/admin/studios", "Not saved: guests must be 1 to 100, and clean-up time 0 to 240 minutes.");
+  if (includedGuests === null || extraGuests === null || bufferMinutes === null) {
+    failed("/admin/studios", "Not saved: guests included must be 1 to 100, extra guests 0 to 100, and clean-up time 0 to 240 minutes.");
   }
   const saved = await saveStudioDetails(await getDb(), text(formData, "studioId"), {
     tagline: text(formData, "tagline"),
     description: text(formData, "description"),
     includedGuests,
+    extraGuests,
     bufferMinutes,
     facts: {
       size: text(formData, "size"),

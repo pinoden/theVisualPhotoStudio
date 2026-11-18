@@ -737,7 +737,9 @@ test("the calendar shows a day, a week and a month, one studio or all, and a boo
   await page.getByLabel("Client’s email").fill("dana.e2e@example.com");
   await page.getByLabel("Client’s phone").fill("407-555-0142");
   // The add-ons of the booking screen are offered: those for any booking, and Dayglow's pet fee.
-  await expect(page.getByRole("checkbox", { name: /extra people/ })).toHaveCount(2);
+  // Dayglow alone takes 6 extra guests, at $5 each.
+  await expect(page.getByRole("spinbutton", { name: "Extra guest" })).toHaveAttribute("max", "6");
+  await expect(byText(page, "Up to 6 with this studio.")).toBeVisible();
   await page.getByRole("checkbox", { name: /Pet fee/ }).check();
   await page.getByRole("button", { name: "Book for the client" }).click();
   await expect(page.getByRole("heading", { name: "Dana Diaz" })).toBeVisible();
