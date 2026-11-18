@@ -106,7 +106,7 @@ describe("the pages the website was built with", () => {
     expect(faq).toContain("Guest Information");
     expect(faq).toContain("We are at 7457 Aloma Ave, Suite 301, Winter Park, FL 32792. The studios are on the 3rd floor.");
     expect(faq).toContain("Bookings open 180 days ahead and close 24 hours before the start time.");
-    expect(faq).toContain("Cancel 14 days (336 hours) or more before your start time and your payment is refunded to your card automatically, less the 5% payment processing fee.");
+    expect(faq).toContain("Cancel 7 days (168 hours) or more before your start time and your payment is refunded to your card automatically, less the 5% payment processing fee.");
     expect(faq).toContain("Yes, once, until 24 hours before it starts.");
     expect(faq).toContain("The code is valid for 90 days.");
     expect(faq).toContain("You get 20% off when you book 2, 22% off when you book 3 or more.");
@@ -120,7 +120,7 @@ describe("the pages the website was built with", () => {
     expect(faq).not.toMatch(/\{[a-z]/);
 
     const policies = await words("policies");
-    expect(policies).toContain("Cancellations made 14 days (336 hours) or more before the appointment are eligible for a full refund, excluding the non-refundable payment processing fee (5%).");
+    expect(policies).toContain("Cancellations made 7 days (168 hours) or more before the appointment are eligible for a full refund, excluding the non-refundable payment processing fee (5%).");
     expect(policies).toContain("may be rescheduled at no additional charge until 24 hours before the appointment.");
     expect(policies).toContain("Sessions are booked at least 14 days ahead.");
     expect(policies).toContain("Pets are permitted in Studio Dayglow only");
@@ -164,7 +164,7 @@ describe("the pages the website was built with", () => {
     expect(faq).not.toContain("Ring 301");
 
     const policies = await words("policies");
-    expect(policies).toContain("Cancellations made less than 14 days before the appointment are non-refundable.");
+    expect(policies).toContain("Cancellations made less than 7 days before the appointment are non-refundable.");
     expect(policies).not.toContain("may be rescheduled");
     expect(policies).not.toContain("Once an appointment has been rescheduled");
     expect(policies).toContain("Pets are not permitted.");

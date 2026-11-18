@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { cancellationOutcome, rescheduleOutcome, type BookingFacts, type PolicySettings } from "./policy";
 
-/** The owner's terms since 2026-11-15: 14 days, 5% kept. */
+/** A photography session's terms: 14 days, 5% kept. A rental's are the same with 7 days (2026-11-17). */
 const settings: PolicySettings = {
   refundWindowHours: 336,
   refundFeePercent: 5,

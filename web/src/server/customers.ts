@@ -120,6 +120,9 @@ export interface CustomerPage {
   standing: LoyaltyStanding | null;
   /** Stamps needed for a free hour, as the owners set it. */
   perReward: number;
+  /** When loyalty last started over: stamps are counted from then. Null when every visit counts. */
+  stampsCountedFrom: string | null;
+  /** Every change made by hand, the ones from before loyalty started over included: they are the record. */
   stampChanges: StampChange[];
   rewards: Reward[];
   rewardChanges: RewardChange[];
@@ -184,6 +187,7 @@ export async function getCustomer(db: DbLike, viewer: AuthUser, rawEmail: string
     past: seeMoney ? appointments.past : appointments.past.map(withoutMoney),
     standing: settings.loyaltyEnabled ? await loyaltyStandingOf(db, email, settings) : null,
     perReward: settings.loyaltyVisits,
+    stampsCountedFrom: settings.loyaltyStartedAt,
     stampChanges,
     rewards,
     rewardChanges,

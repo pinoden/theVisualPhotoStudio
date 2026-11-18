@@ -108,11 +108,11 @@ describe("cancelling", () => {
     );
   });
 
-  it("inside 14 days: cancels without a refund and says why", async () => {
+  it("inside 7 days: cancels without a refund and says why", async () => {
     const booked = expectOk(await world.book({ date: NEAR }));
     const result = expectOk(await cancelBooking(world.db, booked.ref, byToken(booked.manageToken), world.manageDeps()));
     expect(result).toMatchObject({ refundCents: 0, refund: "none" });
-    expect(result.message).toBe("No refund is due, because the booking starts in less than 14 days.");
+    expect(result.message).toBe("No refund is due, because the booking starts in less than 7 days.");
     expect(world.refundCalls).toHaveLength(0);
     expect(await world.db.select().from(refunds)).toHaveLength(0);
     expect((await bookingRow(booked.ref)).status).toBe("cancelled");
@@ -120,19 +120,26 @@ describe("cancelling", () => {
     expect(await world.emails("owner_refund_notice")).toHaveLength(0);
   });
 
-  it("draws the line at 14 days, not at 7 (the owner's answer of 2026-11-15)", async () => {
-    // Ten days ahead was refunded while the window was 7 days. It no longer is.
+  it("draws the line at 7 days for a rental, not at 14 (the owner's answer of 2026-11-17)", async () => {
+    // Ten days ahead was not refunded while the window was 14 days. It is again.
     const tenDays = expectOk(await world.book({ date: "2026-11-24" }));
     expect(expectOk(await cancelBooking(world.db, tenDays.ref, byToken(tenDays.manageToken), world.manageDeps()))).toMatchObject({
-      refundCents: 0,
-      refund: "none",
+      refundCents: 17600 - 880,
+      feeCents: 880,
+      refund: "sent",
     });
-    // Exactly 14 days before the start is still in time: Saturday 10:00 for a booking on Saturday the 28th at 10:00.
-    const onTheLine = expectOk(await world.book({ date: "2026-11-28" }));
+    // Exactly 7 days before the start is still in time: Saturday 10:00 for a booking on Saturday the 21st at 10:00.
+    const onTheLine = expectOk(await world.book({ date: "2026-11-21" }));
     expect(expectOk(await cancelBooking(world.db, onTheLine.ref, byToken(onTheLine.manageToken), world.manageDeps()))).toMatchObject({
       refundCents: 19000 - 950,
       feeCents: 950,
       refund: "sent",
+    });
+    // A quarter of an hour closer is too late.
+    const tooLate = expectOk(await world.book({ date: "2026-11-21", startMinute: h(10) - 15 }));
+    expect(expectOk(await cancelBooking(world.db, tooLate.ref, byToken(tooLate.manageToken), world.manageDeps()))).toMatchObject({
+      refundCents: 0,
+      refund: "none",
     });
   });
 
@@ -215,6 +222,7 @@ describe("cancelling", () => {
     const late = { allowed: true, refundCents: 0, feeCents: 0, creditCents: 0, byHandCents: 0, why: "inside_window" } as const;
     const text = (refundWindowHours: number) => cancelOutcomeText(late, { ...DEFAULT_SETTINGS, refundWindowHours });
     expect(text(336)).toBe("No refund is due, because the booking starts in less than 14 days.");
+    expect(text(DEFAULT_SETTINGS.refundWindowHours)).toBe("No refund is due, because the booking starts in less than 7 days.");
     expect(text(168)).toBe("No refund is due, because the booking starts in less than 7 days.");
     expect(text(100)).toBe("No refund is due, because the booking starts in less than 100 hours.");
     expect(text(36)).toBe("No refund is due, because the booking starts in less than 36 hours.");

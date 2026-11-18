@@ -865,7 +865,7 @@ test("a page shows the studios, prices, contact details and form from the studio
 
   const guest = await visitor(browser);
   await guest.goto("/visit-us");
-  await expect(guest.getByRole("heading", { name: "Cancel 14 days ahead", level: 1 })).toBeVisible();
+  await expect(guest.getByRole("heading", { name: "Cancel 7 days ahead", level: 1 })).toBeVisible();
   await expect(guest.locator(".studio-card")).toHaveCount(3);
   await expect(guest.locator(".studio-card", { hasText: "Studio Paris" })).toContainText(/From \$\d+\/hour/);
   await expect(guest.locator(".studio-card", { hasText: "Studio Paris" }).getByRole("link", { name: "Book Now" })).toHaveAttribute("href", "/book?studio=paris");
@@ -882,7 +882,7 @@ test("a page shows the studios, prices, contact details and form from the studio
   await expect(guest.getByRole("heading", { name: "Cancel 10 days ahead", level: 1 })).toBeVisible();
   // Back as it was, for the tests that follow.
   await page.goto("/admin/settings");
-  await byLabel(page, "Refund window (hours before start)").fill("336");
+  await byLabel(page, "Refund window (hours before start)").fill("168");
   await page.getByRole("button", { name: "Save settings" }).click();
   await expect(byText(page, /saved/i).first()).toBeVisible();
   await guest.context().close();

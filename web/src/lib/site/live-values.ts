@@ -9,7 +9,7 @@ import type { Business } from "./frame";
  * Live values: facts from the settings, the prices and the studio's details
  * that the text of a page can name, so that the text cannot disagree with
  * what the site does. Written in a page's text as `{refund window}`; the
- * website shows "14 days", and shows the new number the moment an owner
+ * website shows "7 days", and shows the new number the moment an owner
  * changes the setting. In the editor a live value shows as its name.
  *
  * A name that is not one of these is left as it was typed.
@@ -34,7 +34,7 @@ export function liveValues(catalog: Catalog, business: Business): LiveValue[] {
     value("minimum notice", "How long before the start a booking can be made at the latest", hoursWithDays(s.minLeadHours)),
     value("booking horizon", "How far ahead bookings open", count(s.maxAdvanceDays, "day")),
     value("refund window", "How long before the start a cancellation is refunded", hoursInWords(s.refundWindowHours)),
-    value("refund window with hours", "The same, with the hours: 14 days (336 hours)", hoursWithDays(s.refundWindowHours)),
+    value("refund window with hours", "The same, with the hours: 7 days (168 hours)", hoursWithDays(s.refundWindowHours)),
     value("refund fee", "The processing fee kept from a refund", `${s.refundFeePercent}%`),
     value("reschedule cutoff", "How long before the start a booking can still be moved", hoursInWords(s.rescheduleCutoffHours)),
     value("reschedules allowed", "How often one booking can be moved", s.maxReschedules === 1 ? "once" : `up to ${s.maxReschedules} times`),

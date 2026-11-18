@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import { getDb } from "@/db/client";
 import { requireOwner } from "@/server/session";
 import { ACCESS_INSTRUCTIONS_MAX, loadAccessInstructions, loadSettings, NUMBER_SETTING_RANGES } from "@/server/settings";
+import { formatDay } from "@/server/tz";
 import { saveAccessInstructionsAction, saveSettingsAction } from "../actions";
 import { AdminFrame, AdminLoading } from "../frame";
 import { SETTING_GROUPS } from "./fields";
@@ -54,10 +55,17 @@ async function SettingsForm({ searchParams }: Pick<PageProps<"/admin/settings">,
           <div className="admin-card" key={group.title}>
             <h3>{group.title}</h3>
             {group.title.startsWith("Loyalty") && (
-              <label style={{ display: "block", marginBottom: "1rem", fontSize: ".9rem" }}>
-                <input type="checkbox" name="loyaltyEnabled" defaultChecked={settings.loyaltyEnabled} /> Email a free
-                hour to customers when their visits have earned one
-              </label>
+              <>
+                <label style={{ display: "block", marginBottom: ".4rem", fontSize: ".9rem" }}>
+                  <input type="checkbox" name="loyaltyEnabled" defaultChecked={settings.loyaltyEnabled} /> Email a free
+                  hour to customers when their visits have earned one
+                </label>
+                <p style={{ fontSize: ".78rem", margin: "0 0 1rem" }}>
+                  Switching this off and on again starts every customer&rsquo;s stamps from nothing. Free hours already
+                  sent stay valid.
+                  {settings.loyaltyStartedAt && <> Stamps are counted from {formatDay(new Date(settings.loyaltyStartedAt))}.</>}
+                </p>
+              </>
             )}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "1rem" }}>
               {group.fields.map((field) => (

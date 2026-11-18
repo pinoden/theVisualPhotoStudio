@@ -160,6 +160,12 @@ async function Customer({ params, searchParams }: Pick<PageProps<"/admin/custome
                 <dd>{customer.standing.earned}</dd>
               </div>
             </dl>
+            {customer.stampsCountedFrom && (
+              <p style={{ fontSize: ".85rem" }}>
+                Stamps are counted from {formatDay(new Date(customer.stampsCountedFrom))}, when loyalty was switched on
+                again. Visits and changes from before that day do not count. Free hours already sent stay valid.
+              </p>
+            )}
             {customer.standing.days.length > 0 && (
               <p style={{ fontSize: ".85rem" }}>
                 Visits that gave a stamp: {[...customer.standing.days].reverse().map((entry) => longDateLabel(entry.day)).join("; ")}.
@@ -226,6 +232,7 @@ async function Customer({ params, searchParams }: Pick<PageProps<"/admin/custome
                 <li key={index}>
                   {formatInstant(new Date(change.at))}: {count(Math.abs(change.stamps), "stamp")} {change.stamps > 0 ? "added" : "taken away"} by{" "}
                   {change.actor}. {change.reason}
+                  {customer.stampsCountedFrom && new Date(change.at) < new Date(customer.stampsCountedFrom) && " (Before loyalty started again: not counted.)"}
                 </li>
               ))}
             </ul>

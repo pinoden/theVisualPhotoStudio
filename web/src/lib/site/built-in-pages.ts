@@ -343,7 +343,7 @@ function faq(): BuiltInPage {
     question(
       "What are the rules during a session?",
       "<ul>" +
-        "<li>Food and drinks are not permitted on furniture.</li>" +
+        "<li>Food and drinks are not allowed inside the studios.</li>" +
         "<li>Furniture may be moved unless noted otherwise. Lift it, never drag it. Mirrors and glass items may not be moved.</li>" +
         "<li>Return all furniture and props to where you found them before you leave.</li>" +
         "<li>Children are welcome and must be supervised by an adult at all times.</li>" +
@@ -447,7 +447,7 @@ function policies(): BuiltInPage {
     "<li>{if not pets}Pets are not permitted.</li>" +
     "<li>No smoking or vaping. No confetti or popping champagne. No fog or haze machines.</li>" +
     "<li>No live bands or performances. Full nudity is not permitted.</li>" +
-    "<li>Food and drinks are not permitted on furniture.</li>" +
+    "<li>Food and drinks are not allowed inside the studios.</li>" +
     "<li>Filming or photography in hallways and common areas is not permitted.</li>" +
     "<li>Furniture may be moved, but mirrors and glass items may not. Furniture must be lifted, never dragged.</li>" +
     "</ul>" +

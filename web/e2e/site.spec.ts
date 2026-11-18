@@ -26,8 +26,8 @@ import {
  */
 test.describe.configure({ mode: "serial" });
 
-const NEAR = dateAhead(3); // inside the 14-day refund window
-const FAR = dateAhead(15); // refundable: more than 14 days ahead
+const NEAR = dateAhead(3); // inside the 7-day refund window
+const FAR = dateAhead(15); // refundable: more than 7 days ahead
 const LATER = dateAhead(21);
 const SATURDAY = dateAhead(3, "saturday");
 const DOOR_DAY = dateAhead(24); // a day no other test books
@@ -102,8 +102,10 @@ test("public pages show the studios and the live price list", async ({ page }) =
   await page.goto("/policies");
   const afterHours = byText(page, /After-hours bookings are available by request/);
   await expect(afterHours.getByRole("link", { name: "contact form" })).toHaveAttribute("href", "/contact");
-  // The terms follow the settings: 14 days and a 5% fee since the owner's answers of 2026-11-15.
-  await expect(byText(page, /Cancellations made 14 days \(336 hours\) or more before the appointment/)).toBeVisible();
+  // The terms follow the settings: 7 days for a rental (the owner's answer of 2026-11-17) and a 5% fee.
+  await expect(byText(page, /Cancellations made 7 days \(168 hours\) or more before the appointment/)).toBeVisible();
+  // Food and drinks stay outside the studios (the same answers).
+  await expect(byText(page, "Food and drinks are not allowed inside the studios.")).toBeVisible();
   await expect(byText(page, /excluding the non-refundable payment processing fee \(5%\)/)).toBeVisible();
   await expect(byText(page, /Sessions are booked at least 14 days ahead\./)).toBeVisible();
   await expect(byText(page, /A pet fee of \$40 applies per reservation.* If your pet does not come, the fee is returned to you as\s+studio credit/)).toBeVisible();
@@ -131,7 +133,7 @@ test("guest information answers with the current rules and prices", async ({ pag
   const refunds = page.locator("details.faq-item", { hasText: "Can I cancel, and do I get a refund?" });
   await expect(refunds.locator(".faq-answer")).toBeHidden();
   await refunds.locator("summary").click();
-  await expect(refunds.locator(".faq-answer")).toContainText("Cancel 14 days (336 hours) or more before your start time");
+  await expect(refunds.locator(".faq-answer")).toContainText("Cancel 7 days (168 hours) or more before your start time");
   await expect(refunds.locator(".faq-answer")).toContainText("less the 5% payment processing fee");
 
   const moving = page.locator("details.faq-item", { hasText: "Can I move my booking to another time?" });

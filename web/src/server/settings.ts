@@ -48,6 +48,12 @@ export interface Settings {
   loyaltyValidDays: number;
   /** Hours after a visit ends before it counts as completed. */
   loyaltyDelayHours: number;
+  /**
+   * When loyalty was last switched on after having been off, as an ISO instant. Stamps are counted from
+   * here: visits and changes by hand from before it are left out, and free hours sent before it stay valid
+   * (the owner's answer of 2026-11-17). Null while it has never been switched off and on again.
+   */
+  loyaltyStartedAt: string | null;
 
   // ── Studio Attendants (the role `staff`): what the owners have switched on for them (see src/lib/abilities.ts) ──
   /** Whether staff see customers' phone number and email. */
@@ -96,8 +102,8 @@ export const DEFAULT_SETTINGS: Settings = {
   holdMinutes: 10,
   multiStudioPercent: { 2: 20, 3: 22 },
 
-  refundWindowHours: 336, // 14 days: the owner's answer of 2026-11-15 (it was 7 days)
-  photoRefundWindowHours: 336, // 14 days, as on the live site
+  refundWindowHours: 168, // 7 days: the owner's answer of 2026-11-17, which changed the 14 days of 2026-11-15
+  photoRefundWindowHours: 336, // 14 days, as on the live site and confirmed on 2026-11-17
   refundFeePercent: 5,
   rescheduleCutoffHours: 24,
   maxReschedules: 1,
@@ -107,6 +113,7 @@ export const DEFAULT_SETTINGS: Settings = {
   loyaltyVisits: 5,
   loyaltyValidDays: 90, // the owner's answer of 2026-11-15 (it was 60)
   loyaltyDelayHours: 2,
+  loyaltyStartedAt: null,
 
   staffSeesContact: true, // the owner's answer of 2026-11-15: shown by default, the switch stays
   staffSetsLabels: true, // the owner, 2026-11-15: "Staff should be able to change all the labels"
@@ -158,6 +165,7 @@ export const NUMBER_SETTING_RANGES = {
 
 export type NumberSettingKey = keyof typeof NUMBER_SETTING_RANGES;
 const bool = (v: unknown) => typeof v === "boolean";
+const instantOrNull = (v: unknown) => v === null || (typeof v === "string" && v.length <= 40 && Number.isFinite(Date.parse(v)));
 
 function discountTable(v: unknown): Record<number, number> | null {
   if (!v || typeof v !== "object" || Array.isArray(v)) return null;
@@ -188,6 +196,7 @@ const VALIDATORS: { [K in Exclude<keyof Settings, "multiStudioPercent">]: (v: un
   loyaltyVisits: int(NUMBER_SETTING_RANGES.loyaltyVisits),
   loyaltyValidDays: int(NUMBER_SETTING_RANGES.loyaltyValidDays),
   loyaltyDelayHours: int(NUMBER_SETTING_RANGES.loyaltyDelayHours),
+  loyaltyStartedAt: instantOrNull,
   staffSeesContact: bool,
   staffSetsLabels: bool,
   staffSeesAllDays: bool,
@@ -241,6 +250,24 @@ export async function saveSetting(db: DbLike, key: string, value: unknown): Prom
     .values({ key, value })
     .onConflictDoUpdate({ target: settingsTable.key, set: { value } });
   return true;
+}
+
+/**
+ * Switch loyalty on or off. Switching it on after it was off starts every
+ * customer's stamps over (the owner's answer of 2026-11-17): the moment is
+ * kept in `loyaltyStartedAt`, and stamps are counted from it. Free hours
+ * already sent are not touched. Saving the switch as it already was changes
+ * nothing.
+ */
+export async function switchLoyalty(db: DbLike, on: boolean, now: Date): Promise<void> {
+  const was = (await loadSettings(db)).loyaltyEnabled;
+  if (on && !was) await saveSetting(db, "loyaltyStartedAt", now.toISOString());
+  await saveSetting(db, "loyaltyEnabled", on);
+}
+
+/** The moment stamps are counted from, or null when every visit counts. */
+export function loyaltyStart(settings: Pick<Settings, "loyaltyStartedAt">): Date | null {
+  return settings.loyaltyStartedAt ? new Date(settings.loyaltyStartedAt) : null;
 }
 
 // ── Kept out of `Settings` on purpose ───────────────────────────────────────

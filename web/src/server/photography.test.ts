@@ -369,7 +369,7 @@ describe("after a session is booked", () => {
   });
 
   it("keeps its own refund window when the owners give rentals a different one", async () => {
-    await world.db.insert(settings).values({ key: "refundWindowHours", value: 168 }); // rentals: 7 days
+    await world.db.insert(settings).values({ key: "refundWindowHours", value: 168 }); // rentals: 7 days, as they are by default
     const booked = expectOk(await session());
     const paris = expectOk(await rental({ studioIds: [world.ids.paris], durationMinutes: 60 }));
     const tenDaysBefore = hoursAfter(NOW, 8 * 24);
