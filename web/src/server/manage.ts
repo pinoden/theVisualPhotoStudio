@@ -4,6 +4,7 @@ import type { Db, DbLike } from "@/db/client";
 import { labelOf } from "@/lib/domain/labels";
 import { formatCents } from "@/lib/domain/pricing";
 import { MANUAL_PROVIDER } from "@/lib/payment-methods";
+import { durationLabel } from "@/lib/domain/time";
 import { count, hoursInWords } from "@/lib/words";
 import {
   afterFee,
@@ -16,10 +17,12 @@ import {
   type RescheduleOutcome,
 } from "@/lib/domain/policy";
 import type { AuthUser } from "./auth";
-import { isBookingRef, tokenMatches } from "./bookings";
+import { isBookingRef, tokenMatches, toBookingViews } from "./bookings";
 import {
   cancellationEmail,
   codeRefundEmail,
+  moveRequestReceivedEmail,
+  moveRequestStudioEmail,
   ownerHandRefundNotice,
   ownerRefundNotice,
   ownerRefundWaitingNotice,
@@ -117,7 +120,7 @@ async function manageContext(
   ref: string,
   actor: Actor,
   now: Date,
-): Promise<{ options: ManageOptions; terms: Settings; heldCents: number } | null> {
+): Promise<{ options: ManageOptions; terms: Settings; heldCents: number; booking: BookingRow } | null> {
   if (!isBookingRef(ref)) return null;
   const [booking] = await db.select().from(bookings).where(eq(bookings.ref, ref)).limit(1);
   if (!booking || !mayAct(booking, actor)) return null;
@@ -127,6 +130,7 @@ async function manageContext(
     options: { cancel: cancellationOutcome(facts, now, terms), reschedule: rescheduleOutcome(facts, now, terms) },
     terms,
     heldCents: await heldCentsOf(db, booking.id, now),
+    booking,
   };
 }
 
@@ -145,6 +149,8 @@ export interface ManageChoices {
   cancel: { allowed: boolean; text: string };
   /** `offered` is false when the owner has switched moving off: there is then nothing to show. */
   reschedule: { allowed: boolean; text: string; offered: boolean };
+  /** Asking the studio to move it (question 20): set by `getManageChoices`, which knows the booking. */
+  request?: { allowed: boolean; text: string };
 }
 
 /** `heldCents`: what the booking's card holds, not taken yet, which the words say what becomes of. */
@@ -184,7 +190,94 @@ export function rescheduleOfferText(
 /** What cancelling or moving would do, in words. A page asks `noticeBookingPayments` first, so that this counts a link just paid. */
 export async function getManageChoices(db: DbLike, ref: string, actor: Actor, now: Date): Promise<ManageChoices | null> {
   const context = await manageContext(db, ref, actor, now);
-  return context ? describeManageOptions(context.options, context.terms, context.heldCents) : null;
+  return context
+    ? { ...describeManageOptions(context.options, context.terms, context.heldCents), request: moveRequestChoice(context.booking, now) }
+    : null;
+}
+
+// ── Asking the studio to move a booking ──────────────────────────────────────
+
+/** The longest message a client can send with a request to move a booking. */
+export const MOVE_REQUEST_MAX = 1000;
+
+const ALREADY_ASKED = "You have asked the studio to move this booking. The studio will contact you to agree a new time.";
+
+/**
+ * Whether the client can ask the studio to move the booking now, in words. Beside the instant reschedule code, not
+ * in its place (question 20 of 2026-11-17): offered until the visit starts, whatever the booking's terms say about
+ * moving online, because the studio decides.
+ */
+function moveRequestChoice(booking: Pick<BookingRow, "status" | "label" | "startAt">, now: Date): { allowed: boolean; text: string } {
+  if (booking.status !== "confirmed" || now.getTime() >= booking.startAt.getTime()) return { allowed: false, text: "" };
+  if (booking.label === "reschedule_pending") return { allowed: false, text: ALREADY_ASKED };
+  return {
+    allowed: true,
+    text: "Tell the studio when would suit you instead. The studio contacts you to agree a new time, and your booking stays as it is until it is moved.",
+  };
+}
+
+export type MoveRequestResult =
+  | { ok: true }
+  | { ok: false; code: "not_found" | "not_confirmed" | "already_started" | "already_asked" | "bad_message"; message: string };
+
+/**
+ * A client asks the studio to move their booking. The booking is marked Reschedule Pending, which keeps its time, keeps
+ * the scheduled task from completing it and the reminder from being sent; its history says what the client wrote. The
+ * studio is emailed, with a reply that reaches the client, and the client gets a copy. The studio then moves it on the
+ * appointment's page (a move the client asked for), or takes the label off.
+ */
+export async function askStudioToMove(
+  db: Db,
+  ref: string,
+  actor: Actor,
+  message: string,
+  deps: Pick<ManageDeps, "now" | "ownerEmail" | "baseUrl">,
+): Promise<MoveRequestResult> {
+  const notFound = { ok: false as const, code: "not_found" as const, message: "Booking not found." };
+  if (!isBookingRef(ref)) return notFound;
+  const text = message.trim();
+  if (!text) return { ok: false, code: "bad_message", message: "Say when would suit you, so that the studio can find a time." };
+  if (text.length > MOVE_REQUEST_MAX) return { ok: false, code: "bad_message", message: `Please keep it to ${MOVE_REQUEST_MAX} characters.` };
+
+  return db.transaction(async (tx): Promise<MoveRequestResult> => {
+    // Locked, so that two presses at once send one request.
+    const [booking] = await tx.select().from(bookings).where(eq(bookings.ref, ref)).for("update").limit(1);
+    if (!booking || !mayAct(booking, actor)) return notFound;
+    if (booking.status !== "confirmed") return { ok: false, code: "not_confirmed", message: endedText(booking) };
+    if (deps.now.getTime() >= booking.startAt.getTime()) {
+      return { ok: false, code: "already_started", message: "This booking has started. Please talk to the studio." };
+    }
+    if (booking.label === "reschedule_pending") return { ok: false, code: "already_asked", message: ALREADY_ASKED };
+
+    await tx.update(bookings).set({ label: "reschedule_pending" }).where(eq(bookings.id, booking.id));
+    await recordEvent(tx, {
+      bookingId: booking.id,
+      from: labelOf(booking),
+      to: "reschedule_pending",
+      actor: actor.kind === "owner" ? BY_STUDIO : BY_CUSTOMER,
+      at: deps.now,
+      note: `The client asked the studio to move it: ${text}`,
+    });
+    const [view] = await toBookingViews(tx, [booking], deps.now);
+    const when = formatInstant(booking.startAt);
+    if (deps.ownerEmail) {
+      await queueEmail(
+        tx,
+        moveRequestStudioEmail({
+          to: deps.ownerEmail,
+          client: { name: booking.customerName, email: booking.customerEmail, phone: booking.customerPhone },
+          ref: booking.ref,
+          studios: view.studios.map((studio) => studio.name).join(" + "),
+          when,
+          duration: durationLabel(booking.durationMinutes),
+          message: text,
+          appointmentUrl: `${deps.baseUrl.replace(/\/$/, "")}/admin/appointments/${booking.ref}`,
+        }),
+      );
+    }
+    await queueEmail(tx, moveRequestReceivedEmail({ to: booking.customerEmail, name: booking.customerName, ref: booking.ref, when, message: text }));
+    return { ok: true };
+  });
 }
 
 const NOT_CHANGEABLE = "This booking can no longer be changed.";

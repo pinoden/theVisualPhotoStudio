@@ -425,6 +425,18 @@ test("the released time is bookable again, and the code pays for a new booking w
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "Yes, release it and send my code" })).toBeEnabled();
   await page.getByRole("button", { name: "Keep my booking" }).click();
+  // Or she asks the studio to move it (question 20 of 2026-11-17): it keeps its time, marked Reschedule Pending.
+  await page.getByRole("button", { name: "Ask the studio to move it" }).click();
+  await byLabel(page, "When would suit you?").fill("Any weekday afternoon the week after");
+  await page.getByRole("button", { name: "Send my request" }).click();
+  await expect(byText(page, /Your request was sent\. The studio will contact you to agree a new time/)).toBeVisible();
+  expect((await latestEmail(page, "move_request_received", jane.email)).body).toContain("Any weekday afternoon the week after");
+  const toStudio = await latestEmail(page, "move_request_studio", OWNER);
+  expect(toStudio.replyTo).toBe(jane.email);
+  expect(toStudio.body).toContain("Any weekday afternoon the week after");
+  await page.reload();
+  await expect(byText(page, "You have asked the studio to move this booking. The studio will contact you to agree a new time.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Ask the studio to move it" })).toHaveCount(0);
 
   // The code is spent.
   await page.goto("/book");

@@ -3,13 +3,13 @@
 import { refresh } from "next/cache";
 import { getDb } from "@/db/client";
 import { formatCents } from "@/lib/domain/pricing";
-import { cancelBooking, requestRescheduleCode, type Actor } from "@/server/manage";
+import { askStudioToMove, cancelBooking, requestRescheduleCode, type Actor } from "@/server/manage";
 import { flushEmailsSoon, manageDeps } from "@/server/runtime";
 import { getCurrentUser } from "@/server/session";
 import { formatInstant } from "@/server/tz";
 
 export interface ManageState {
-  status: "idle" | "cancelled" | "rescheduled" | "error";
+  status: "idle" | "cancelled" | "rescheduled" | "requested" | "error";
   message: string;
   /** The reschedule code, shown once on screen as well as emailed. */
   code?: string;
@@ -68,5 +68,22 @@ export async function rescheduleBookingAction(_previous: ManageState, formData: 
     message: `Your booking was released. Your code is worth ${formatCents(result.valueCents)} and is valid until ${formatInstant(result.expiresAt)}. We also emailed it to you.${
       result.unseenNote ? ` ${result.unseenNote}` : ""
     }`,
+  };
+}
+
+/** The client asks the studio to move the booking (question 20): it keeps its time until the studio moves it. */
+export async function askStudioToMoveAction(_previous: ManageState, formData: FormData): Promise<ManageState> {
+  const actor = await actorFrom(formData);
+  if (!actor) return SIGNED_OUT;
+  const result = await askStudioToMove(await getDb(), String(formData.get("ref") ?? ""), actor, String(formData.get("message") ?? ""), await manageDeps());
+  if (!result.ok) {
+    if (result.code === "already_asked") refresh();
+    return { status: "error", message: result.message };
+  }
+  flushEmailsSoon();
+  if (!formData.get("keepInPlace")) refresh();
+  return {
+    status: "requested",
+    message: "Your request was sent. The studio will contact you to agree a new time; until then your booking stays as it is. We emailed you a copy.",
   };
 }

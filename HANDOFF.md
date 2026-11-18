@@ -19,7 +19,7 @@ Nothing. No tool has unfinished changes in the tree.
 On the tree of this commit, 2026-11-17:
 
 - `npm run typecheck` and `npm run lint`: clean.
-- `npm test`: 934 tests pass.
+- `npm test`: 938 tests pass.
 - `npm run test:e2e`: the whole browser suite, 59 cases, passes (rerun on this commit, 2026-11-18).
 - Migrations `0035` and `0036` were each tried on copies of two browser-test databases, and `0037` (extra charges) on a copy of one holding 25 bookings: applied, its checks refuse an unknown kind and a zero amount, and a second run changes nothing. `0038` (extra guests) on a copy of a browser-test database whose owners had changed Paris's included guests and renamed a tier: it keeps both, switches the two tiers off, adds the $5 add-on once, leaves the add-ons of earlier bookings as they were, and a second run changes nothing. `0039` (the reminder) on a copy holding 25 bookings: the column is added, no booking is marked as reminded, and a second run changes nothing. `0035` to `0040` together on a copy of an older database (at `0034`, 16 bookings): all apply, the bookings get no stored terms and so follow the settings of the day, and a second run changes nothing.
 - One browser run on 2026-11-18 failed once at the header editor's "Discard changes" (`website.spec.ts`, the font and logo case): the discard was still running when the 20-second wait ran out, with the dev server busy. The whole suite passed on the rerun, as in the five runs before. If it comes back, look at how long a discard takes under load.
@@ -29,7 +29,7 @@ On the tree of this commit, 2026-11-17:
 
 Tester pass (2026-11-18, `.claude/agents/tester.md`) on follow-ups 6 and 9, the 7-day refund window, the food rule, the Settings fee field and `/api/health`: four low defects, all fixed in commit `3a76abc` (see the decision log). Not covered by it: the 503 answer of `/api/health` in a production build, migrations `0035` and `0036` on an older database (checked by hand earlier), photography reschedule fees, staff-role views, keyboard and screen-reader use.
 
-Not yet through an independent tester pass: follow-ups 1, 2, 4, 7, 8, 12, 13 and 15, the reminder email, and bookings keeping their terms.
+Not yet through an independent tester pass: follow-ups 1, 2, 4, 7, 8, 12, 13 and 15, the reminder email, bookings keeping their terms, and asking the studio to move a booking.
 
 ## Done from the owner's 16 follow-up answers
 
@@ -94,14 +94,14 @@ Agreed with the owner on 2026-11-17. Each item is done once it is checked off he
 
 ## Next, in this order
 
-1. **A client asks the studio to move a booking** (question 20).
-2. **Follow-up 3: memberships.** Plan it before building: it needs Square's subscriptions.
-3. **The admin's email templates** (question 33).
+1. **Follow-up 3: memberships.** Plan it before building: it needs Square's subscriptions.
+2. **The admin's email templates** (question 33).
 
 ## Waiting on the owners
 
 - **Question 37 (extra guests on bundles):** the limit of 10 for two studios counts every guest, and Paris with Dayglow (or Blanche) already include 10, so a two-studio bundle takes no extra guests, while Blanche alone takes 12 people. Built so; the owners can raise the limit under Settings if they meant otherwise.
 - **Question 38 (the reminder email):** sent once, 24 hours before (a setting), or later while the visit has not started; none for a booking made inside those 24 hours, and a new one when the studio moves a booking. Built so; an "OK" settles it.
+- **Question 39 (asking the studio to move a booking):** offered until the visit starts, one request at a time, not withdrawn online. Built so; an "OK" settles it.
 - **Follow-up 14:** the Instagram account has to be connected by an owner (Instagram gives a feed only after the account's owner signs in and allows it). It blocks nothing else and can wait until go-live.
 - **Policies wording:** the line "Cancellations made less than {refund window} before the appointment are non-refundable, but may be rescheduled at no additional charge until {reschedule cutoff} before the appointment" now sits above the $20 line for further reschedules, and reads as if every reschedule were free. It is the owners' text: they choose the new wording (for example "…may be rescheduled until …, the first time at no charge").
 - **To go live:** hosting, the web address, the email service, live Square keys, a privacy policy and the sales-tax answer. Questions 1 to 6 of "Questions for the owners" in `ProjectLibrary.md`.

@@ -285,6 +285,61 @@ export function bookingConfirmationEmail(input: {
   };
 }
 
+/**
+ * A client asked the studio to move their booking (question 20 of 2026-11-17): to the studio, with what the client
+ * wrote and a reply that reaches the client.
+ */
+export function moveRequestStudioEmail(input: {
+  to: string;
+  client: { name: string; email: string; phone: string };
+  ref: string;
+  studios: string;
+  when: string;
+  duration: string;
+  message: string;
+  appointmentUrl: string;
+}): QueuedEmail {
+  return {
+    to: input.to,
+    kind: "move_request_studio",
+    replyTo: input.client.email,
+    subject: `${input.client.name} asks to move booking ${input.ref}`,
+    body: [
+      `${input.client.name} asked the studio to move their booking. It is marked Reschedule Pending, and keeps its time until it is moved.`,
+      "",
+      `Reference: ${input.ref}`,
+      `Studio: ${input.studios}`,
+      `Now: ${input.when} (${input.duration})`,
+      `Client: ${input.client.name}, ${input.client.email}${input.client.phone ? `, ${input.client.phone}` : ""}`,
+      "",
+      "What they wrote:",
+      input.message,
+      "",
+      `Open the appointment to move it: ${input.appointmentUrl}`,
+      "A reply to this email reaches the client.",
+    ].join("\n"),
+  };
+}
+
+/** The client's copy of their request to move a booking. */
+export function moveRequestReceivedEmail(input: { to: string; name: string; ref: string; when: string; message: string }): QueuedEmail {
+  return {
+    to: input.to,
+    kind: "move_request_received",
+    subject: `We have your request to move booking ${input.ref}`,
+    body: [
+      `Hi ${input.name},`,
+      "",
+      `We have your request to move your booking ${input.ref}, now ${input.when}. The studio will contact you to agree a new time. Until then your booking stays as it is.`,
+      "",
+      "What you wrote:",
+      input.message,
+      "",
+      SIGN_OFF,
+    ].join("\n"),
+  };
+}
+
 /** The reminder before a visit (`queueReminders` in tasks.ts), with how to get in as it is now. */
 export function bookingReminderEmail(input: {
   to: string;
