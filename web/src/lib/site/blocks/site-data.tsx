@@ -1,5 +1,6 @@
 import Image from "next/image";
 import { ContactForm as ContactFormView } from "@/components/ContactForm";
+import { PictureRow } from "@/components/site/PictureRow";
 import { hasWeekendPricing, hourlyFromCents, hoursLines, openingHours, priceTable } from "@/lib/catalog-view";
 import { formatCents } from "@/lib/domain/pricing";
 import { durationLabel } from "@/lib/domain/time";
@@ -23,13 +24,51 @@ export const StudioCards = defineBlock({
   label: "Studio cards",
   group: "site",
   fields: {
+    look: {
+      kind: "choice",
+      label: "Look",
+      options: { cards: "Cards: the picture, then the words and buttons", arches: "Tall pictures with a rounded top, each studio's name under its own" },
+      start: "cards",
+    },
     prices: { kind: "toggle", label: "Show the price per hour", start: true },
     viewLabel: { kind: "text", label: "Words on the button that shows a studio", max: 30, start: "View Studio" },
     bookLabel: { kind: "text", label: "Words on the button that books it", max: 30, start: "Book Now" },
   },
-  render: ({ prices, viewLabel, bookLabel, site, editing }) => {
+  render: ({ look, prices, viewLabel, bookLabel, site, editing }) => {
     const catalog = site.catalog;
     if (!catalog) return <EditorNote editing={editing}>{MISSING}</EditorNote>;
+    if (look === "arches") {
+      // As the old website's home page showed the studios: each picture under an arch, the studio's name under it, and
+      // the picture and the name leading to the studio. No button shows the studio: the arch does.
+      return (
+        <ul className="blk studio-arches">
+          {catalog.studios.map((studio) => {
+            const from = hourlyFromCents(catalog, studio.id);
+            const photo = studio.photos[0];
+            return (
+              <li className="studio-arch" key={studio.id}>
+                <SiteAnchor href={`/studios#${studio.slug}`} className="studio-arch-link" editing={editing}>
+                  <span className={`studio-arch-img ${studio.slug}-bg`}>
+                    {photo ? (
+                      <Image className="studio-photo" src={photo.url} width={photo.width} height={photo.height} alt={photo.alt} sizes="(max-width: 700px) 100vw, 400px" quality={85} />
+                    ) : (
+                      <span className="studio-placeholder-text">{studio.name}</span>
+                    )}
+                  </span>
+                  <span className="studio-arch-name">{studio.name}</span>
+                </SiteAnchor>
+                {prices && from !== null && <p className="studio-price">From {formatCents(from)}/hour</p>}
+                {bookLabel && (
+                  <SiteAnchor href={`/book?studio=${studio.slug}`} className="btn btn-outline" editing={editing}>
+                    {bookLabel}
+                  </SiteAnchor>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      );
+    }
     return (
       <div className="blk studios-grid">
         {catalog.studios.map((studio) => {
@@ -90,7 +129,7 @@ export const StudioDetails = defineBlock({
               <div className="container">
                 <div className="two-col">
                   <div>
-                    <div className={`studio-card-img ${studio.slug}-bg`} style={{ height: 340 }}>
+                    <div className={`studio-card-img studio-main-photo ${studio.slug}-bg`}>
                       {photo ? (
                         <Image className="studio-photo" src={photo.url} width={photo.width} height={photo.height} alt={photo.alt} sizes="(max-width: 768px) 100vw, 560px" quality={85} loading={index === 0 ? "eager" : "lazy"} />
                       ) : (
@@ -108,22 +147,6 @@ export const StudioDetails = defineBlock({
                         )}
                         <figcaption>Floor plan of {studio.name}</figcaption>
                       </figure>
-                    )}
-                    {more.length > 0 && (
-                      <ul className="studio-photo-strip" aria-label={`More photos of ${studio.name}`}>
-                        {more.map((picture) => (
-                          <li key={picture.id}>
-                            {/* The picture's file opens in a tab of its own: it is not a page, so it is not a link of the router. */}
-                            {editing ? (
-                              <Image src={picture.url} width={picture.width} height={picture.height} alt={picture.alt} sizes="120px" />
-                            ) : (
-                              <a href={picture.url} target="_blank" rel="noopener">
-                                <Image src={picture.url} width={picture.width} height={picture.height} alt={picture.alt} sizes="120px" />
-                              </a>
-                            )}
-                          </li>
-                        ))}
-                      </ul>
                     )}
                   </div>
                   <div>
@@ -169,6 +192,26 @@ export const StudioDetails = defineBlock({
                     )}
                   </div>
                 </div>
+                {/* The studio's other photos, large, in a row across the section that scrolls sideways, as the old
+                    website showed them: three and a part of a fourth at once, one at a time on a phone. */}
+                {more.length > 0 && (
+                  <div className="studio-photo-row">
+                    <PictureRow label={`More photos of ${studio.name}`} columns={3.3} columnsPhone={1.15} ratio="1 / 1" count={more.length} listClassName="studio-photo-strip">
+                      {more.map((picture) => (
+                        <li key={picture.id}>
+                          {/* The picture's file opens in a tab of its own: it is not a page, so it is not a link of the router. */}
+                          {editing ? (
+                            <Image src={picture.url} width={picture.width} height={picture.height} alt={picture.alt} sizes="(max-width: 640px) 90vw, 380px" />
+                          ) : (
+                            <a href={picture.url} target="_blank" rel="noopener">
+                              <Image src={picture.url} width={picture.width} height={picture.height} alt={picture.alt} sizes="(max-width: 640px) 90vw, 380px" />
+                            </a>
+                          )}
+                        </li>
+                      ))}
+                    </PictureRow>
+                  </div>
+                )}
               </div>
             </section>
           );

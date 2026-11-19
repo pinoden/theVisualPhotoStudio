@@ -1,5 +1,6 @@
 import Image from "next/image";
 import type { CSSProperties } from "react";
+import { PictureRow } from "@/components/site/PictureRow";
 import { VideoPlayer } from "@/components/site/VideoPlayer";
 import type { Picture as LibraryPicture } from "@/server/media";
 import { parseVideo, VIDEO_SERVICES } from "../video";
@@ -11,7 +12,8 @@ import { EditorNote, SiteAnchor } from "./shared";
 /** The shapes a picture can be cropped to, as width over height. "original" keeps the picture's own. */
 const SHAPES = { original: "As it is", wide: "Wide (16:9)", photo: "Photo (3:2)", standard: "Standard (4:3)", square: "Square", tall: "Tall (4:5)" } as const;
 const RATIO: Record<Exclude<keyof typeof SHAPES, "original">, string> = { wide: "16 / 9", photo: "3 / 2", standard: "4 / 3", square: "1 / 1", tall: "4 / 5" };
-const FOCUS = { center: "The middle", top: "The top", bottom: "The bottom", left: "The left", right: "The right" } as const;
+/** What stays in view of a picture that is cropped: a word CSS's `object-position` takes as it is. */
+export const FOCUS = { center: "The middle", top: "The top", bottom: "The bottom", left: "The left", right: "The right" } as const;
 
 const ratioOf = (shape: keyof typeof SHAPES, picture: LibraryPicture) => (shape === "original" ? `${picture.width} / ${picture.height}` : RATIO[shape]);
 
@@ -68,12 +70,18 @@ export const Gallery = defineBlock({
     source: { kind: "choice", label: "Which pictures", options: { chosen: "The pictures I choose here", collection: "A collection of the library" }, start: "chosen" },
     pictures: { kind: "pictures", label: "Pictures", max: 60 },
     collection: { kind: "collection", label: "Collection" },
+    layout: {
+      kind: "choice",
+      label: "How they are laid out",
+      options: { grid: "In rows, all of them at once", row: "In one row that scrolls sideways, with arrows" },
+      start: "grid",
+    },
     columns: { kind: "number", label: "How many side by side", min: 1, max: 6, start: 3, phone: true },
     shape: { kind: "choice", label: "Shape of each picture", options: { square: "Square", photo: "Photo (3:2)", tall: "Tall (4:5)", wide: "Wide (16:9)" }, start: "square" },
     gap: { kind: "choice", label: "Space between them", options: { normal: "Normal", small: "Small", none: "None" }, start: "normal" },
     captions: { kind: "toggle", label: "Show the words written for each in the library", start: false },
   },
-  render: ({ source, pictures, collection, columns, columnsPhone, shape, gap, captions, site, editing }) => {
+  render: ({ source, pictures, collection, layout, columns, columnsPhone, shape, gap, captions, site, editing }) => {
     const set = source === "collection" ? site.collections[collection] : undefined;
     if (source === "collection" && !set) {
       return <EditorNote editing={editing}>{collection ? "This collection is no longer in the library. Choose another." : "Gallery: choose a collection in the panel."}</EditorNote>;
@@ -82,23 +90,31 @@ export const Gallery = defineBlock({
     if (set && !set.shows && !editing) return null;
     const shown = (set ? set.pictures : pictures).map((id) => site.pictures[id]).filter((picture): picture is LibraryPicture => picture !== undefined);
     if (shown.length === 0) return <EditorNote editing={editing}>{set ? `The collection ${set.name} has no pictures yet.` : "Gallery: choose its pictures in the panel."}</EditorNote>;
-    // On a phone: as many side by side as was chosen for phones, otherwise two at most.
-    const style = { "--cols": columns, "--cols-phone": columnsPhone ?? Math.min(columns, 2), "--ratio": RATIO[shape] } as CSSProperties;
+    // On a phone: as many side by side as was chosen for phones; otherwise two at most in rows, and one at a time in a
+    // row that scrolls, as the old website showed its portfolio.
+    const onPhone = columnsPhone ?? (layout === "row" ? 1 : Math.min(columns, 2));
+    const items = shown.map((picture) => (
+      <li key={picture.id}>
+        <figure>
+          <SiteAnchor href={picture.url} editing={editing}>
+            <Image src={picture.url} width={picture.width} height={picture.height} alt={picture.alt} sizes={`(max-width: 640px) ${Math.round(100 / onPhone)}vw, ${Math.round(1200 / columns)}px`} />
+          </SiteAnchor>
+          {captions && picture.caption && <figcaption>{picture.caption}</figcaption>}
+        </figure>
+      </li>
+    ));
     return (
       <div className="blk blk-gallery-wrap">
         {set && !set.shows && <p className="blk-note">The collection {set.name} is outside its dates: visitors do not see this gallery now.</p>}
-        <ul className="blk-gallery" data-gap={gap} style={style}>
-          {shown.map((picture) => (
-            <li key={picture.id}>
-              <figure>
-                <SiteAnchor href={picture.url} editing={editing}>
-                  <Image src={picture.url} width={picture.width} height={picture.height} alt={picture.alt} sizes={`(max-width: 640px) ${Math.round(100 / (columnsPhone ?? Math.min(columns, 2)))}vw, ${Math.round(1200 / columns)}px`} />
-                </SiteAnchor>
-                {captions && picture.caption && <figcaption>{picture.caption}</figcaption>}
-              </figure>
-            </li>
-          ))}
-        </ul>
+        {layout === "row" ? (
+          <PictureRow label={set ? set.name : "Pictures"} columns={columns} columnsPhone={onPhone} ratio={RATIO[shape]} gap={gap} count={shown.length} listClassName="blk-gallery-row">
+            {items}
+          </PictureRow>
+        ) : (
+          <ul className="blk-gallery" data-gap={gap} style={{ "--cols": columns, "--cols-phone": onPhone, "--ratio": RATIO[shape] } as CSSProperties}>
+            {items}
+          </ul>
+        )}
       </div>
     );
   },
