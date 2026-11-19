@@ -29,7 +29,7 @@ import { chargesOf, hourlyRateOf, type ChargeLine } from "./charges";
 import { storedTerms, termsChangedSince, termsFor, type BookingTerms } from "./terms";
 import { bookingMovedEmail, queueEmail } from "./email";
 import { listEvents, recordEvent, withoutAmounts, type BookingEvent } from "./history";
-import { creditLeftCentsByBooking, owedCents } from "./money";
+import { chargesCentsByBooking, creditLeftCentsByBooking, owedCents } from "./money";
 import { openPayLinkOf, type PayLinkView } from "./pay-links";
 import type { Made, PaymentProvider } from "./payments";
 import { PET_CREDIT_BLOCK_TEXT, petCreditStanding, petFeeReturnedCents } from "./pet-fee";
@@ -95,6 +95,22 @@ export interface Appointment {
   labelChoices: { key: SettableLabel; allowed: boolean; why: string }[];
   /** What this viewer may do with the appointment. */
   may: Record<"setLabels" | "move" | "recordPayment" | "changePayments" | "openCustomer" | "refund", boolean>;
+  /** Why the booking cannot be moved, where the viewer may otherwise move it: it has extra charges (`CHARGES_BLOCK_MOVE`). */
+  moveBlocked: string | null;
+}
+
+/**
+ * A booking with extra charges is not moved (the tester's fourth pass of 2026-11-18). A charge is added once its visit
+ * has started, so the visit has taken place, at least in part; and moved to a day of another price, one booking would
+ * hold the price paid for the visit, its charges and the price of the new day, which no reading of its money keeps
+ * apart: what paid which, what a refund gave back, what goes into a code. The rest of a shoot is a new booking.
+ */
+export const CHARGES_BLOCK_MOVE =
+  "This booking has extra charges, added once its visit had started, so it cannot be moved. Book the rest of the shoot as a new booking (Calendar, New booking), or first take back a charge added by mistake.";
+
+/** The booking has an extra charge that was not taken back. */
+async function hasCharges(db: DbLike, bookingId: string): Promise<boolean> {
+  return (await chargesCentsByBooking(db, [bookingId])).has(bookingId);
 }
 
 /** The viewer may see this booking: owners always, staff on the days they may see. */
@@ -118,6 +134,7 @@ export async function getAppointment(db: DbLike, viewer: AuthUser, ref: string, 
   const pet = viewer.role === "owner" ? await petCreditStanding(db, booking) : null;
   const seesCharges = may("recordPayments") || viewer.role === "owner";
   const rate = seesCharges && booking.photographerId === null ? await hourlyRateOf(db, booking) : null;
+  const mayMove = booking.status === "confirmed" && now.getTime() < booking.endAt.getTime() && may("moveBookings");
 
   return {
     ref: booking.ref,
@@ -172,12 +189,13 @@ export async function getAppointment(db: DbLike, viewer: AuthUser, ref: string, 
     }),
     may: {
       setLabels: active && may("setLabels"),
-      move: booking.status === "confirmed" && now.getTime() < booking.endAt.getTime() && may("moveBookings"),
+      move: mayMove,
       recordPayment: active && money.dueCents > 0 && may("recordPayments"),
       changePayments: viewer.role === "owner",
       openCustomer: may("seeCustomers"),
       refund: may("refund"),
     },
+    moveBlocked: mayMove && (await hasCharges(db, booking.id)) ? CHARGES_BLOCK_MOVE : null,
   };
 }
 
@@ -328,6 +346,7 @@ export async function moveOptions(
   if (!isBookingRef(ref) || !can(viewer, "moveBookings", settings)) return { ok: false, message: "Booking not found." };
   const [booking] = await db.select().from(bookings).where(eq(bookings.ref, ref)).limit(1);
   if (!booking || !(await maySee(db, viewer, booking.startAt))) return { ok: false, message: "Booking not found." };
+  if (await hasCharges(db, booking.id)) return { ok: false, message: CHARGES_BLOCK_MOVE };
   const free = await freeStartsFor(
     db,
     {
@@ -369,7 +388,7 @@ export type MoveResult =
  * which the studio refunds; what was paid stays as it is. The availability
  * rules are the ones every booking obeys: opening hours, no overlap, and the
  * gap between appointments; and the database refuses an overlap whatever
- * happens here.
+ * happens here. A booking with extra charges is not moved (`CHARGES_BLOCK_MOVE`).
  *
  * `countsAsClientMove` says the client asked for the move. While moving is
  * offered (`maxReschedules` above 0), it then counts as
@@ -397,6 +416,7 @@ export async function moveBooking(
   if (found.status !== "confirmed" || now.getTime() >= found.endAt.getTime()) {
     return refuse("not_movable", "Only a booking that is still to come can be moved.");
   }
+  if (await hasCharges(db, found.id)) return refuse("not_movable", CHARGES_BLOCK_MOVE);
   if (!isIsoDate(input.date) || !Number.isInteger(input.startMinute) || input.startMinute < 0 || input.startMinute >= 1440) {
     return refuse("invalid_time", "Choose a date and a time.");
   }
@@ -442,6 +462,8 @@ export async function moveBooking(
     return await db.transaction(async (tx): Promise<MoveResult> => {
       const [booking] = await tx.select().from(bookings).where(eq(bookings.id, found.id)).for("update").limit(1);
       if (!booking || booking.status !== "confirmed") return refuse("not_movable", "Only a booking that is still to come can be moved.");
+      // A charge added since the check above: adding one locks the same row (`addCharge`).
+      if (await hasCharges(tx, booking.id)) return refuse("not_movable", CHARGES_BLOCK_MOVE);
       // A day of the other kind prices the booking for that day (follow-up 5): worked out on the locked row.
       const price = await priceOnNewDay(tx, booking, input.date, catalog);
       if (price.kind === "refused") return refuse("no_price", price.message);

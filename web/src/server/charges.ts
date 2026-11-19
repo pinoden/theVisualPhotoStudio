@@ -9,7 +9,7 @@ import { defaultDayType, durationLabel } from "@/lib/domain/time";
 import type { AuthUser } from "./auth";
 import { isBookingRef } from "./bookings";
 import { recordEvent } from "./history";
-import { moneyByPurposeOf, owedCents, STANDS } from "./money";
+import { chargesPaidOf, owedCents, STANDS } from "./money";
 import { openPayLinkOf } from "./pay-links";
 import { loadSettings } from "./settings";
 import { canViewDay } from "./staff";
@@ -222,16 +222,17 @@ export async function voidCharge(db: Db, viewer: AuthUser, chargeId: string, rea
     if (link) {
       return { ok: false, message: `A payment link for ${formatCents(link.amountCents)} is open for this booking. Cancel the link first, then take the charge back.` };
     }
-    if (STANDS.includes(booking.status) && (await owedCents(tx, booking, now)) < charge.amountCents) {
-      // Paid by what came in after it, or no longer owed: what was paid for it given back, which is how a paid charge is
-      // undone (the tester's third pass of 2026-11-18 found the same words sent the owner round in a circle).
-      const paid = (await moneyByPurposeOf(tx, booking.id)).charges.find((line) => line.id === charge.id)?.paidCents ?? 0;
+    // Only while nothing was paid of it (question 36), read charge by charge as what the booking owes reads its money
+    // (`chargesPaidOf`): the booking's whole balance against this one charge let a paid charge go, or one whose money was
+    // given back, and the next charge then went unpaid (the tester's fourth pass of 2026-11-18).
+    const share = STANDS.includes(booking.status) ? (await chargesPaidOf(tx, booking, now)).find((line) => line.id === charge.id) : undefined;
+    if (share && share.paidCents > 0) {
       return {
         ok: false,
         message:
-          paid > 0
+          share.keptCents > 0
             ? `This charge of ${formatCents(charge.amountCents)} was paid, at least in part. Give it back as a refund instead: the charge then stays on the client's receipt, beside the refund, and is not owed again.`
-            : `This charge of ${formatCents(charge.amountCents)} is not owed any more: what was paid for it was given back, or the booking had been paid beyond its price. It stays on the client's booking and receipt, and needs nothing more.`,
+            : `This charge of ${formatCents(charge.amountCents)} is not owed any more: what was paid for it was given back. It stays on the client's booking and receipt, beside the refund, and needs nothing more.`,
       };
     }
     const why = reason.trim().slice(0, CHARGE_NOTE_MAX);

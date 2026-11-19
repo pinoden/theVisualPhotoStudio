@@ -83,7 +83,7 @@ async function AppointmentDetails({
   if (!appointment) notFound();
   const query = await searchParams;
   // "Move to a new time" works in two steps: choose the date, then one of the times that are free on it.
-  const moveDate = appointment.may.move && typeof query.move === "string" && isIsoDate(query.move) ? query.move : null;
+  const moveDate = appointment.may.move && !appointment.moveBlocked && typeof query.move === "string" && isIsoDate(query.move) ? query.move : null;
   const moveTimes = moveDate ? await moveOptions(db, viewer, ref, moveDate, now) : null;
 
   const when = formatRange(new Date(appointment.startAt), new Date(appointment.endAt));
@@ -248,7 +248,14 @@ async function AppointmentDetails({
         </div>
       )}
 
-      {appointment.may.move && (
+      {appointment.may.move && appointment.moveBlocked && (
+        <div className="admin-card" id="move">
+          <h3>Move to a new time</h3>
+          <p className="move-blocked">{appointment.moveBlocked}</p>
+        </div>
+      )}
+
+      {appointment.may.move && !appointment.moveBlocked && (
         <div className="admin-card" id="move">
           <h3>Move to a new time</h3>
           <form method="get" action={`/admin/appointments/${appointment.ref}#move`} className="admin-form-row">
@@ -514,7 +521,7 @@ async function AppointmentDetails({
                   : appointment.payments.madeInAdmin
                     ? "This booking was made in the admin, so nothing was charged online."
                     : appointment.payments.cardLapsed
-                      ? `The amount its card held lapsed before it was taken, so the card was not charged: collect ${paidTowardPrice > 0 ? "the rest" : "the price"} at the studio${linkPossible ? ", or with a payment link" : ""}.`
+                      ? `The amount its card held lapsed before it was taken, so the card was not charged: collect what is still to pay at the studio${linkPossible ? ", or with a payment link" : ""}.`
                       : paidTowardPrice > 0
                         ? `That is what its price went up by after it was paid, when it was moved to a day that costs more. Collect it at the studio${linkPossible ? ", or with a payment link" : ""}.`
                         : `Its code or membership hours paid what it cost when it was booked; that is what its price went up by afterwards, when it was moved to a day that costs more. Collect it at the studio${linkPossible ? ", or with a payment link" : ""}.`}
