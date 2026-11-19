@@ -33,7 +33,7 @@ export interface QueuedEmail {
   replyTo?: string;
   /** When the message is no longer any use (a sign-in code's email): one still waiting then is not sent. */
   expiresAt?: Date;
-  /** The template a message to a client is written from, with the parts the site filled in. */
+  /** The template a message is written from, with the parts the site filled in. */
   template?: { key: TemplateKey; parts: Readonly<Record<string, string>> };
 }
 
@@ -71,8 +71,8 @@ export async function queueEmail(db: DbLike, message: QueuedEmail): Promise<stri
 }
 
 /**
- * A message to a client, written from its template with these parts: in the site's wording, which `queueEmail`
- * replaces with the owners' when they have changed the email. `first_name` comes with `name`.
+ * A message written from its template with these parts, to a client or to the studio: in the site's wording, which
+ * `queueEmail` replaces with the owners' when they have changed the email. `first_name` comes with `name`.
  */
 function written(key: TemplateKey, head: { to: string; kind: string; replyTo?: string }, parts: Record<string, string>): QueuedEmail {
   const all = Object.hasOwn(parts, "name") ? { ...parts, first_name: firstNameOf(parts.name) } : parts;
@@ -297,26 +297,20 @@ export function moveRequestStudioEmail(input: {
   message: string;
   appointmentUrl: string;
 }): QueuedEmail {
-  return {
-    to: input.to,
-    kind: "move_request_studio",
-    replyTo: input.client.email,
-    subject: `${input.client.name} asks to move booking ${input.ref}`,
-    body: [
-      `${input.client.name} asked the studio to move their booking. It is marked Reschedule Pending, and keeps its time until it is moved.`,
-      "",
-      `Reference: ${input.ref}`,
-      `Studio: ${input.studios}`,
-      `Now: ${input.when} (${input.duration})`,
-      `Client: ${input.client.name}, ${input.client.email}${input.client.phone ? `, ${input.client.phone}` : ""}`,
-      "",
-      "What they wrote:",
-      input.message,
-      "",
-      `Open the appointment to move it: ${input.appointmentUrl}`,
-      "A reply to this email reaches the client.",
-    ].join("\n"),
-  };
+  return written(
+    "move_request_studio",
+    { to: input.to, kind: "move_request_studio", replyTo: input.client.email },
+    {
+      client_name: input.client.name,
+      reference: input.ref,
+      studios: input.studios,
+      when: input.when,
+      duration: input.duration,
+      client: `${input.client.name}, ${input.client.email}${input.client.phone ? `, ${input.client.phone}` : ""}`,
+      message: input.message,
+      appointment_link: input.appointmentUrl,
+    },
+  );
 }
 
 /** The client's copy of their request to move a booking. */
@@ -612,19 +606,17 @@ export function payLinkEmail(input: {
  * site cannot send that money back, so the owner is asked to.
  */
 export function ownerHandRefundNotice(input: { to: string; ref: string; customer: string; paidCents: number; feePercent: number }): QueuedEmail {
-  return {
-    to: input.to,
-    kind: "owner_hand_refund",
-    subject: `ACTION NEEDED: refund by hand for ${input.ref}`,
-    body: [
-      `${input.customer} cancelled booking ${input.ref} early enough to be refunded.`,
-      "",
-      `Of what was paid at the studio, ${money(input.paidCents)} is refunded by the rental terms${
+  return written(
+    "owner_hand_refund",
+    { to: input.to, kind: "owner_hand_refund" },
+    {
+      customer: input.customer,
+      reference: input.ref,
+      refund: `Of what was paid at the studio, ${money(input.paidCents)} is refunded by the rental terms${
         input.feePercent > 0 ? `, less the ${input.feePercent}% fee: ${money(afterFee(input.paidCents, input.feePercent))}` : ", in full"
       }. The site cannot send that back.`,
-      "Refund the customer by hand, then record the refund on the appointment's page.",
-    ].join("\n"),
-  };
+    },
+  );
 }
 
 /**
@@ -652,11 +644,7 @@ export function ownerUnseenLinkNotice(input: {
   const ended = `${input.customer}'s booking ${input.ref} was ${input.ended === "released" ? "released for a reschedule code" : "cancelled"}`;
   const close = 'close it on the appointment\'s page with "Close it by hand"';
   const settle = `When it was not paid, ${close}. When it was paid, refund it to the client there, as the client was told to ask, then ${close}.`;
-  return {
-    to: input.to,
-    kind: "owner_unseen_link",
-    subject: `CHECK THE PAYMENT LINK of ${input.ref}`,
-    body:
+  const whatHappened =
       input.kind === "other"
         ? [
             `${ended}. Its payment link for ${money(input.linkCents)} was made by another card processor than the one set up now (in test mode, or with Square's other account), which the site cannot ask whether it was paid.`,
@@ -674,8 +662,12 @@ export function ownerUnseenLinkNotice(input: {
               "",
               "If it was paid, the payment is refunded to the card in full once the processor tells the site, and the client was told so. The site keeps asking.",
               `If the processor never can (a link it no longer knows), look the link up in Square. When it was not paid, ${close}. When Square shows it was paid, the site will never see that payment: refund it to the client in Square, as they were promised, then ${close}.`,
-            ].join("\n"),
-  };
+            ].join("\n");
+  return written(
+    "owner_unseen_link",
+    { to: input.to, kind: "owner_unseen_link" },
+    { reference: input.ref, customer: input.customer, what_happened: whatHappened },
+  );
 }
 
 export function rescheduleCodeEmail(input: {
@@ -744,26 +736,16 @@ export function ownerRefundNotice(input: {
   reason?: string;
 }): QueuedEmail {
   const failed = input.failedReason !== undefined;
-  return {
-    to: input.to,
-    kind: failed ? "owner_refund_failed" : "owner_refund_notice",
-    subject: failed
-      ? `ACTION NEEDED: refund failed for ${input.ref}`
-      : `Refund ${money(input.amountCents)} for ${input.ref}`,
-    body: failed
-      ? [
-          `A refund of ${money(input.amountCents)} for booking ${input.ref} (${input.customer}) could not be sent.`,
-          "",
-          `Reason: ${input.failedReason}`,
-          "",
-          "The site tries it again by itself. If it keeps failing, refund the payment in Square, then press \u201cRefunded it in Square\u201d beside it on the admin's overview, so that the site stops trying.",
-        ].join("\n")
-      : [
-          `${input.automatic ? "An automatic refund" : "A refund"} of ${money(input.amountCents)} was sent for booking ${input.ref} (${input.customer})${
-            input.reason ? `: ${input.reason.replace(/[.!?]$/, "")}` : ""
-          }.`,
-        ].join("\n"),
-  };
+  const head = { to: input.to, kind: failed ? "owner_refund_failed" : "owner_refund_notice" };
+  const parts = { amount: money(input.amountCents), reference: input.ref, customer: input.customer };
+  return failed
+    ? written("owner_refund_failed", head, { ...parts, reason: input.failedReason ?? "" })
+    : written("owner_refund_sent", head, {
+        ...parts,
+        refund: `${input.automatic ? "An automatic refund" : "A refund"} of ${money(input.amountCents)} was sent for booking ${input.ref} (${input.customer})${
+          input.reason ? `: ${input.reason.replace(/[.!?]$/, "")}` : ""
+        }.`,
+      });
 }
 
 /**
@@ -784,34 +766,18 @@ export function ownerCaptureNotice(input: {
   reason: string;
   givenBackAt: Date;
 }): QueuedEmail {
-  return {
-    to: input.to,
-    kind: "owner_capture_failed",
-    subject: `Payment not taken yet for ${input.ref}`,
-    body: [
-      `The card for booking ${input.ref} (${input.customer}) has ${money(input.amountCents)} reserved on it, and the booking is confirmed, but taking the money did not go through.`,
-      "",
-      `Reason: ${input.reason}`,
-      "",
-      `The site tries again every time its scheduled task runs. If the money has not been taken by ${formatInstant(input.givenBackAt)}, Square gives the amount back to the card and the booking is unpaid: then take the payment at the studio, or cancel the booking.`,
-    ].join("\n"),
-  };
+  return written("owner_capture_failed", { to: input.to, kind: "owner_capture_failed" }, {
+    amount: money(input.amountCents),
+    reference: input.ref,
+    customer: input.customer,
+    reason: input.reason,
+    given_back: formatInstant(input.givenBackAt),
+  });
 }
 
 /** A refund that cannot be sent with the card processor set up now, and waits for the right one. */
 export function ownerRefundWaitingNotice(input: { to: string; ref: string; customer: string; amountCents: number; reason: string }): QueuedEmail {
-  return {
-    to: input.to,
-    kind: "owner_refund_waiting",
-    subject: `A refund for ${input.ref} is waiting`,
-    body: [
-      `A refund of ${money(input.amountCents)} for booking ${input.ref} (${input.customer}) has not been sent.`,
-      "",
-      input.reason,
-      "",
-      "The client was told it has not reached their card yet. It is listed on the admin's overview until it goes through.",
-    ].join("\n"),
-  };
+  return written("owner_refund_waiting", { to: input.to, kind: "owner_refund_waiting" }, { amount: money(input.amountCents), reference: input.ref, customer: input.customer, reason: input.reason });
 }
 
 /**
@@ -820,16 +786,7 @@ export function ownerRefundWaitingNotice(input: { to: string; ref: string; custo
  * Sent only while it owes something: the studio may have collected it already.
  */
 export function ownerReservationLapsedNotice(input: { to: string; ref: string; customer: string; amountCents: number; dueCents: number }): QueuedEmail {
-  return {
-    to: input.to,
-    kind: "owner_reservation_lapsed",
-    subject: `ACTION NEEDED: ${input.ref} was not paid`,
-    body: [
-      `The ${money(input.amountCents)} reserved on the card for booking ${input.ref} (${input.customer}) lapsed before it could be taken: Square gave it back to the card, and nothing was charged.`,
-      "",
-      `The booking still stands, and ${money(input.dueCents)} is still to pay. Take the payment at the studio and record it on the appointment's page, or email the client a payment link from there, or cancel the booking. The client was told that their card was not charged and that the studio will be in touch.`,
-    ].join("\n"),
-  };
+  return written("owner_reservation_lapsed", { to: input.to, kind: "owner_reservation_lapsed" }, { amount: money(input.amountCents), reference: input.ref, customer: input.customer, due: money(input.dueCents) });
 }
 
 /** The client's side of `ownerReservationLapsedNotice`: their card was not charged, and the booking, which stands, is still to pay. */
@@ -917,16 +874,7 @@ export function membershipProblemEmail(input: { to: string; name: string; planNa
 
 /** The studio's side of `membershipProblemEmail`: what went wrong, and that the member was told. */
 export function ownerMembershipProblemNotice(input: { to: string; code: string; customer: string; planName: string; problem: string }): QueuedEmail {
-  return {
-    to: input.to,
-    kind: "owner_membership_problem",
-    subject: `ACTION NEEDED: membership ${input.code} was not paid`,
-    body: [
-      `${input.customer}'s membership ${input.code} (${input.planName}): ${input.problem}`,
-      "",
-      "No hours were added for it. The member was told that the studio will be in touch. A month Square takes later is recorded, and its hours added, by itself.",
-    ].join("\n"),
-  };
+  return written("owner_membership_problem", { to: input.to, kind: "owner_membership_problem" }, { customer: input.customer, code: input.code, plan: input.planName, problem: input.problem });
 }
 
 /**
@@ -934,16 +882,7 @@ export function ownerMembershipProblemNotice(input: { to: string; code: string; 
  * gave it up. Square may have taken the payment all the same.
  */
 export function ownerMembershipUnfinishedNotice(input: { to: string; code: string; customer: string; planName: string; amountCents: number }): QueuedEmail {
-  return {
-    to: input.to,
-    kind: "owner_membership_unfinished",
-    subject: `CHECK SQUARE: membership ${input.code} was not finished`,
-    body: [
-      `${input.customer} pressed to join ${input.planName} (${money(input.amountCents)} a month), and no answer came from the card processor about their card, so the membership was not started.`,
-      "",
-      `Look in Square for a payment of ${money(input.amountCents)} with the reference ${input.code}. If there is one, refund it there: the client was told they would not be charged twice, not that they were not charged.`,
-    ].join("\n"),
-  };
+  return written("owner_membership_unfinished", { to: input.to, kind: "owner_membership_unfinished" }, { customer: input.customer, plan: input.planName, amount: money(input.amountCents), code: input.code });
 }
 
 /** A membership cancelled (follow-up 3): no more payments, and the hours left stay usable. */
@@ -976,18 +915,7 @@ export function membershipCancelledEmail(input: {
  * refunds it by hand. The client was told the studio would.
  */
 export function ownerMembershipRefundNotice(input: { to: string; code: string; customer: string; amountCents: number; reason: string }): QueuedEmail {
-  return {
-    to: input.to,
-    kind: "owner_membership_refund",
-    subject: `ACTION NEEDED: refund the first month of membership ${input.code}`,
-    body: [
-      `${input.customer} paid ${money(input.amountCents)} for the first month of membership ${input.code}, but the monthly payments could not be set up with the card, so the membership was not started.`,
-      "",
-      `The refund of that payment did not go through either: ${input.reason}`,
-      "",
-      "Refund the payment in Square by hand. The client was told that the studio will refund it.",
-    ].join("\n"),
-  };
+  return written("owner_membership_refund", { to: input.to, kind: "owner_membership_refund" }, { customer: input.customer, amount: money(input.amountCents), code: input.code, reason: input.reason });
 }
 
 /** A visitor's message from the contact page, sent to the owner. Replying reaches the visitor. */
@@ -998,18 +926,9 @@ export function contactMessageEmail(input: {
   topic: string;
   message: string;
 }): QueuedEmail {
-  return {
-    to: input.to,
-    replyTo: input.email,
-    kind: "contact_message",
-    subject: `Website message from ${input.name}: ${input.topic}`,
-    body: [
-      `${input.name} <${input.email}> wrote through the contact page.`,
-      `Topic: ${input.topic}`,
-      "",
-      input.message,
-      "",
-      `Reply to this email to answer ${input.name}.`,
-    ].join("\n"),
-  };
+  return written(
+    "contact_message",
+    { to: input.to, kind: "contact_message", replyTo: input.email },
+    { name: input.name, email: input.email, topic: input.topic, message: input.message },
+  );
 }

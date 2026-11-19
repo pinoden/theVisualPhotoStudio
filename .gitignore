@@ -6,3 +6,6 @@
 .claude/*
 !.claude/agents/
 .DS_Store
+
+# The old website's photos and their manifest, for scripts/import-old-site-photos.ts: their file names hold clients' names.
+/old-site-photos/

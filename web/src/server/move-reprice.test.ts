@@ -152,17 +152,18 @@ describe("moving a booking to a day of the other kind", () => {
     );
     const { ref } = expectOk(await world.book({ studioIds: [world.ids.paris], date: FAR, promoCode: joined.membership.code, paymentToken: undefined }));
     expect(await rowOf(ref)).toMatchObject({ membershipMinutes: 120, membershipCents: 13600, totalCents: 0 });
-    // At weekends members pay the difference to the weekend price, while the owners keep that switch on (question 41).
+    // At weekends the minutes pay for the weekend time in full (question 41): nothing is owed.
     expectOk(await moveBooking(world.db, owner, ref, to(SATURDAY), NOW));
-    expect(await rowOf(ref)).toMatchObject({ membershipMinutes: 120, membershipCents: 13600, studiosSubtotalCents: 14400, totalCents: 800 });
-    expect(await paymentCard(ref)).toMatchObject({ dueCents: 800 });
-    // With it off, the minutes pay for the weekend time in full.
-    expect(await saveSetting(world.db, "memberWeekendDifference", false)).toBe(true);
+    expect(await rowOf(ref)).toMatchObject({ membershipMinutes: 120, membershipCents: 14400, studiosSubtotalCents: 14400, totalCents: 0 });
+    expect(await paymentCard(ref)).toMatchObject({ dueCents: 0 });
+    // Should the owners switch the weekend difference on, the member pays it.
+    expect(await saveSetting(world.db, "memberWeekendDifference", true)).toBe(true);
     expectOk(await moveBooking(world.db, owner, ref, to(SATURDAY, h(14)), NOW));
-    expect(await rowOf(ref)).toMatchObject({ membershipMinutes: 120, totalCents: 800 }); // the same kind of day: kept
+    expect(await rowOf(ref)).toMatchObject({ membershipMinutes: 120, totalCents: 0 }); // the same kind of day: kept
     expectOk(await moveBooking(world.db, owner, ref, to(FAR), NOW));
     expectOk(await moveBooking(world.db, owner, ref, to(SATURDAY), NOW));
-    expect(await rowOf(ref)).toMatchObject({ membershipCents: 14400, totalCents: 0 });
+    expect(await rowOf(ref)).toMatchObject({ membershipCents: 13600, totalCents: 800 });
+    expect(await paymentCard(ref)).toMatchObject({ dueCents: 800 });
   });
 
   it("refuses a day with no price for the booking's length, and changes nothing where both kinds are priced alike", async () => {
@@ -275,6 +276,8 @@ describe("the payment card and the receipt after a move (the tester's second pas
         { now: NOW, payments: world.provider, baseUrl: BASE_URL, ownerEmail: OWNER_EMAIL },
       ),
     );
+    // With the weekend difference switched on (off since question 41), a move to Saturday leaves $8 owed.
+    expect(await saveSetting(world.db, "memberWeekendDifference", true)).toBe(true);
     const member = expectOk(await world.book({ studioIds: [world.ids.paris], date: FAR, promoCode: joined.membership.code, paymentToken: undefined }));
     expectOk(await moveBooking(world.db, owner, member.ref, to(SATURDAY), NOW));
     expect(await paymentCard(member.ref)).toMatchObject({ dueCents: 800, cardLapsed: false, receivedCents: 0 });

@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { emailTemplates } from "@/db/schema";
+import { eq } from "drizzle-orm";
+import { emailOutbox, emailTemplates } from "@/db/schema";
 import { EMAIL_TEMPLATES, TEMPLATE_KEYS } from "@/lib/email-templates";
 import { DEFAULT_FRAME } from "@/lib/site/frame";
 import * as emails from "./email";
@@ -121,6 +122,35 @@ describe("the owners' wording of an email", () => {
   });
 });
 
+describe("a notice to the studio (question 40, answered 2026-11-18: every email can be changed)", () => {
+  it("is sent in the owners' wording once they change it, still answering the visitor, and keeps what it cannot do without", async () => {
+    const notice = () => emails.contactMessageEmail({ to: OWNER_EMAIL, name: "Ann Lee", email: "ann@example.com", topic: "After-hours booking", message: "Friday at 9 p.m.?\n\nThanks" });
+    await emails.queueEmail(world.db, notice());
+    expect((await world.emails("contact_message"))[0].subject).toBe("Website message from Ann Lee: After-hours booking");
+
+    // A notice cannot leave out what it is for, or name a money amount it does not have.
+    expect(await saveEmailTemplate(world.db, OWNER, "contact_message", { subject: "From {{name}}", body: "Someone wrote." }, 0, NOW)).toMatchObject({
+      ok: false,
+      code: "invalid",
+      message: "Not saved. {{message}} must stay in this email.",
+    });
+    expect(await saveEmailTemplate(world.db, OWNER, "owner_reservation_lapsed", { subject: "{{reference}} lapsed", body: "{{amount}} lapsed for {{customer}}." }, 0, NOW)).toMatchObject({
+      ok: false,
+      message: "Not saved. {{due}} must stay in this email.",
+    });
+
+    const body = "{{first_name}} ({{email}}) asks about: {{topic}}\n\n{{message}}\n\nAnswer by replying.";
+    expectOk(await saveEmailTemplate(world.db, OWNER, "contact_message", { subject: "[{{topic}}] {{name}}", body }, 0, NOW));
+    await emails.queueEmail(world.db, notice());
+    const mail = (await world.emails("contact_message"))[1];
+    expect(mail.subject).toBe("[After-hours booking] Ann Lee");
+    expect(mail.body).toBe("Ann (ann@example.com) asks about: After-hours booking\n\nFriday at 9 p.m.?\n\nThanks\n\nAnswer by replying.");
+    const replies = await world.db.select({ replyTo: emailOutbox.replyTo }).from(emailOutbox).where(eq(emailOutbox.kind, "contact_message"));
+    expect(replies.map((row) => row.replyTo)).toEqual(["ann@example.com", "ann@example.com"]);
+    expect((await listEmailTemplates(world.db)).find((item) => item.spec.key === "contact_message")).toMatchObject({ wording: "owners", spec: { group: "Notices to the studio" } });
+  });
+});
+
 describe("every email to a client", () => {
   it("is written from its template, with every part its template lists", () => {
     const visit = { to: "a@x.test", name: "Jane Smith", ref: "VS-1", studios: "Paris", when: "W", duration: "1 hour" };
@@ -147,13 +177,24 @@ describe("every email to a client", () => {
       emails.membershipCancelledEmail({ to: "a@x.test", name: "Jane", planName: "P", code: "C", endsOn: null, minutesLeft: 0, bookUrl: "U" }),
       emails.membershipMonthPaidEmail({ to: "a@x.test", name: "Jane", planName: "P", minutes: 300, priceCents: 100, code: "C", minutesLeft: 300, nextBilling: "2027-01-14", accountUrl: "A" }),
       emails.membershipProblemEmail({ to: "a@x.test", name: "Jane", planName: "P", problem: "It did not go through.", code: "C", minutesLeft: 0 }),
+      // The notices to the studio (question 40, answered 2026-11-18: every email can be changed).
+      emails.moveRequestStudioEmail({ to: "o@x.test", client: { name: "Jane", email: "j@x.test", phone: "" }, ref: "VS-1", studios: "Paris", when: "W", duration: "1 hour", message: "M", appointmentUrl: "U" }),
+      emails.contactMessageEmail({ to: "o@x.test", name: "N", email: "n@x.test", topic: "T", message: "M" }),
+      emails.ownerHandRefundNotice({ to: "o@x.test", ref: "VS-1", customer: "Jane", paidCents: 100, feePercent: 5 }),
+      emails.ownerRefundNotice({ to: "o@x.test", ref: "VS-1", customer: "Jane", amountCents: 100, automatic: true }),
+      emails.ownerRefundNotice({ to: "o@x.test", ref: "VS-1", customer: "Jane", amountCents: 100, automatic: true, failedReason: "R" }),
+      emails.ownerRefundWaitingNotice({ to: "o@x.test", ref: "VS-1", customer: "Jane", amountCents: 100, reason: "R" }),
+      emails.ownerCaptureNotice({ to: "o@x.test", ref: "VS-1", customer: "Jane", amountCents: 100, reason: "R", givenBackAt: new Date("2026-12-20T15:00:00Z") }),
+      emails.ownerReservationLapsedNotice({ to: "o@x.test", ref: "VS-1", customer: "Jane", amountCents: 100, dueCents: 100 }),
+      emails.ownerUnseenLinkNotice({ to: "o@x.test", ref: "VS-1", customer: "Jane", linkCents: 100, ended: "cancelled", kind: "unseen" }),
+      emails.ownerMembershipRefundNotice({ to: "o@x.test", code: "C", customer: "Jane", amountCents: 100, reason: "R" }),
+      emails.ownerMembershipProblemNotice({ to: "o@x.test", code: "C", customer: "Jane", planName: "P", problem: "It did not go through." }),
+      emails.ownerMembershipUnfinishedNotice({ to: "o@x.test", code: "C", customer: "Jane", planName: "P", amountCents: 100 }),
     ];
     expect(written.map((message) => message.template?.key).sort()).toEqual([...TEMPLATE_KEYS].sort());
     for (const message of written) {
       const spec = EMAIL_TEMPLATES[message.template!.key];
       expect(Object.keys(message.template!.parts).sort(), spec.key).toEqual(spec.parts.map((part) => part.key).sort());
     }
-    // The studio's own notices keep the site's wording.
-    expect(emails.contactMessageEmail({ to: "o@x.test", name: "N", email: "n@x.test", topic: "T", message: "M" }).template).toBeUndefined();
   });
 });

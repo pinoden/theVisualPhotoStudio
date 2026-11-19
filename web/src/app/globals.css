@@ -2190,8 +2190,6 @@ fieldset { min-inline-size: 0; }
 /* ── Admin: the emails (Admin → Emails) ── */
 .admin-intro { font-size: .9rem; max-width: 60rem; }
 .email-list td:first-child { min-width: 11rem; }
-.email-notices { margin: 0; padding-left: 1.1rem; font-size: .875rem; }
-.email-notices li { margin-bottom: .35rem; }
 /* The text and its preview side by side on a wide screen, the parts under the text; one column below that. */
 .email-editor { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 1.5rem; align-items: start; }
 .email-editor-form { grid-column: 1; grid-row: 1; }

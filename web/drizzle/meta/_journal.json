@@ -330,6 +330,13 @@
       "when": 1795035844173,
       "tag": "0046_priced_as_credit_refunds",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1795062994611,
+      "tag": "0047_member_weekend_full",
+      "breakpoints": true
     }
   ]
 }

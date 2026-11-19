@@ -59,8 +59,8 @@ export interface Settings {
 
   /**
    * At weekends, a booking paid with membership minutes pays the difference between the weekday and the weekend price
-   * of the time the minutes cover (the owners' rule of 2026-11-17; whether it still stands: question 41). Off, the
-   * minutes cover weekend time in full.
+   * of the time the minutes cover (the owners' rule of 2026-11-17). Off, the minutes cover weekend time in full: the
+   * default since the owners' answer to question 41 on 2026-11-18 ("only the time balance, not the price").
    */
   memberWeekendDifference: boolean;
 
@@ -145,7 +145,7 @@ export const DEFAULT_SETTINGS: Settings = {
 
   reminderHours: 24,
   memberReturnHours: 48,
-  memberWeekendDifference: true,
+  memberWeekendDifference: false, // question 41, answered 2026-11-18: the hours cover weekend time in full
   twoStudioGuestLimit: 10,
   threeStudioGuestLimit: 20,
 
