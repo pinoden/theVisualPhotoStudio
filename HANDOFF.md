@@ -6,52 +6,113 @@
 
 ## Current state
 
-- The local checkout and cached `origin/rebuild` and `origin/master` refs are at `e90d224` (PR #9). The fourth tester pass fixes are in the working tree. Their commit, push and PR are pending verification.
-- The fourth pass addressed charge allocation, charge refunds and reversals, payment links, booking moves with charges, and lapsed-card messaging. The latest rules allocate payments to the booking price first, then to charges in the order they were added. Bookings with charges cannot be moved. Owner acceptance is pending under question 48.
+- The fourth tester pass's fixes are committed at `365679a` and pushed to `rebuild`. PR #15 (`rebuild` into `master`) is open and mergeable, and both CI jobs passed on `365679a`. It waits for the owner's word to merge. `master` is at `e90d224` (PR #9).
+- The fourth pass fixed charge allocation, charge refunds and reversals, payment links, booking moves with charges, and the lapsed-card wording. Payments now pay the booking's price first, then the charges in the order they were added. A booking with charges cannot be moved. The owner confirmed this (question 48) on 2026-11-18.
+- The owner answered the other open questions on 2026-11-18. Two answers change what is built and are next steps: question 41 (members pay no weekend difference) and question 40 (every email can be customized). See "Owner decisions" below.
 - The project has never been deployed. Migrations run from `0000` through `0046`. The fourth pass adds no migration.
-- Follow-up 14 (Instagram feed) awaits account connection. Follow-up 16 (discount by yearly spend) was declined. The other follow-ups are built or previously verified, with the open decisions below. See [Project Library](ProjectLibrary.md) for the full follow-up list and decision history.
+- Follow-up 14 (Instagram feed) is connected once the site is on its host. Follow-up 16 (discount by yearly spend) was declined. The other follow-ups are built. See the [Project Library](ProjectLibrary.md) for the full list and decision history.
+- Nothing is uncommitted except this file and `ProjectLibrary.md` (the owner's answers and this plan), committed together.
 
 ## Verification
 
-| Check | Reported status |
+| Check | Status |
 | --- | --- |
-| Type check and lint | Clean on the fourth-pass working tree |
-| Unit and integration tests | 1,056 passed across 77 files on the fourth-pass working tree |
-| Browser tests | Latest result unrecorded. The prior recorded run passed 63 cases. |
-| GitHub CI | Both jobs passed on `47e6402` according to the previous handoff. CI for the fourth-pass changes is unverified. |
-| Square sandbox | Payment receipt behavior verified. Earlier membership purchase, use and cancellation checks used the sandbox card form. |
-| Database migrations | `0046` verified on copies of browser-test databases. Production migrations are pending. |
+| Type check and lint | Clean on `365679a` |
+| Unit and integration tests | 1,056 passed across 77 files on `365679a`. Focused booking tests: 99 passed across bookings, photography, membership redemption and membership billing. |
+| Browser tests (local) | Second run on `365679a`: 56 passed, 1 failed, 6 not run (11.9 min). The failure is a page-editor case (`website.spec.ts:743`, "Taken off the website" not shown in time), and the six cases after it in that file did not run. The first run had 2 failures (the staff day sheet, the design draft) that both passed on the second run. No out-of-memory lines in either run. |
+| GitHub CI | Both jobs (`checks`, `browser`) passed on `365679a`, PR #15. |
+| Square sandbox | Payment receipts verified. Earlier membership purchase, use and cancellation checks used the sandbox card form. |
+| Database migrations | `0046` verified on copies of browser-test databases. No production migration has run. |
 
-The browser suite uses `next dev`. A development worker repeatedly reached its JS heap limit late in earlier runs that passed. Page-editor tests have also been flaky around discarding edits, deleting blocks and dragging into columns.
+The browser suite uses `next dev`. Page-editor cases have been flaky around discarding edits, deleting blocks, dragging into columns and now taking a page off the website. Each failure has passed on a rerun, and CI passed them all. If `website.spec.ts:743` fails again on a quiet machine, look at it.
 
-Independent coverage still due includes the fourth-pass fixes, monthly Square billing, clearing test-mode data on PostgreSQL, daylight-saving transitions, Safari and real phones. The browser suite runs on the real clock and currently has no case for the move screen of an appointment that has already started.
+Not yet covered by an independent tester pass: the fourth pass's fixes, monthly Square billing, clearing test-mode data on PostgreSQL, daylight-saving transitions, Safari and real phones. The browser suite runs on the real clock and has no case for the move screen of an appointment that has already started.
 
 ## Next steps
 
-1. Record the fourth-pass browser result against the exact revision. Run an independent pass on charge reversals, payment-link charges, the move screen for a booking with charges, and lapsed-card wording.
-2. Verify the commit and PR status. Obtain the owner's approval and passing CI before merging the fourth-pass fixes.
-3. Confirm the client-facing price summary after a goodwill refund. The current wording can show the original booking cost under “Paid by card and at the studio.”
-4. Set up staging on Vercel and Neon with a separate database and Square sandbox keys. Configure the scheduler, transactional email, monitoring and backups, and fill in the launch details in the [runbook](RUNBOOK.md).
-5. Use `npm run db:migrate` against the intended database. A fresh database needs the full migration sequence. An existing database gets its pending migrations. Preserve customized prices if the weekend-price migration runs on a database that already contains them. Run the browser suite again before launch.
-6. Switch to live Square keys as the final launch step. Coordinate the live booking, receipt-link check and refund with Katya. Confirm whether Acuity will stay available during the transition.
+### Now (needs nothing from the owners)
+
+1. **Merge PR #15** once the owner says so. CI has passed.
+2. **Question 41: switch off the weekend difference for members.** Default `memberWeekendDifference` to off, and add a migration that switches it off in a stored database. Check the booking screen's and the confirmation's wording for a member's weekend booking. Tests: a member's Saturday booking pays nothing for the time their minutes cover.
+3. **Question 40: every email can be customized.** Make the nine notices to the studio editable in Admin → Emails, like the 18 client emails. The site's wording stays the default. Keep the rule that a template cannot drop a part the email cannot do without (a code, a link, the money it states).
+4. **A tester pass** over the fourth pass's fixes and items 2 and 3: charge reversals, payment-link charges, the move screen of a booking with charges, the lapsed-card wording, a member's weekend booking, and a studio notice in the owners' wording.
+
+### Before the preview (tools the cutover needs, not built yet)
+
+5. **Import upcoming appointments from Acuity.** Read an Acuity export into bookings that hold their rooms and photographer like any other booking, with nothing charged and no email sent. Refuse and list any that clash. Each row is matched by Acuity's ID, so a second run of the same export adds nothing.
+6. **Carry over active members.** The site's memberships are billed by Square subscriptions that the site creates. A member billed today by Acuity or Squarespace cannot be moved onto one. Two ways, for the owners to choose: the member joins again on the site with their card, and the old subscription is cancelled; or the site imports the member's balance as a membership without billing, which the old provider keeps billing until it is cancelled. The second needs a "balance only" membership and a way to add each paid month by hand.
+7. **Import past records, read-only.** Past Acuity appointments and Square payments, for the client pages and loyalty stamps, matched by provider and ID. Loyalty from imported visits follows the restart rule of follow-up 9.
+
+### Preview, rehearsal and cutover
+
+8. **Hosted preview** on Vercel with its own Neon database and Square sandbox keys (see "Launch plan" below). Katya tests the booking flow and the studio admin role.
+9. **Rehearse the import** (items 5 to 7) in a restricted database, and reconcile counts, credits and member balances with the owners.
+10. **Cut over** once the preview and rehearsal pass, with the owner's word. Live Square keys go in last.
+
+## Launch plan
+
+### What Katya needs from scheduling
+
+- **Find and book a slot.** Clients start from a studio or from a date and time, on a phone too. Paris + Dayglow, Paris + Blanche and all three are each a single reservation. Blanche + Dayglow requires Paris. Rooms not booked stay available, the same photographer is never booked in two rooms at once, and the site respects 15-minute starts and cleanup gaps.
+- **Run the calendar and handle changes.** Staff need day, week and month views with studio filters, status and history. Staff bookings follow the same availability rules as online bookings. A pending move keeps the original slot. After a confirmed move, staff can see what was paid in Square, what is still due and what credit remains. A booking keeps its original terms. A customer gets one free reschedule at least 24 hours ahead, and $20 for each later one.
+- **Apply prices and member balances.** Weekday and weekend rates, and $5 per extra guest within capacity. A member's minutes cover the time they pay for, on weekends in full (question 41). A member with 60 minutes left uses them toward a two-hour booking and pays for the other hour. Unused minutes carry over and stay available after the membership is cancelled. A cancellation 48 hours ahead gives the minutes back, and a bundle member can book any single room the plan covers.
+
+The early site audit also found membership prices that differed between the website and checkout, and refund copy that promised 100% while the terms kept 5%. Check that what customers see and pay matches the approved rules. See the [original requirements and Katya's follow-ups](ProjectLibrary.md#requirements-from-the-owner-received-2026-11-14).
+
+### Booking and payments
+
+**Launch direction: the site's own scheduler, with Square for payments.** Acuity stays live until the hosted preview and the import rehearsal pass. Only one scheduler takes bookings at any time, so that a room or the photographer is never booked in both.
+
+- **What Acuity can cover.** The live menu already lists the three approved bundles. Acuity's resources can make one appointment hold several rooms and a shared photographer, padding included. The live resource assignments have not been checked. [Acuity resource rules](https://help.acuityscheduling.com/hc/en-us/articles/16676949567757-Use-resources-to-limit-bookings).
+- **Why Acuity cannot do what Katya asked.** These were checked against Acuity's help center on 2026-11-18:
+  - A minutes-based package or subscription code can't be used at all when its balance doesn't cover the whole appointment. Katya wants a member with 60 minutes left to use them on a two-hour booking and pay the rest.
+  - A dollar-based code can pay part of an appointment, but the member's minutes then become a cash balance.
+  - A subscription can roll unused value over. Once cancelled, it can be redeemed only until its next renewal date would have been. Katya wants unused minutes to stay available after a cancellation.
+  - Acuity gives a code's value back on any cancellation, unless the appointment is marked as a no-show. Katya's rule is 48 hours ahead.
+
+  [Code redemption](https://help.acuityscheduling.com/hc/en-us/articles/29268134579085-Redeeming-package-gift-certificate-or-subscription-codes) · [Subscription cancellation](https://help.acuityscheduling.com/hc/en-us/articles/28615961734797-Managing-client-subscriptions) · [Creating subscriptions](https://help.acuityscheduling.com/hc/en-us/articles/28615820183309-Creating-subscriptions).
+
+  The remaining claims could not be checked because Acuity's help pages refuse automated readers: the no-show exception, and that Acuity sends staff to Square for refunds and leaves those refunds out of its reports. Open those [refund pages](https://help.acuityscheduling.com/hc/en-us/articles/28052155599885-Handling-refunds-and-price-adjustments) in a browser before quoting them to the owners.
+- **The site's scheduler** already has the studio bundles, database-enforced room and photographer holds, partial minutes, weekend pricing and membership billing. Demonstrate these to Katya in the hosted preview with the Square sandbox, and check that staff can book, move and cancel from their normal workflow.
+- **Cutover decision.** Switch only if the preview passes and future reservations and active memberships reconcile. For each member, confirm their unused minutes, their next billing date and who bills them from now on (item 6 of "Next steps"). No member is billed by two providers. If the transition cannot be reconciled, keep Acuity live and defer the rules it cannot follow.
+
+### Preview, cutover and rollback
+
+1. **Inventory.** With the owners, list current bills, future appointments, active subscriptions, outstanding credits, unredeemed codes and which provider bills each membership. Track Squarespace Commerce subscriptions separately from Acuity memberships. Keep the current site and booking link available during the rehearsal.
+2. **Preview.** Set up Vercel and a separate Neon database with sample clients and Square sandbox keys. Confirm the deployment can read the repository, which is private now. Katya tests the studio admin role. Configure the transactional email sender without touching the Gmail DNS records. Check the scheduled tasks and `/api/health`. Set up monitoring and backups, and fill in the contacts and rollback steps in the [runbook](RUNBOOK.md).
+3. **Rehearse the import.** Export Acuity appointments and Square payment history to a restricted location, and import them into a restricted database separate from the shared preview, with outgoing email and payments switched off. Past records stay read-only. Rehearse carrying upcoming appointments into the calendar with the right room and photographer holds. Reconcile counts, open credits and member balances with the owners. Measure database size, indexes included, with about 10,000 bookings, and compute over a representative week. Photos stay in object storage. Card details and credentials stay out of exports and Git.
+4. **Pass the booking checks.** Book on a real phone. Send Paris + Dayglow and Paris-only requests for the same time in both orders: the shared room is never double-booked and Blanche stays available. The photographer cannot be booked in two rooms at once. Book two weekend hours with only 60 membership minutes left: the minutes cover one hour, with no weekend difference, and the member pays for the other. Check that cancellations and refunds reconcile, and that the confirmation with the door code and the 24-hour reminder each arrive once. Record which flows passed and any staff workaround accepted.
+5. **Cut over.** Close online booking in Acuity, take a final export and import what changed since the rehearsal. Save the current DNS values. From `web/`, run `npm run db:migrate` against the production database: a fresh database gets the whole sequence, an existing one its pending migrations. If the weekend-price migration applies, keep the owners' customized prices. Run the browser suite. Point the domain and `www` to Vercel, keep the mail records, and check both addresses on a phone. Switch to live Square keys last. With Katya, make one small real booking and refund it, then check the calendar entry, the email, the Square payment and its receipt link.
+6. **Keep a fallback.** Record who can restore DNS and reopen Acuity's online booking. Before reopening Acuity, carry the bookings, holds and payments made on the site since the switch back into it. Once booking and email work on the live domain, cancel only the Squarespace website plan, after checking what that does to Commerce subscriptions. Keep the domain registration and the studio mailbox. Keep Acuity through the agreed rollback period, then cancel it. Cancelling the Acuity plan cancels the subscriptions sold to clients through it, so every member must have moved first.
+
+### Budget and recovery
+
+- The November 2026 estimate is **$47–$54/month** for one Vercel Pro seat and Acuity Standard at about 208 bookings a month, with Neon on its free tier. Under this plan, Acuity is paid only until the rollback period ends. The Neon Launch example (**about $15/month**) is needed, not optional, because the site holds live reservations, credits and membership balances. After the rollback period the core cost is Vercel Pro plus Neon Launch. Confirm the studio's actual Acuity tier, provider prices and processing fees before buying. Domain renewal, the mailbox, taxes, processing fees and usage overages are outside this estimate. Compare it with today's bill after subtracting only the Squarespace website plan.
+- Use the free database tier for the rehearsal, and measure storage and compute before choosing a paid plan. Before the site holds live balances or reservations, require point-in-time recovery, a separate encrypted export and a successful restore rehearsal.
+- Set a Vercel spend alert, and review Neon usage weekly in the first month. Check the first bill against the budget, peak daily email volume and photo delivery included. Upgrade based on measured limits and recovery needs.
 
 ## Owner decisions
 
-### Confirmed direction
+### Confirmed (2026-11-18 and before)
 
-- Vercel and Neon are acceptable. Keep the existing domain. Start sign-in with emailed codes and consider Google sign-in later.
-- Customers should be able to update their email address. Log access to customer pages. Support merging duplicate accounts if the effort is small.
-- Test extensively with Square sandbox and run multiple independent passes before launch. Import as much historical Acuity and Square data as practical.
-- Design, navigation and page edits require Publish. Pricing, opening hours and booking rules take effect immediately. Keep deleted pages in trash for 30 days.
-- Support YouTube, Vimeo and Instagram as video sources. Owners should be able to rename, add and remove studios without a deployment and edit email wording in admin.
+- Vercel and Neon are acceptable. Keep the existing domain. Sign-in starts with emailed codes; Google sign-in may come later.
+- Question 48 (extra charges): the price is paid first, then the charges; a paid charge is given back as a refund; a booking with charges is not moved. As built.
+- Questions 42, 43, 45 and 46 (memberships): as built. Question 44: Blanche's plans are $380 and $700, as built.
+- Question 41: a membership looks only at the time balance, not the price. The minutes cover weekend time in full. To build (next step 2).
+- Question 40: the site's wording stays the default, and the owners can customize every email, the notices to the studio included. To build (next step 3).
+- Follow-up 14: the owners connect the Instagram account once the site is on its host.
+- Customers can update their email address. Access to customer pages is logged. Duplicate accounts can be merged if the effort is small.
+- Test extensively with the Square sandbox and run several independent passes before launch. Import as much historical Acuity and Square data as practical.
+- Design, navigation and page edits need Publish. Prices, opening hours and booking rules take effect immediately. Deleted pages stay in the trash for 30 days.
+- YouTube, Vimeo and Instagram are the video sources. Owners rename, add and remove studios without a deployment, and edit the email wording in the admin.
 
 ### Open decisions
 
 | Area | Decision needed |
 | --- | --- |
-| Launch | Acuity's role during and after migration, Squarespace DNS options and ownership, transactional email provider and sender address, privacy policy and sales tax |
-| Memberships, questions 41–46 | Weekend eligibility, pricing the extra portion of longer bookings, rescheduling, Blanche tier prices, checkout rules and monthly billing behavior |
-| Extra charges, question 48 | Approve payment allocation, charge refund handling and the restriction on moving bookings with charges |
-| Email templates, question 40 | Approve owner-only editing of client emails and system-managed language for money, codes and refunds |
-| Policies | Clarify how the free reschedule and the fee for later reschedules are described together |
-| Integrations and content | Instagram account connection, Apple Wallet loyalty scope, newsletter provider and signup, and what a seasonal collection should include |
+| Merge | The owner's word to merge PR #15 |
+| Members at cutover | Each current member joins again on the site, or is carried over as a balance while the old provider keeps billing until it is cancelled (next step 6) |
+| Launch | Approve the cutover after the hosted preview and the import rehearsal. DNS ownership, the transactional email provider and sender address, the privacy policy and sales tax |
+| Price summary after a goodwill refund | Its line still reads "Paid by card and at the studio" with the original amount. Keep it, or say what was refunded |
+| Policies | How the free reschedule and the fee for later reschedules are described together |
+| Integrations and content | Apple Wallet loyalty scope, the newsletter provider and signup, and what a seasonal collection should include |
