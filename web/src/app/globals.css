@@ -332,6 +332,36 @@ a:hover { color: var(--color-rose-dark); }
 }
 
 .hero-content { position: relative; z-index: 1; max-width: 720px; padding: 2rem; }
+
+/* A title band with a picture behind it (the Banner block's picture): the picture fills the band, a shade over it
+   keeps the words readable, and the words turn white. */
+.blk-banner-picture { object-fit: cover; object-position: var(--focus, center); z-index: 0; }
+.blk-banner.has-picture { position: relative; overflow: hidden; }
+.blk-banner.has-picture::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: linear-gradient(180deg, rgba(28, 22, 20, .28) 0%, rgba(28, 22, 20, .42) 100%);
+  pointer-events: none;
+}
+.hero.has-picture { min-height: min(92vh, 760px); background: var(--color-dark); }
+.hero.has-picture .hero-content { z-index: 2; }
+.page-banner.has-picture {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: clamp(220px, 34vw, 430px);
+  border-bottom: 0;
+  background: var(--color-dark);
+}
+.page-banner-content { position: relative; z-index: 2; }
+.blk-banner.has-picture :is(h1, h1 em, .blk-banner-text) { color: #fff; }
+.blk-banner.has-picture :is(.hero-eyebrow, .section-eyebrow) { color: #fff; opacity: .9; }
+.blk-banner.has-picture .btn-outline,
+.blk-banner.has-picture .btn-ghost { border-color: #fff; color: #fff; }
+.blk-banner.has-picture .btn-outline:hover,
+.blk-banner.has-picture .btn-ghost:hover { background: #fff; color: var(--color-dark); }
 .hero-eyebrow {
   font-family: var(--font-sans);
   font-size: .75rem;
@@ -403,10 +433,40 @@ a:hover { color: var(--color-rose-dark); }
 
 /* A studio's photo fills its box, cropped to it. The tinted box behind stands in while there is none. */
 .studio-card-img .studio-photo { width: 100%; height: 100%; object-fit: cover; }
-.studio-photo-strip { display: flex; flex-wrap: wrap; gap: .5rem; list-style: none; margin: .5rem 0 0; padding: 0; }
-.studio-photo-strip a { display: block; width: 84px; height: 64px; overflow: hidden; }
-.studio-photo-strip img { width: 100%; height: 100%; object-fit: cover; transition: transform .3s; }
-.studio-photo-strip a:hover img { transform: scale(1.06); }
+/* A studio's first photo on the studios page, nearer square than a card's, as the old website showed it. */
+.studio-card-img.studio-main-photo { height: auto; aspect-ratio: 5 / 4; }
+/* Its other photos: large, in a row across the section that scrolls sideways (PictureRow). */
+.studio-photo-row { margin-top: 2.5rem; }
+.studio-photo-strip a { display: block; overflow: hidden; }
+.studio-photo-strip a:hover img { transform: scale(1.04); }
+
+/* ── The studios as arches (the studio cards' "arches" look, as the old website's home page had them) ── */
+.studio-arches {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
+  gap: 2rem 1.5rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  text-align: center;
+}
+.studio-arch { display: flex; flex-direction: column; align-items: center; gap: .75rem; }
+.studio-arch-link { display: flex; flex-direction: column; align-items: center; gap: 1rem; width: 100%; color: inherit; text-decoration: none; }
+.studio-arch-img {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  aspect-ratio: 7 / 8;
+  overflow: hidden;
+  /* A half circle across the top, whatever the width: the browser scales radii too large for the box down to fit it. */
+  border-radius: 999px 999px 0 0;
+}
+.studio-arch-img .studio-photo { width: 100%; height: 100%; object-fit: cover; transition: transform .4s; }
+.studio-arch-link:hover .studio-photo { transform: scale(1.04); }
+.studio-arch-name { font-family: var(--font-serif); font-size: 1.35rem; color: var(--color-dark); }
+.studio-arch-link:hover .studio-arch-name { color: var(--color-rose); }
+.studio-arch .studio-price { margin: 0; }
 
 .studio-placeholder-text {
   font-family: var(--font-serif);
@@ -1936,6 +1996,53 @@ fieldset { min-inline-size: 0; }
 .blk-gallery a, .blk-gallery span { display: block; overflow: hidden; }
 .blk-gallery img { display: block; width: 100%; height: auto; aspect-ratio: var(--ratio); object-fit: cover; transition: transform .4s; }
 .blk-gallery a:hover img { transform: scale(1.04); }
+
+/* ── Pictures in one row that scrolls sideways (PictureRow: a gallery's "row" layout, a studio's photos) ── */
+.picture-row { position: relative; }
+.picture-row-list {
+  --gap: 1rem;
+  display: flex;
+  gap: var(--gap);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.picture-row-list::-webkit-scrollbar { display: none; }
+.picture-row-list[data-gap="small"] { --gap: .4rem; }
+.picture-row-list[data-gap="none"] { --gap: 0px; }
+.picture-row-list > li { flex: 0 0 calc((100% - (var(--cols, 3) - 1) * var(--gap)) / var(--cols, 3)); min-width: 0; scroll-snap-align: start; }
+.picture-row-list figure { margin: 0; }
+.picture-row-list a, .picture-row-list span { display: block; overflow: hidden; }
+.picture-row-list img { display: block; width: 100%; height: auto; aspect-ratio: var(--ratio); object-fit: cover; transition: transform .4s; }
+.picture-row-list a:hover img { transform: scale(1.04); }
+.picture-row-arrow {
+  position: absolute;
+  top: 50%;
+  z-index: 1;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--color-dark) 72%, transparent);
+  color: #fff;
+  font-size: 1.15rem;
+  line-height: 1;
+  cursor: pointer;
+  transform: translateY(-50%);
+}
+.picture-row-arrow:hover { background: var(--color-dark); }
+.picture-row-arrow:focus-visible { outline: 2px solid var(--color-rose); outline-offset: 2px; }
+.picture-row-arrow[data-side="back"] { left: .75rem; }
+.picture-row-arrow[data-side="next"] { right: .75rem; }
+.picture-row[data-arrows] .picture-row-arrow { display: flex; }
 /* Logos: the brands the studio has worked for, all as tall as each other, in a row that wraps. */
 .blk-logos { --logo-h: 48px; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 1.75rem 3rem; list-style: none; margin: 0; padding: 0; }
 .blk-logos[data-height="small"] { --logo-h: 32px; }
@@ -2029,6 +2136,11 @@ fieldset { min-inline-size: 0; }
   .blk-spacer { height: var(--h-phone, var(--h, 48px)); }
   .blk-cards { grid-template-columns: repeat(var(--cols-phone, 1), minmax(0, 1fr)); }
   .blk-gallery { grid-template-columns: repeat(var(--cols-phone, 2), minmax(0, 1fr)); }
+  .picture-row-list > li { flex-basis: calc((100% - (var(--cols-phone, 1) - 1) * var(--gap)) / var(--cols-phone, 1)); }
+  .picture-row .picture-row-arrow { display: none; }
+  .picture-row[data-arrows-phone] .picture-row-arrow { display: flex; }
+  .blk-banner-picture { object-position: var(--focus-phone, var(--focus, center)); }
+  .hero.has-picture { min-height: min(80vh, 640px); }
   .blk-reviews { grid-template-columns: repeat(var(--cols-phone, 1), minmax(0, 1fr)); }
   .blk-logos { gap: 1.25rem 2rem; }
   .blk-logos img { height: calc(var(--logo-h) * .75); }

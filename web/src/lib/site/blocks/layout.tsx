@@ -1,4 +1,6 @@
+import Image from "next/image";
 import { cssVars, defineBlock } from "./block";
+import { FOCUS } from "./pictures";
 import { anchorId, SiteAnchor } from "./shared";
 import { BUTTON_CLASS, BUTTON_LOOKS } from "./text";
 
@@ -30,9 +32,28 @@ export const Banner = defineBlock({
       },
       start: [],
     },
+    // A picture across the whole band, the words over it, as the old website's home page and price page had: the band
+    // is then darkened under the words, which turn white.
+    picture: { kind: "picture", label: "A picture behind it (optional)" },
+    focus: { kind: "choice", label: "What stays in view of the picture", options: FOCUS, start: "center", phone: true },
   },
-  render: ({ look, eyebrow, title, accent, text, buttons, editing }) => {
+  render: ({ look, eyebrow, title, accent, text, buttons, picture, focus, focusPhone, site, editing }) => {
     const shown = buttons.filter((button) => button.label !== "" && (button.link !== "" || editing));
+    const behind = picture ? site.pictures[picture] : undefined;
+    // The first thing a visitor sees: asked for at once, not when it is scrolled to.
+    const backdrop = behind && (
+      <Image
+        className="blk-banner-picture"
+        src={behind.url}
+        alt={behind.alt}
+        fill
+        sizes="100vw"
+        quality={80}
+        loading="eager"
+        fetchPriority="high"
+        style={cssVars({ focus: [focus, focusPhone || null] })}
+      />
+    );
     const inside = (
       <>
         {eyebrow && <p className={look === "hero" ? "hero-eyebrow" : "section-eyebrow"}>{eyebrow}</p>}
@@ -57,12 +78,17 @@ export const Banner = defineBlock({
         )}
       </>
     );
+    const pictured = backdrop ? " has-picture" : "";
     return look === "hero" ? (
-      <section className="blk blk-banner hero">
+      <section className={`blk blk-banner hero${pictured}`}>
+        {backdrop}
         <div className="hero-content">{inside}</div>
       </section>
     ) : (
-      <div className="blk blk-banner page-banner">{inside}</div>
+      <div className={`blk blk-banner page-banner${pictured}`}>
+        {backdrop}
+        {backdrop ? <div className="page-banner-content">{inside}</div> : inside}
+      </div>
     );
   },
 });
