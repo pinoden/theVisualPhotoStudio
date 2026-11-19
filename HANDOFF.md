@@ -7,7 +7,7 @@
 ## Current state
 
 - **Hosted preview:** https://the-visual-photo-studio.vercel.app, on Vercel (Hobby plan, team "The Visuals Photo Studio"). It deploys every change to `master` by itself. Its database is the Neon staging project below, with Square's sandbox keys. Owners sign in with emailed codes, through Resend.
-- **`master`** is at PR #18 (`93c2a56`, 2026-11-19): the security review's fixes, after PR #17 (the deployment warnings, ESLint 10 and the Neon configuration). `rebuild` holds the same code; only this handoff is newer.
+- **`master`** is at PR #18 (`93c2a56`, 2026-11-19): the security review's fixes, after PR #17 (the deployment warnings, ESLint 10 and the Neon configuration). `rebuild` is ahead only by the editors' `Group` fix (`f04c942`, below) and these notes; they go to `master` with the next pull request.
 - **Scheduled tasks on the preview** run once a day (`web/vercel.json`, at 12:00 UTC), the most the Hobby plan allows. Between runs `/api/health` answers 503 and the admin overview says the tasks are late: expected until Vercel Pro, where they run every five minutes (step 10). Emails go out right after whatever queued them; reminders, free hours, review requests, refund retries and membership months wait for the daily run.
 - **Email:** Resend's domain `thevisualsphotostudio.com` is not verified yet. Until it is, `EMAIL_FROM` is Resend's test sender (`onboarding@resend.dev`), which delivers only to the Resend account's own address. Once Resend shows the domain verified, set `EMAIL_FROM` to `The Visuals Photo Studio <bookings@thevisualsphotostudio.com>` and redeploy.
 - **The owners' answers of 2026-11-18 are all built:** questions 40, 41 and 48 (see "Owner decisions"). Migrations run from `0000` to `0048`; staging has all of them.
@@ -39,15 +39,15 @@ The localhost check used mock payments and sent no email. The hosted Vercel prev
 
 | Check | Status |
 | --- | --- |
-| Type check and lint | Clean on `1ca4ce9` |
-| Unit and integration tests | 1,070 passed on `1ca4ce9` |
-| Browser tests (local) | 63 passed on `1ca4ce9` (14.4 min). The run before it was cut short by a full disk; with space freed, the whole suite passed. |
-| GitHub CI | Both jobs (`checks`, `browser`) passed on `1ca4ce9`, PR #18, for the pull request and for the push to `rebuild`. |
+| Type check and lint | Clean on `f04c942` |
+| Unit and integration tests | 1,070 passed across 79 files on `f04c942` |
+| Browser tests (local) | 63 passed on `f04c942` (12.8 min), none retried |
+| GitHub CI | Both jobs (`checks`, `browser`) passed on `1ca4ce9`, PR #18. On `64dd3cf`, a push of notes only, the browser job failed once: the font-and-logo test clicked the header editor's Logo group before the page had loaded, which `f04c942` fixes. The push of `f04c942` runs CI again; its result is on GitHub. |
 | Hosted preview | After PR #18 deployed: the checks under "Current state". Earlier the same day: every picture on the home, studios and photography pages loaded on a desktop and a phone, with no broken link. |
 | Square sandbox | Payment receipts verified. Earlier membership purchase, use and cancellation checks used the sandbox card form. |
 | Database migrations | `0047` tried on a copy of the browser suite's database, `0048` on a Neon branch of staging; both then applied to staging. No production migration has run. |
 
-The browser suite uses `next dev`. Page-editor cases have been flaky around discarding edits, deleting blocks, dragging into columns and now taking a page off the website. Each failure has passed on a rerun, and CI passed them all. If `website.spec.ts:743` fails again on a quiet machine, look at it.
+The browser suite uses `next dev`. Page-editor cases have been flaky around discarding edits, deleting blocks, dragging into columns and now taking a page off the website. Each failure has passed on a rerun, and CI passed them all. If `website.spec.ts:743` fails again on a quiet machine, look at it. A click made before a page has loaded can also fail a test, through React's hydration warning, as the Logo group's did: see "Conventions and gotchas" in `ProjectLibrary.md`.
 
 Not yet covered by an independent tester pass: the fourth pass's fixes, questions 40 and 41, the photo import, the security fixes, monthly Square billing, clearing test-mode data on PostgreSQL, daylight-saving transitions, Safari and real phones. The browser suite runs on the real clock and has no case for the move screen of an appointment that has already started.
 
