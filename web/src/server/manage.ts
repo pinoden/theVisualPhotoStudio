@@ -37,7 +37,7 @@ import {
 } from "./email";
 import { BY_CUSTOMER, BY_STUDIO, BY_SYSTEM, recordEvent } from "./history";
 import { releaseHolds } from "./holds";
-import { creditLeftCentsByBooking, heldCentsByBooking, moneyByPurposeOf, netCardPaidCents } from "./money";
+import { creditLeftCentsByBooking, heldCentsByBooking, netCardPaidCents, paidAtStudioCents } from "./money";
 import {
   closePayLinkOf,
   lookAtPayLink,
@@ -95,22 +95,21 @@ async function factsFor(db: DbLike, booking: BookingRow): Promise<BookingFacts> 
   const [code] = booking.promoCodeId
     ? await db.select({ source: promoCodes.source }).from(promoCodes).where(eq(promoCodes.id, booking.promoCodeId)).limit(1)
     : [];
-  // Only what paid the price: what paid the extra charges never travels into a refund or a reschedule code (question
-  // 36), also once the studio has moved a booking that had started (the tester's findings of 2026-11-18,
-  // `moneyByPurposeOf`).
-  const money = await moneyByPurposeOf(db, booking.id);
+  // What the card and the studio hold for it. A charge never travels into a refund or a reschedule code (question 36): it
+  // is added once the visit has started, when a client can neither cancel for a refund nor move it, and a booking with
+  // charges is not moved by the studio either (`moveBooking`, the tester's fourth pass of 2026-11-18).
   return {
     status: booking.status,
     startAt: booking.startAt,
     rescheduledCount: booking.rescheduledCount,
     madeWithRescheduleCode: code?.source === "reschedule",
-    cardPaidCents: money.priceByCardCents,
+    cardPaidCents: await netCardPaidCents(db, booking.id),
     creditAppliedCents: booking.creditAppliedCents,
     // promoDiscountCents holds whatever the code took off: for a credit code that is the credit itself.
     discountCents: booking.promoDiscountCents - booking.creditAppliedCents,
     petFeeCents,
     petCreditGiven: petFeeCents > 0 && (await petCreditOf(db, booking.id)) !== null,
-    paidAtStudioCents: money.priceAtStudioCents,
+    paidAtStudioCents: await paidAtStudioCents(db, booking.id),
     membershipMinutes: booking.membershipMinutes,
   };
 }
