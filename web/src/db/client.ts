@@ -28,11 +28,22 @@ async function openPglite(dataDir?: string): Promise<{ db: Db; close: () => Prom
   return { db: db as unknown as Db, close: () => client.close() };
 }
 
+/**
+ * The address with its SSL mode spelled out as the driver treats it. node-postgres now reads "prefer", "require" and
+ * "verify-ca" as "verify-full" (the server's certificate is checked against the system's authorities, as Neon's pass),
+ * and warns on each connection until the address says so. An address without SSL, or with "disable" or
+ * "verify-full", is left as it is.
+ */
+export function withVerifiedSsl(url: string): string {
+  const mode = /([?&])sslmode=(prefer|require|verify-ca)(?=&|$)/i;
+  return url.replace(mode, "$1sslmode=verify-full");
+}
+
 /** The PostgreSQL server named by `url`, opened as it is: no migrations, no checks. For scripts. */
 export async function openPostgres(url: string): Promise<{ db: Db; close: () => Promise<void> }> {
   const { Pool } = await import("pg");
   const { drizzle } = await import("drizzle-orm/node-postgres");
-  const pool = new Pool({ connectionString: url });
+  const pool = new Pool({ connectionString: withVerifiedSsl(url) });
   const db = drizzle(pool, { schema });
   return { db: db as unknown as Db, close: () => pool.end() };
 }
@@ -47,7 +58,7 @@ export async function migratePostgres(url: string): Promise<void> {
   const { Pool } = await import("pg");
   const { drizzle } = await import("drizzle-orm/node-postgres");
   const { migrate } = await import("drizzle-orm/node-postgres/migrator");
-  const pool = new Pool({ connectionString: url });
+  const pool = new Pool({ connectionString: withVerifiedSsl(url) });
   try {
     await migrate(drizzle(pool, { schema }), { migrationsFolder: MIGRATIONS_DIR });
   } finally {

@@ -1,17 +1,37 @@
 # Project handoff
 
 - **Project:** The Visuals Photo Studio
-- **Updated:** 2026-11-18
+- **Updated:** 2026-11-19
 - **Branch:** `rebuild`
 
 ## Current state
 
-- The fourth tester pass's fixes are committed at `365679a` and pushed to `rebuild`. PR #15 (`rebuild` into `master`) is open and mergeable, and both CI jobs passed on `365679a`. It waits for the owner's word to merge. `master` is at `e90d224` (PR #9).
-- The fourth pass fixed charge allocation, charge refunds and reversals, payment links, booking moves with charges, and the lapsed-card wording. Payments now pay the booking's price first, then the charges in the order they were added. A booking with charges cannot be moved. The owner confirmed this (question 48) on 2026-11-18.
-- The owner answered the other open questions on 2026-11-18. Two answers change what is built and are next steps: question 41 (members pay no weekend difference) and question 40 (every email can be customized). See "Owner decisions" below.
-- The project has never been deployed. Migrations run from `0000` through `0046`. The fourth pass adds no migration.
-- Follow-up 14 (Instagram feed) is connected once the site is on its host. Follow-up 16 (discount by yearly spend) was declined. The other follow-ups are built. See the [Project Library](ProjectLibrary.md) for the full list and decision history.
-- Nothing is uncommitted except this file and `ProjectLibrary.md` (the owner's answers and this plan), committed together.
+- **Hosted preview:** https://the-visual-photo-studio.vercel.app, on Vercel (Hobby plan, team "The Visuals Photo Studio"). It deploys every change to `master` by itself. Its database is the Neon staging project below, with Square's sandbox keys. Owners sign in with emailed codes, through Resend.
+- **`master`** is at PR #16 (`3ed65b6`, 2026-11-19). PR #17 (`rebuild` into `master`: the deployment warnings, ESLint 10 from Dependabot's PR #12, and the Neon configuration) waits for CI and is merged on the owner's word.
+- **Email:** Resend's domain `thevisualsphotostudio.com` is not verified yet. Until it is, `EMAIL_FROM` is Resend's test sender (`onboarding@resend.dev`), which delivers only to the Resend account's own address. Once Resend shows the domain verified, set `EMAIL_FROM` to `The Visuals Photo Studio <bookings@thevisualsphotostudio.com>` and redeploy.
+- **The owners' answers of 2026-11-18 are all built:** questions 40, 41 and 48 (see "Owner decisions"). Migrations run from `0000` to `0047`; staging has all of them.
+- **Photos:** the 102 photos of the old website are in the staging database's media library, on the studios, in collections and on the photography page (`scripts/import-old-site-photos.ts`; see `ProjectLibrary.md`). The photo files are kept nowhere else but the old website. The manifest of what goes where is in `/old-site-photos/` (ignored by Git: its file names hold clients' names).
+- **GitHub:** the repository is private on the Free plan, so `master`'s branch protection no longer applies (the owner chose this for now). Changes still reach `master` only through a pull request after CI passes.
+- **Tools signed in on the builder's Mac:** GitHub (`gh`), Vercel CLI (account `pinoden`) and the Neon CLI. Nothing of them is in the repository.
+- Follow-up 14 (Instagram feed) is connected once the site is on its host. Follow-up 16 was declined. The other follow-ups are built. See the [Project Library](ProjectLibrary.md).
+
+## Neon staging
+
+- **Target.** `thevisualsphotostudio-staging` (`orange-mode-34735663`), AWS US East 1 (N. Virginia), PostgreSQL 18. The branch named `production` is the default branch inside this staging project. Postgres was the only service configured.
+- **CLI setup.** Installed Neon CLI 9.7.2 with `npm i -g neon@latest`. From an isolated copy of `web/`, ran `neon init -y --org-id org-sparkling-feather-88850154 --project-id orange-mode-34735663 --branch production --services postgres`. The CLI generated the project link and `neon.ts`, installed `@neon/config` and `@neon/env`, and installed its agent tooling.
+- **Sign-in and provisioning.** The first `neon deploy` could not start browser sign-in from a noninteractive shell. Retrying in a terminal completed browser authorization. The deployment confirmed the branch already matched the Postgres policy and pulled its environment variables into `web/.env.local`.
+- **App connection.** Kept the existing Drizzle and node-postgres driver. The app uses pooled `DATABASE_URL`. For `npm run db:migrate` and `npm run db:seed`, the verification run supplied `DATABASE_URL_UNPOOLED` as the scripts' `DATABASE_URL`; the scripts read the process environment. The initially empty staging database was migrated and seeded, including eight built-in pages and the three studios. The generated config, package dependencies, and ignore rule were then installed in the studio checkout. The private `web/.env.local` and the CLI link `web/.neon` are Git-ignored.
+- **Verification.** Used committed revision `5580cde` with the generated Neon configuration in an isolated checkout. `npm run build` compiled successfully and generated 61 of 61 pages. The local production server returned the results below. The PostgreSQL driver emitted a future SSL-mode compatibility warning during build; the runtime smoke test used `sslmode=verify-full`.
+
+| Check | Observed result |
+| --- | --- |
+| `GET /book` | HTTP 200 |
+| `GET /api/availability` | HTTP 200, three studios read from Neon |
+| `GET /api/cron/tick` | HTTP 200, scheduler heartbeat written |
+| `GET /api/health` | HTTP 200, database OK and scheduler heartbeat fresh |
+| Direct Neon query | Stored heartbeat matched the timestamp returned by the app |
+
+The localhost check used mock payments and sent no email. The hosted Vercel preview, Square sandbox configuration on that preview, and production cutover remain pending.
 
 ## Verification
 
@@ -30,24 +50,24 @@ Not yet covered by an independent tester pass: the fourth pass's fixes, monthly 
 
 ## Next steps
 
-### Now (needs nothing from the owners)
+### Now
 
-1. **Merge PR #15** once the owner says so. CI has passed.
-2. **Question 41: switch off the weekend difference for members.** Default `memberWeekendDifference` to off, and add a migration that switches it off in a stored database. Check the booking screen's and the confirmation's wording for a member's weekend booking. Tests: a member's Saturday booking pays nothing for the time their minutes cover.
-3. **Question 40: every email can be customized.** Make the nine notices to the studio editable in Admin → Emails, like the 18 client emails. The site's wording stays the default. Keep the rule that a template cannot drop a part the email cannot do without (a code, a link, the money it states).
-4. **A tester pass** over the fourth pass's fixes and items 2 and 3: charge reversals, payment-link charges, the move screen of a booking with charges, the lapsed-card wording, a member's weekend booking, and a studio notice in the owners' wording.
+1. **Merge PR #17** on the owner's word once CI passes.
+2. **Verify the Resend domain** (owner: DNS records where the domain is managed), then switch `EMAIL_FROM` back as above.
+3. **A tester pass** over the fourth pass's fixes, questions 40 and 41, the photo import, and the hosted preview on a real phone.
+4. **Vercel Preview environment:** its `OWNER_EMAILS` still holds the first list; set it as Production's if branch previews are used.
 
-### Before the preview (tools the cutover needs, not built yet)
+### Before cutover (tools not built yet)
 
 5. **Import upcoming appointments from Acuity.** Read an Acuity export into bookings that hold their rooms and photographer like any other booking, with nothing charged and no email sent. Refuse and list any that clash. Each row is matched by Acuity's ID, so a second run of the same export adds nothing.
-6. **Carry over active members.** The site's memberships are billed by Square subscriptions that the site creates. A member billed today by Acuity or Squarespace cannot be moved onto one. Two ways, for the owners to choose: the member joins again on the site with their card, and the old subscription is cancelled; or the site imports the member's balance as a membership without billing, which the old provider keeps billing until it is cancelled. The second needs a "balance only" membership and a way to add each paid month by hand.
-7. **Import past records, read-only.** Past Acuity appointments and Square payments, for the client pages and loyalty stamps, matched by provider and ID. Loyalty from imported visits follows the restart rule of follow-up 9.
+6. **Carry over active members.** The site's memberships are billed by Square subscriptions that the site creates. A member billed today by Acuity or Squarespace cannot be moved onto one. Two ways, for the owners to choose: the member joins again on the site with their card, and the old subscription is cancelled; or the site imports the member's balance as a membership without billing, which the old provider keeps billing until it is cancelled.
+7. **Import past records, read-only.** Past Acuity appointments and Square payments, for the client pages and loyalty stamps, matched by provider and ID.
 
-### Preview, rehearsal and cutover
+### Rehearsal and cutover
 
-8. **Hosted preview** on Vercel with its own Neon database and Square sandbox keys (see "Launch plan" below). Katya tests the booking flow and the studio admin role.
-9. **Rehearse the import** (items 5 to 7) in a restricted database, and reconcile counts, credits and member balances with the owners.
-10. **Cut over** once the preview and rehearsal pass, with the owner's word. Live Square keys go in last.
+8. **Production database:** its own Neon project (never the staging one, which holds test-mode bookings), migrated with `npm run db:migrate`, and the photos imported again or copied from staging.
+9. **Rehearse the imports** (items 5 to 7), and reconcile counts, credits and member balances with the owners.
+10. **Cut over** with the owner's word: Vercel Pro, the domain pointed at Vercel, live Square keys last.
 
 ## Launch plan
 
