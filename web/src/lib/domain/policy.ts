@@ -146,6 +146,11 @@ export type RescheduleOutcome =
       feeCents: number;
       /** What the move after this one would cost: 0 while free moves are left. */
       nextFeeCents: number;
+      /**
+       * Whether the new booking can be moved online at all, by the terms it will be made under: not while the owners have
+       * moving switched off, nor after the free moves with no fee for more (the tester's third pass of 2026-11-18).
+       */
+      nextMovable: boolean;
     };
 
 /**
@@ -188,6 +193,8 @@ export function rescheduleOutcome(
   const feeCents = free ? 0 : settings.rescheduleFeeCents;
   const creditCents = paidCents + discountCents - feeCents;
   if (creditCents <= 0) return { allowed: false, reason: "fee_not_covered" };
-  const nextFeeCents = booking.rescheduledCount + 1 < nextTerms.maxReschedules ? 0 : nextTerms.rescheduleFeeCents;
-  return { allowed: true, creditCents, discountCents, feeCents, nextFeeCents };
+  const nextFree = booking.rescheduledCount + 1 < nextTerms.maxReschedules;
+  const nextFeeCents = nextFree ? 0 : nextTerms.rescheduleFeeCents;
+  const nextMovable = nextTerms.maxReschedules > 0 && (nextFree || nextTerms.rescheduleFeeCents > 0);
+  return { allowed: true, creditCents, discountCents, feeCents, nextFeeCents, nextMovable };
 }

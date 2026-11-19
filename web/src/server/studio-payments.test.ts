@@ -8,8 +8,9 @@ import { toBookingViews } from "./bookings";
 import { cancelBooking, getManageChoices, ownerRefund, requestRescheduleCode, retryOpenRefunds } from "./manage";
 import { netCardPaidCents, paidAtStudioCents } from "./money";
 import { loadReceipts } from "./receipts";
+import { settleReservedPayments } from "./reserved";
 import { moneyOf, recordHandRefund, recordStudioPayment, voidStudioPayment } from "./studio-payments";
-import { BASE_URL, createTestWorld, expectOk, FAR, h, minutesAfter, NEAR, NOW, OWNER_EMAIL, type TestWorld } from "./testing";
+import { BASE_URL, createTestWorld, expectOk, FAR, h, hoursAfter, minutesAfter, NEAR, NOW, OWNER_EMAIL, type TestWorld } from "./testing";
 
 /**
  * The owner's answer of 2026-11-15: a booking made in the admin gets a "mark
@@ -384,5 +385,51 @@ describe("money taken at the studio and the site's own refunds", () => {
     const code = expectOk(await requestRescheduleCode(world.db, made.ref, { kind: "customer", email: "dana@example.com" }, world.manageDeps()));
     expect(code.valueCents).toBe(17600);
     expect((await world.db.select().from(promoCodes))[0]).toMatchObject({ kind: "amount", value: 17600, source: "reschedule", email: "dana@example.com" });
+  });
+});
+
+describe("a card's amount that lapsed, as the payment card reads it (the tester's third pass of 2026-11-18)", () => {
+  it("knows the card's amount lapsed once the reservation has run out, before the scheduled task has marked it", async () => {
+    world.failCaptures = "Square did not answer";
+    const { ref } = expectOk(await world.book({ date: FAR }));
+    world.failCaptures = null;
+    const later = hoursAfter(NOW, 25);
+    // The reservation lapsed an hour ago: the card holds nothing, and the booking owes its price.
+    const card = (await getAppointment(world.db, owner, ref, later))!.payments!;
+    expect({ dueCents: card.dueCents, held: card.held, receivedCents: card.receivedCents, madeInAdmin: card.madeInAdmin }).toEqual({
+      dueCents: 17600,
+      held: null,
+      receivedCents: 0,
+      madeInAdmin: false,
+    });
+    expect(card.cardLapsed).toBe(true);
+  });
+
+  it("knows it when the reservation was made through another processor than the one set up now, which never marks it", async () => {
+    world.failCaptures = "Square did not answer";
+    const { ref } = expectOk(await world.book({ date: FAR }));
+    world.failCaptures = null;
+    const later = hoursAfter(NOW, 25);
+    // The scheduled task runs with Square set up: it asks only about Square's reservations, and leaves this one.
+    await settleReservedPayments(world.db, { now: later, payments: { ...world.provider, name: "square" }, ownerEmail: OWNER_EMAIL });
+    expect((await getAppointment(world.db, owner, ref, later))!.payments!.cardLapsed).toBe(true);
+  });
+
+  it("pins the facts of a lapsed card paid in part at the studio", async () => {
+    world.failCaptures = "Square did not answer";
+    const { ref } = expectOk(await world.book({ date: FAR }));
+    world.failCaptures = null;
+    const later = hoursAfter(NOW, 25);
+    await settleReservedPayments(world.db, { now: later, payments: world.provider, ownerEmail: OWNER_EMAIL });
+    expectOk(await recordStudioPayment(world.db, owner, ref, { amountCents: 10000, method: "cash", note: "" }, hoursAfter(later, 1)));
+    const card = (await getAppointment(world.db, owner, ref, hoursAfter(later, 2)))!.payments!;
+    // The page says the card's amount lapsed, and that the rest is to collect: it reads `cardLapsed` first.
+    const [row] = await world.db.select().from(bookings).where(eq(bookings.ref, ref));
+    expect({ dueCents: card.dueCents, cardLapsed: card.cardLapsed, paidTowardPrice: card.receivedCents - card.creditReturnedCents, total: row.totalCents }).toEqual({
+      dueCents: 7600,
+      cardLapsed: true,
+      paidTowardPrice: 10000,
+      total: 17600,
+    });
   });
 });

@@ -331,7 +331,7 @@ describe("moving a booking to a new time", () => {
     // Moved, not made with a reschedule code: the client is told so, and why.
     expect(options?.cancel).toMatchObject({ allowed: true, refundCents: 0, why: "moved" });
     // It was their free reschedule: moving it again online costs the fee.
-    expect(options?.reschedule).toEqual({ allowed: true, creditCents: 15600, discountCents: 0, feeCents: 2000, nextFeeCents: 2000 });
+    expect(options?.reschedule).toEqual({ allowed: true, creditCents: 15600, discountCents: 0, feeCents: 2000, nextFeeCents: 2000, nextMovable: true });
     expect((await getManageChoices(world.db, nextDayRef, { kind: "owner" }, NOW))?.cancel.text).toBe(
       "No refund is due, because this booking was moved at your request: a moved booking is not refunded.",
     );

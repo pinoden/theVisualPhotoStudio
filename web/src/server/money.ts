@@ -204,6 +204,65 @@ export async function creditLeftCentsByBooking(db: DbLike, rows: { id: string; t
   return left;
 }
 
+/** One extra charge that counts, with what was paid of it (`moneyByPurposeOf`). */
+export interface ChargePaid {
+  id: string;
+  /** As the client reads it (`clientChargeLabel`). */
+  label: string;
+  amountCents: number;
+  /** What payments paid of it and kept: not what a refund of them gave back. */
+  paidCents: number;
+}
+
+/**
+ * What a booking's payments paid for, once each payment counts net of its own refunds (the tester's third pass of
+ * 2026-11-18): a payment made after an extra charge was added pays the charges added before it first, earliest first,
+ * as that is what it was taken for; the rest of it, and every payment made before, pays the price. What paid the
+ * price, by card and at the studio, is all a client's cancellation refunds or a reschedule code carries: a charge never
+ * travels into either (question 36), also once the studio moved a booking that had started. The site does not record
+ * which payment was for what: this is its reading of the order they came in.
+ */
+export async function moneyByPurposeOf(db: DbLike, bookingId: string): Promise<{ priceByCardCents: number; priceAtStudioCents: number; charges: ChargePaid[] }> {
+  const [paid, back, chargeRows] = await together(db, [
+    () =>
+      db
+        .select({ id: payments.id, provider: payments.provider, amountCents: payments.amountCents, createdAt: payments.createdAt })
+        .from(payments)
+        .where(and(eq(payments.bookingId, bookingId), eq(payments.status, "succeeded")))
+        .orderBy(asc(payments.createdAt)),
+    () =>
+      db
+        .select({ paymentId: refunds.paymentId, total: sql<number>`coalesce(sum(${refunds.amountCents}), 0)::int` })
+        .from(refunds)
+        .innerJoin(payments, eq(payments.id, refunds.paymentId))
+        .where(and(eq(payments.bookingId, bookingId), eq(payments.status, "succeeded"), inArray(refunds.status, [...REFUNDS_THAT_COUNT])))
+        .groupBy(refunds.paymentId),
+    () =>
+      db
+        .select()
+        .from(bookingCharges)
+        .where(and(eq(bookingCharges.bookingId, bookingId), isNull(bookingCharges.voidedAt)))
+        .orderBy(asc(bookingCharges.createdAt)),
+  ]);
+  const returned = new Map(back.map((row) => [row.paymentId, row.total]));
+  const charges: ChargePaid[] = chargeRows.map((row) => ({ id: row.id, label: clientChargeLabel(row), amountCents: row.amountCents, paidCents: 0 }));
+  let added = 0; // the charges added before the payment being counted
+  let priceByCardCents = 0;
+  let priceAtStudioCents = 0;
+  for (const payment of paid) {
+    while (added < chargeRows.length && chargeRows[added].createdAt.getTime() <= payment.createdAt.getTime()) added++;
+    let left = Math.max(0, payment.amountCents - (returned.get(payment.id) ?? 0));
+    for (let index = 0; index < added && left > 0; index++) {
+      const take = Math.min(left, charges[index].amountCents - charges[index].paidCents);
+      charges[index].paidCents += take;
+      left -= take;
+    }
+    if (payment.provider === MANUAL_PROVIDER) priceAtStudioCents += left;
+    else priceByCardCents += left;
+  }
+  return { priceByCardCents, priceAtStudioCents, charges };
+}
+
 /**
  * For several bookings at once: the charges that count (not taken back), as lines the client reads on their booking,
  * their receipt and a payment link, a cleaning or damage charge with what it is for (`clientChargeLabel`). A booking with

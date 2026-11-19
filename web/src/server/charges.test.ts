@@ -3,7 +3,9 @@ import { and, eq } from "drizzle-orm";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { BookingSummary } from "@/components/BookingSummary";
-import { bookingCharges, bookingEvents, bookings, priceRules, settings, specialDates, staffShifts } from "@/db/schema";
+import { bookingCharges, bookingEvents, bookings, emailTemplates, payments, priceRules, settings, specialDates, staffShifts } from "@/db/schema";
+import { EMAIL_TEMPLATES } from "@/lib/email-templates";
+import { MANUAL_PROVIDER } from "@/lib/payment-methods";
 import { createAdminBooking, getAppointment, moveBooking } from "./appointments";
 import type { AuthUser } from "./auth";
 import { toBookingViews } from "./bookings";
@@ -12,8 +14,8 @@ import { getManageChoices, getManageOptions, ownerCancelBooking, type Actor } fr
 import { owedCents } from "./money";
 import { sendPayLink, type PayLinkDeps } from "./pay-links";
 import { loadReceipts } from "./receipts";
-import { recordStudioPayment } from "./studio-payments";
-import { BASE_URL, createTestWorld, expectOk, h, minutesAfter, NEAR, NOW, type TestWorld } from "./testing";
+import { recordHandRefund, recordStudioPayment } from "./studio-payments";
+import { BASE_URL, createTestWorld, expectOk, h, minutesAfter, NEAR, NOW, OWNER_EMAIL, type TestWorld } from "./testing";
 
 /**
  * Follow-up 13, the owner's answer of 2026-11-17: overtime at the studio's hourly rate, each 15 minutes started a
@@ -235,6 +237,155 @@ describe("what a charge is for, and where its money goes (the tester's findings 
   });
 });
 
+
+// The tester's third pass of 2026-11-18: which money paid what (`moneyByPurposeOf`).
+const LATER_DAY = { date: "2026-12-09", startMinute: h(10), countsAsClientMove: false };
+const cash = (ref: string, amountCents: number, at: Date, note = "") => recordStudioPayment(world.db, owner, ref, { amountCents, method: "cash", note }, at);
+const damage = (ref: string, amountCents: number, at: Date) => addCharge(world.db, owner, ref, { kind: "damage", amountCents, note: "Broken light stand" }, at);
+/** What the client is offered after the studio moved the booking: the cancellation and the reschedule code. */
+async function clientOptions(ref: string, manageToken: string, at: Date) {
+  const actor: Actor = { kind: "token", token: manageToken };
+  const options = (await getManageOptions(world.db, ref, actor, at))!;
+  const choices = (await getManageChoices(world.db, ref, actor, at))!;
+  return { options, cancelText: choices.cancel.text, rescheduleText: choices.reschedule.text };
+}
+
+describe("a paid extra charge, once the studio moved a booking that had started (the tester's third pass of 2026-11-18)", () => {
+  it("does not give back the damage payment when the price itself was not paid yet", async () => {
+    const made = await madeInAdmin();
+    // Half an hour in, a stand breaks: $100 of damage, paid in cash at once. The price was to be paid at the end.
+    expectOk(await damage(made.ref, 10000, minutesAfter(STARTS, 30)));
+    expectOk(await cash(made.ref, 10000, minutesAfter(STARTS, 31), "For the stand"));
+    // The shoot is cut short, and the studio moves the booking to a later day.
+    expectOk(await moveBooking(world.db, owner, made.ref, LATER_DAY, minutesAfter(STARTS, 45)));
+    const { options, cancelText, rescheduleText } = await clientOptions(made.ref, made.manageToken, minutesAfter(STARTS, 50));
+    // Nothing was paid toward the price: a cancellation gives nothing back, and there is no credit to move.
+    expect({ cancel: options.cancel, reschedule: options.reschedule }, `Cancel: "${cancelText}" Move: "${rescheduleText}"`).toMatchObject({
+      cancel: { byHandCents: 0, refundCents: 0 },
+      reschedule: { allowed: false, reason: "nothing_paid" },
+    });
+  });
+
+  it("does not give back the damage payment when the price was paid only in part", async () => {
+    const made = await madeInAdmin();
+    expectOk(await cash(made.ref, 10000, STARTS, "Deposit"));
+    expectOk(await damage(made.ref, 5000, minutesAfter(STARTS, 30)));
+    expectOk(await cash(made.ref, 5000, minutesAfter(STARTS, 31), "For the stand"));
+    expectOk(await moveBooking(world.db, owner, made.ref, LATER_DAY, minutesAfter(STARTS, 45)));
+    const { options, cancelText, rescheduleText } = await clientOptions(made.ref, made.manageToken, minutesAfter(STARTS, 50));
+    // $100 was paid toward the price: 95% of it ($95) is given back, not 95% of the $150 that includes the damage.
+    expect({ cancel: options.cancel, reschedule: options.reschedule }, `Cancel: "${cancelText}" Move: "${rescheduleText}"`).toMatchObject({
+      cancel: { byHandCents: 10000 },
+      reschedule: { creditCents: 10000 },
+    });
+  });
+
+  it("tells the owner a paid charge whose money was given back needs nothing more, and is not owed again", async () => {
+    const made = await madeInAdmin();
+    expectOk(await cash(made.ref, 17600, STARTS));
+    expectOk(await damage(made.ref, 10000, minutesAfter(STARTS, 30)));
+    expectOk(await cash(made.ref, 10000, minutesAfter(STARTS, 31), "For the stand"));
+    const [charge] = await world.db.select().from(bookingCharges);
+    // The stand was already cracked: the owner takes the charge back. The site refuses, and says to refund it instead.
+    const voided = await voidCharge(world.db, owner, charge.id, "It was cracked before", minutesAfter(STARTS, 35));
+    expect(voided).toMatchObject({ ok: false, message: expect.stringContaining("Give it back as a refund instead") });
+    const [forStand] = await world.db
+      .select()
+      .from(payments)
+      .where(and(eq(payments.provider, MANUAL_PROVIDER), eq(payments.amountCents, 10000)));
+    expectOk(await recordHandRefund(world.db, owner, forStand.id, { amountCents: 10000, note: "Damage charge given back" }, minutesAfter(STARTS, 36)));
+    // Its money given back, the refund undid it: the charge stays on the receipt beside the refund, is not owed again, and
+    // the owner is told so rather than to refund it again (the builder's reading, recorded in ProjectLibrary.md).
+    expect(await voidCharge(world.db, owner, charge.id, "Given back", minutesAfter(STARTS, 37))).toEqual({
+      ok: false,
+      message:
+        "This charge of $100 is not owed any more: what was paid for it was given back, or the booking had been paid beyond its price. It stays on the client's booking and receipt, and needs nothing more.",
+    });
+    expect((await getAppointment(world.db, owner, made.ref, minutesAfter(STARTS, 37)))!.payments).toMatchObject({ dueCents: 0, creditLeftCents: 0 });
+  });
+
+  it("gives the client back what they paid for the booking when a paid charge was refunded before the move", async () => {
+    const made = await madeInAdmin();
+    expectOk(await cash(made.ref, 17600, STARTS));
+    expectOk(await damage(made.ref, 10000, minutesAfter(STARTS, 30)));
+    expectOk(await cash(made.ref, 10000, minutesAfter(STARTS, 31), "For the stand"));
+    const [forStand] = await world.db
+      .select()
+      .from(payments)
+      .where(and(eq(payments.provider, MANUAL_PROVIDER), eq(payments.amountCents, 10000)));
+    expectOk(await recordHandRefund(world.db, owner, forStand.id, { amountCents: 10000, note: "Damage charge given back" }, minutesAfter(STARTS, 36)));
+    expectOk(await moveBooking(world.db, owner, made.ref, LATER_DAY, minutesAfter(STARTS, 45)));
+    const { options, cancelText, rescheduleText } = await clientOptions(made.ref, made.manageToken, minutesAfter(STARTS, 50));
+    // The client kept $176 with the studio, for the booking: 95% of it is given back ($167.20).
+    expect({ cancel: options.cancel, reschedule: options.reschedule }, `Cancel: "${cancelText}" Move: "${rescheduleText}"`).toMatchObject({
+      cancel: { byHandCents: 17600 },
+      reschedule: { allowed: true, creditCents: 17600 },
+    });
+  });
+});
+
+describe("a paid extra charge given back, or taken back, before the studio moved the booking", () => {
+  it("gives back what the card paid for an online booking when the damage, paid in cash, was given back before the move", async () => {
+    // Booked online for 2 p.m. and paid by card ($176); the damage paid in cash and given back by hand.
+    const booked = expectOk(await world.book({ startMinute: h(14) }));
+    expectOk(await damage(booked.ref, 10000, minutesAfter(STARTS, 30)));
+    expectOk(await cash(booked.ref, 10000, minutesAfter(STARTS, 31), "For the stand"));
+    const [forStand] = await world.db
+      .select()
+      .from(payments)
+      .where(and(eq(payments.provider, MANUAL_PROVIDER), eq(payments.amountCents, 10000)));
+    expectOk(await recordHandRefund(world.db, owner, forStand.id, { amountCents: 10000, note: "Damage charge given back" }, minutesAfter(STARTS, 36)));
+    expectOk(await moveBooking(world.db, owner, booked.ref, LATER_DAY, minutesAfter(STARTS, 45)));
+    const { options, cancelText, rescheduleText } = await clientOptions(booked.ref, booked.manageToken, minutesAfter(STARTS, 50));
+    // The card paid $176 for the booking and kept it: 95% of it goes back to the card ($167.20).
+    expect({ cancel: options.cancel, reschedule: options.reschedule }, `Cancel: "${cancelText}" Move: "${rescheduleText}"`).toMatchObject({
+      cancel: { refundCents: 16720, byHandCents: 0 },
+      reschedule: { allowed: true, creditCents: 17600 },
+    });
+  });
+
+  it("is not changed by a charge taken back before the move", async () => {
+    const made = await madeInAdmin();
+    expectOk(await cash(made.ref, 17600, STARTS));
+    expectOk(await damage(made.ref, 10000, minutesAfter(STARTS, 30)));
+    const [charge] = await world.db.select().from(bookingCharges);
+    expectOk(await voidCharge(world.db, owner, charge.id, "Added to the wrong booking", minutesAfter(STARTS, 35)));
+    expectOk(await moveBooking(world.db, owner, made.ref, LATER_DAY, minutesAfter(STARTS, 45)));
+    const { options } = await clientOptions(made.ref, made.manageToken, minutesAfter(STARTS, 50));
+    expect({ cancel: options.cancel, reschedule: options.reschedule }).toMatchObject({ cancel: { byHandCents: 17600 }, reschedule: { creditCents: 17600 } });
+  });
+});
+
+describe("the owners' wording of the payment link saved before {{charges}} existed", () => {
+  it("is not used: the site's wording, with the charges, is sent", async () => {
+    const spec = EMAIL_TEMPLATES.payment_link;
+    const body = spec.body.split("\n").filter((line) => !line.includes("{{charges}}")).join("\n").replace("You can pay", "Pay online");
+    await world.db.insert(emailTemplates).values({ key: "payment_link", subject: spec.subject, body, revision: 1, updatedBy: OWNER_EMAIL, updatedAt: NOW });
+    const made = await madeInAdmin();
+    expectOk(await cash(made.ref, 17600, STARTS));
+    expectOk(await damage(made.ref, 10000, minutesAfter(STARTS, 30)));
+    expectOk(await sendPayLink(world.db, owner, made.ref, { now: minutesAfter(STARTS, 40), baseUrl: BASE_URL, payments: { ...world.provider, name: "square" } }));
+    const sent = (await world.emails("payment_link")).at(-1)!.body;
+    expect(sent).toContain("It includes the extra charges of your visit:\nDamage charge: Broken light stand, $100");
+    expect(sent).not.toContain("Pay online");
+  });
+});
+
+describe("the payment link's email lists the charges its amount includes", () => {
+  it("does not list a charge already paid at the studio as included in the amount", async () => {
+    const made = await madeInAdmin();
+    expectOk(await cash(made.ref, 17600, STARTS));
+    expectOk(await damage(made.ref, 10000, minutesAfter(STARTS, 30)));
+    expectOk(await cash(made.ref, 10000, minutesAfter(STARTS, 31), "For the stand"));
+    expectOk(await addCharge(world.db, owner, made.ref, { kind: "overtime", minutes: 20, note: "" }, ENDS));
+    expectOk(await sendPayLink(world.db, owner, made.ref, { now: minutesAfter(ENDS, 25), baseUrl: BASE_URL, payments: { ...world.provider, name: "square" } }));
+    const body = (await world.emails("payment_link")).at(-1)!.body;
+    expect(body).toContain("Amount: $44");
+    // The $100 was paid in cash already: the $44 does not include it.
+    expect(body).not.toContain("Damage charge: Broken light stand, $100");
+  });
+});
+
 describe("who adds and takes back a charge", () => {
   it("staff who may record payments add one on their days; only an owner takes one back", async () => {
     const made = await madeInAdmin();
@@ -281,7 +432,7 @@ describe("who adds and takes back a charge", () => {
     const otherCharge = (await world.db.select().from(bookingCharges).where(eq(bookingCharges.bookingId, other.id)))[0];
     expect(await voidCharge(world.db, owner, otherCharge.id, "", ENDS)).toEqual({
       ok: false,
-      message: "The booking has been paid beyond its price, so this charge of $50 was paid, at least in part. Give it back as a refund instead.",
+      message: "This charge of $50 was paid, at least in part. Give it back as a refund instead: the charge then stays on the client's receipt, beside the refund, and is not owed again.",
     });
   });
 });

@@ -233,7 +233,7 @@ describe("cancelling", () => {
     const early = expectOk(await world.book({ date: FAR }));
     expect(await getManageOptions(world.db, early.ref, byToken(early.manageToken), NOW)).toEqual({
       cancel: { allowed: true, refundCents: 16720, feeCents: 880, creditCents: 0, byHandCents: 0, why: "refund" },
-      reschedule: { allowed: true, creditCents: 17600, discountCents: 0, feeCents: 0, nextFeeCents: 2000 },
+      reschedule: { allowed: true, creditCents: 17600, discountCents: 0, feeCents: 0, nextFeeCents: 2000, nextMovable: true },
     });
     const late = expectOk(await world.book({ date: NEAR }));
     expect(await getManageOptions(world.db, late.ref, byToken(late.manageToken), NOW)).toMatchObject({
@@ -509,7 +509,7 @@ describe("the reschedule code", () => {
     // 25 days ahead would normally be refundable. A moved booking is not. It can be moved again, for the fee.
     expect(await getManageOptions(world.db, second.ref, byToken(second.manageToken), NOW)).toEqual({
       cancel: { allowed: true, refundCents: 0, feeCents: 0, creditCents: 0, byHandCents: 0, why: "rescheduled" },
-      reschedule: { allowed: true, creditCents: 15600, discountCents: 0, feeCents: 2000, nextFeeCents: 2000 },
+      reschedule: { allowed: true, creditCents: 15600, discountCents: 0, feeCents: 2000, nextFeeCents: 2000, nextMovable: true },
     });
     const cancelled = expectOk(await cancelBooking(world.db, second.ref, byToken(second.manageToken), world.manageDeps()));
     expect(cancelled).toMatchObject({ refundCents: 0, refund: "none" });
@@ -557,6 +557,7 @@ describe("the reschedule code", () => {
       discountCents: 0,
       feeCents: 2000,
       nextFeeCents: 2000,
+      nextMovable: true,
     });
   });
 
@@ -1482,5 +1483,23 @@ describe("a client's change of a booking that stopped being confirmed while thei
       code: "not_confirmed",
       message: "This visit has taken place, so the booking can no longer be changed online.",
     });
+  });
+});
+
+describe("what moving the new booking costs, by today's settings (the tester's third pass of 2026-11-18)", () => {
+  it("does not promise a paid move when the owners have switched moving off since the booking was made", async () => {
+    const first = expectOk(await world.book({ date: FAR }));
+    // Moving online is switched off today; the booking keeps the terms it was made under, which allow one free move.
+    expect(await saveSetting(world.db, "maxReschedules", 0)).toBe(true);
+    const told = (await getManageChoices(world.db, first.ref, byToken(first.manageToken), NOW))!.reschedule;
+    expect(told.allowed).toBe(true);
+    const released = expectOk(await requestRescheduleCode(world.db, first.ref, byToken(first.manageToken), world.manageDeps()));
+    const second = expectOk(await world.book({ date: FAR, startMinute: h(14), promoCode: released.code, paymentToken: undefined }));
+    const next = (await getManageChoices(world.db, second.ref, byToken(second.manageToken), NOW))!.reschedule;
+    // The new booking cannot be moved online at all...
+    expect(next).toMatchObject({ allowed: false, offered: false });
+    // ...and the client is told so, not that moving it again would cost $20.
+    expect(told.text).not.toContain("Moving the new booking again would cost");
+    expect(told.text).toContain("The new booking cannot be moved online again.");
   });
 });

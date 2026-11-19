@@ -81,7 +81,7 @@ export interface BookingMoney {
   creditLeftCents: number;
   /** What a refund to the card can still give back: what the card paid and kept, less a pet fee returned as credit. */
   cardRefundableCents: number;
-  /** A card's amount for the booking was reserved and never taken, the reservation lapsing: then no card paid it. */
+  /** A card's amount for the booking was reserved and never taken, the reservation lapsing: no card paid it. */
   cardLapsed: boolean;
   /** How the booking ended, if it has: then nothing more is to pay, whatever was received. */
   ended: "cancelled" | "released" | null;
@@ -131,7 +131,10 @@ export async function moneyOf(
     dueCents: await owedCents(db, booking, now),
     creditLeftCents: (await creditLeftCentsByBooking(db, [booking])).get(booking.id) ?? 0,
     cardRefundableCents: Math.max(0, card - Math.min(card, await petFeeReturnedCents(db, booking.id))),
+    // Marked failed by the scheduled task, or run out before the task marked it (it may not run, nor ever mark another
+    // processor's reservation), as what is owed counts it already (the tester's third pass of 2026-11-18).
     cardLapsed:
+      all.some((row) => row.status === "authorized" && row.createdAt.getTime() <= lapsedBefore) ||
       (
         await db
           .select({ id: payments.id })

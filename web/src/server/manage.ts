@@ -37,7 +37,7 @@ import {
 } from "./email";
 import { BY_CUSTOMER, BY_STUDIO, BY_SYSTEM, recordEvent } from "./history";
 import { releaseHolds } from "./holds";
-import { chargesCentsByBooking, creditLeftCentsByBooking, heldCentsByBooking, netCardPaidCents, paidAtStudioCents, paidTowardPriceCentsByBooking } from "./money";
+import { creditLeftCentsByBooking, heldCentsByBooking, moneyByPurposeOf, netCardPaidCents } from "./money";
 import {
   closePayLinkOf,
   lookAtPayLink,
@@ -95,28 +95,22 @@ async function factsFor(db: DbLike, booking: BookingRow): Promise<BookingFacts> 
   const [code] = booking.promoCodeId
     ? await db.select({ source: promoCodes.source }).from(promoCodes).where(eq(promoCodes.id, booking.promoCodeId)).limit(1)
     : [];
-  // What paid the extra charges never travels into a refund or a reschedule code (question 36), also once the studio
-  // has moved a booking that had started (the tester's finding of 2026-11-18). The price is taken as paid first, and
-  // what was paid toward it beyond, up to the charges, paid them: off money taken at the studio first, where charges are
-  // mostly paid, then off the card.
-  const card = await netCardPaidCents(db, booking.id);
-  const atStudio = await paidAtStudioCents(db, booking.id);
-  const charges = (await chargesCentsByBooking(db, [booking.id])).get(booking.id) ?? 0;
-  const toward = charges > 0 ? ((await paidTowardPriceCentsByBooking(db, [booking.id])).get(booking.id) ?? 0) : 0;
-  const forCharges = Math.min(charges, Math.max(0, toward - booking.totalCents));
-  const offStudio = Math.min(forCharges, Math.max(0, atStudio));
+  // Only what paid the price: what paid the extra charges never travels into a refund or a reschedule code (question
+  // 36), also once the studio has moved a booking that had started (the tester's findings of 2026-11-18,
+  // `moneyByPurposeOf`).
+  const money = await moneyByPurposeOf(db, booking.id);
   return {
     status: booking.status,
     startAt: booking.startAt,
     rescheduledCount: booking.rescheduledCount,
     madeWithRescheduleCode: code?.source === "reschedule",
-    cardPaidCents: Math.max(0, card - (forCharges - offStudio)),
+    cardPaidCents: money.priceByCardCents,
     creditAppliedCents: booking.creditAppliedCents,
     // promoDiscountCents holds whatever the code took off: for a credit code that is the credit itself.
     discountCents: booking.promoDiscountCents - booking.creditAppliedCents,
     petFeeCents,
     petCreditGiven: petFeeCents > 0 && (await petCreditOf(db, booking.id)) !== null,
-    paidAtStudioCents: atStudio - offStudio,
+    paidAtStudioCents: money.priceAtStudioCents,
     membershipMinutes: booking.membershipMinutes,
   };
 }
@@ -227,8 +221,12 @@ export function rescheduleOfferText(
       : fee
         ? ` That is what you paid ${fee}.`
         : "";
-  // A free move tells the client, before they use it, that the next one will cost the fee.
-  const next = outcome.feeCents === 0 && outcome.nextFeeCents > 0 ? ` Moving the new booking again would cost ${formatCents(outcome.nextFeeCents)}.` : "";
+  // The client is told, before they use it, what moving the new booking will cost, or that it cannot be moved online.
+  const next = !outcome.nextMovable
+    ? " The new booking cannot be moved online again."
+    : outcome.feeCents === 0 && outcome.nextFeeCents > 0
+      ? ` Moving the new booking again would cost ${formatCents(outcome.nextFeeCents)}.`
+      : "";
   return `This booking will be released and you will get a code worth ${formatCents(outcome.creditCents)}, valid for ${count(settings.creditValidDays, "day")}, to book a new time.${discount} A booking made with the code cannot be refunded.${next}`;
 }
 
