@@ -7,12 +7,13 @@
 ## Current state
 
 - **Hosted preview:** https://the-visual-photo-studio.vercel.app, on Vercel (Hobby plan, team "The Visuals Photo Studio"). It deploys every change to `master` by itself. Its database is the Neon staging project below, with Square's sandbox keys. Owners sign in with emailed codes, through Resend.
-- **`master`** is at PR #17 (`75d43f3`, 2026-11-19): the deployment warnings fixed, ESLint 10, and the Neon configuration.
+- **`master`** is at PR #18 (`93c2a56`, 2026-11-19): the security review's fixes, after PR #17 (the deployment warnings, ESLint 10 and the Neon configuration). `rebuild` holds the same code; only this handoff is newer.
+- **Scheduled tasks on the preview** run once a day (`web/vercel.json`, at 12:00 UTC), the most the Hobby plan allows. Between runs `/api/health` answers 503 and the admin overview says the tasks are late: expected until Vercel Pro, where they run every five minutes (step 10). Emails go out right after whatever queued them; reminders, free hours, review requests, refund retries and membership months wait for the daily run.
 - **Email:** Resend's domain `thevisualsphotostudio.com` is not verified yet. Until it is, `EMAIL_FROM` is Resend's test sender (`onboarding@resend.dev`), which delivers only to the Resend account's own address. Once Resend shows the domain verified, set `EMAIL_FROM` to `The Visuals Photo Studio <bookings@thevisualsphotostudio.com>` and redeploy.
 - **The owners' answers of 2026-11-18 are all built:** questions 40, 41 and 48 (see "Owner decisions"). Migrations run from `0000` to `0048`; staging has all of them.
-- **Security review of 2026-11-19:** its high and medium findings and the missing headers are fixed (see the decision log in `ProjectLibrary.md`). Still open: shorter sessions for owners and staff, Square's buyer verification and risk rules before the live keys, Vercel deployment protection for previews, and two-factor sign-in on every account and on the inboxes in `OWNER_EMAILS`.
+- **Security review of 2026-11-19:** its high and medium findings and the missing headers are fixed and live (see the decision log in `ProjectLibrary.md`). Checked on the hosted preview after the deploy: the new headers are sent and `X-Powered-By` is not, the open-redirect probe stays on the site, and the database rate limit counted an empty booking request, which was refused with no booking made. The new sign-in limits have not run there yet: nobody has asked for a code since the deploy (step 3). Still open: shorter sessions for owners and staff, Square's buyer verification and risk rules before the live keys, Vercel deployment protection for previews, and two-factor sign-in on GitHub, Resend, Square and the inboxes in `OWNER_EMAILS` (Vercel's is on).
 - **Photos:** the 102 photos of the old website are in the staging database's media library, on the studios, in collections and on the photography page (`scripts/import-old-site-photos.ts`; see `ProjectLibrary.md`). The photo files are kept nowhere else but the old website. The manifest of what goes where is in `/old-site-photos/` (ignored by Git: its file names hold clients' names).
-- **GitHub:** the repository is private on the Free plan, so `master`'s branch protection no longer applies (the owner chose this for now). Changes still reach `master` only through a pull request after CI passes.
+- **GitHub:** the repository is private on the Free plan, so `master`'s branch protection no longer applies (the owner chose this for now). Changes still reach `master` only through a pull request after CI passes. Four Dependabot pull requests into `rebuild` are open: #10 (GitHub Actions) and #14 (`@types/node` 26) pass CI; #11 (minor and patch updates) needs its cancelled browser job run again; #13 (TypeScript 7) fails the type check.
 - **Tools signed in on the builder's Mac:** GitHub (`gh`), Vercel CLI (account `pinoden`) and the Neon CLI. Nothing of them is in the repository.
 - Follow-up 14 (Instagram feed) is connected once the site is on its host. Follow-up 16 was declined. The other follow-ups are built. See the [Project Library](ProjectLibrary.md).
 
@@ -38,24 +39,25 @@ The localhost check used mock payments and sent no email. The hosted Vercel prev
 
 | Check | Status |
 | --- | --- |
-| Type check and lint | Clean on `365679a` |
-| Unit and integration tests | 1,056 passed across 77 files on `365679a`. Focused booking tests: 99 passed across bookings, photography, membership redemption and membership billing. |
-| Browser tests (local) | Second run on `365679a`: 56 passed, 1 failed, 6 not run (11.9 min). The failure is a page-editor case (`website.spec.ts:743`, "Taken off the website" not shown in time), and the six cases after it in that file did not run. The first run had 2 failures (the staff day sheet, the design draft) that both passed on the second run. No out-of-memory lines in either run. |
-| GitHub CI | Both jobs (`checks`, `browser`) passed on `365679a`, PR #15. |
+| Type check and lint | Clean on `1ca4ce9` |
+| Unit and integration tests | 1,070 passed on `1ca4ce9` |
+| Browser tests (local) | 63 passed on `1ca4ce9` (14.4 min). The run before it was cut short by a full disk; with space freed, the whole suite passed. |
+| GitHub CI | Both jobs (`checks`, `browser`) passed on `1ca4ce9`, PR #18, for the pull request and for the push to `rebuild`. |
+| Hosted preview | After PR #18 deployed: the checks under "Current state". Earlier the same day: every picture on the home, studios and photography pages loaded on a desktop and a phone, with no broken link. |
 | Square sandbox | Payment receipts verified. Earlier membership purchase, use and cancellation checks used the sandbox card form. |
-| Database migrations | `0046` verified on copies of browser-test databases. No production migration has run. |
+| Database migrations | `0047` tried on a copy of the browser suite's database, `0048` on a Neon branch of staging; both then applied to staging. No production migration has run. |
 
 The browser suite uses `next dev`. Page-editor cases have been flaky around discarding edits, deleting blocks, dragging into columns and now taking a page off the website. Each failure has passed on a rerun, and CI passed them all. If `website.spec.ts:743` fails again on a quiet machine, look at it.
 
-Not yet covered by an independent tester pass: the fourth pass's fixes, monthly Square billing, clearing test-mode data on PostgreSQL, daylight-saving transitions, Safari and real phones. The browser suite runs on the real clock and has no case for the move screen of an appointment that has already started.
+Not yet covered by an independent tester pass: the fourth pass's fixes, questions 40 and 41, the photo import, the security fixes, monthly Square billing, clearing test-mode data on PostgreSQL, daylight-saving transitions, Safari and real phones. The browser suite runs on the real clock and has no case for the move screen of an appointment that has already started.
 
 ## Next steps
 
 ### Now
 
-1. **Merge the security fixes' pull request** once CI passes (staging already has migration `0048`, which the new code needs).
-2. **Verify the Resend domain** (owner: DNS records where the domain is managed), then switch `EMAIL_FROM` back as above.
-3. **A tester pass** over the fourth pass's fixes, questions 40 and 41, the photo import, and the hosted preview on a real phone.
+1. **Verify the Resend domain** (owner: DNS records where the domain is managed), then switch `EMAIL_FROM` back as above.
+2. **A tester pass** over the fourth pass's fixes, questions 40 and 41, the photo import, the security fixes, and the hosted preview on a real phone.
+3. **Sign in once on the hosted preview with a new code** (sign out first), to see the new sign-in limits work there. Until the Resend domain is verified, only the Resend account's own address receives the code.
 4. **Vercel Preview environment:** its `OWNER_EMAILS` still holds the first list; set it as Production's if branch previews are used.
 
 ### Before cutover (tools not built yet)
@@ -68,7 +70,7 @@ Not yet covered by an independent tester pass: the fourth pass's fixes, monthly 
 
 8. **Production database:** its own Neon project (never the staging one, which holds test-mode bookings), migrated with `npm run db:migrate`, and the photos imported again or copied from staging.
 9. **Rehearse the imports** (items 5 to 7), and reconcile counts, credits and member balances with the owners.
-10. **Cut over** with the owner's word: Vercel Pro, the domain pointed at Vercel, live Square keys last.
+10. **Cut over** with the owner's word: Vercel Pro with the scheduled tasks every five minutes (`web/vercel.json`), the domain pointed at Vercel, live Square keys last.
 
 ## Launch plan
 
@@ -100,7 +102,7 @@ The early site audit also found membership prices that differed between the webs
 ### Preview, cutover and rollback
 
 1. **Inventory.** With the owners, list current bills, future appointments, active subscriptions, outstanding credits, unredeemed codes and which provider bills each membership. Track Squarespace Commerce subscriptions separately from Acuity memberships. Keep the current site and booking link available during the rehearsal.
-2. **Preview.** Set up Vercel and a separate Neon database with sample clients and Square sandbox keys. Confirm the deployment can read the repository, which is private now. Katya tests the studio admin role. Configure the transactional email sender without touching the Gmail DNS records. Check the scheduled tasks and `/api/health`. Set up monitoring and backups, and fill in the contacts and rollback steps in the [runbook](RUNBOOK.md).
+2. **Preview.** Set up Vercel and a separate Neon database with sample clients and Square sandbox keys. Confirm the deployment can read the repository, which is private now. Katya tests the studio admin role. Configure the transactional email sender without touching the Gmail DNS records. Check the scheduled tasks and `/api/health`. Set up monitoring and backups, and fill in the contacts and rollback steps in the [runbook](RUNBOOK.md). Done by 2026-11-19: Vercel, the Neon staging database, Square's sandbox keys, deploying from the private repository, the daily scheduled tasks and `/api/health`. Still to do: the sender's domain in Resend, Katya's test, monitoring, backups and the runbook.
 3. **Rehearse the import.** Export Acuity appointments and Square payment history to a restricted location, and import them into a restricted database separate from the shared preview, with outgoing email and payments switched off. Past records stay read-only. Rehearse carrying upcoming appointments into the calendar with the right room and photographer holds. Reconcile counts, open credits and member balances with the owners. Measure database size, indexes included, with about 10,000 bookings, and compute over a representative week. Photos stay in object storage. Card details and credentials stay out of exports and Git.
 4. **Pass the booking checks.** Book on a real phone. Send Paris + Dayglow and Paris-only requests for the same time in both orders: the shared room is never double-booked and Blanche stays available. The photographer cannot be booked in two rooms at once. Book two weekend hours with only 60 membership minutes left: the minutes cover one hour, with no weekend difference, and the member pays for the other. Check that cancellations and refunds reconcile, and that the confirmation with the door code and the 24-hour reminder each arrive once. Record which flows passed and any staff workaround accepted.
 5. **Cut over.** Close online booking in Acuity, take a final export and import what changed since the rehearsal. Save the current DNS values. From `web/`, run `npm run db:migrate` against the production database: a fresh database gets the whole sequence, an existing one its pending migrations. If the weekend-price migration applies, keep the owners' customized prices. Run the browser suite. Point the domain and `www` to Vercel, keep the mail records, and check both addresses on a phone. Switch to live Square keys last. With Katya, make one small real booking and refund it, then check the calendar entry, the email, the Square payment and its receipt link.
@@ -119,8 +121,8 @@ The early site audit also found membership prices that differed between the webs
 - Vercel and Neon are acceptable. Keep the existing domain. Sign-in starts with emailed codes; Google sign-in may come later.
 - Question 48 (extra charges): the price is paid first, then the charges; a paid charge is given back as a refund; a booking with charges is not moved. As built.
 - Questions 42, 43, 45 and 46 (memberships): as built. Question 44: Blanche's plans are $380 and $700, as built.
-- Question 41: a membership looks only at the time balance, not the price. The minutes cover weekend time in full. To build (next step 2).
-- Question 40: the site's wording stays the default, and the owners can customize every email, the notices to the studio included. To build (next step 3).
+- Question 41: a membership looks only at the time balance, not the price. The minutes cover weekend time in full. Built.
+- Question 40: the site's wording stays the default, and the owners can customize every email, the notices to the studio included. Built.
 - Follow-up 14: the owners connect the Instagram account once the site is on its host.
 - Customers can update their email address. Access to customer pages is logged. Duplicate accounts can be merged if the effort is small.
 - Test extensively with the Square sandbox and run several independent passes before launch. Import as much historical Acuity and Square data as practical.
@@ -131,7 +133,6 @@ The early site audit also found membership prices that differed between the webs
 
 | Area | Decision needed |
 | --- | --- |
-| Merge | The owner's word to merge PR #15 |
 | Members at cutover | Each current member joins again on the site, or is carried over as a balance while the old provider keeps billing until it is cancelled (next step 6) |
 | Launch | Approve the cutover after the hosted preview and the import rehearsal. DNS ownership, the transactional email provider and sender address, the privacy policy and sales tax |
 | Price summary after a goodwill refund | Its line still reads "Paid by card and at the studio" with the original amount. Keep it, or say what was refunded |
