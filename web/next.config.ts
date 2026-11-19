@@ -1,6 +1,23 @@
 import type { NextConfig } from "next";
 
+/**
+ * Sent with every response (the security review of 2026-11-19). The site's own pages may frame it (the page editor's
+ * preview), no other site may. A full content security policy is not set yet: Square's card form and the framework's
+ * own inline scripts need careful allowances, to be tried on the preview first.
+ */
+const SECURITY_HEADERS = [
+  { key: "Content-Security-Policy", value: "frame-ancestors 'self'" },
+  { key: "X-Frame-Options", value: "SAMEORIGIN" },
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+  { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), browsing-topics=()" },
+];
+
 const nextConfig: NextConfig = {
+  poweredByHeader: false,
+  async headers() {
+    return [{ source: "/:path*", headers: SECURITY_HEADERS }];
+  },
   cacheComponents: true,
   partialPrefetching: true,
   // Database drivers load native/WASM files at runtime and must not be bundled.

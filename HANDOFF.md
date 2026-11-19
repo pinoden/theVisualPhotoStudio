@@ -7,9 +7,10 @@
 ## Current state
 
 - **Hosted preview:** https://the-visual-photo-studio.vercel.app, on Vercel (Hobby plan, team "The Visuals Photo Studio"). It deploys every change to `master` by itself. Its database is the Neon staging project below, with Square's sandbox keys. Owners sign in with emailed codes, through Resend.
-- **`master`** is at PR #16 (`3ed65b6`, 2026-11-19). PR #17 (`rebuild` into `master`: the deployment warnings, ESLint 10 from Dependabot's PR #12, and the Neon configuration) waits for CI and is merged on the owner's word.
+- **`master`** is at PR #17 (`75d43f3`, 2026-11-19): the deployment warnings fixed, ESLint 10, and the Neon configuration.
 - **Email:** Resend's domain `thevisualsphotostudio.com` is not verified yet. Until it is, `EMAIL_FROM` is Resend's test sender (`onboarding@resend.dev`), which delivers only to the Resend account's own address. Once Resend shows the domain verified, set `EMAIL_FROM` to `The Visuals Photo Studio <bookings@thevisualsphotostudio.com>` and redeploy.
-- **The owners' answers of 2026-11-18 are all built:** questions 40, 41 and 48 (see "Owner decisions"). Migrations run from `0000` to `0047`; staging has all of them.
+- **The owners' answers of 2026-11-18 are all built:** questions 40, 41 and 48 (see "Owner decisions"). Migrations run from `0000` to `0048`; staging has all of them.
+- **Security review of 2026-11-19:** its high and medium findings and the missing headers are fixed (see the decision log in `ProjectLibrary.md`). Still open: shorter sessions for owners and staff, Square's buyer verification and risk rules before the live keys, Vercel deployment protection for previews, and two-factor sign-in on every account and on the inboxes in `OWNER_EMAILS`.
 - **Photos:** the 102 photos of the old website are in the staging database's media library, on the studios, in collections and on the photography page (`scripts/import-old-site-photos.ts`; see `ProjectLibrary.md`). The photo files are kept nowhere else but the old website. The manifest of what goes where is in `/old-site-photos/` (ignored by Git: its file names hold clients' names).
 - **GitHub:** the repository is private on the Free plan, so `master`'s branch protection no longer applies (the owner chose this for now). Changes still reach `master` only through a pull request after CI passes.
 - **Tools signed in on the builder's Mac:** GitHub (`gh`), Vercel CLI (account `pinoden`) and the Neon CLI. Nothing of them is in the repository.
@@ -52,7 +53,7 @@ Not yet covered by an independent tester pass: the fourth pass's fixes, monthly 
 
 ### Now
 
-1. **Merge PR #17** on the owner's word once CI passes.
+1. **Merge the security fixes' pull request** once CI passes (staging already has migration `0048`, which the new code needs).
 2. **Verify the Resend domain** (owner: DNS records where the domain is managed), then switch `EMAIL_FROM` back as above.
 3. **A tester pass** over the fourth pass's fixes, questions 40 and 41, the photo import, and the hosted preview on a real phone.
 4. **Vercel Preview environment:** its `OWNER_EMAILS` still holds the first list; set it as Production's if branch previews are used.

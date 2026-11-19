@@ -24,7 +24,7 @@ export interface ContactDeps {
   /** Who receives messages. Null when no owner address is configured. */
   ownerEmail: string | null;
   /** Asked once for each message that would be sent; false refuses it. For rate limiting. */
-  allowSend?: () => boolean;
+  allowSend?: () => boolean | Promise<boolean>;
 }
 
 const TOPIC_KEYS = Object.keys(CONTACT_TOPICS) as [ContactTopic, ...ContactTopic[]];
@@ -73,7 +73,7 @@ export async function sendContactMessage(
   }
 
   if (!deps.ownerEmail) return { ok: false, code: "unavailable" };
-  if (deps.allowSend && !deps.allowSend()) return { ok: false, code: "too_many" };
+  if (deps.allowSend && !(await deps.allowSend())) return { ok: false, code: "too_many" };
 
   const { name, email, topic, message } = parsed.data;
   await queueEmail(db, contactMessageEmail({ to: deps.ownerEmail, name, email, topic: CONTACT_TOPICS[topic], message }));

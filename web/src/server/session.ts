@@ -23,10 +23,19 @@ export const getCurrentUser = cache(async (): Promise<AuthUser | null> => {
   return getSessionUser(db, token, new Date(), ownerEmails());
 });
 
-/** Only same-site paths are followed after sign-in. */
+/**
+ * Only same-site paths are followed after sign-in. Browsers drop tabs and line breaks from an address, so "/\t/evil.example"
+ * would be read as another site: no control character, space or backslash is allowed (the security review of
+ * 2026-11-19), and the path must stay on this site when read as an address.
+ */
 export function safeNextPath(value: unknown): string {
   if (typeof value !== "string") return "/account";
-  if (!value.startsWith("/") || value.startsWith("//") || value.includes("\\") || value.length > 300) return "/account";
+  if (!value.startsWith("/") || value.startsWith("//") || /[\u0000-\u0020\u007f\\]/.test(value) || value.length > 300) return "/account";
+  try {
+    if (new URL(value, "https://site.invalid").host !== "site.invalid") return "/account";
+  } catch {
+    return "/account";
+  }
   return value;
 }
 

@@ -236,7 +236,7 @@ export async function createTestWorld(): Promise<TestWorld> {
     async reset() {
       await db.execute(sql`
         truncate email_outbox, email_templates, membership_plans, booking_charges, payment_links, refunds, payments, booking_addons, studio_holds, blocks, bookings,
-          promo_codes, special_dates, settings, sessions, login_codes, staff_shifts, users,
+          promo_codes, special_dates, settings, sessions, login_codes, rate_limit_hits, staff_shifts, users,
           price_rules, studio_hours, addons, studios, photographers, site_versions, site_documents,
           media_collection_items, media_collections, studio_photos, media, site_font_files, site_fonts, site_files, site_redirects cascade
       `);
