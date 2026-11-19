@@ -312,10 +312,14 @@ export function History<T>({
 
 // ── Form fields ──────────────────────────────────────────────────────────────
 
-/** A group of fields that folds away. */
+/**
+ * A group of fields that folds away. A click on its title before the page has
+ * loaded is the browser's own: it opens the group before React takes the page
+ * over, so `open` may differ from what the server sent, and that is no fault.
+ */
 export function Group({ title, open, children }: { title: string; open?: boolean; children: ReactNode }) {
   return (
-    <details className="admin-card editor-group" open={open}>
+    <details className="admin-card editor-group" open={open} suppressHydrationWarning>
       <summary>{title}</summary>
       <div className="editor-fields">{children}</div>
     </details>
