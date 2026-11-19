@@ -46,7 +46,7 @@ describe("paying for a booking with membership minutes", () => {
   it("pays the whole studio time with the code, so no card is needed, and takes the minutes", async () => {
     const code = await join();
     const preview = await quoteSelection(world.db, { studioIds: [world.ids.paris], date: FAR, durationMinutes: 120, promoCode: code.toLowerCase(), email: "Jane@Example.com" }, NOW);
-    expect(preview).toMatchObject({ ok: true, promo: null, membership: { code, minutesLeft: 300, weekendDifference: true }, quote: { membershipMinutes: 120, membershipCents: 13600, totalCents: 0 } });
+    expect(preview).toMatchObject({ ok: true, promo: null, membership: { code, minutesLeft: 300, weekendDifference: false }, quote: { membershipMinutes: 120, membershipCents: 13600, totalCents: 0 } });
 
     const booked = expectOk(await world.book({ studioIds: [world.ids.paris], date: FAR, promoCode: code, paymentToken: undefined }));
     expect(booked.totalCents).toBe(0);
@@ -83,14 +83,15 @@ describe("paying for a booking with membership minutes", () => {
     });
   });
 
-  it("covers the weekday price of the time at weekends while the owners keep that rule, and weekend time in full otherwise", async () => {
+  it("covers weekend time in full (question 41), and only the weekday price of the time if the owners switch the difference on", async () => {
     const code = await join();
-    // Paris for two hours: $136 on a weekday, $144 on a Saturday.
-    const saturday = expectOk(await world.book({ studioIds: [world.ids.paris], date: SATURDAY, promoCode: code }));
-    expect(saturday.totalCents).toBe(800);
-    await change("memberWeekendDifference", false);
-    const free = expectOk(await world.book({ studioIds: [world.ids.paris], date: SATURDAY, startMinute: h(14), promoCode: code, paymentToken: undefined }));
+    // Paris for two hours: $136 on a weekday, $144 on a Saturday. A member pays nothing for it either way.
+    const free = expectOk(await world.book({ studioIds: [world.ids.paris], date: SATURDAY, promoCode: code, paymentToken: undefined }));
     expect(free.totalCents).toBe(0);
+    expect(await rowOf(free.ref)).toMatchObject({ membershipMinutes: 120, membershipCents: 14400, totalCents: 0 });
+    await change("memberWeekendDifference", true);
+    const saturday = expectOk(await world.book({ studioIds: [world.ids.paris], date: SATURDAY, startMinute: h(14), promoCode: code }));
+    expect(saturday.totalCents).toBe(800);
   });
 
   it("is for the studios of its plan, a bundle's one at a time or together, and pays add-ons never", async () => {

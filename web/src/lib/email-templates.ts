@@ -1,5 +1,5 @@
 /**
- * The emails the site sends to clients by itself, as templates the owners change under Admin → Emails (question 33,
+ * The emails the site sends by itself, to clients and to the studio, as templates the owners change under Admin → Emails (question 33,
  * answered 2026-11-17). Each email has a subject and a text in which the parts the site fills in are written in double
  * braces, `{{name}}`. Until the owners change an email, the template below is what is sent: word for word what the site
  * sent before there were templates. Once they change it, their wording is sent instead (`src/server/email-templates.ts`),
@@ -52,6 +52,18 @@ export const TEMPLATE_KEYS = [
   "membership_month_paid",
   "membership_payment_problem",
   "membership_cancelled",
+  "move_request_studio",
+  "contact_message",
+  "owner_hand_refund",
+  "owner_refund_sent",
+  "owner_refund_failed",
+  "owner_refund_waiting",
+  "owner_capture_failed",
+  "owner_reservation_lapsed",
+  "owner_unseen_link",
+  "owner_membership_refund",
+  "owner_membership_problem",
+  "owner_membership_unfinished",
 ] as const;
 
 export type TemplateKey = (typeof TEMPLATE_KEYS)[number];
@@ -75,7 +87,7 @@ export interface EmailTemplateSpec {
   readonly parts: readonly EmailPart[];
 }
 
-export const TEMPLATE_GROUPS = ["Bookings", "Moving and cancelling", "Payments", "Codes and signing in", "Memberships"] as const;
+export const TEMPLATE_GROUPS = ["Bookings", "Moving and cancelling", "Payments", "Codes and signing in", "Memberships", "Notices to the studio"] as const;
 
 /** Parts every email has: the studio's name and address as the website publishes them, filled in when it is queued. */
 export const STUDIO_PARTS: readonly EmailPart[] = [
@@ -761,28 +773,255 @@ const TEMPLATES: readonly EmailTemplateSpec[] = [
   },
 ];
 
-export const EMAIL_TEMPLATES: Readonly<Record<TemplateKey, EmailTemplateSpec>> = Object.fromEntries(
-  TEMPLATES.map((template) => [template.key, template]),
-) as Record<TemplateKey, EmailTemplateSpec>;
+// ── The notices to the studio ────────────────────────────────────────────────
+// Sent to the studio's own address when something needs it (the owner's answer of 2026-11-18 to question 40: every
+// email can be changed). What the site did and what needs doing are parts the site writes, which a notice must keep.
 
-/**
- * The messages the site sends the studio. They say what the site did and what needs doing, so they keep the site's
- * wording, which follows what the site does (the builder's reading of question 33, in `ProjectLibrary.md`).
- */
-export const STUDIO_NOTICES: readonly { title: string; when: string }[] = [
-  { title: "A client asks to move a booking", when: "With what the client wrote. A reply reaches the client." },
-  { title: "A message from the contact page", when: "With the visitor's message. A reply reaches the visitor." },
-  { title: "A refund to give back by hand", when: "When a booking paid at the studio is cancelled early enough to be refunded." },
-  { title: "A refund was sent", when: "When a refund reaches the card processor." },
-  { title: "A refund failed", when: "When a card refund could not be sent. The site tries it again by itself." },
-  { title: "A refund is waiting", when: "When a refund cannot be sent with the card processor set up now." },
-  { title: "A card payment not taken yet", when: "When the amount reserved on a client's card could not be taken yet. The site keeps trying." },
-  { title: "A reserved amount lapsed", when: "When the amount reserved on a card lapsed before it could be taken, and the booking is still to pay." },
-  { title: "A payment link to check", when: "When a booking ends while the site cannot tell whether its payment link was paid." },
-  { title: "A membership's first month to refund", when: "When a membership could not be set up after its first month was paid, and the refund did not go through." },
-  { title: "A membership's payment did not go through", when: "When Square could not take a month's payment, or stopped a membership's monthly payments." },
-  { title: "A membership not finished", when: "When a client pressed to join and no answer came about their card, so the membership was not started: Square may hold a payment to refund." },
+const CUSTOMER: EmailPart = { key: "customer", label: "The client's name", sample: "Jane Smith" };
+const NOTICE_REFERENCE: EmailPart = { key: "reference", label: "The booking's reference", required: true, sample: "VS-7K2M9Q" };
+const AMOUNT = (label: string, sample: string): EmailPart => ({ key: "amount", label, required: true, sample });
+const MEMBER_CODE: EmailPart = { key: "code", label: "The membership's code", required: true, sample: "MEMBER-4K7P-2XQ9" };
+const PLAN: EmailPart = { key: "plan", label: "The membership's name", sample: "Studio Paris, 5 hours a month" };
+
+const NOTICES: readonly EmailTemplateSpec[] = [
+  {
+    key: "move_request_studio",
+    title: "A client asks to move a booking",
+    group: "Notices to the studio",
+    when: "When a client asks the studio to move their booking, with what they wrote. A reply reaches the client.",
+    subject: "{{client_name}} asks to move booking {{reference}}",
+    body: lines(
+      "{{client_name}} asked the studio to move their booking. It is marked Reschedule Pending, and keeps its time until it is moved.",
+      "",
+      "Reference: {{reference}}",
+      "Studio: {{studios}}",
+      "Now: {{when}} ({{duration}})",
+      "Client: {{client}}",
+      "",
+      "What they wrote:",
+      "{{message}}",
+      "",
+      "Open the appointment to move it: {{appointment_link}}",
+      "A reply to this email reaches the client.",
+    ),
+    parts: [
+      { key: "client_name", label: "The client's name", sample: "Jane Smith" },
+      NOTICE_REFERENCE,
+      STUDIOS,
+      WHEN,
+      DURATION,
+      { key: "client", label: "The client's name, email address and phone number", sample: "Jane Smith, jane@example.com, 407-555-0100" },
+      { key: "message", label: "What the client wrote", lines: true, required: true, sample: "Could we move to the same time next Saturday?" },
+      { key: "appointment_link", label: "The link to the appointment in the admin", link: true, required: true, sample: "/admin/appointments/VS-7K2M9Q" },
+    ],
+  },
+  {
+    key: "contact_message",
+    title: "A message from the contact page",
+    group: "Notices to the studio",
+    when: "When a visitor writes through the contact page, with their message. A reply reaches the visitor.",
+    subject: "Website message from {{name}}: {{topic}}",
+    body: lines("{{name}} <{{email}}> wrote through the contact page.", "Topic: {{topic}}", "", "{{message}}", "", "Reply to this email to answer {{name}}."),
+    parts: [
+      { key: "name", label: "The visitor's name, as they gave it", sample: "Ann Lee" },
+      { key: "first_name", label: "The visitor's first name: the first word of their name", sample: "Ann" },
+      { key: "email", label: "The visitor's email address", sample: "ann@example.com" },
+      { key: "topic", label: "The topic they chose", sample: "After-hours booking" },
+      { key: "message", label: "What the visitor wrote", lines: true, required: true, sample: "Hi, could we book Blanche from 9 to 11 p.m. on a Friday?" },
+    ],
+  },
+  {
+    key: "owner_hand_refund",
+    title: "A refund to give back by hand",
+    group: "Notices to the studio",
+    when: "When a booking paid at the studio is cancelled early enough to be refunded.",
+    subject: "ACTION NEEDED: refund by hand for {{reference}}",
+    body: lines("{{customer}} cancelled booking {{reference}} early enough to be refunded.", "", "{{refund}}", "Refund the customer by hand, then record the refund on the appointment's page."),
+    parts: [
+      CUSTOMER,
+      NOTICE_REFERENCE,
+      {
+        key: "refund",
+        label: "How much of what was paid at the studio is refunded, by the rental terms",
+        required: true,
+        sample: "Of what was paid at the studio, $136.50 is refunded by the rental terms, less the 5% fee: $129.68. The site cannot send that back.",
+      },
+    ],
+  },
+  {
+    key: "owner_refund_sent",
+    title: "A refund was sent",
+    group: "Notices to the studio",
+    when: "When a refund reaches the card processor.",
+    subject: "Refund {{amount}} for {{reference}}",
+    body: "{{refund}}",
+    parts: [
+      AMOUNT("The amount refunded", "$99.05"),
+      NOTICE_REFERENCE,
+      CUSTOMER,
+      {
+        key: "refund",
+        label: "The refund in a sentence: how much, whether it was automatic, the booking, the client and what it was for",
+        required: true,
+        sample: "An automatic refund of $99.05 was sent for booking VS-7K2M9Q (Jane Smith).",
+      },
+    ],
+  },
+  {
+    key: "owner_refund_failed",
+    title: "A refund failed",
+    group: "Notices to the studio",
+    when: "When a card refund could not be sent. The site tries it again by itself.",
+    subject: "ACTION NEEDED: refund failed for {{reference}}",
+    body: lines(
+      "A refund of {{amount}} for booking {{reference}} ({{customer}}) could not be sent.",
+      "",
+      "Reason: {{reason}}",
+      "",
+      "The site tries it again by itself. If it keeps failing, refund the payment in Square, then press “Refunded it in Square” beside it on the admin's overview, so that the site stops trying.",
+    ),
+    parts: [
+      AMOUNT("The amount to refund", "$99"),
+      NOTICE_REFERENCE,
+      CUSTOMER,
+      { key: "reason", label: "Why the card processor refused it", sample: "The card has expired." },
+    ],
+  },
+  {
+    key: "owner_refund_waiting",
+    title: "A refund is waiting",
+    group: "Notices to the studio",
+    when: "When a refund cannot be sent with the card processor set up now.",
+    subject: "A refund for {{reference}} is waiting",
+    body: lines(
+      "A refund of {{amount}} for booking {{reference}} ({{customer}}) has not been sent.",
+      "",
+      "{{reason}}",
+      "",
+      "The client was told it has not reached their card yet. It is listed on the admin's overview until it goes through.",
+    ),
+    parts: [
+      AMOUNT("The amount to refund", "$20"),
+      NOTICE_REFERENCE,
+      CUSTOMER,
+      { key: "reason", label: "Why it cannot be sent now", required: true, sample: "The payment was made in test mode, and the site now uses the live account." },
+    ],
+  },
+  {
+    key: "owner_capture_failed",
+    title: "A card payment not taken yet",
+    group: "Notices to the studio",
+    when: "When the amount reserved on a client's card could not be taken yet. The site keeps trying.",
+    subject: "Payment not taken yet for {{reference}}",
+    body: lines(
+      "The card for booking {{reference}} ({{customer}}) has {{amount}} reserved on it, and the booking is confirmed, but taking the money did not go through.",
+      "",
+      "Reason: {{reason}}",
+      "",
+      "The site tries again every time its scheduled task runs. If the money has not been taken by {{given_back}}, Square gives the amount back to the card and the booking is unpaid: then take the payment at the studio, or cancel the booking.",
+    ),
+    parts: [
+      AMOUNT("The amount reserved on the card", "$144"),
+      NOTICE_REFERENCE,
+      CUSTOMER,
+      { key: "reason", label: "Why the card processor did not take it", sample: "The card was declined." },
+      { key: "given_back", label: "When Square gives the reserved amount back to the card", required: true, sample: "Sun, Dec 20, 2026, 10:00 AM" },
+    ],
+  },
+  {
+    key: "owner_reservation_lapsed",
+    title: "A reserved amount lapsed",
+    group: "Notices to the studio",
+    when: "When the amount reserved on a card lapsed before it could be taken, and the booking is still to pay.",
+    subject: "ACTION NEEDED: {{reference}} was not paid",
+    body: lines(
+      "The {{amount}} reserved on the card for booking {{reference}} ({{customer}}) lapsed before it could be taken: Square gave it back to the card, and nothing was charged.",
+      "",
+      "The booking still stands, and {{due}} is still to pay. Take the payment at the studio and record it on the appointment's page, or email the client a payment link from there, or cancel the booking. The client was told that their card was not charged and that the studio will be in touch.",
+    ),
+    parts: [
+      AMOUNT("The amount that was reserved on the card", "$144"),
+      NOTICE_REFERENCE,
+      CUSTOMER,
+      { key: "due", label: "What the booking still has to pay", required: true, sample: "$176" },
+    ],
+  },
+  {
+    key: "owner_unseen_link",
+    title: "A payment link to check",
+    group: "Notices to the studio",
+    when: "When a booking ends while the site cannot tell whether its payment link was paid.",
+    subject: "CHECK THE PAYMENT LINK of {{reference}}",
+    body: "{{what_happened}}",
+    parts: [
+      NOTICE_REFERENCE,
+      CUSTOMER,
+      {
+        key: "what_happened",
+        label: "How the booking ended, why the site cannot tell whether the link was paid, and what to do in Square and on the appointment's page",
+        lines: true,
+        required: true,
+        sample:
+          "Jane Smith's booking VS-7K2M9Q was cancelled while the card processor could not say whether its payment link for $40 had been paid.\n\nIf it was paid, the payment is refunded to the card in full once the processor tells the site, and the client was told so. The site keeps asking.",
+      },
+    ],
+  },
+  {
+    key: "owner_membership_refund",
+    title: "A membership's first month to refund",
+    group: "Notices to the studio",
+    when: "When a membership could not be set up after its first month was paid, and the refund did not go through.",
+    subject: "ACTION NEEDED: refund the first month of membership {{code}}",
+    body: lines(
+      "{{customer}} paid {{amount}} for the first month of membership {{code}}, but the monthly payments could not be set up with the card, so the membership was not started.",
+      "",
+      "The refund of that payment did not go through either: {{reason}}",
+      "",
+      "Refund the payment in Square by hand. The client was told that the studio will refund it.",
+    ),
+    parts: [
+      CUSTOMER,
+      AMOUNT("The first month's payment", "$300"),
+      MEMBER_CODE,
+      { key: "reason", label: "Why the refund did not go through", sample: "The card was declined." },
+    ],
+  },
+  {
+    key: "owner_membership_problem",
+    title: "A membership's payment did not go through",
+    group: "Notices to the studio",
+    when: "When Square could not take a month's payment, or stopped a membership's monthly payments.",
+    subject: "ACTION NEEDED: membership {{code}} was not paid",
+    body: lines(
+      "{{customer}}'s membership {{code}} ({{plan}}): {{problem}}",
+      "",
+      "No hours were added for it. The member was told that the studio will be in touch. A month Square takes later is recorded, and its hours added, by itself.",
+    ),
+    parts: [
+      CUSTOMER,
+      MEMBER_CODE,
+      PLAN,
+      { key: "problem", label: "What went wrong", required: true, sample: "The payment of $300 for the month from Monday, January 18, 2027 did not go through." },
+    ],
+  },
+  {
+    key: "owner_membership_unfinished",
+    title: "A membership not finished",
+    group: "Notices to the studio",
+    when: "When a client pressed to join and no answer came about their card, so the membership was not started: Square may hold a payment to refund.",
+    subject: "CHECK SQUARE: membership {{code}} was not finished",
+    body: lines(
+      "{{customer}} pressed to join {{plan}} ({{amount}} a month), and no answer came from the card processor about their card, so the membership was not started.",
+      "",
+      "Look in Square for a payment of {{amount}} with the reference {{code}}. If there is one, refund it there: the client was told they would not be charged twice, not that they were not charged.",
+    ),
+    parts: [CUSTOMER, PLAN, AMOUNT("The monthly price", "$300"), MEMBER_CODE],
+  },
 ];
+
+export const EMAIL_TEMPLATES: Readonly<Record<TemplateKey, EmailTemplateSpec>> = Object.fromEntries(
+  [...TEMPLATES, ...NOTICES].map((template) => [template.key, template]),
+) as Record<TemplateKey, EmailTemplateSpec>;
 
 // ── Filling a template in ────────────────────────────────────────────────────
 

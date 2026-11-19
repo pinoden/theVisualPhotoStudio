@@ -3,7 +3,7 @@ import Link from "next/link";
 import { connection } from "next/server";
 import { Suspense } from "react";
 import { getDb } from "@/db/client";
-import { STUDIO_NOTICES, TEMPLATE_GROUPS } from "@/lib/email-templates";
+import { TEMPLATE_GROUPS } from "@/lib/email-templates";
 import { listEmailTemplates } from "@/server/email-templates";
 import { requireOwner } from "@/server/session";
 import { AdminFrame, AdminLoading } from "../frame";
@@ -27,9 +27,10 @@ async function EmailList({ searchParams }: Pick<PageProps<"/admin/emails">, "sea
   return (
     <AdminFrame active="/admin/emails" title="Emails" query={await searchParams}>
       <p className="admin-intro">
-        The emails the site sends clients by itself. Each is sent in the site&apos;s own wording until you change it, and
-        in yours from then on: a change reaches the emails sent after you save it. The site fills in each booking&apos;s
-        details, such as the client&apos;s name, the time and what was paid, wherever you put them.
+        The emails the site sends by itself, to clients and, at the end, to the studio. Each is sent in the site&apos;s own
+        wording until you change it, and in yours from then on: a change reaches the emails sent after you save it. The
+        site fills in each booking&apos;s details, such as the client&apos;s name, the time and what was paid, wherever you
+        put them.
       </p>
       {TEMPLATE_GROUPS.map((group) => (
         <div className="admin-card" key={group}>
@@ -64,20 +65,6 @@ async function EmailList({ searchParams }: Pick<PageProps<"/admin/emails">, "sea
           </div>
         </div>
       ))}
-      <div className="admin-card">
-        <h3>Notices to the studio</h3>
-        <p className="admin-intro">
-          The site also emails the studio when something needs it. These keep the site&apos;s wording, as they say what
-          the site did and what to do next.
-        </p>
-        <ul className="email-notices">
-          {STUDIO_NOTICES.map((notice) => (
-            <li key={notice.title}>
-              <strong>{notice.title}.</strong> {notice.when}
-            </li>
-          ))}
-        </ul>
-      </div>
     </AdminFrame>
   );
 }

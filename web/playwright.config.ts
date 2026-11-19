@@ -44,6 +44,9 @@ export default defineConfig({
     reuseExistingServer: Boolean(process.env.E2E_REUSE_SERVER),
     timeout: 180_000,
     env: {
+      // Never a real database, whatever web/.env.local says (`neon link` writes a staging DATABASE_URL there): Next.js
+      // does not override a variable that is already set, so an empty one keeps the embedded database below.
+      DATABASE_URL: "",
       PGLITE_DATA_NAME: NAME,
       // The site's own address, as production has it: the addresses in pages' metadata and emails are made with it.
       SITE_URL: `http://localhost:${PORT}`,
