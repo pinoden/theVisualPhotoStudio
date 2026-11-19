@@ -41,7 +41,7 @@
     "@testing-library/react": "^16.3.3",
     "@testing-library/user-event": "^14.6.10",
     "@types/luxon": "^3.7.6",
-    "@types/node": "^24.19.2",
+    "@types/node": "^26.6.6",
     "@types/pg": "^8.23.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
