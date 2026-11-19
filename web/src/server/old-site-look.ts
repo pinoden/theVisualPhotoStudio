@@ -13,8 +13,11 @@ import { listPages, listPageVersions, loadPageForEditing, savePageDraft } from "
  * the ones `old-site-import.ts` brought into the media library, found here by
  * their names there; nothing is uploaded. What changes, page by page:
  *
- *  - the home page: Studio Paris's first photo across the top, behind the
- *    title, as the old site's slideshow opened; the studios as arches; while
+ *  - the home page: the old site's slideshow of the three studios across the
+ *    top, with arrows (the owner, later that day: "the original website has
+ *    all 3 studios being rotated with arrows"), and the title band under it
+ *    as words only, as the old site's first words were; the studios as
+ *    arches; while
  *    the season lasts, the Christmas setups with the old site's words about
  *    them; and the old home page's gallery of ten photos, under the old
  *    site's line about Instagram;
@@ -37,7 +40,9 @@ export const LOOK_ID = "old-site-look";
 
 /** The library's names of the photos placed here. */
 export const LOOK_PHOTOS = {
-  homeHero: "studio-paris-01.jpg",
+  slideParis: "studio-paris-01.jpg",
+  slideBlanche: "studio-blanche-01.jpg",
+  slideDayglow: "studio-dayglow-01.jpg",
   christmasLeft: "christmas-setup-01.webp",
   christmasRight: "christmas-setup-02.webp",
   servicesLead: "photography-portfolio-01.jpg",
@@ -64,6 +69,17 @@ export const CHRISTMAS_WORDS = {
 
 /** The old site's line over its home page's gallery. */
 export const INSTAGRAM_WORDS = { eyebrow: "Follow us on Instagram", heading: "@thevisuals.photostudio" };
+
+/**
+ * The old site's slideshow at the top of its home page (read on 2026-11-19): a slide for each studio, in its order,
+ * with its words as they were and what stayed in view of each photo. Its buttons led to the old booking page; here
+ * each books its own studio.
+ */
+export const SLIDES = [
+  { photo: "slideParis", studio: "paris", title: "Studio Paris", text: "a romantic space with vintage charm\nnow available for bookings", focus: "bottom" },
+  { photo: "slideBlanche", studio: "blanche", title: "Studio Blanche", text: "a modern, all-white space with sleek design", focus: "center" },
+  { photo: "slideDayglow", studio: "dayglow", title: "Studio Dayglow", text: "a natural, boho-style studio with warm vibes", focus: "center" },
+] as const satisfies readonly { photo: keyof typeof LOOK_PHOTOS; studio: string; title: string; text: string; focus: string }[];
 
 /** What the changes need from the library: the photos' ids by their names, and the home gallery's collection. */
 export interface LookLibrary {
@@ -122,7 +138,26 @@ export function homeLook(loaded: StoredBlock[], library: LookLibrary, today: str
   const changes: string[] = [];
   const taken = idsOf(blocks);
 
-  pictureBehind(firstOf(blocks, "Banner"), library.photos.homeHero, "Studio Paris's first photo across the top, behind the title", changes);
+  // The old site's slideshow across the top: all three slides or none. The title band follows it, as the old site's
+  // first words did: words only, without the Paris photo an earlier run put behind them, which the slideshow opens
+  // with now. A picture the owners chose stays.
+  const slideshowId = `${LOOK_ID}-slideshow`;
+  const slides = SLIDES.flatMap((slide) => {
+    const picture = library.photos[slide.photo];
+    return picture
+      ? [{ picture, focus: slide.focus, title: slide.title, text: slide.text, buttonLabel: "Book Now", buttonLink: `/book?studio=${slide.studio}` }]
+      : [];
+  });
+  if (!taken.has(slideshowId) && slides.length === SLIDES.length) {
+    blocks.unshift(makeBlock("Slideshow", slideshowId, { slides, shade: "light" }));
+    changes.push("the three studios one after another across the top, with arrows");
+    const banner = firstOf(blocks, "Banner");
+    if (banner && (banner.props.picture === library.photos.slideParis || banner.props.look === "hero")) {
+      if (banner.props.picture === library.photos.slideParis) banner.props.picture = "";
+      if (banner.props.look === "hero") banner.props.look = "page";
+      changes.push("the title band under it, as words only");
+    }
+  }
 
   const cards = firstOf(blocks, "StudioCards");
   if (cards && cards.props.look !== "arches") {

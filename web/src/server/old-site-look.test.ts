@@ -89,11 +89,22 @@ describe("showing the old website's pictures its way", () => {
     expect(result.pages.every((page) => page.versionBefore! >= 1)).toBe(true);
 
     const home = await draftOf("");
-    expect(home[0].type).toBe("Banner");
-    expect(home[0].props.picture).toBe(ids[LOOK_PHOTOS.homeHero]);
+    // The old site's slideshow across the top: a slide for each studio, in its order, each booking its own studio.
+    expect(home[0].type).toBe("Slideshow");
+    expect(home[0].props.id).toBe("old-site-look-slideshow");
+    const slides = home[0].props.slides as Record<string, unknown>[];
+    expect(slides.map((slide) => [slide.picture, slide.title, slide.buttonLabel, slide.buttonLink])).toEqual([
+      [ids[LOOK_PHOTOS.slideParis], "Studio Paris", "Book Now", "/book?studio=paris"],
+      [ids[LOOK_PHOTOS.slideBlanche], "Studio Blanche", "Book Now", "/book?studio=blanche"],
+      [ids[LOOK_PHOTOS.slideDayglow], "Studio Dayglow", "Book Now", "/book?studio=dayglow"],
+    ]);
+    expect(slides[0]).toMatchObject({ text: "a romantic space with vintage charm\nnow available for bookings", focus: "bottom" });
+    // The title band under it, as words only, as the old site's first words were.
+    expect(home[1].type).toBe("Banner");
+    expect(home[1].props).toMatchObject({ look: "page", picture: "" });
     expect(find(home, (block) => block.type === "StudioCards")!.props.look).toBe("arches");
     // The Christmas setups right under the title, a photo either side of the old site's words.
-    expect(home[1].props.id).toBe("old-site-look-christmas");
+    expect(home[2].props.id).toBe("old-site-look-christmas");
     const christmas = find(home, (block) => block.type === "Columns" && block.props.id.startsWith("old-site-look-christmas"))!;
     expect((christmas.props.one as StoredBlock[])[0].props.picture).toBe(ids[LOOK_PHOTOS.christmasLeft]);
     expect((christmas.props.two as StoredBlock[])[0].props.text).toContain("<strong>Studio Paris</strong> will feature");
@@ -143,10 +154,12 @@ describe("showing the old website's pictures its way", () => {
     if (!result.ok) throw new Error(result.message);
     expect(result.pages.find((page) => page.path === "/rates")!.skipped).toBe("the page has changes waiting for the owners: nothing was changed");
     expect((await loadPageForEditing(world.db, owner, rates, NOW))!.content.meta.title).toBe("Our prices");
+    // The slideshow opens the page, and the picture the owners put behind the title stays there.
     const home = await draftOf("");
-    expect(home[0].props.picture).toBe(theirs);
-    expect(home[0].props.picture).not.toBe(ids[LOOK_PHOTOS.homeHero]);
-    expect(result.pages.find((page) => page.path === "/")!.changes).not.toContain("Studio Paris's first photo across the top, behind the title");
+    expect(home[0].type).toBe("Slideshow");
+    const banner = find(home, (block) => block.type === "Banner")!;
+    expect(banner.props.picture).toBe(theirs);
+    expect(banner.props.picture).not.toBe(ids[LOOK_PHOTOS.slideParis]);
   });
 
   it("says which photos are not in the library, and places the others", async () => {
@@ -165,6 +178,29 @@ describe("showing the old website's pictures its way", () => {
     const staff = await world.addUser("staff@studio.test", "staff", "Sam");
     const result = await applyOldSiteLook(world.db, staff, NOW);
     expect(result.ok).toBe(false);
+  });
+});
+
+describe("the home page's slideshow", () => {
+  const all = { photos: { slideParis: "paris", slideBlanche: "blanche", slideDayglow: "dayglow" } };
+  // The home page after the first run: Studio Paris's photo behind its title, across the screen.
+  const page: StoredBlock[] = [{ type: "Banner", props: { id: "home-1", look: "hero", title: "Welcome", picture: "paris" } }];
+
+  it("opens the page, and the title band under it keeps its words only", () => {
+    const { blocks, changes } = homeLook(page, all, "2027-02-01");
+    expect(blocks.map((block) => block.type)).toEqual(["Slideshow", "Banner"]);
+    expect(blocks[1].props).toMatchObject({ look: "page", picture: "", title: "Welcome" });
+    expect(changes).toEqual(["the three studios one after another across the top, with arrows", "the title band under it, as words only"]);
+    // What was loaded is not changed.
+    expect(page[0].props).toMatchObject({ look: "hero", picture: "paris" });
+    // A second time, nothing.
+    expect(homeLook(blocks, all, "2027-02-01").changes).toEqual([]);
+  });
+
+  it("is added with all three slides or not at all", () => {
+    const { blocks, changes } = homeLook(page, { photos: { slideParis: "paris", slideBlanche: "blanche" } }, "2027-02-01");
+    expect(blocks).toEqual(page);
+    expect(changes).toEqual([]);
   });
 });
 

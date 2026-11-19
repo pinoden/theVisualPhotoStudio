@@ -1,7 +1,7 @@
 import type { BlockSpec } from "./block";
 import type { Fields } from "./fields";
 import { Banner, Columns, Divider, Section, Spacer } from "./layout";
-import { Gallery, Logos, Picture, Video } from "./pictures";
+import { Gallery, Logos, Picture, Slideshow, Video } from "./pictures";
 import { AddonPrices, ContactDetails, ContactForm, LocationCard, MembershipPlans, RateCards, StudioCards, StudioDetails } from "./site-data";
 import { Buttons, Cards, Heading, Questions, Reviews, Table, Text } from "./text";
 
@@ -24,6 +24,7 @@ export const BLOCKS = {
   Buttons,
   Picture,
   Gallery,
+  Slideshow,
   Logos,
   Video,
   Cards,

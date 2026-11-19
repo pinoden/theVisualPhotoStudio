@@ -48,7 +48,7 @@ export const Banner = defineBlock({
         alt={behind.alt}
         fill
         sizes="100vw"
-        quality={80}
+        quality={75}
         loading="eager"
         fetchPriority="high"
         style={cssVars({ focus: [focus, focusPhone || null] })}

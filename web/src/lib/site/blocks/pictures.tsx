@@ -4,10 +4,10 @@ import { PictureRow } from "@/components/site/PictureRow";
 import { VideoPlayer } from "@/components/site/VideoPlayer";
 import type { Picture as LibraryPicture } from "@/server/media";
 import { parseVideo, VIDEO_SERVICES } from "../video";
-import { defineBlock } from "./block";
+import { cssVars, defineBlock } from "./block";
 import { EditorNote, SiteAnchor } from "./shared";
 
-/** The blocks that are pictures: one picture, a gallery of them, a row of logos, and a video. */
+/** The blocks that are pictures: one picture, a gallery of them, a slideshow, a row of logos, and a video. */
 
 /** The shapes a picture can be cropped to, as width over height. "original" keeps the picture's own. */
 const SHAPES = { original: "As it is", wide: "Wide (16:9)", photo: "Photo (3:2)", standard: "Standard (4:3)", square: "Square", tall: "Tall (4:5)" } as const;
@@ -116,6 +116,99 @@ export const Gallery = defineBlock({
           </ul>
         )}
       </div>
+    );
+  },
+});
+
+/**
+ * Pictures across the page one at a time, each with its own words and button
+ * over it, and arrows to go from one to the next: the old website's home page
+ * opened with its three studios this way (the owner, 2026-11-19). It is the
+ * sideways row (`PictureRow`) with one slide in view, so a finger swipes it
+ * on a phone, and the arrows go from the last slide back to the first. It
+ * does not move by itself, as the old one did not.
+ */
+export const Slideshow = defineBlock({
+  label: "Slideshow",
+  group: "pictures",
+  fields: {
+    slides: {
+      kind: "list",
+      label: "Slides",
+      max: 8,
+      title: "title",
+      of: {
+        picture: { kind: "picture", label: "Picture" },
+        focus: { kind: "choice", label: "What stays in view of the picture", options: FOCUS, start: "center" },
+        title: { kind: "text", label: "Title", max: 80, start: "" },
+        text: { kind: "text", label: "Words under the title, in italics: each line on its own", max: 200, start: "", lines: true },
+        buttonLabel: { kind: "text", label: "Words on the button", max: 40, start: "Book Now" },
+        buttonLink: { kind: "link", label: "Where it leads", start: "/book" },
+      },
+      start: [],
+    },
+    shade: {
+      kind: "choice",
+      label: "Over the pictures",
+      options: { light: "A pale veil, with dark words", dark: "A dark shade, with white words" },
+      start: "light",
+    },
+  },
+  render: ({ slides, shade, site, editing }) => {
+    // A slide whose picture left the library is not shown.
+    const shown = slides.flatMap((slide) => {
+      const picture = slide.picture ? site.pictures[slide.picture] : undefined;
+      return picture ? [{ ...slide, picture }] : [];
+    });
+    if (shown.length === 0) return <EditorNote editing={editing}>Slideshow: add its slides in the panel, each with a picture.</EditorNote>;
+    return (
+      <section className="blk blk-slideshow" data-shade={shade}>
+        <PictureRow
+          label="Slideshow"
+          columns={1}
+          columnsPhone={1}
+          ratio="auto"
+          gap="none"
+          count={shown.length}
+          listClassName="slideshow-list"
+          backLabel="Previous slide"
+          nextLabel="Next slide"
+        >
+          {shown.map((slide, index) => (
+            <li key={index} className="slide" aria-label={`${index + 1} of ${shown.length}`}>
+              {/* Every slide's picture is asked for at once, so that the next is there when an arrow moves to it; the first before the others. */}
+              <Image
+                className="slide-picture"
+                src={slide.picture.url}
+                alt={slide.picture.alt}
+                fill
+                sizes="100vw"
+                quality={75}
+                loading="eager"
+                fetchPriority={index === 0 ? "high" : undefined}
+                style={cssVars({ focus: [slide.focus] })}
+              />
+              <div className="slide-content">
+                {slide.title && <h2>{slide.title}</h2>}
+                {slide.text
+                  .split("\n")
+                  .map((line) => line.trim())
+                  .filter((line) => line !== "")
+                  .map((line, n) => (
+                    <p key={n}>
+                      <em>{line}</em>
+                    </p>
+                  ))}
+                {slide.buttonLabel && (slide.buttonLink !== "" || editing) && (
+                  <SiteAnchor href={slide.buttonLink} editing={editing} className="btn btn-outline">
+                    {slide.buttonLabel}
+                  </SiteAnchor>
+                )}
+              </div>
+            </li>
+          ))}
+        </PictureRow>
+      </section>
     );
   },
 });
