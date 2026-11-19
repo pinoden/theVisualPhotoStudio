@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { createMemoryDb, isTransaction, openOnce, readyOrClosed, together, type DbLike } from "./client";
+import { createMemoryDb, isTransaction, openOnce, readyOrClosed, together, withVerifiedSsl, type DbLike } from "./client";
 
 describe("opening the database", () => {
   it("closes a database that was refused once opened, so that nothing of it stays open", async () => {
@@ -44,6 +44,16 @@ describe("opening the database", () => {
     now = 1_000_000;
     await expect(open()).resolves.toBe("db");
     expect(attempts).toBe(2);
+  });
+});
+
+describe("the address of a database server", () => {
+  it("spells out the certificate check the driver does anyway, and leaves every other address as it is", () => {
+    const base = "postgresql://user:secret@ep-x.us-east-1.aws.neon.tech/neondb";
+    expect(withVerifiedSsl(`${base}?sslmode=require&channel_binding=require`)).toBe(`${base}?sslmode=verify-full&channel_binding=require`);
+    expect(withVerifiedSsl(`${base}?channel_binding=require&sslmode=prefer`)).toBe(`${base}?channel_binding=require&sslmode=verify-full`);
+    expect(withVerifiedSsl(`${base}?sslmode=verify-ca`)).toBe(`${base}?sslmode=verify-full`);
+    for (const kept of [base, `${base}?sslmode=disable`, `${base}?sslmode=verify-full`, `${base}?sslmode=required`]) expect(withVerifiedSsl(kept)).toBe(kept);
   });
 });
 
