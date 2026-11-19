@@ -186,10 +186,12 @@ export function servicesLook(loaded: StoredBlock[], library: LookLibrary): PageL
     blocks.splice(banner + 1, 0, section);
     changes.push("the portfolio's first photo, large, under the title");
   }
-  // The portfolio the old import put on the page, in one row that scrolls sideways.
+  // The portfolio the old import put on the page, in one row that scrolls sideways. Its number for phones is left as it
+  // is (none): a row shows one at a time on a phone by itself, and code that draws no rows yet keeps two in a line there,
+  // not twenty-five one under another.
   const portfolio = firstOf(blocks, "Gallery", (block) => block.props.id.startsWith("old-site-gallery") && block.props.source === "collection");
   if (portfolio && portfolio.props.layout !== "row") {
-    Object.assign(portfolio.props, { layout: "row", columns: 3, columnsPhone: 1, gap: "small" });
+    Object.assign(portfolio.props, { layout: "row", columns: 3, gap: "small" });
     changes.push("the portfolio in one row that scrolls sideways");
   }
   return { blocks, changes };

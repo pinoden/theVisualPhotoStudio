@@ -106,7 +106,8 @@ describe("showing the old website's pictures its way", () => {
     const services = await draftOf("services");
     expect(services[1].props.id).toBe("old-site-look-lead");
     expect(find(services, (block) => block.type === "Picture")!.props).toMatchObject({ picture: ids[LOOK_PHOTOS.servicesLead], shape: "standard", size: "large" });
-    expect(find(services, (block) => block.props.id === "old-site-gallery-1")!.props).toMatchObject({ layout: "row", columns: 3, columnsPhone: 1 });
+    // One at a time on a phone comes from the row itself: a number for phones would stack the photos where rows are not drawn yet.
+    expect(find(services, (block) => block.props.id === "old-site-gallery-1")!.props).toMatchObject({ layout: "row", columns: 3, columnsPhone: null });
 
     expect((await draftOf("rates"))[0].props.picture).toBe(ids[LOOK_PHOTOS.ratesBand]);
 
