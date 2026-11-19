@@ -196,7 +196,7 @@ function drawReceipt(sheet: Sheet, receipt: Receipt, business: Business): void {
   sheet.row("Payment status", RECEIPT_STATUS_TEXT[receipt.status], { soft: true });
   sheet.space(18);
   sheet.text(
-    "This receipt shows what was actually paid for this booking, at the prices it was booked at. Amounts are in US dollars. Times are Eastern Time.",
+    "This receipt shows the booking at its prices, and what was actually paid and given back for it. Amounts are in US dollars. Times are Eastern Time.",
     { soft: true, size: 8.5 },
   );
 }

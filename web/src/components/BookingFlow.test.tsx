@@ -45,9 +45,9 @@ function rulesFor(studioId: string, weekday: Record<number, number>, weekend: Re
 
 const catalog: Catalog = {
   studios: [
-    { id: B, slug: "blanche", name: "Studio Blanche", tagline: "All white.", description: "", includedGuests: 6, bufferMinutes: 10, color: "#4f7cac", hours, photos: [], facts: NO_FACTS, floorPlan: null },
-    { id: D, slug: "dayglow", name: "Studio Dayglow", tagline: "Boho.", description: "", includedGuests: 6, bufferMinutes: 10, color: "#c9851a", hours, photos: [], facts: NO_FACTS, floorPlan: null },
-    { id: P, slug: "paris", name: "Studio Paris", tagline: "Vintage.", description: "", includedGuests: 4, bufferMinutes: 10, color: "#b4517b", hours, photos: [], facts: NO_FACTS, floorPlan: null },
+    { id: B, slug: "blanche", name: "Studio Blanche", tagline: "All white.", description: "", includedGuests: 6, extraGuests: 6, bufferMinutes: 10, color: "#4f7cac", hours, photos: [], facts: NO_FACTS, floorPlan: null },
+    { id: D, slug: "dayglow", name: "Studio Dayglow", tagline: "Boho.", description: "", includedGuests: 6, extraGuests: 6, bufferMinutes: 10, color: "#c9851a", hours, photos: [], facts: NO_FACTS, floorPlan: null },
+    { id: P, slug: "paris", name: "Studio Paris", tagline: "Vintage.", description: "", includedGuests: 4, extraGuests: 4, bufferMinutes: 10, color: "#b4517b", hours, photos: [], facts: NO_FACTS, floorPlan: null },
   ],
   rules: [
     ...rulesFor(B, { 60: 88, 120: 176, 600: 720 }, { 60: 110, 120: 200, 600: 800 }),
@@ -55,7 +55,7 @@ const catalog: Catalog = {
     ...rulesFor(P, { 60: 68, 120: 136 }),
   ],
   addons: [
-    { id: "addon-people", slug: "extra-people", name: "Extra people", description: "Bigger groups.", priceCents: 3000, studioId: null, maxQuantity: 1, kind: "people" },
+    { id: "addon-people", slug: "extra-guest", name: "Extra guest", description: "Beyond those included.", priceCents: 500, studioId: null, maxQuantity: 20, kind: "people" },
     { id: "addon-pet", slug: "pet-fee", name: "Pet fee", description: "Dayglow only.", priceCents: 4000, studioId: D, maxQuantity: 1, kind: "pet" },
   ],
   settings: { ...DEFAULT_SETTINGS, slotIncrementMinutes: 60, multiStudioPercent: { 2: 20, 3: 22 } },
@@ -66,6 +66,7 @@ const catalog: Catalog = {
     { id: "pack-p-60", studioId: P, durationMinutes: 60, priceCents: 31500, includes: "1–2 outfits, 20 edited images" },
   ],
   accessInfoSent: false,
+  membershipPlans: [],
 };
 
 /** Taken time per studio that the fake server reports. */
@@ -331,7 +332,29 @@ describe("studio-first flow", () => {
     await pickTime("9:00 AM");
     await next();
     expect(screen.queryByRole("checkbox", { name: /Pet fee/ })).toBeNull();
-    expect(screen.getByRole("checkbox", { name: /Extra people/ })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Extra guest" })).toBeTruthy();
+  });
+
+  it("takes extra guests in a number, up to what the studio allows, at $5 each", async () => {
+    render(<BookingFlow catalog={catalog} navigate={nav.push} />);
+    await user.click(studioBox("Studio Paris"));
+    await next();
+    pickDate(WED);
+    await pickDuration("1 hr");
+    await next();
+    await pickTime("9:00 AM");
+    await next();
+    const guests = screen.getByRole("combobox", { name: "Extra guest" }) as HTMLSelectElement;
+    // Paris takes 4 extra guests.
+    expect([...guests.options].map((option) => option.value)).toEqual(["0", "1", "2", "3", "4"]);
+    expect(screen.getByText("Up to 4 extra guests with this studio.")).toBeTruthy();
+    await user.selectOptions(guests, "3");
+    expect(screen.getByText("Extra guest × 3")).toBeTruthy();
+    await fillDetails();
+    await next();
+    await user.click(await screen.findByRole("button", { name: "Confirm & pay $83" }));
+    await waitFor(() => expect(posted).toHaveLength(1));
+    expect(posted[0]).toMatchObject({ addons: [{ addonId: "addon-people", quantity: 3 }], expectedTotalCents: 8300 });
   });
 
   it("returns to the time step with fresh availability when the slot was just taken", async () => {

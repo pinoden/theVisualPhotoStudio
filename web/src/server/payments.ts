@@ -2,6 +2,7 @@
  * Card payments. The rest of the app talks to a PaymentProvider and never to
  * Square directly, so tests and local development can run without credentials.
  */
+import { STUDIO_TIME_ZONE } from "@/lib/domain/time";
 
 export interface ChargeRequest {
   amountCents: number;
@@ -12,6 +13,8 @@ export interface ChargeRequest {
   reference: string;
   note: string;
   buyerEmail: string;
+  /** The processor's customer the payment is for: a membership's first month, whose card is then kept (`saveCard`). */
+  customerId?: string;
   /**
    * Reserve the amount on the card without taking it yet: `capture` takes it,
    * `release` gives it back, and the processor gives it back by itself if
@@ -90,6 +93,52 @@ export type PayLinkState =
   /** No answer, or one that says neither: nothing is known to have changed. */
   | { state: "unknown"; message: string };
 
+/** An answer that is either done, with what it made, or refused, with why (the processor's words, for the record). */
+export type Made<T> = ({ ok: true } & T) | { ok: false; message: string };
+
+/**
+ * What the processor says of a membership's subscription (follow-up 3). Dates are the studio's days, `YYYY-MM-DD`.
+ *  - `pending`: it starts billing on a later day (a membership's first month is paid when it is bought).
+ *  - `active`: it bills each month.
+ *  - `cancelled`: it bills no more; `endsOn` is the end of the month paid for.
+ *  - `stopped`: the processor stopped it, as Square does when a customer's email address is refused.
+ */
+export type SubscriptionState =
+  | {
+      state: "pending" | "active" | "cancelled" | "stopped";
+      /** The last day of the months paid for, when it has billed. */
+      paidThrough: string | null;
+      endsOn: string | null;
+      /** The months billed so far, each with whether it was paid. */
+      invoices: { id: string; paid: boolean; amountCents: number; day: string }[];
+    }
+  | { state: "unknown"; message: string };
+
+/**
+ * A membership's billing (follow-up 3): a customer at the processor, the card of the first month's payment kept for
+ * the months after it, and a subscription that charges it monthly. The card is kept by the processor, never by this
+ * site.
+ */
+export interface MembershipBilling {
+  createCustomer(input: { email: string; name: string; idempotencyKey: string }): Promise<Made<{ customerId: string }>>;
+  /** Keep the card of a payment made minutes ago, for the subscription to charge. */
+  saveCard(input: { paymentId: string; customerId: string; idempotencyKey: string }): Promise<Made<{ cardId: string }>>;
+  /**
+   * A price of one of the site's plans at the processor: its plan (made the first time, then reused) and a variation
+   * for this price. A price cannot change under a variation, so a new price is a new variation, and members keep theirs.
+   */
+  createPlanPrice(input: { planName: string; processorPlanId: string | null; priceCents: number; idempotencyKey: string }): Promise<
+    Made<{ processorPlanId: string; variationId: string }>
+  >;
+  /** Charge the kept card at the variation's price each month from `startDate` on. */
+  subscribe(input: { customerId: string; cardId: string; variationId: string; startDate: string; idempotencyKey: string }): Promise<
+    Made<{ subscriptionId: string }>
+  >;
+  /** Bill no more. The month paid for runs to its end, which the answer gives when the processor says. */
+  cancelSubscription(subscriptionId: string): Promise<Made<{ endsOn: string | null }>>;
+  subscriptionState(subscriptionId: string): Promise<SubscriptionState>;
+}
+
 export interface PaymentProvider {
   /**
    * Which processor, and with which keys: Square's sandbox and its live account are two processors, for a payment or a
@@ -97,6 +146,7 @@ export interface PaymentProvider {
    * asks one about what the other made.
    */
   name: "square" | "square-sandbox" | "mock";
+  memberships: MembershipBilling;
   charge(request: ChargeRequest): Promise<ChargeResult>;
   refund(request: RefundRequest): Promise<RefundResult>;
   /** Take an amount reserved with `reserve`. Taking one already taken succeeds. */
@@ -110,6 +160,12 @@ export interface PaymentProvider {
   payLinkState(link: { linkId: string; orderId: string }): Promise<PayLinkState>;
   /** Withdraw a link so that it can no longer be paid. Succeeds for a link that is already gone. */
   cancelPayLink(linkId: string): Promise<{ ok: true } | { ok: false; message: string }>;
+  /**
+   * The processor's own page of a payment it took: Square's receipt, which shows the receipt number its Dashboard finds
+   * the payment by (follow-up 5). Square documents no address of a payment's page in its Dashboard, and gives the
+   * receipt's only once the payment is completed.
+   */
+  receiptOf(paymentId: string): Promise<Made<{ url: string }>>;
 }
 
 export const MOCK_TOKEN_OK = "mock-card-ok";
@@ -121,9 +177,63 @@ export const MOCK_TOKEN_DECLINED = "mock-card-declined";
  */
 export const MOCK_TOKEN_REFUNDS_REFUSED = "mock-card-refunds-refused";
 
+/**
+ * The day `months` months after `day` (both `YYYY-MM-DD`), on the same date, or on the month's last day when it is
+ * shorter: what a subscription started on the 31st bills on in February. Counted from the first day each time, as
+ * Square's billing anchor is, so March is the 31st again.
+ */
+export function monthsAfter(day: string, months: number): string {
+  const [year, month, date] = day.split("-").map(Number);
+  const first = new Date(Date.UTC(year, month - 1 + months, 1));
+  const last = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0)).getUTCDate();
+  first.setUTCDate(Math.min(date, last));
+  return first.toISOString().slice(0, 10);
+}
+
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * The pretend processor's memberships. It keeps nothing: a subscription's first day and price are in its id, and it
+ * bills every month from that day on, each month paid, so that local development sees months go by as days pass.
+ */
+const mockMemberships: MembershipBilling = {
+  async createCustomer(input) {
+    return { ok: true, customerId: `mock_customer_${input.idempotencyKey}` };
+  },
+  async saveCard(input) {
+    if (!input.paymentId.startsWith("mock_")) return { ok: false, message: "Unknown payment." };
+    return { ok: true, cardId: `mock_card_${input.idempotencyKey}` };
+  },
+  async createPlanPrice(input) {
+    return {
+      ok: true,
+      processorPlanId: input.processorPlanId ?? `mock_plan_${input.idempotencyKey}`,
+      variationId: `mock_variation_${input.priceCents}_${input.idempotencyKey}`,
+    };
+  },
+  async subscribe(input) {
+    const price = /^mock_variation_(\d+)_/.exec(input.variationId)?.[1];
+    if (!price || !ISO_DAY.test(input.startDate)) return { ok: false, message: "Unknown plan." };
+    return { ok: true, subscriptionId: `mock_sub_${input.startDate}_${price}_${input.idempotencyKey}` };
+  },
+  async cancelSubscription() {
+    return { ok: true, endsOn: null };
+  },
+  async subscriptionState(subscriptionId) {
+    const match = /^mock_sub_(\d{4}-\d{2}-\d{2})_(\d+)_/.exec(subscriptionId);
+    if (!match) return { state: "unknown", message: "Unknown subscription." };
+    const [, start, price] = match;
+    const today = new Date().toISOString().slice(0, 10);
+    const invoices: { id: string; paid: boolean; amountCents: number; day: string }[] = [];
+    for (let n = 0; monthsAfter(start, n) <= today; n++) invoices.unshift({ id: `${subscriptionId}_${n}`, paid: true, amountCents: Number(price), day: monthsAfter(start, n) });
+    return { state: invoices.length > 0 ? "active" : "pending", paidThrough: invoices.length > 0 ? monthsAfter(start, invoices.length) : null, endsOn: null, invoices };
+  },
+};
+
 /** Pretend card processor for development and tests. Moves no money. */
 export const mockProvider: PaymentProvider = {
   name: "mock",
+  memberships: mockMemberships,
   async charge(request) {
     if (request.token === MOCK_TOKEN_OK) return { ok: true, paymentId: `mock_${request.idempotencyKey}` };
     if (request.token === MOCK_TOKEN_DECLINED) return { ok: false, message: "Card declined." };
@@ -155,6 +265,9 @@ export const mockProvider: PaymentProvider = {
   async cancelPayLink() {
     return { ok: true };
   },
+  async receiptOf() {
+    return { ok: false, message: "This payment was made in test mode, with the pretend card processor, which has no receipt page: no card was charged." };
+  },
 };
 
 interface SquareConfig {
@@ -184,7 +297,7 @@ interface SquareAnswer {
   ok: boolean;
   status: number;
   data: {
-    payment?: { id?: string; status?: string; amount_money?: SquareMoney };
+    payment?: { id?: string; status?: string; amount_money?: SquareMoney; receipt_url?: string; receipt_number?: string };
     refund?: { id?: string; status?: string };
     payment_link?: { id?: string; order_id?: string; url?: string };
     order?: {
@@ -192,6 +305,17 @@ interface SquareAnswer {
       /** What was paid with. For a paid link: one tender, whose payment_id is the Payment. */
       tenders?: { id?: string; payment_id?: string; amount_money?: SquareMoney }[];
     };
+    // Memberships. The shapes are what Square's sandbox returned on 2026-11-18.
+    customer?: { id?: string };
+    card?: { id?: string };
+    catalog_object?: { id?: string };
+    subscription?: { id?: string; status?: string; charged_through_date?: string; canceled_date?: string; start_date?: string; customer_id?: string };
+    invoices?: {
+      id?: string;
+      status?: string;
+      subscription_id?: string;
+      payment_requests?: { computed_amount_money?: SquareMoney; due_date?: string }[];
+    }[];
     errors?: SquareError[];
   };
 }
@@ -282,8 +406,116 @@ export function squareProvider(config: SquareConfig): PaymentProvider {
     return { ok: false, message: inSquaresWords(answer.data.errors ?? []) || `Payment status ${answer.data.payment?.status ?? "missing"}, HTTP ${answer.status}` };
   }
 
+  /** Square's words for a refusal, or what was missing from an answer. */
+  const refused = (answer: SquareAnswer | null) =>
+    !answer ? "No answer from Square" : inSquaresWords(answer.data.errors ?? []) || `Square answered HTTP ${answer.status}`;
+
+  const memberships: MembershipBilling = {
+    async createCustomer(input) {
+      const [given, ...rest] = input.name.trim().split(/\s+/);
+      // No phone number: Square refuses a whole customer over a number it does not like, and the site keeps the phone.
+      const answer = await post("/v2/customers", {
+        idempotency_key: input.idempotencyKey,
+        given_name: given ?? "",
+        family_name: rest.join(" "),
+        email_address: input.email,
+      });
+      const id = answer?.ok ? answer.data.customer?.id : undefined;
+      return id ? { ok: true, customerId: id } : { ok: false, message: refused(answer) };
+    },
+
+    async saveCard(input) {
+      const answer = await post("/v2/cards", { idempotency_key: input.idempotencyKey, source_id: input.paymentId, card: { customer_id: input.customerId } });
+      const id = answer?.ok ? answer.data.card?.id : undefined;
+      return id ? { ok: true, cardId: id } : { ok: false, message: refused(answer) };
+    },
+
+    async createPlanPrice(input) {
+      let processorPlanId = input.processorPlanId;
+      if (!processorPlanId) {
+        const plan = await post("/v2/catalog/object", {
+          idempotency_key: `${input.idempotencyKey}-plan`,
+          object: { type: "SUBSCRIPTION_PLAN", id: "#plan", subscription_plan_data: { name: input.planName.slice(0, 255), all_items: false } },
+        });
+        processorPlanId = plan?.ok ? (plan.data.catalog_object?.id ?? null) : null;
+        if (!processorPlanId) return { ok: false, message: refused(plan) };
+      }
+      const variation = await post("/v2/catalog/object", {
+        idempotency_key: `${input.idempotencyKey}-price`,
+        object: {
+          type: "SUBSCRIPTION_PLAN_VARIATION",
+          id: "#price",
+          subscription_plan_variation_data: {
+            name: `${input.planName}, ${(input.priceCents / 100).toFixed(2)} a month`.slice(0, 255),
+            subscription_plan_id: processorPlanId,
+            phases: [{ ordinal: 0, cadence: "MONTHLY", pricing: { type: "STATIC", price_money: { amount: input.priceCents, currency: "USD" } } }],
+          },
+        },
+      });
+      const variationId = variation?.ok ? variation.data.catalog_object?.id : undefined;
+      return variationId ? { ok: true, processorPlanId, variationId } : { ok: false, message: refused(variation) };
+    },
+
+    async subscribe(input) {
+      const answer = await post("/v2/subscriptions", {
+        idempotency_key: input.idempotencyKey,
+        location_id: config.locationId,
+        plan_variation_id: input.variationId,
+        customer_id: input.customerId,
+        card_id: input.cardId,
+        start_date: input.startDate,
+        timezone: STUDIO_TIME_ZONE,
+      });
+      const id = answer?.ok ? answer.data.subscription?.id : undefined;
+      return id ? { ok: true, subscriptionId: id } : { ok: false, message: refused(answer) };
+    },
+
+    async cancelSubscription(subscriptionId) {
+      const path = `/v2/subscriptions/${encodeURIComponent(subscriptionId)}`;
+      const answer = await post(`${path}/cancel`, {});
+      if (answer?.ok) return { ok: true, endsOn: answer.data.subscription?.canceled_date ?? null };
+      // Cancelled already (Square refuses a second time): read it, and it is as cancelled as it can be.
+      const read = await send("GET", path);
+      const subscription = read?.ok ? read.data.subscription : undefined;
+      if (subscription?.canceled_date || subscription?.status === "CANCELED" || subscription?.status === "DEACTIVATED") {
+        return { ok: true, endsOn: subscription.canceled_date ?? null };
+      }
+      return { ok: false, message: refused(answer) };
+    },
+
+    async subscriptionState(subscriptionId) {
+      const read = await send("GET", `/v2/subscriptions/${encodeURIComponent(subscriptionId)}`);
+      const subscription = read?.ok ? read.data.subscription : undefined;
+      if (!subscription?.status) return { state: "unknown", message: refused(read) };
+      const found = subscription.customer_id
+        ? await post("/v2/invoices/search", { query: { filter: { location_ids: [config.locationId], customer_ids: [subscription.customer_id] } }, limit: 200 })
+        : null;
+      if (subscription.customer_id && !found?.ok) return { state: "unknown", message: refused(found) };
+      const invoices = (found?.data.invoices ?? [])
+        .filter((invoice) => invoice.subscription_id === subscriptionId && invoice.id)
+        .map((invoice) => ({
+          id: invoice.id!,
+          paid: invoice.status === "PAID",
+          amountCents: invoice.payment_requests?.[0]?.computed_amount_money?.amount ?? 0,
+          day: invoice.payment_requests?.[0]?.due_date ?? "",
+        }))
+        .sort((a, b) => (a.day < b.day ? 1 : a.day > b.day ? -1 : 0));
+      const status = subscription.status;
+      const state =
+        status === "PENDING"
+          ? subscription.canceled_date ? "cancelled" : "pending"
+          : status === "ACTIVE"
+            ? subscription.canceled_date ? "cancelled" : "active"
+            : status === "CANCELED"
+              ? "cancelled"
+              : "stopped";
+      return { state, paidThrough: subscription.charged_through_date ?? null, endsOn: subscription.canceled_date ?? null, invoices };
+    },
+  };
+
   return {
     name: config.environment === "production" ? "square" : "square-sandbox",
+    memberships,
 
     async charge(request) {
       const answer = await post("/v2/payments", {
@@ -294,6 +526,7 @@ export function squareProvider(config: SquareConfig): PaymentProvider {
         reference_id: request.reference,
         note: request.note.slice(0, 500),
         buyer_email_address: request.buyerEmail,
+        ...(request.customerId ? { customer_id: request.customerId } : {}),
         // Reserved, the payment waits to be completed or cancelled; one left alone is cancelled by Square.
         ...(request.reserve ? { autocomplete: false, delay_action: "CANCEL", delay_duration: `PT${RESERVE_HOURS}H` } : { autocomplete: true }),
       });
@@ -411,8 +644,26 @@ export function squareProvider(config: SquareConfig): PaymentProvider {
       if (answer.ok || answer.status === 404) return { ok: true };
       return { ok: false, message: inSquaresWords(answer.data.errors ?? []) || `Square answered HTTP ${answer.status}` };
     },
+
+    async receiptOf(paymentId) {
+      const answer = await send("GET", `/v2/payments/${encodeURIComponent(paymentId)}`);
+      if (!answer?.ok) return { ok: false, message: refused(answer) };
+      const url = answer.data.payment?.receipt_url;
+      // Only Square's own pages are opened: the address comes from Square, and the admin is sent to it.
+      if (url && SQUARE_RECEIPT.test(url)) return { ok: true, url };
+      return {
+        ok: false,
+        message:
+          answer.data.payment?.status === "COMPLETED"
+            ? "Square gave no receipt for this payment."
+            : `Square has no receipt for this payment, as it is not completed (Square says ${answer.data.payment?.status ?? "nothing of it"}).`,
+      };
+    },
   };
 }
+
+/** The receipts of Square's live account and of its sandbox. */
+const SQUARE_RECEIPT = /^https:\/\/(?:[a-z0-9-]+\.)*squareup(?:sandbox)?\.com\/receipt\//i;
 
 export interface PaymentClientConfig {
   mode: "square" | "mock" | "disabled";

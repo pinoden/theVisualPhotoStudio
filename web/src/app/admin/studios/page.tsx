@@ -244,6 +244,22 @@ async function StudiosAndAddons({ searchParams }: Pick<PageProps<"/admin/studios
                 />
               </div>
               <div className="form-group">
+                <label className="form-label" htmlFor={`studio-${studio.slug}-extra-guests`}>
+                  Extra guests allowed
+                </label>
+                <input
+                  id={`studio-${studio.slug}-extra-guests`}
+                  name="extraGuests"
+                  className="form-control price-input"
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={1}
+                  defaultValue={studio.extraGuests}
+                  required
+                />
+              </div>
+              <div className="form-group">
                 <label className="form-label" htmlFor={`studio-${studio.slug}-buffer`}>
                   Kept free after a booking (minutes)
                 </label>

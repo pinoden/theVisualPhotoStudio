@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { normalizeEmail } from "@/server/auth";
+import { CHARGE_MAX_CENTS } from "@/server/charges";
+import { MONEY_SETTING_RANGES } from "@/server/settings";
 import {
   centsToInput,
   dollarsToCents,
+  CHARGE_PATTERN,
   DOLLARS_PATTERN,
+  FEE_PATTERN,
   EMAIL_PATTERN,
   EMAIL_RULE,
   formText,
@@ -136,6 +140,19 @@ describe("the patterns a browser checks a money field with", () => {
   it("take a price up to $100,000 and nothing above", () => {
     for (const ok of ["0", "88", "88.50", "$1,500", "99,999.99", "100000", "100,000.00"]) expect(accepts(PRICE_PATTERN, ok), ok).toBe(true);
     for (const bad of ["100000.01", "150000", "1,000,000", "12,50", "-5"]) expect(accepts(PRICE_PATTERN, bad), bad).toBe(false);
+  });
+
+  it("take a fee in Settings up to $1,000, the server's limit, and nothing above", () => {
+    expect(MONEY_SETTING_RANGES.rescheduleFeeCents).toEqual([0, 100_000]);
+    for (const ok of ["0", "20", "20.5", "$35.50", "999.99", "1000", "$1,000.00", "  25  "]) expect(accepts(FEE_PATTERN, ok), ok).toBe(true);
+    for (const bad of ["1000.01", "1500", "1,500", "9999999", "-5", "20.555", "abc", ""]) expect(accepts(FEE_PATTERN, bad), bad).toBe(false);
+    for (const ok of ["0", "20.5", "999.99", "1000", "$1,000.00"]) expect(dollarsToCents(ok), ok).not.toBeNull();
+  });
+
+  it("take an extra charge up to $10,000, the server's limit, and nothing above", () => {
+    expect(CHARGE_MAX_CENTS).toBe(1_000_000);
+    for (const ok of ["50", "50.5", "$1,250.00", "9999.99", "10000", "$10,000.00"]) expect(accepts(CHARGE_PATTERN, ok), ok).toBe(true);
+    for (const bad of ["10000.01", "12000", "10,001", "-5", "abc", "1.234"]) expect(accepts(CHARGE_PATTERN, bad), bad).toBe(false);
   });
 
   it("take a credit above zero only", () => {

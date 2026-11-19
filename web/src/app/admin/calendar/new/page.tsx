@@ -7,7 +7,7 @@ import { getDb } from "@/db/client";
 import { bookableDurations, formatCents, PricingError, quote } from "@/lib/domain/pricing";
 import { durationLabel, isIsoDate, longDateLabel, minutesToLabel } from "@/lib/domain/time";
 import { can } from "@/lib/abilities";
-import { studioCombinationError } from "@/lib/catalog-view";
+import { extraGuestsFor, studioCombinationError } from "@/lib/catalog-view";
 import { EMAIL_FIELD } from "@/lib/parse";
 import { freeStartsFor } from "@/server/appointments";
 import { dayTypeFor, loadCatalog } from "@/server/catalog";
@@ -60,6 +60,14 @@ async function NewBooking({ searchParams }: Pick<PageProps<"/admin/calendar/new"
   const ready = studioIds.length > 0 && duration !== null && !combinationError;
   // The add-ons the booking screen would offer for these studios: those for any booking, and those of a chosen studio.
   const addons = catalog.addons.filter((addon) => addon.studioId === null || studioIds.includes(addon.studioId));
+  // Extra guests these studios can take, as the booking screen says (extraGuestsFor).
+  const guestsAllowed = extraGuestsFor(catalog, studioIds);
+  const guestRule =
+    guestsAllowed > 0
+      ? `Up to ${guestsAllowed} with ${studioIds.length > 1 ? "these studios" : "this studio"}.`
+      : studioIds.length > 1
+        ? `None with these studios together: ${studioIds.length === 2 ? catalog.settings.twoStudioGuestLimit : catalog.settings.threeStudioGuestLimit} guests at most in all, and their prices include that many.`
+        : "None with this studio.";
   const free = ready ? await freeStartsFor(db, { studioIds, date, durationMinutes: duration }, now) : null;
   let price: number | null = null;
   if (ready) {
@@ -189,7 +197,36 @@ async function NewBooking({ searchParams }: Pick<PageProps<"/admin/calendar/new"
               {addons.length > 0 && (
                 <fieldset className="form-group price-summary">
                   <legend className="form-label">Add-ons</legend>
-                  {addons.map((addon) => (
+                  {addons.map((addon) =>
+                    addon.maxQuantity > 1 ? (
+                      // Taken in a quantity (an extra guest). How many the studios can take is checked with the price.
+                      <div className="addon-row addon-quantity" key={addon.id}>
+                        <input
+                          id={`addon-count-${addon.id}`}
+                          name={`addonCount-${addon.id}`}
+                          className="form-control addon-count"
+                          type="number"
+                          min={0}
+                          max={addon.kind === "people" ? Math.min(addon.maxQuantity, guestsAllowed) : addon.maxQuantity}
+                          step={1}
+                          defaultValue={0}
+                        />
+                        <span className="addon-text">
+                          <span className="addon-head">
+                            <label htmlFor={`addon-count-${addon.id}`}>
+                              <strong>{addon.name}</strong>
+                            </label>
+                            <span className="addon-price">{formatCents(addon.priceCents)} each</span>
+                          </span>
+                          {addon.description && <span className="addon-description">{addon.description}</span>}
+                          {addon.kind === "people" && (
+                            <span className="addon-description">
+                              {guestRule}
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                    ) : (
                     <label className="addon-row" key={addon.id}>
                       <input type="checkbox" name="addon" value={addon.id} />
                       <span className="addon-text">
@@ -200,17 +237,19 @@ async function NewBooking({ searchParams }: Pick<PageProps<"/admin/calendar/new"
                         {addon.description && <span className="addon-description">{addon.description}</span>}
                       </span>
                     </label>
-                  ))}
+                    ),
+                  )}
                 </fieldset>
               )}
               <div className="form-group" style={{ maxWidth: "20rem" }}>
                 <label className="form-label" htmlFor="new-code">
-                  Client&rsquo;s reward or credit code (optional)
+                  Client&rsquo;s reward, credit or membership code (optional)
                 </label>
                 <input id="new-code" name="code" className="form-control" maxLength={40} autoComplete="off" autoCapitalize="characters" />
                 <div style={{ fontSize: ".78rem", marginTop: ".25rem" }}>
-                  A free hour or credit that belongs to this client&rsquo;s email address. It comes off what is paid at the
-                  studio, and is used up.
+                  A free hour, studio credit or membership code that belongs to this client&rsquo;s email address. A free hour
+                  and credit are used up; a membership&rsquo;s hours come off what it has left. What they pay comes off
+                  what is paid at the studio.
                 </div>
               </div>
               <button type="submit" className="btn btn-dark">

@@ -7,6 +7,7 @@ import { formatCents } from "@/lib/domain/pricing";
 import { isIsoDate } from "@/lib/domain/time";
 import { dollarsToCents, formText, intInRange } from "@/lib/parse";
 import { createAdminBooking, moveBooking, setLabel } from "@/server/appointments";
+import { addCharge, OVERTIME_MAX_MINUTES, voidCharge, type AddChargeInput } from "@/server/charges";
 import { cancelPayLink, checkBookingPayLink, closePayLinkByHand, sendPayLink } from "@/server/pay-links";
 import { resolvePayments } from "@/server/payments";
 import { givePetFeeCredit } from "@/server/pet-fee";
@@ -87,6 +88,11 @@ export async function createAdminBookingAction(formData: FormData): Promise<void
   const form = `/admin/calendar/new?${again}`;
   if (durationMinutes === null || startMinute === null) redirect(withMessage(form, "error", "Choose a length and a start time."));
 
+  // How many of each add-on taken in a quantity. A number that is not one is refused, never read as none.
+  const counted = [...formData.entries()]
+    .filter(([key]) => key.startsWith("addonCount-"))
+    .map(([key, value]) => ({ addonId: key.slice("addonCount-".length), quantity: intInRange(typeof value === "string" && value.trim() !== "" ? value : "0", 0, 100) }));
+  if (counted.some((selection) => selection.quantity === null)) redirect(withMessage(form, "error", "Enter how many extra guests as a whole number, or 0."));
   const result = await createAdminBooking(
     await getDb(),
     viewer,
@@ -101,8 +107,12 @@ export async function createAdminBookingAction(formData: FormData): Promise<void
         phone: formText(formData.get("phone")),
       },
       notes: formText(formData.get("notes")),
-      // Each add-on once, as on the booking screen; one that does not apply to the studios is refused by the price.
-      addons: [...new Set(formData.getAll("addon").filter((value): value is string => typeof value === "string"))].map((addonId) => ({ addonId, quantity: 1 })),
+      // Each ticked add-on once, and one taken in a quantity as many times as typed (an extra guest), as on the booking
+      // screen. One that does not apply to the studios, or more guests than they take, is refused by the price.
+      addons: [
+        ...[...new Set(formData.getAll("addon").filter((value): value is string => typeof value === "string"))].map((addonId) => ({ addonId, quantity: 1 })),
+        ...counted.flatMap((selection) => (selection.quantity ? [{ addonId: selection.addonId, quantity: selection.quantity }] : [])),
+      ],
       // A reward or credit of the client's, used on their behalf: it is checked and spent as at checkout.
       promoCode: formText(formData.get("code")) || undefined,
     },
@@ -115,7 +125,10 @@ export async function createAdminBookingAction(formData: FormData): Promise<void
     withMessage(
       `/admin/appointments/${result.ref}`,
       "notice",
-      "Booked. The client has been emailed their confirmation. Nothing was charged: the price is paid at the studio.",
+      // A code or membership hours may have paid all of it (the tester's finding of 2026-11-18).
+      result.totalCents > 0
+        ? "Booked. The client has been emailed their confirmation. Nothing was charged: the price is paid at the studio."
+        : "Booked. The client has been emailed their confirmation. Nothing was charged, and nothing is left to pay: their code or membership hours paid for it.",
     ),
   );
 }
@@ -153,6 +166,45 @@ export async function recordPaymentAction(formData: FormData): Promise<void> {
       } The client has been emailed a confirmation.`,
     ),
   );
+}
+
+/** Add overtime, or a cleaning or damage charge, to an appointment that has started (src/server/charges.ts). */
+export async function addChargeAction(formData: FormData): Promise<void> {
+  const ref = formText(formData.get("ref"));
+  const page = appointmentPage(ref);
+  const viewer = await requireStaff(page);
+  const kind = formText(formData.get("kind"));
+  const note = formText(formData.get("note"));
+  let input: AddChargeInput;
+  if (kind === "overtime") {
+    const minutes = intInRange(formText(formData.get("minutes")), 1, OVERTIME_MAX_MINUTES);
+    if (minutes === null) redirect(withMessage(page, "error", `Enter the minutes past the end, from 1 to ${OVERTIME_MAX_MINUTES}.`));
+    input = { kind, minutes, note };
+  } else if (kind === "cleaning" || kind === "damage") {
+    const amountCents = dollarsToCents(formText(formData.get("amount")));
+    if (amountCents === null) redirect(withMessage(page, "error", "Enter the amount of the charge, for example 50 or 50.50."));
+    input = { kind, amountCents, note };
+  } else {
+    redirect(withMessage(page, "error", "Choose what the charge is for."));
+  }
+  const result = await addCharge(await getDb(), viewer, ref, input, new Date());
+  if (!result.ok) redirect(withMessage(page, "error", result.message));
+  redirect(
+    withMessage(
+      page,
+      "notice",
+      `${formatCents(result.amountCents)} added. The booking now has ${formatCents(result.dueCents)} to pay: mark it as paid, or email a payment link.`,
+    ),
+  );
+}
+
+/** Take back a charge added by mistake. Owners only. */
+export async function voidChargeAction(formData: FormData): Promise<void> {
+  const page = appointmentPage(formText(formData.get("ref")));
+  const viewer = await requireOwner(page);
+  const result = await voidCharge(await getDb(), viewer, formText(formData.get("chargeId")), formText(formData.get("reason")), new Date());
+  if (!result.ok) redirect(withMessage(page, "error", result.message));
+  redirect(withMessage(page, "notice", "The charge was taken back. It no longer counts."));
 }
 
 /** Take back a payment recorded by mistake. Owners only. */

@@ -9,7 +9,7 @@ import type { AuthUser } from "./auth";
 import { isBookingRef } from "./bookings";
 import { latePaymentEmail, payLinkEmail, paymentReceivedEmail, queueEmail, replaceQueuedEmail } from "./email";
 import { BY_CUSTOMER, BY_SYSTEM, recordEvent } from "./history";
-import { owedCents } from "./money";
+import { moneyByPurposeOf, owedCents } from "./money";
 import type { PaymentProvider } from "./payments";
 import { loadSettings } from "./settings";
 import { canViewDay } from "./staff";
@@ -141,6 +141,11 @@ export async function sendPayLink(db: Db, viewer: AuthUser, ref: string, deps: P
   const dueCents = await dueCentsOf(db, booking, deps.now);
   if (dueCents <= 0) return refuse("nothing_due", "Nothing is owed for this booking.");
 
+  // What the amount includes beyond the price, each with what it is for (question 36): only what is still unpaid of each,
+  // never a charge already paid (the tester's third pass of 2026-11-18).
+  const charges = (await moneyByPurposeOf(db, booking.id)).charges
+    .filter((charge) => charge.amountCents > charge.paidCents)
+    .map((charge) => ({ label: charge.label, cents: charge.amountCents - charge.paidCents }));
   const email = (linkId: string) =>
     queueEmail(
       db,
@@ -151,6 +156,7 @@ export async function sendPayLink(db: Db, viewer: AuthUser, ref: string, deps: P
         when: formatInstant(booking.startAt),
         amountCents: dueCents,
         payUrl: payPageUrl(deps.baseUrl, linkId),
+        charges,
       }),
     );
 

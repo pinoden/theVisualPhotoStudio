@@ -1,5 +1,5 @@
-import { eq, sql } from "drizzle-orm";
-import { bookings, photographerHolds, studioHolds } from "@/db/schema";
+import { and, eq, sql } from "drizzle-orm";
+import { bookings, payments, photographerHolds, studioHolds } from "@/db/schema";
 import { PG_EXCLUSION_VIOLATION, pgErrorCode, type Db, type DbLike } from "@/db/client";
 import { combinedStarts, isStartFree } from "@/lib/domain/availability";
 import {
@@ -11,7 +11,7 @@ import {
   type LabelKey,
   type SettableLabel,
 } from "@/lib/domain/labels";
-import { durationLabel, isIsoDate, type IsoDate } from "@/lib/domain/time";
+import { durationLabel, isIsoDate, type DayType, type IsoDate } from "@/lib/domain/time";
 import { can, type Ability } from "@/lib/abilities";
 import type { AuthUser } from "./auth";
 import { loadDayAvailability } from "./availability";
@@ -24,11 +24,17 @@ import {
   type BookingView,
   type CreateBookingResult,
 } from "./bookings";
-import { loadCatalog } from "./catalog";
+import { dayTypeFor, loadCatalog } from "./catalog";
+import { chargesOf, hourlyRateOf, type ChargeLine } from "./charges";
+import { storedTerms, termsChangedSince, termsFor, type BookingTerms } from "./terms";
 import { bookingMovedEmail, queueEmail } from "./email";
 import { listEvents, recordEvent, withoutAmounts, type BookingEvent } from "./history";
+import { creditLeftCentsByBooking, owedCents } from "./money";
 import { openPayLinkOf, type PayLinkView } from "./pay-links";
+import type { Made, PaymentProvider } from "./payments";
 import { PET_CREDIT_BLOCK_TEXT, petCreditStanding, petFeeReturnedCents } from "./pet-fee";
+import { addBackToCode } from "./promos";
+import { movePriceText, priceOnNewDay, repriceNote, totalBeforeCredit } from "./reprice";
 import { loadSettings, type Settings } from "./settings";
 import { canViewDay } from "./staff";
 import { moneyOf, type BookingMoney } from "./studio-payments";
@@ -75,6 +81,14 @@ export interface Appointment {
    * owners' decision.
    */
   /** `returnedCents`: what its credit was issued for, which is part of the fee when only part was paid. */
+  /**
+   * Extra charges (src/server/charges.ts), for a viewer who may record payments, and for the owners. `canAdd` once the
+   * appointment has started; `hourlyCents` is the rate overtime is worked out from, null for a photography session or
+   * a studio with no one-hour price that day.
+   */
+  charges: { lines: ChargeLine[]; canAdd: boolean; overtime: boolean; hourlyCents: number | null; missingRate: string[] } | null;
+  /** The terms the booking was made under (question 10), and whether the settings have changed since. */
+  terms: BookingTerms & { changedSince: boolean };
   petFee: { cents: number; creditCode: string | null; returnedCents: number; canReturn: boolean; why: string } | null;
   history: BookingEvent[];
   /** Each label that can be set by hand, and whether it can be set right now. */
@@ -102,6 +116,8 @@ export async function getAppointment(db: DbLike, viewer: AuthUser, ref: string, 
   const money = await moneyOf(db, booking, now);
   const seesPayments = may("seePrices") || (may("recordPayments") && money.dueCents > 0);
   const pet = viewer.role === "owner" ? await petCreditStanding(db, booking) : null;
+  const seesCharges = may("recordPayments") || viewer.role === "owner";
+  const rate = seesCharges && booking.photographerId === null ? await hourlyRateOf(db, booking) : null;
 
   return {
     ref: booking.ref,
@@ -120,6 +136,16 @@ export async function getAppointment(db: DbLike, viewer: AuthUser, ref: string, 
     money: may("seePrices") ? view : null,
     payments: seesPayments ? money : null,
     payLink: seesPayments ? await openPayLinkOf(db, booking.id) : null,
+    terms: { ...storedTerms(booking, settings), changedSince: termsChangedSince(booking, settings) },
+    charges: seesCharges
+      ? {
+          lines: await chargesOf(db, booking.id),
+          canAdd: active && now.getTime() >= booking.startAt.getTime() && may("recordPayments"),
+          overtime: booking.photographerId === null,
+          hourlyCents: rate?.ok ? rate.cents : null,
+          missingRate: rate && !rate.ok ? rate.missing : [],
+        }
+      : null,
     petFee:
       pet && pet.feeCents > 0
         ? {
@@ -152,6 +178,41 @@ export async function getAppointment(db: DbLike, viewer: AuthUser, ref: string, 
       openCustomer: may("seeCustomers"),
       refund: may("refund"),
     },
+  };
+}
+
+/**
+ * Where one card payment of a booking can be seen at the card processor that took it: Square's receipt of it, which
+ * shows the receipt number Square's Dashboard finds it by (follow-up 5). For a viewer who sees the booking's payments
+ * on its page. Square is asked when the link is followed, with the keys set up now, so a payment taken with Square's
+ * other account (sandbox or live) or in test mode is answered with where to look instead.
+ */
+export async function cardReceiptOf(
+  db: DbLike,
+  viewer: AuthUser,
+  ref: string,
+  paymentId: string,
+  processor: PaymentProvider | null,
+  now: Date,
+): Promise<Made<{ url: string }>> {
+  const appointment = await getAppointment(db, viewer, ref, now);
+  const line = appointment?.payments?.payments.find((payment) => payment.id === paymentId && !payment.byHand);
+  if (!line) return { ok: false, message: "That card payment was not found." };
+  const [row] = await db
+    .select({ provider: payments.provider, providerPaymentId: payments.providerPaymentId })
+    .from(payments)
+    .where(and(eq(payments.id, paymentId), eq(payments.provider, line.processor ?? "")))
+    .limit(1);
+  if (!row?.providerPaymentId) return { ok: false, message: "The card processor's reference of that payment is not known." };
+  if (processor && processor.name === row.provider) return processor.receiptOf(row.providerPaymentId);
+  return {
+    ok: false,
+    message:
+      row.provider === "mock"
+        ? "That payment was made in test mode, with the pretend card processor, which has no receipt page: no card was charged."
+        : row.provider === "square-sandbox"
+          ? "That payment was taken with Square's sandbox (its test account), which the site is not set up with now: look it up there."
+          : "That payment was taken with Square's live account, which the site is not set up with now: look it up in Square's Dashboard.",
   };
 }
 
@@ -232,19 +293,42 @@ async function studioIdsOf(db: DbLike, bookingId: string): Promise<string[]> {
   return rows.map((row) => row.studioId);
 }
 
-/** For the "move" form: the free start times on `date` for this booking, in its own studios and for its own length. */
+/**
+ * What moving a booking to another day would do to its money (follow-up 5): its total before and after, as the client
+ * reads it (after discounts, before credit and minutes), and then what it owes, what it was paid beyond its price, and
+ * what goes back on the code that paid for it. Null when the price stays.
+ */
+export interface MovePricePreview {
+  dayType: DayType;
+  wasCents: number;
+  nowCents: number;
+  owedCents: number;
+  creditLeftCents: number;
+  codeBackCents: number;
+}
+
+/** What the booking's money is after a move to `price`: what it owes, and what it was paid beyond its new price. */
+async function moneyAfter(db: DbLike, booking: { id: string; status: string }, totalCents: number, now: Date): Promise<{ owedCents: number; creditLeftCents: number }> {
+  const after = { id: booking.id, status: booking.status, totalCents };
+  return {
+    owedCents: await owedCents(db, after, now),
+    creditLeftCents: (await creditLeftCentsByBooking(db, [after])).get(booking.id) ?? 0,
+  };
+}
+
+/** For the "move" form: the free start times on `date` for this booking, in its own studios and for its own length, and its price that day. */
 export async function moveOptions(
   db: DbLike,
   viewer: AuthUser,
   ref: string,
   date: string,
   now: Date,
-): Promise<{ ok: true; starts: number[] } | { ok: false; message: string }> {
+): Promise<{ ok: true; starts: number[]; price: MovePricePreview | null } | { ok: false; message: string }> {
   const settings = await loadSettings(db);
   if (!isBookingRef(ref) || !can(viewer, "moveBookings", settings)) return { ok: false, message: "Booking not found." };
   const [booking] = await db.select().from(bookings).where(eq(bookings.ref, ref)).limit(1);
   if (!booking || !(await maySee(db, viewer, booking.startAt))) return { ok: false, message: "Booking not found." };
-  return freeStartsFor(
+  const free = await freeStartsFor(
     db,
     {
       studioIds: await studioIdsOf(db, booking.id),
@@ -255,17 +339,37 @@ export async function moveOptions(
     },
     now,
   );
+  // A date that cannot be booked is said so first; then one the booking cannot be priced for.
+  if (!free.ok) return free;
+  const price = await priceOnNewDay(db, booking, date, await loadCatalog(db));
+  if (price.kind === "refused") return { ok: false, message: price.message };
+  // Nothing the client reads changes (a free hour still pays all of it): no price to show.
+  if (price.kind === "same" || !price.announced) return { ...free, price: null };
+  return {
+    ...free,
+    price: {
+      dayType: price.dayType,
+      wasCents: totalBeforeCredit(booking),
+      nowCents: totalBeforeCredit({ totalCents: price.quote.totalCents, creditAppliedCents: price.creditAppliedCents, membershipCents: price.quote.membershipCents }),
+      ...(await moneyAfter(db, booking, price.quote.totalCents, now)),
+      codeBackCents: price.codeBack?.cents ?? 0,
+    },
+  };
 }
 
 export type MoveResult =
   | { ok: true; startAt: Date; endAt: Date }
-  | { ok: false; reason: "forbidden" | "not_found" | "not_movable" | "invalid_time" | "slot_taken"; message: string };
+  | { ok: false; reason: "forbidden" | "not_found" | "not_movable" | "invalid_time" | "slot_taken" | "no_price"; message: string };
 
 /**
  * Move a booking to a new date or time, in the same studios and for the same
- * length. What was paid stays as it is. The availability rules are the ones
- * every booking obeys: opening hours, no overlap, and the gap between
- * appointments; and the database refuses an overlap whatever happens here.
+ * length. A day of the other kind (a weekday for a weekend, or the other way
+ * round) prices it for that day, at today's prices (`priceOnNewDay`, follow-up
+ * 5): the booking then owes the difference, or was paid beyond its price,
+ * which the studio refunds; what was paid stays as it is. The availability
+ * rules are the ones every booking obeys: opening hours, no overlap, and the
+ * gap between appointments; and the database refuses an overlap whatever
+ * happens here.
  *
  * `countsAsClientMove` says the client asked for the move. While moving is
  * offered (`maxReschedules` above 0), it then counts as
@@ -300,8 +404,10 @@ export async function moveBooking(
   const startAt = localToUtc(input.date, input.startMinute);
   const endAt = localToUtc(input.date, input.startMinute + found.durationMinutes);
   if (startAt.getTime() === found.startAt.getTime()) return refuse("invalid_time", "That is the time the booking already has.");
-  // With moving switched off the rental terms say nothing about a move, so one made for the client costs them nothing.
-  const clientMove = input.countsAsClientMove && settings.maxReschedules > 0;
+  // The terms the booking was made under (question 10). With moving switched off in them, the rental terms say nothing
+  // about a move, so one made for the client costs them nothing.
+  const terms = termsFor(found, settings);
+  const clientMove = input.countsAsClientMove && terms.maxReschedules > 0;
   // Across the hour the clocks change, the booking would not last as long as it was paid for.
   if (endAt.getTime() - startAt.getTime() !== found.durationMinutes * 60_000) {
     return refuse("slot_taken", "The clocks change at that time, so the booking cannot move there. Choose another.");
@@ -336,6 +442,10 @@ export async function moveBooking(
     return await db.transaction(async (tx): Promise<MoveResult> => {
       const [booking] = await tx.select().from(bookings).where(eq(bookings.id, found.id)).for("update").limit(1);
       if (!booking || booking.status !== "confirmed") return refuse("not_movable", "Only a booking that is still to come can be moved.");
+      // A day of the other kind prices the booking for that day (follow-up 5): worked out on the locked row.
+      const price = await priceOnNewDay(tx, booking, input.date, catalog);
+      if (price.kind === "refused") return refuse("no_price", price.message);
+      const repriced = price.kind === "new" ? price : null;
 
       await tx
         .update(bookings)
@@ -344,17 +454,38 @@ export async function moveBooking(
           endAt,
           label: "rescheduled",
           rescheduledCount: booking.rescheduledCount + (clientMove ? 1 : 0),
+          // A reminder comes again before the new time; to a time closer than the reminder's hours, the email about
+          // the move tells the new time, and no reminder follows it (queueReminders).
+          reminderSentAt: startAt.getTime() - now.getTime() > catalog.settings.reminderHours * 3_600_000 ? null : now,
+          // Its new day's kind, which the next move compares with: priced for it, or both kinds priced alike.
+          pricedAs: dayTypeFor(catalog, input.date),
+          ...(repriced
+            ? {
+                studiosSubtotalCents: repriced.quote.studiosSubtotalCents,
+                multiStudioDiscountCents: repriced.quote.multiStudioDiscountCents,
+                promoDiscountCents: repriced.quote.promoDiscountCents,
+                creditAppliedCents: repriced.creditAppliedCents,
+                membershipCents: repriced.quote.membershipCents,
+                totalCents: repriced.quote.totalCents,
+              }
+            : {}),
         })
         .where(eq(bookings.id, booking.id));
-      // Each studio keeps its own gap after the booking, as when the booking was made.
+      // Each studio keeps its own gap after the booking, as when the booking was made, and takes its new price.
       for (const studioId of [...studioIds].sort()) {
         const buffer = catalog.studios.find((studio) => studio.id === studioId)?.bufferMinutes ?? 0;
         const occupiedEnd = new Date(endAt.getTime() + buffer * 60_000);
+        const priceCents = repriced?.quote.studioLines.find((line) => line.studioId === studioId)?.priceCents;
         await tx
           .update(studioHolds)
-          .set({ occupied: sql`tstzrange(${startAt.toISOString()}::timestamptz, ${occupiedEnd.toISOString()}::timestamptz, '[)')` })
+          .set({
+            occupied: sql`tstzrange(${startAt.toISOString()}::timestamptz, ${occupiedEnd.toISOString()}::timestamptz, '[)')`,
+            ...(priceCents !== undefined ? { priceCents } : {}),
+          })
           .where(sql`${studioHolds.bookingId} = ${booking.id} and ${studioHolds.studioId} = ${studioId}`);
       }
+      // Credit the new price no longer needs goes back on the code it came from, as a cancellation by the studio gives it back.
+      if (repriced?.codeBack) await addBackToCode(tx, repriced.codeBack.codeId, repriced.codeBack.cents);
 
       if (photographer) {
         const heldUntil = new Date(endAt.getTime() + photographer.bufferMinutes * 60_000);
@@ -372,8 +503,17 @@ export async function moveBooking(
         to: "rescheduled",
         actor: viewer.email,
         at: now,
-        note: `Moved from ${was} to ${is}${clientMove ? ", at the client's request" : ""}`,
+        note: `Moved from ${was} to ${is}${clientMove ? ", at the client's request" : ""}${repriced ? repriceNote(repriced, booking) : ""}`,
       });
+      const priceNote = repriced?.announced
+        ? movePriceText({
+            dayType: repriced.dayType,
+            wasCents: totalBeforeCredit(booking),
+            nowCents: totalBeforeCredit({ totalCents: repriced.quote.totalCents, creditAppliedCents: repriced.creditAppliedCents, membershipCents: repriced.quote.membershipCents }),
+            ...(await moneyAfter(tx, booking, repriced.quote.totalCents, now)),
+            codeBack: repriced.codeBack,
+          })
+        : "";
       await queueEmail(
         tx,
         bookingMovedEmail({
@@ -384,7 +524,8 @@ export async function moveBooking(
           was,
           now: is,
           duration: durationLabel(booking.durationMinutes),
-          ...(clientMove ? { clientAsked: movesLeft(booking.rescheduledCount + 1, settings) } : {}),
+          priceNote,
+          ...(clientMove ? { clientAsked: movesLeft(booking.rescheduledCount + 1, terms) } : {}),
         }),
       );
       return { ok: true, startAt, endAt };

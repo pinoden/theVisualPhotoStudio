@@ -1,4 +1,4 @@
-import { addons, photoPackages, photographerHours, photographers, priceRules, studioHours, studios } from "./schema";
+import { addons, membershipPlans, membershipPlanStudios, photoPackages, photographerHours, photographers, priceRules, studioHours, studios } from "./schema";
 import type { Db } from "./client";
 
 /**
@@ -7,6 +7,56 @@ import type { Db } from "./client";
  * Owners can change the prices in Admin.
  */
 const h = (hours: number) => Math.round(hours * 60);
+
+/**
+ * The memberships (follow-up 3): the owners' table of 2026-11-17, 5 or 10 hours a month in one studio or a bundle.
+ * The single studios' words are the live site's (its scheduling page, read 2026-11-18). Migration
+ * `0042_membership_plans` gives a database that already has the studios the same plans.
+ */
+export const STARTING_PLANS: readonly { studios: readonly ("blanche" | "dayglow" | "paris")[]; name: string; hours: number; dollars: number; description: string }[] = [
+  { studios: ["dayglow"], name: "Studio Dayglow, 5 hours a month", hours: 5, dollars: 330, description: "Get creative in Studio Dayglow, the perfect space for vibrant, high-energy shoots." },
+  {
+    studios: ["dayglow"],
+    name: "Studio Dayglow, 10 hours a month",
+    hours: 10,
+    dollars: 600,
+    description: "Enjoy flexible, affordable access to Studio Dayglow, where every session feels vibrant, modern, and full of energy.",
+  },
+  {
+    studios: ["paris"],
+    name: "Studio Paris, 5 hours a month",
+    hours: 5,
+    dollars: 300,
+    description: "Capture timeless, light-filled moments in Studio Paris, your go-to space for soft, elegant, and modern photography.",
+  },
+  {
+    studios: ["paris"],
+    name: "Studio Paris, 10 hours a month",
+    hours: 10,
+    dollars: 550,
+    description: "Enjoy the charm and versatility of Studio Paris, a beautifully curated space designed for elegant portraits and creative storytelling.",
+  },
+  {
+    studios: ["blanche"],
+    name: "Studio Blanche, 5 hours a month",
+    hours: 5,
+    dollars: 380,
+    description: "Create freely in Studio Blanche, a bright, modern space perfect for content, portraits, and inspiration.",
+  },
+  {
+    studios: ["blanche"],
+    name: "Studio Blanche, 10 hours a month",
+    hours: 10,
+    dollars: 700,
+    description: "Enjoy consistent, flexible access to Studio Blanche, the perfect space to create whenever inspiration strikes.",
+  },
+  { studios: ["paris", "dayglow"], name: "Paris and Dayglow, 5 hours a month", hours: 5, dollars: 520, description: "Use your hours in Studio Paris, in Studio Dayglow, or in both booked together." },
+  { studios: ["paris", "dayglow"], name: "Paris and Dayglow, 10 hours a month", hours: 10, dollars: 950, description: "Use your hours in Studio Paris, in Studio Dayglow, or in both booked together." },
+  { studios: ["paris", "blanche"], name: "Paris and Blanche, 5 hours a month", hours: 5, dollars: 660, description: "Use your hours in Studio Paris, in Studio Blanche, or in both booked together." },
+  { studios: ["paris", "blanche"], name: "Paris and Blanche, 10 hours a month", hours: 10, dollars: 1200, description: "Use your hours in Studio Paris, in Studio Blanche, or in both booked together." },
+  { studios: ["paris", "dayglow", "blanche"], name: "All three studios, 5 hours a month", hours: 5, dollars: 780, description: "Use your hours in any of the three studios, or in several booked together." },
+  { studios: ["paris", "dayglow", "blanche"], name: "All three studios, 10 hours a month", hours: 10, dollars: 1450, description: "Use your hours in any of the three studios, or in several booked together." },
+];
 
 /** What a photography session includes, by its length in hours. The same in every studio. */
 const SESSION_INCLUDES: Record<number, string> = {
@@ -25,6 +75,7 @@ const STUDIOS = [
     description:
       "A bright, modern canvas for creative work. Featuring a 10×15 ft seamless white cyclorama wall, a wall-mounted paper backdrop system, large southeast-facing windows and a minimalist aesthetic designed for portraits, branding sessions and editorial work. Shoes come off or get covered here to keep the space white.",
     includedGuests: 6,
+    extraGuests: 6,
     // hours -> dollars
     prices: {
       weekday: { 1: 88, 1.5: 132, 2: 176, 3: 264, 4: 320, 5: 385, 8: 605, 10: 720 },
@@ -41,6 +92,7 @@ const STUDIOS = [
     description:
       "A warm, natural-light studio with a boho feel. The paper backdrop on a floor stand can be switched out during your session. Dayglow is our only pet-friendly studio.",
     includedGuests: 6,
+    extraGuests: 6,
     prices: {
       weekday: { 1: 78, 1.5: 117, 2: 156, 3: 234, 4: 285, 5: 350, 8: 540 },
       weekend: { 1: 82, 1.5: 123, 2: 164, 3: 246, 4: 300, 5: 368, 8: 568 },
@@ -56,6 +108,7 @@ const STUDIOS = [
     description:
       "A romantic, elegant space for timeless visuals. Classic details, a white vintage couch, a fireplace mantel, gold mirrors and soft natural light from large southeast-facing windows. Styled with seasonal setups through the year.",
     includedGuests: 4,
+    extraGuests: 4,
     prices: {
       weekday: { 1: 68, 1.5: 102, 2: 136, 3: 195, 4: 245, 5: 300 },
       weekend: { 1: 72, 1.5: 108, 2: 144, 3: 206, 4: 259, 5: 318 },
@@ -81,6 +134,7 @@ export async function seed(db: Db): Promise<boolean> {
           tagline: s.tagline,
           description: s.description,
           includedGuests: s.includedGuests,
+          extraGuests: s.extraGuests,
           bufferMinutes: 15,
           color: s.color,
           sortOrder: index,
@@ -139,22 +193,16 @@ export async function seed(db: Db): Promise<boolean> {
 
     await tx.insert(addons).values([
       {
-        slug: "extra-people-1-2",
-        name: "1 to 2 extra people",
-        description: "For groups larger than the number of guests included with the studio.",
-        priceCents: 3000,
+        // $5 for each guest beyond those included (follow-up 2, the owner's answer of 2026-11-17). How many a booking
+        // can take is each studio's `extraGuests`, and the settings' limits for studios booked together.
+        slug: "extra-guest",
+        name: "Extra guest",
+        description: "For each guest beyond those included with the studio.",
+        priceCents: 500,
         studioId: null,
+        maxQuantity: 20,
         kind: "people",
         sortOrder: 0,
-      },
-      {
-        slug: "extra-people-3-5",
-        name: "3 to 5 extra people",
-        description: "For groups larger than the number of guests included with the studio.",
-        priceCents: 5000,
-        studioId: null,
-        kind: "people",
-        sortOrder: 1,
       },
       {
         slug: "pet-fee",
@@ -166,6 +214,14 @@ export async function seed(db: Db): Promise<boolean> {
         sortOrder: 2,
       },
     ]);
+
+    for (const [index, plan] of STARTING_PLANS.entries()) {
+      const [row] = await tx
+        .insert(membershipPlans)
+        .values({ name: plan.name, description: plan.description, minutes: h(plan.hours), priceCents: plan.dollars * 100, sortOrder: index })
+        .returning({ id: membershipPlans.id });
+      await tx.insert(membershipPlanStudios).values(plan.studios.map((slug) => ({ planId: row.id, studioId: ids[slug] })));
+    }
   });
   return true;
 }

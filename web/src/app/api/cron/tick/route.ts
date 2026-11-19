@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import type { NextRequest } from "next/server";
 import { getDb } from "@/db/client";
+import { recordSchedulerRun } from "@/server/heartbeat";
 import { taskDeps } from "@/server/runtime";
 import { runScheduledTasks } from "@/server/tasks";
 
@@ -23,6 +24,10 @@ export async function GET(request: NextRequest) {
     return Response.json({ ok: false, message: "CRON_SECRET is not set." }, { status: 503 });
   }
 
-  const summary = await runScheduledTasks(await getDb(), await taskDeps());
+  const db = await getDb();
+  const deps = await taskDeps();
+  const summary = await runScheduledTasks(db, deps);
+  // Recorded after the work, so that a run that fails part-way is not counted as the scheduler being well.
+  await recordSchedulerRun(db, deps.now);
   return Response.json({ ok: true, ...summary }, { headers: { "Cache-Control": "no-store" } });
 }

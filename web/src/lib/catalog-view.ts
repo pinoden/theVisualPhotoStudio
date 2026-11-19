@@ -1,5 +1,5 @@
 import type { Catalog, CatalogStudio } from "@/server/catalog";
-import { multiStudioPercentFor } from "@/lib/domain/pricing";
+import { extraGuestsAllowed, multiStudioPercentFor } from "@/lib/domain/pricing";
 import { weekdayName, minutesToLabel } from "@/lib/domain/time";
 
 /** Blanche and Dayglow can be reserved together as part of the three-studio bundle. */
@@ -13,6 +13,15 @@ export function studioCombinationError(studios: readonly Pick<CatalogStudio, "id
 }
 
 /** Lowest weekday price for one hour, used for "from $X/hour" labels. */
+/**
+ * How many extra guests a booking of these studios can take (`extraGuestsAllowed`), from the studios and the owners'
+ * limits for studios booked together. The booking screen and the server ask the same.
+ */
+export function extraGuestsFor(catalog: Pick<Catalog, "studios" | "settings">, studioIds: readonly string[]): number {
+  const chosen = catalog.studios.filter((studio) => studioIds.includes(studio.id));
+  return extraGuestsAllowed(chosen, { 2: catalog.settings.twoStudioGuestLimit, 3: catalog.settings.threeStudioGuestLimit });
+}
+
 export function hourlyFromCents(catalog: Catalog, studioId: string): number | null {
   const prices = catalog.rules
     .filter((r) => r.studioId === studioId && r.durationMinutes === 60)

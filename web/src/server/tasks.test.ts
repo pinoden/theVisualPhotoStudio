@@ -4,7 +4,9 @@ import { bookings, emailOutbox, payments, promoCodes, settings } from "@/db/sche
 import { deliverPendingEmails, MAX_EMAIL_ATTEMPTS, queueEmail, replaceQueuedEmail, resolveEmailTransport, type EmailTransport } from "./email";
 import { cancelBooking } from "./manage";
 import { MOCK_TOKEN_DECLINED, mockProvider, resolvePayments, type PaymentProvider } from "./payments";
-import { completeVisits, runScheduledTasks } from "./tasks";
+import { createAdminBooking, moveBooking } from "./appointments";
+import { saveAccessInstructions } from "./settings";
+import { completeVisits, queueReminders, runScheduledTasks } from "./tasks";
 import {
   BASE_URL,
   createTestWorld,
@@ -165,12 +167,16 @@ describe("the scheduled run", () => {
       visitsCompleted: 1,
       loyaltyCodes: 1,
       reviewRequestsQueued: 0,
+      remindersQueued: 0,
       refundsSucceeded: 0,
       refundsFailed: 0,
       refundsSettled: 0,
       refundsRejected: 0,
       payLinksPaid: 0,
       payLinksClosed: 0,
+      membershipMonthsPaid: 0,
+      membershipProblems: 0,
+      membershipsCarriedOn: 0,
       emailsSent: 2, // the booking confirmation and the free hour
       emailsFailed: 0,
       pagesRemoved: 0,
@@ -193,6 +199,87 @@ describe("the scheduled run", () => {
     expect(requests).toHaveLength(1);
     expect(requests[0].body).toContain("https://g.page/r/CTQ9ea1fatgnEBM/review");
     expect(requests[0].body).toContain(completed.ref);
+  });
+});
+
+describe("the reminder before a visit", () => {
+  // world.book() books NEAR 10:00-12:00 local: it starts at 15:00 UTC, and was made at NOW, four days before.
+  const START = new Date("2026-11-18T15:00:00Z");
+  const reminders = () => world.emails("booking_reminder");
+
+  it("is sent once, 24 hours before the start, with the visit and how to get in as it is now", async () => {
+    const booked = expectOk(await world.book());
+    await saveAccessInstructions(world.db, "Door code 4321, second floor.");
+    expect(await queueReminders(world.db, minutesAfter(hoursAfter(START, -24), -1))).toBe(0);
+    expect(await queueReminders(world.db, hoursAfter(START, -24))).toBe(1);
+    expect(await queueReminders(world.db, hoursAfter(START, -20))).toBe(0);
+    const [mail] = await reminders();
+    expect(mail.toEmail).toBe("jane@example.com");
+    expect(mail.subject).toBe("Reminder: your booking at The Visuals Photo Studio, Wed, Nov 18, 2026, 10:00 AM");
+    expect(mail.body).toContain(`Reference: ${booked.ref}`);
+    expect(mail.body).toContain("Studio: Studio Blanche");
+    expect(mail.body).toContain("When: Wed, Nov 18, 2026, 10:00 AM (2 hours)");
+    expect(mail.body).toContain("Getting in:\nDoor code 4321, second floor.");
+    // Paid by card when it was made: nothing more to pay is said.
+    expect(mail.body).not.toContain("to pay");
+  });
+
+  it("still goes when the scheduled task runs late, but never once the visit has started", async () => {
+    expectOk(await world.book());
+    expectOk(await world.book({ startMinute: h(14) }));
+    // The task did not run for a day: at 9:30 the first visit is half an hour away, the second four and a half hours.
+    expect(await queueReminders(world.db, hoursAfter(START, -0.5))).toBe(2);
+    const late = expectOk(await world.book({ date: "2026-11-19" }));
+    expect(await queueReminders(world.db, new Date("2026-11-19T15:01:00Z"))).toBe(0);
+    expect((await reminders()).some((mail) => mail.body.includes(late.ref))).toBe(false);
+  });
+
+  it("is not sent for a booking made inside the reminder's hours, cancelled, or waiting to be moved, nor when switched off", async () => {
+    // Made ten hours before it starts (the owners let bookings be made 2 hours ahead): the confirmation has just gone.
+    await world.db.insert(settings).values({ key: "minLeadHours", value: 2 });
+    expectOk(await world.book({}, { now: hoursAfter(START, -10) }));
+    const cancelled = expectOk(await world.book({ startMinute: h(14) }));
+    await world.db.update(bookings).set({ status: "cancelled", cancelReason: "customer" }).where(eq(bookings.ref, cancelled.ref));
+    const waiting = expectOk(await world.book({ studioIds: [world.ids.paris] }));
+    await world.db.update(bookings).set({ label: "reschedule_pending" }).where(eq(bookings.ref, waiting.ref));
+    expect(await queueReminders(world.db, hoursAfter(START, -5))).toBe(0);
+    // Switched off by the owners: a booking that would get one gets none.
+    expectOk(await world.book({ studioIds: [world.ids.dayglow] }));
+    await world.db.insert(settings).values({ key: "reminderHours", value: 0 });
+    expect(await queueReminders(world.db, hoursAfter(START, -5))).toBe(0);
+    await world.db.update(settings).set({ value: 48 }).where(eq(settings.key, "reminderHours"));
+    expect(await queueReminders(world.db, hoursAfter(START, -47))).toBe(1);
+  });
+
+  it("says what is still to pay at the studio for a booking the studio made", async () => {
+    const owner = await world.addUser("owner@studio.test", "owner", "Olivia");
+    const made = expectOk(
+      await createAdminBooking(
+        world.db,
+        owner,
+        { studioIds: [world.ids.blanche], date: "2026-11-18", startMinute: h(10), durationMinutes: 120, customer: { name: "Dana Diaz", email: "dana@example.com", phone: "407-555-0133" } },
+        { now: NOW, baseUrl: BASE_URL },
+      ),
+    );
+    expect(await queueReminders(world.db, hoursAfter(START, -24))).toBe(1);
+    const [mail] = await reminders();
+    expect(mail.body).toContain(made.ref);
+    expect(mail.body).toContain("To pay at the studio: $176");
+  });
+
+  it("comes again before the new time when the studio moves the booking, unless the new time is closer than its hours", async () => {
+    const owner = await world.addUser("owner@studio.test", "owner", "Olivia");
+    const booked = expectOk(await world.book());
+    expect(await queueReminders(world.db, hoursAfter(START, -24))).toBe(1);
+    // Moved three days later: a reminder again, 24 hours before the new start (Saturday 21st, 10:00 local).
+    expectOk(await moveBooking(world.db, owner, booked.ref, { date: "2026-11-21", startMinute: h(10), countsAsClientMove: false }, hoursAfter(START, -23)));
+    const newStart = new Date("2026-11-21T15:00:00Z");
+    expect(await queueReminders(world.db, hoursAfter(newStart, -25))).toBe(0);
+    expect(await queueReminders(world.db, hoursAfter(newStart, -24))).toBe(1);
+    // Moved again an hour before it starts, to that afternoon: the email about the move tells the time, and no reminder follows.
+    expectOk(await moveBooking(world.db, owner, booked.ref, { date: "2026-11-21", startMinute: h(15), countsAsClientMove: false }, hoursAfter(newStart, -1)));
+    expect(await queueReminders(world.db, hoursAfter(newStart, 1))).toBe(0);
+    expect(await reminders()).toHaveLength(2);
   });
 });
 

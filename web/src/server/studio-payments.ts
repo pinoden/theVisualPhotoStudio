@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import { bookings, paymentLinks, payments, promoCodes, refunds } from "@/db/schema";
 import type { Db, DbLike } from "@/db/client";
 import { labelOf } from "@/lib/domain/labels";
@@ -10,9 +10,9 @@ import { isBookingRef } from "./bookings";
 import { codeRefundEmail, paymentReceivedEmail, queueEmail } from "./email";
 import { recordEvent } from "./history";
 import { openPayLinkOf } from "./pay-links";
-import { netCardPaidCents, owedCents, paidAtStudioCents, STANDS } from "./money";
+import { chargesCentsByBooking, creditLeftCentsByBooking, creditReturnedCentsByBooking, netCardPaidCents, netPaidCentsByBooking, owedCents, paidAtStudioCents, STANDS } from "./money";
 import { RESERVE_HOURS } from "./payments";
-import { petFeeCentsOf, studioRefundableCents } from "./pet-fee";
+import { petFeeCentsOf, petFeeReturnedCents, studioRefundableCents } from "./pet-fee";
 import { codeStanding, rescheduleCodeOf, spendable, takeOffRescheduleCode } from "./promos";
 import { loadSettings } from "./settings";
 import { canViewDay } from "./staff";
@@ -50,14 +50,39 @@ export interface PaymentLine {
   held: boolean;
   recordedBy: string | null;
   note: string;
+  /**
+   * The card processor that took it (`PaymentProvider.name`): "square" or "square-sandbox" for Square, whose receipt
+   * the appointment's page opens; "mock" for the pretend one of test mode. Null for money taken at the studio.
+   */
+  processor: string | null;
 }
 
 export interface BookingMoney {
+  /** What the booking costs: its price, and the extra charges added since (src/server/charges.ts). */
   totalCents: number;
+  /** The part of `totalCents` that is extra charges. */
+  chargesCents: number;
   /** Every payment that succeeded, before refunds. */
   receivedCents: number;
+  /**
+   * What was given back of what the booking was paid beyond its price (`creditReturnedCentsByBooking`): `receivedCents`
+   * less this is what it was paid toward its price.
+   */
+  creditReturnedCents: number;
+  /** What was paid and kept: every payment that succeeded, less every refund of it (`netPaidCentsByBooking`). */
+  paidCents: number;
   /** What is still to pay (`owedCents`): nothing once the booking has ended. */
   dueCents: number;
+  /**
+   * What was paid beyond what the booking costs now (`creditLeftCentsByBooking`), for example after a move to a day
+   * that costs less (follow-up 5). It is the client's, refunded by hand or once the studio agrees. Nothing for a
+   * booking that ended.
+   */
+  creditLeftCents: number;
+  /** What a refund to the card can still give back: what the card paid and kept, less a pet fee returned as credit. */
+  cardRefundableCents: number;
+  /** A card's amount for the booking was reserved and never taken, the reservation lapsing: no card paid it. */
+  cardLapsed: boolean;
   /** How the booking ended, if it has: then nothing more is to pay, whatever was received. */
   ended: "cancelled" | "released" | null;
   /** Made in the admin, and so paid at the studio or through a payment link; else made online, and paid by card then. */
@@ -95,10 +120,28 @@ export async function moneyOf(
         .where(and(eq(paymentLinks.bookingId, booking.id), isNotNull(paymentLinks.paymentId)))
     ).map((row) => row.paymentId),
   );
+  const charged = (await chargesCentsByBooking(db, [booking.id])).get(booking.id) ?? 0;
+  const card = await netCardPaidCents(db, booking.id);
   return {
-    totalCents: booking.totalCents,
+    totalCents: booking.totalCents + charged,
+    chargesCents: charged,
     receivedCents,
+    creditReturnedCents: (await creditReturnedCentsByBooking(db, [booking.id])).get(booking.id) ?? 0,
+    paidCents: (await netPaidCentsByBooking(db, [booking.id])).get(booking.id) ?? 0,
     dueCents: await owedCents(db, booking, now),
+    creditLeftCents: (await creditLeftCentsByBooking(db, [booking])).get(booking.id) ?? 0,
+    cardRefundableCents: Math.max(0, card - Math.min(card, await petFeeReturnedCents(db, booking.id))),
+    // Marked failed by the scheduled task, or run out before the task marked it (it may not run, nor ever mark another
+    // processor's reservation), as what is owed counts it already (the tester's third pass of 2026-11-18).
+    cardLapsed:
+      all.some((row) => row.status === "authorized" && row.createdAt.getTime() <= lapsedBefore) ||
+      (
+        await db
+          .select({ id: payments.id })
+          .from(payments)
+          .where(and(eq(payments.bookingId, booking.id), eq(payments.status, "failed"), ne(payments.provider, MANUAL_PROVIDER)))
+          .limit(1)
+      ).length > 0,
     madeInAdmin: booking.madeBy !== null,
     ended: STANDS.includes(booking.status) ? null : booking.cancelReason === "rescheduled" ? "released" : "cancelled",
     held:
@@ -130,6 +173,7 @@ export async function moneyOf(
       held: row.status === "authorized",
       recordedBy: row.recordedBy,
       note: row.note,
+      processor: row.provider === MANUAL_PROVIDER ? null : row.provider,
     })),
   };
 }
@@ -382,9 +426,13 @@ export async function recordHandRefund(
       );
     }
     const why = input.note.trim().slice(0, 180);
+    // Given back while the booking was paid beyond its price: that part first, which it owes again should its price go
+    // up again (`paidTowardPriceCentsByBooking`); the rest is the studio's goodwill.
+    const creditLeft = (await creditLeftCentsByBooking(tx, [booking])).get(booking.id) ?? 0;
     await tx.insert(refunds).values({
       paymentId: payment.id,
       amountCents: input.amountCents,
+      creditCents: Math.min(creditLeft, input.amountCents),
       status: "succeeded",
       reason: why || `Refunded by hand for ${booking.ref}`,
       automatic: false,

@@ -5,7 +5,7 @@ import { createManualCode, voidCode } from "./admin";
 import type { AuthUser } from "./auth";
 import { FREE_HOUR_MINUTES, listStampChanges, loyaltyStandingOf } from "./loyalty";
 import { cancelBooking } from "./manage";
-import { adjustStamps, cancelReward, listRewardChanges, listRewards, restoreReward } from "./rewards";
+import { adjustStamps, cancelReward, listRewardChanges, listRewards, LOYALTY_OFF, restoreReward } from "./rewards";
 import { DEFAULT_SETTINGS } from "./settings";
 import { completeVisits } from "./tasks";
 import { BASE_URL, createTestWorld, daysAfter, expectOk, FAR, minutesAfter, NOW, type TestWorld } from "./testing";
@@ -271,10 +271,10 @@ describe("an owner corrects a customer's stamps", () => {
     expect(await ask(sam)).toMatchObject({ ok: false });
   });
 
-  it("sends nothing while loyalty is switched off", async () => {
+  it("refuses a change while loyalty is switched off, since switching it on would throw the change away", async () => {
     await world.db.insert(settings).values({ key: "loyaltyEnabled", value: false });
-    const result = expectOk(await adjustStamps(world.db, owner, { email: JANE, stamps: 5, reason: "Five visits before the site" }, deps()));
-    expect(result).toMatchObject({ sent: 0, standing: { stamps: 5, earned: 1 } });
+    expect(await adjustStamps(world.db, owner, { email: JANE, stamps: 5, reason: "Five visits before the site" }, deps())).toEqual({ ok: false, message: LOYALTY_OFF });
+    expect(await listStampChanges(world.db, JANE)).toHaveLength(0);
     expect(await codes()).toHaveLength(0);
   });
 

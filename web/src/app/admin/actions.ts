@@ -74,10 +74,13 @@ async function requireAbility(ability: Ability, next: string): Promise<void> {
   if (!can(viewer, ability, await loadSettings(await getDb()))) notFound();
 }
 
-/** Where to return after a bookings action. Only the bookings list itself is accepted. */
+/**
+ * Where to return after a bookings action: the bookings list, or an appointment's page, whose payment card refunds
+ * what a booking was paid beyond its price (follow-up 5). Nothing else is followed.
+ */
 function bookingsBack(formData: FormData): string {
   const back = text(formData, "back");
-  return /^\/admin\/bookings(\?[A-Za-z0-9=&%_.-]*)?$/.test(back) ? back : "/admin/bookings";
+  return /^\/admin\/bookings(\?[A-Za-z0-9=&%_.-]*)?$/.test(back) || /^\/admin\/appointments\/VS-[0-9A-Z]{6}$/.test(back) ? back : "/admin/bookings";
 }
 
 // ── Staff ────────────────────────────────────────────────────────────────────
@@ -394,6 +397,7 @@ export async function saveSettingsAction(formData: FormData): Promise<void> {
   }
   // Loyalty has a switch of its own: switching it on after it was off starts the stamps over (`switchLoyalty`).
   await switchLoyalty(db, formData.get("loyaltyEnabled") !== null, new Date());
+  await saveSetting(db, "memberWeekendDifference", formData.get("memberWeekendDifference") !== null);
   updateTag(CATALOG_TAG);
   if (rejected.length > 0) {
     failed("/admin/settings", `Not saved: ${rejected.join("; ")}. Everything else was saved.`);
@@ -421,14 +425,16 @@ export async function saveAccessInstructionsAction(formData: FormData): Promise<
 export async function saveStudioDetailsAction(formData: FormData): Promise<void> {
   await requireOwner("/admin/studios");
   const includedGuests = intInRange(text(formData, "includedGuests"), 1, 100);
+  const extraGuests = intInRange(text(formData, "extraGuests"), 0, 100);
   const bufferMinutes = intInRange(text(formData, "bufferMinutes"), 0, 240);
-  if (includedGuests === null || bufferMinutes === null) {
-    failed("/admin/studios", "Not saved: guests must be 1 to 100, and clean-up time 0 to 240 minutes.");
+  if (includedGuests === null || extraGuests === null || bufferMinutes === null) {
+    failed("/admin/studios", "Not saved: guests included must be 1 to 100, extra guests 0 to 100, and clean-up time 0 to 240 minutes.");
   }
   const saved = await saveStudioDetails(await getDb(), text(formData, "studioId"), {
     tagline: text(formData, "tagline"),
     description: text(formData, "description"),
     includedGuests,
+    extraGuests,
     bufferMinutes,
     facts: {
       size: text(formData, "size"),

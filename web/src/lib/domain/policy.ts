@@ -44,6 +44,8 @@ export interface BookingFacts {
    * site cannot send it anywhere: a refund of it is the studio's to make.
    */
   paidAtStudioCents?: number;
+  /** Membership minutes the booking took (follow-up 3). Leave it out for a booking without any. */
+  membershipMinutes?: number;
 }
 
 export type CancelBlock = "not_confirmed" | "already_started";
@@ -125,7 +127,12 @@ export type RescheduleBlock =
   | "limit_reached"
   /** The fee for moving again is as much as the booking is worth, or more: no credit would be left. */
   | "fee_not_covered"
-  | "nothing_paid";
+  | "nothing_paid"
+  /**
+   * Paid with membership minutes: such a booking is cancelled, which gives its minutes back from far enough ahead, and
+   * booked again, rather than released for a reschedule code (the builder's reading, question 43).
+   */
+  | "membership";
 
 export type RescheduleOutcome =
   | { allowed: false; reason: RescheduleBlock }
@@ -137,6 +144,13 @@ export type RescheduleOutcome =
       discountCents: number;
       /** The fee for a move after the free ones, already taken off `creditCents`. 0 for a free move. */
       feeCents: number;
+      /** What the move after this one would cost: 0 while free moves are left. */
+      nextFeeCents: number;
+      /**
+       * Whether the new booking can be moved online at all, by the terms it will be made under: not while the owners have
+       * moving switched off, nor after the free moves with no fee for more (the tester's third pass of 2026-11-18).
+       */
+      nextMovable: boolean;
     };
 
 /**
@@ -152,9 +166,19 @@ export type RescheduleOutcome =
  * the code: the client pays it when the new booking is made, as the
  * difference the code no longer covers (the owner's answer of 2026-11-17).
  */
-export function rescheduleOutcome(booking: BookingFacts, now: Date, settings: PolicySettings): RescheduleOutcome {
+export function rescheduleOutcome(
+  booking: BookingFacts,
+  now: Date,
+  settings: PolicySettings,
+  /**
+   * The terms the new booking will be made under: the settings of today, as a booking made with the code takes them
+   * (question 10). What moving it again costs is theirs, not the released booking's (the tester's finding of 2026-11-18).
+   */
+  nextTerms: Pick<PolicySettings, "maxReschedules" | "rescheduleFeeCents"> = settings,
+): RescheduleOutcome {
   if (booking.status !== "confirmed") return { allowed: false, reason: "not_confirmed" };
   if (now.getTime() >= booking.startAt.getTime()) return { allowed: false, reason: "already_started" };
+  if ((booking.membershipMinutes ?? 0) > 0) return { allowed: false, reason: "membership" };
   if (settings.maxReschedules <= 0) return { allowed: false, reason: "not_offered" };
   const free = booking.rescheduledCount < settings.maxReschedules;
   if (!free && settings.rescheduleFeeCents <= 0) return { allowed: false, reason: "limit_reached" };
@@ -169,5 +193,8 @@ export function rescheduleOutcome(booking: BookingFacts, now: Date, settings: Po
   const feeCents = free ? 0 : settings.rescheduleFeeCents;
   const creditCents = paidCents + discountCents - feeCents;
   if (creditCents <= 0) return { allowed: false, reason: "fee_not_covered" };
-  return { allowed: true, creditCents, discountCents, feeCents };
+  const nextFree = booking.rescheduledCount + 1 < nextTerms.maxReschedules;
+  const nextFeeCents = nextFree ? 0 : nextTerms.rescheduleFeeCents;
+  const nextMovable = nextTerms.maxReschedules > 0 && (nextFree || nextTerms.rescheduleFeeCents > 0);
+  return { allowed: true, creditCents, discountCents, feeCents, nextFeeCents, nextMovable };
 }

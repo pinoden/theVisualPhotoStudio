@@ -149,6 +149,9 @@ export type AdjustStampsResult =
   | { ok: true; standing: LoyaltyStanding; /** Free hours this change earned, sent to the customer at once. */ sent: number }
   | { ok: false; message: string };
 
+export const LOYALTY_OFF =
+  "Loyalty is switched off in Settings, so stamps cannot be changed. Switching it on starts every customer's stamps from nothing: change them after that.";
+
 /**
  * Add stamps to a customer, or take some away, with a reason: a visit from
  * before the site counted them, a stamp given by mistake. The change is one
@@ -163,6 +166,9 @@ export async function adjustStamps(
 ): Promise<AdjustStampsResult> {
   const settings = await loadSettings(db);
   if (!can(viewer, "correctLoyalty", settings)) return { ok: false, message: "You cannot change stamps." };
+  // Switching loyalty on starts every customer's stamps from that moment (`switchLoyalty`), so a change
+  // made while it is off would be thrown away the moment it is on: refuse it rather than report it counted.
+  if (!settings.loyaltyEnabled) return { ok: false, message: LOYALTY_OFF };
   const email = normalizeEmail(input.email);
   if (!email) return { ok: false, message: "That is not a valid email address." };
   if (!Number.isInteger(input.stamps) || input.stamps === 0 || Math.abs(input.stamps) > MAX_STAMPS_AT_ONCE) {
@@ -180,10 +186,9 @@ export async function adjustStamps(
     }
     await tx.insert(loyaltyLedger).values({ email, kind: "stamps", stamps: input.stamps, reason, actor: viewer.email, createdAt: deps.now });
 
-    // A free hour these stamps completed goes out now. While loyalty is switched off nothing is sent,
-    // as for visits: it follows at the customer's next visit once it is on.
+    // A free hour these stamps completed goes out now.
     let sent = 0;
-    if (settings.loyaltyEnabled && input.stamps > 0) {
+    if (input.stamps > 0) {
       const [latest] = await tx
         .select({ name: bookings.customerName })
         .from(bookings)

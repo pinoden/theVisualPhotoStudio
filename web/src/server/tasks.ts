@@ -1,8 +1,11 @@
-import { and, asc, eq, gt, inArray, isNull, lte, ne, or } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import { bookings, payments } from "@/db/schema";
 import type { Db } from "@/db/client";
 import { releaseExpiredHolds } from "./availability";
-import { deliverPendingEmails, queueEmail, reviewRequestEmail, type EmailTransport } from "./email";
+import { durationLabel } from "@/lib/domain/time";
+import { toBookingViews } from "./bookings";
+import { bookingReminderEmail, deliverPendingEmails, queueEmail, reviewRequestEmail, type EmailTransport } from "./email";
+import { runMembershipBilling } from "./memberships";
 import { labelOf } from "@/lib/domain/labels";
 import { BY_SYSTEM, recordEvent } from "./history";
 import { sendEarnedFreeHours } from "./loyalty";
@@ -10,7 +13,8 @@ import { checkUnsettledRefunds, retryOpenRefunds, type ManageDeps } from "./mana
 import { settleReservedPayments } from "./reserved";
 import { checkOpenPayLinks } from "./pay-links";
 import { emptyOldTrash } from "./pages";
-import { loadSettings } from "./settings";
+import { loadAccessInstructions, loadSettings } from "./settings";
+import { formatInstant } from "./tz";
 
 /**
  * Work that happens on a clock rather than on a request. `runScheduledTasks`
@@ -36,6 +40,8 @@ export interface TaskSummary {
   /** Free hours sent to customers who reached five visits. */
   loyaltyCodes: number;
   reviewRequestsQueued: number;
+  /** Reminders queued for visits starting within the reminder's hours (`reminderHours`). */
+  remindersQueued: number;
   refundsSucceeded: number;
   refundsFailed: number;
   /** Refunds the processor had accepted as pending, found complete now. */
@@ -46,6 +52,12 @@ export interface TaskSummary {
   payLinksPaid: number;
   /** Payment links withdrawn because their booking is no longer active. */
   payLinksClosed: number;
+  /** Memberships' months found paid at the processor, recorded with their minutes (`runMembershipBilling`). */
+  membershipMonthsPaid: number;
+  /** Members told that a month was not paid, or that their payments stopped. */
+  membershipProblems: number;
+  /** Memberships whose buying stopped after their first month was paid, started now. */
+  membershipsCarriedOn: number;
   emailsSent: number;
   emailsFailed: number;
   /** Pages removed for good from the trash, after the days a deleted page is kept. */
@@ -53,6 +65,60 @@ export interface TaskSummary {
 }
 
 const DAY = 86_400_000;
+
+/**
+ * The reminder before a visit (the owner's answer of 2026-11-17: 24 hours before). Each confirmed booking gets one,
+ * once, when it starts within `reminderHours`, and only until it starts: a run that comes late still sends it while
+ * it can help. A booking made inside those hours gets none, as its confirmation has only just gone; nor one waiting to
+ * be moved. How to get in is the text the owners have set now, which may be newer than the confirmation's.
+ */
+export async function queueReminders(db: Db, now: Date): Promise<number> {
+  const { reminderHours } = await loadSettings(db);
+  if (reminderHours <= 0) return 0;
+  const until = new Date(now.getTime() + reminderHours * 3_600_000);
+  return db.transaction(async (tx) => {
+    const due = await tx
+      .select()
+      .from(bookings)
+      .where(
+        and(
+          eq(bookings.status, "confirmed"),
+          gt(bookings.startAt, now),
+          lte(bookings.startAt, until),
+          isNull(bookings.reminderSentAt),
+          lte(bookings.createdAt, sql`${bookings.startAt} - make_interval(hours => ${reminderHours})`),
+          or(isNull(bookings.label), ne(bookings.label, "reschedule_pending")),
+        ),
+      )
+      .orderBy(asc(bookings.startAt), asc(bookings.id))
+      .limit(100)
+      .for("update", { skipLocked: true });
+    if (due.length === 0) return 0;
+    // One after the other: a transaction has a single connection (`together` in client.ts).
+    const views = await toBookingViews(tx, due, now);
+    const access = await loadAccessInstructions(tx);
+    for (const [index, booking] of due.entries()) {
+      const view = views[index];
+      await queueEmail(
+        tx,
+        bookingReminderEmail({
+          to: booking.customerEmail,
+          name: booking.customerName,
+          ref: booking.ref,
+          studios: view.studios.map((studio) => studio.name).join(" + "),
+          when: formatInstant(booking.startAt),
+          duration: durationLabel(booking.durationMinutes),
+          photoIncludes: booking.photographerId !== null ? (booking.photoIncludes ?? "") : undefined,
+          dueCents: view.dueCents,
+          atStudio: booking.madeBy !== null,
+          access: access || undefined,
+        }),
+      );
+      await tx.update(bookings).set({ reminderSentAt: now }).where(eq(bookings.id, booking.id));
+    }
+    return due.length;
+  });
+}
 
 async function queueReviewRequests(db: Db, now: Date): Promise<number> {
   const cutoff = new Date(now.getTime() - DAY);
@@ -183,9 +249,11 @@ export async function runScheduledTasks(db: Db, deps: TaskDeps): Promise<TaskSum
   const reservations = await settleReservedPayments(db, deps);
   const visits = await completeVisits(db, deps.now, deps.baseUrl);
   const reviewRequestsQueued = await queueReviewRequests(db, deps.now);
+  const remindersQueued = await queueReminders(db, deps.now);
   const refundRuns = await retryOpenRefunds(db, deps);
   const settling = await checkUnsettledRefunds(db, deps);
   const links = await checkOpenPayLinks(db, deps);
+  const billing = await runMembershipBilling(db, deps);
   const mail = await deliverPendingEmails(db, deps.email, deps.now);
   const pagesRemoved = await emptyOldTrash(db, deps.now);
   return {
@@ -196,12 +264,16 @@ export async function runScheduledTasks(db: Db, deps: TaskDeps): Promise<TaskSum
     visitsCompleted: visits.completed,
     loyaltyCodes: visits.codes,
     reviewRequestsQueued,
+    remindersQueued,
     refundsSucceeded: refundRuns.succeeded,
     refundsFailed: refundRuns.failed,
     refundsSettled: settling.settled,
     refundsRejected: settling.rejected,
     payLinksPaid: links.paid,
     payLinksClosed: links.closed,
+    membershipMonthsPaid: billing.monthsPaid,
+    membershipProblems: billing.problems,
+    membershipsCarriedOn: billing.carriedOn,
     emailsSent: mail.sent,
     emailsFailed: mail.failed,
     pagesRemoved,

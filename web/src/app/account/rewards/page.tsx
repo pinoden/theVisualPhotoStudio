@@ -15,7 +15,7 @@ import { listCodesForEmail } from "@/server/promos";
 import { listRewards } from "@/server/rewards";
 import { requireUser } from "@/server/session";
 import { loadSettings, loyaltyStart } from "@/server/settings";
-import { formatDay } from "@/server/tz";
+import { formatDay, formatInstant } from "@/server/tz";
 
 export const metadata: Metadata = { title: "My Rewards", robots: { index: false } };
 
@@ -69,7 +69,7 @@ async function Rewards() {
             You collect one stamp for each day you visit, and {count(perReward, "stamp")} earn a free studio hour. We
             email you the code, and it appears below. Two bookings on one day are one stamp. A visit made with a free
             hour does not give a stamp, and neither does a photography session with our photographer.
-            {since && <> Stamps are counted from {formatDay(since)}, when the program started again. Free hours you already have stay valid.</>}
+            {since && <> Stamps are counted from {formatInstant(since)}, when the program started again. Free hours you already have stay valid.</>}
           </p>
           <dl className="reward-facts stamp-facts">
             <div>

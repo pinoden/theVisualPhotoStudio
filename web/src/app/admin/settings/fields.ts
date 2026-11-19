@@ -13,6 +13,17 @@ export const SETTING_GROUPS: { title: string; fields: SettingField[] }[] = [
       { key: "photoMinLeadHours", label: "Minimum notice for photography (hours)", help: "336 is two weeks. A session with the photographer cannot be booked closer than this." },
       { key: "slotIncrementMinutes", label: "Start times every (minutes)", help: "15 offers 9:00, 9:15, 9:30 and so on." },
       { key: "holdMinutes", label: "Hold while paying (minutes)", help: "How long a slot is kept for a customer at checkout." },
+      {
+        key: "reminderHours",
+        label: "Reminder email (hours before the start)",
+        help: "0 sends none. A booking made closer to its start than this gets none: its confirmation was just sent.",
+      },
+      {
+        key: "twoStudioGuestLimit",
+        label: "Most guests for two studios together",
+        help: "Every guest counts, those included and the extra ones. Each studio's included and extra guests are set under Studios.",
+      },
+      { key: "threeStudioGuestLimit", label: "Most guests for all three studios", help: "Every guest counts, as above." },
     ],
   },
   {
@@ -38,6 +49,16 @@ export const SETTING_GROUPS: { title: string; fields: SettingField[] }[] = [
       { key: "loyaltyVisits", label: "Visits that earn a free hour", help: "Counted on separate days. A visit made with a free hour does not count." },
       { key: "loyaltyValidDays", label: "Free hour valid for (days)", help: "" },
       { key: "loyaltyDelayHours", label: "A visit counts after (hours)", help: "Time after the visit ends, so staff can mark a no-show first." },
+    ],
+  },
+  {
+    title: "Memberships",
+    fields: [
+      {
+        key: "memberReturnHours",
+        label: "Membership hours given back (hours before start)",
+        help: "48 is two days. A booking made with membership hours and cancelled at least this long before it starts gives its hours back.",
+      },
     ],
   },
 ];

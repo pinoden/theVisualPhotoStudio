@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  type AnyPgColumn,
   boolean,
   check,
   customType,
@@ -114,6 +115,8 @@ export const studios = pgTable("studios", {
   description: text("description").notNull().default(""),
   /** Guests included in the price. */
   includedGuests: integer("included_guests").notNull().default(6),
+  /** Guests that can come beyond those included, each paid as an extra guest (an add-on of kind `people`). */
+  extraGuests: integer("extra_guests").notNull().default(0),
   /**
    * Minutes kept free after every booking, so that appointments are at least this far apart.
    * 15 is the owner's rule: 7 minutes before and 7 after each appointment, drawn so in the calendar.
@@ -339,6 +342,19 @@ export const bookings = pgTable(
      * paid (a reschedule credit), as opposed to a discount.
      */
     creditAppliedCents: integer("credit_applied_cents").notNull().default(0),
+    /**
+     * A booking paid with membership minutes (follow-up 3): the membership, the minutes it took, and the part of the
+     * studio price they paid. `total_cents` is what is left to pay after them.
+     */
+    membershipId: uuid("membership_id").references((): AnyPgColumn => memberships.id, { onDelete: "restrict" }),
+    membershipMinutes: integer("membership_minutes").notNull().default(0),
+    membershipCents: integer("membership_cents").notNull().default(0),
+    /**
+     * The kind of day the booking is priced as: its day's kind when it was made, or the new day's when a move priced it
+     * again (follow-up 5). A move compares the new day with this, not with what the owners make the old day later (a
+     * special date added since). Null for a booking made before it was kept (migration 0046 filled those in).
+     */
+    pricedAs: dayType("priced_as"),
 
     /** A booking that has been moved can no longer be refunded. */
     rescheduledCount: integer("rescheduled_count").notNull().default(0),
@@ -372,10 +388,21 @@ export const bookings = pgTable(
     /** Hash of the secret of a second manage link, given to the screen that asked again for a booking it had made. */
     retryTokenHash: text("retry_token_hash"),
     termsAcceptedAt: ts("terms_accepted_at"),
+    /**
+     * The terms the booking was made under (`BookingTerms` in src/server/terms.ts): its refund window and fee, how
+     * long and how often it can be moved and for what fee, and how long the credit it gives stays valid. A booking
+     * keeps them when the owners change the settings (question 10). Null for one made before they were kept.
+     */
+    terms: jsonb("terms"),
     /** When this completed visit was counted for loyalty (a free hour may or may not have followed). */
     loyaltyIssuedAt: ts("loyalty_issued_at"),
     /** When the review request was queued, or the rollout skipped an older appointment. */
     reviewRequestedAt: ts("review_requested_at"),
+    /**
+     * When the reminder before the visit was queued (`queueReminders` in tasks.ts). Set at once, with nothing sent, for
+     * a booking moved by the studio to a time closer than the reminder: the email about the move tells the new time.
+     */
+    reminderSentAt: ts("reminder_sent_at"),
     cancelledAt: ts("cancelled_at"),
     createdAt: createdAt(),
   },
@@ -545,27 +572,69 @@ export const paymentLinks = pgTable(
   (t) => [index("payment_links_booking_idx").on(t.bookingId)],
 );
 
-export const refunds = pgTable("refunds", {
-  id: id(),
-  paymentId: uuid("payment_id")
-    .notNull()
-    .references(() => payments.id, { onDelete: "restrict" }),
-  amountCents: integer("amount_cents").notNull(),
-  /** pending until the processor confirms; failed ones need the owner's attention. */
-  status: refundStatus("status").notNull().default("pending"),
-  providerRefundId: text("provider_refund_id"),
-  reason: text("reason").notNull().default(""),
-  /** True when the system refunded by policy without the owner's involvement. */
-  automatic: boolean("automatic").notNull().default(false),
-  error: text("error"),
-  /**
-   * When the processor said the refund was complete. A refund it accepted as
-   * pending has none until the scheduled task asks again; one it rejects
-   * then becomes failed (`checkUnsettledRefunds` in manage.ts).
-   */
-  settledAt: ts("settled_at"),
-  createdAt: createdAt(),
-});
+/**
+ * What an appointment costs beyond its price, added by the studio once it has started (follow-up 13): overtime, at a
+ * quarter of the studio's hourly rate for each 15 minutes started, and cleaning or damage, at an amount typed each time.
+ * An active charge adds to what the booking owes (`owedCentsByBooking`), so it is paid at the studio or through a
+ * payment link like the rest. One added by mistake is taken back (`voidedAt`), never deleted. See src/server/charges.ts.
+ */
+export const bookingCharges = pgTable(
+  "booking_charges",
+  {
+    id: id(),
+    bookingId: uuid("booking_id")
+      .notNull()
+      .references(() => bookings.id, { onDelete: "cascade" }), // removed with a test-mode booking, as its holds are
+    kind: text("kind", { enum: ["overtime", "cleaning", "damage"] }).notNull(),
+    amountCents: integer("amount_cents").notNull(),
+    /** Overtime only: the minutes the client stayed past the end. */
+    minutes: integer("minutes"),
+    /** Overtime only: the hourly rate it was worked out from, as it was then. */
+    hourlyCents: integer("hourly_cents"),
+    note: text("note").notNull().default(""),
+    createdBy: text("created_by").notNull(),
+    createdAt: createdAt(),
+    voidedAt: ts("voided_at"),
+    voidedBy: text("voided_by"),
+  },
+  (t) => [
+    index("booking_charges_booking_idx").on(t.bookingId),
+    check("booking_charges_kind", sql`${t.kind} in ('overtime', 'cleaning', 'damage')`),
+    check("booking_charges_amount", sql`${t.amountCents} > 0`),
+  ],
+);
+
+export const refunds = pgTable(
+  "refunds",
+  {
+    id: id(),
+    paymentId: uuid("payment_id")
+      .notNull()
+      .references(() => payments.id, { onDelete: "restrict" }),
+    amountCents: integer("amount_cents").notNull(),
+    /** pending until the processor confirms; failed ones need the owner's attention. */
+    status: refundStatus("status").notNull().default("pending"),
+    providerRefundId: text("provider_refund_id"),
+    reason: text("reason").notNull().default(""),
+    /**
+     * The part of this refund that gave back what the booking was paid beyond its price then (its remaining credit, after
+     * a move to a day that costs less: follow-up 5). That part is money paid back, not a gift: should the price go up
+     * again, the booking owes it again. The rest of a refund (goodwill, a cancellation's) never makes a booking owe.
+     */
+    creditCents: integer("credit_cents").notNull().default(0),
+    /** True when the system refunded by policy without the owner's involvement. */
+    automatic: boolean("automatic").notNull().default(false),
+    error: text("error"),
+    /**
+     * When the processor said the refund was complete. A refund it accepted as
+     * pending has none until the scheduled task asks again; one it rejects
+     * then becomes failed (`checkUnsettledRefunds` in manage.ts).
+     */
+    settledAt: ts("settled_at"),
+    createdAt: createdAt(),
+  },
+  (t) => [check("refunds_credit_cents", sql`${t.creditCents} >= 0 and ${t.creditCents} <= ${t.amountCents}`)],
+);
 
 /** Every email the system wants to send. A sender delivers the unsent rows. */
 export const emailOutbox = pgTable("email_outbox", {
@@ -587,6 +656,192 @@ export const emailOutbox = pgTable("email_outbox", {
   error: text("error"),
   createdAt: createdAt(),
 });
+
+// ── Memberships ──────────────────────────────────────────────────────────────
+
+/**
+ * A membership the studio sells (follow-up 3): studio minutes each month for a monthly price, in one studio or in the
+ * studios of a bundle (`membership_plan_studios`). The owners add plans, change them and switch them on and off under
+ * Admin → Memberships. See src/server/memberships.ts.
+ */
+export const membershipPlans = pgTable(
+  "membership_plans",
+  {
+    id: id(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    /** The studio minutes it gives each month: 300 for 5 hours. */
+    minutes: integer("minutes").notNull(),
+    /** What it costs each month. */
+    priceCents: integer("price_cents").notNull(),
+    /** False when it is no longer offered. A plan is never deleted. */
+    active: boolean("active").notNull().default(true),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: createdAt(),
+  },
+  (t) => [check("membership_plans_minutes", sql`${t.minutes} > 0`), check("membership_plans_price", sql`${t.priceCents} > 0`)],
+);
+
+/** The studios a plan's minutes are for: one, or the studios of a bundle, each of which they can be spent in alone too. */
+export const membershipPlanStudios = pgTable(
+  "membership_plan_studios",
+  {
+    planId: uuid("plan_id")
+      .notNull()
+      .references(() => membershipPlans.id, { onDelete: "cascade" }),
+    studioId: uuid("studio_id")
+      .notNull()
+      .references(() => studios.id, { onDelete: "restrict" }),
+  },
+  (t) => [primaryKey({ columns: [t.planId, t.studioId] })],
+);
+
+/**
+ * A plan's price at the card processor (Square's subscription plan and its variation): made the first time a
+ * membership is bought at that price, and reused after. A new price is a new variation, so members keep theirs.
+ */
+export const membershipPlanPrices = pgTable(
+  "membership_plan_prices",
+  {
+    planId: uuid("plan_id")
+      .notNull()
+      .references(() => membershipPlans.id, { onDelete: "restrict" }),
+    /** Which processor, as `payments.provider`: a price made in the sandbox is unknown to the live account. */
+    provider: text("provider").notNull(),
+    priceCents: integer("price_cents").notNull(),
+    processorPlanId: text("processor_plan_id").notNull(),
+    variationId: text("variation_id").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.planId, t.provider, t.priceCents] })],
+);
+
+export const MEMBERSHIP_STATUSES = ["starting", "active", "cancelled", "stopped", "failed"] as const;
+
+/**
+ * A membership a client bought (follow-up 3). Its first month is paid when it is bought; the processor's subscription
+ * bills the same card each month after, from the same day of the next month. The member keeps the plan's name, minutes
+ * and price as they were when they joined.
+ *
+ * `status`: `starting` while it is being bought (the card form was sent: the first month and the subscription are
+ * being set up, and pressing again finds it); `active`, billed each month; `cancelled`, billed no more, the month paid
+ * for running to `ends_on`; `stopped`, the processor stopped billing it; `failed`, never bought (the card was refused,
+ * or the billing could not be set up, and the first month was given back). The minutes stay usable in every state but
+ * `failed`. See src/server/memberships.ts.
+ */
+export const memberships = pgTable(
+  "memberships",
+  {
+    id: id(),
+    /** The client, by their email address, always lowercase, as their bookings are. */
+    email: text("email").notNull(),
+    name: text("name").notNull(),
+    phone: text("phone").notNull().default(""),
+    planId: uuid("plan_id")
+      .notNull()
+      .references(() => membershipPlans.id, { onDelete: "restrict" }),
+    planName: text("plan_name").notNull(),
+    minutesPerMonth: integer("minutes_per_month").notNull(),
+    priceCents: integer("price_cents").notNull(),
+    /** What the member books with. */
+    code: text("code").notNull().unique(),
+    status: text("status", { enum: MEMBERSHIP_STATUSES }).notNull(),
+    /** The buying page's own key: pressing again finds this membership instead of buying a second. */
+    requestKey: text("request_key").notNull().unique(),
+    /** Which processor bills it, as `payments.provider`. */
+    provider: text("provider").notNull(),
+    customerId: text("customer_id"),
+    cardId: text("card_id"),
+    subscriptionId: text("subscription_id"),
+    /** The day it was bought, the studio's day. */
+    startedOn: date("started_on", { mode: "string" }).notNull(),
+    /** The first day not paid for yet: the day the next month is billed while it is active. */
+    paidThrough: date("paid_through", { mode: "string" }),
+    cancelledAt: ts("cancelled_at"),
+    /** Once cancelled: the day the month paid for ends, with no charge after it. */
+    endsOn: date("ends_on", { mode: "string" }),
+    /** Why it failed or was stopped, or what went wrong with a month's payment, for the owners. */
+    problem: text("problem"),
+    /** When the scheduled task last asked the processor about its months: at most once an hour (`runMembershipBilling`). */
+    billingCheckedAt: ts("billing_checked_at"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("memberships_email_idx").on(t.email),
+    check("memberships_status", sql`${t.status} in ('starting', 'active', 'cancelled', 'stopped', 'failed')`),
+    check("memberships_minutes", sql`${t.minutesPerMonth} > 0`),
+    check("memberships_price", sql`${t.priceCents} > 0`),
+  ],
+);
+
+/** A month a membership paid: the first, paid when it was bought, then each the processor billed. */
+export const membershipPayments = pgTable(
+  "membership_payments",
+  {
+    id: id(),
+    membershipId: uuid("membership_id")
+      .notNull()
+      .references(() => memberships.id, { onDelete: "restrict" }),
+    /** The processor's payment (the first month) or invoice (a month it billed): each is recorded once. */
+    processorId: text("processor_id").notNull().unique(),
+    amountCents: integer("amount_cents").notNull(),
+    /** The first day of the month it pays for. */
+    periodStart: date("period_start", { mode: "string" }).notNull(),
+    paidAt: ts("paid_at").notNull(),
+    /** Set when it was given back: a first month whose membership could not be set up. */
+    refundedAt: ts("refunded_at"),
+  },
+  (t) => [check("membership_payments_amount", sql`${t.amountCents} > 0`)],
+);
+
+/**
+ * Every change to a membership's minutes: the balance is their sum. `month`: a paid month's minutes; `booking`: spent
+ * on a booking (negative); `returned`: given back by a cancellation; `correction`: an owner's, with a note.
+ */
+export const membershipMinutes = pgTable(
+  "membership_minutes",
+  {
+    id: id(),
+    membershipId: uuid("membership_id")
+      .notNull()
+      .references(() => memberships.id, { onDelete: "restrict" }),
+    minutes: integer("minutes").notNull(),
+    kind: text("kind", { enum: ["month", "booking", "returned", "correction"] }).notNull(),
+    /** The month that added them: at most once each. */
+    paymentId: uuid("payment_id")
+      .unique()
+      .references(() => membershipPayments.id, { onDelete: "restrict" }),
+    bookingId: uuid("booking_id").references(() => bookings.id, { onDelete: "restrict" }),
+    note: text("note").notNull().default(""),
+    /** Who: "the site", or the owner who corrected them. */
+    actor: text("actor").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("membership_minutes_membership_idx").on(t.membershipId),
+    check("membership_minutes_kind", sql`${t.kind} in ('month', 'booking', 'returned', 'correction')`),
+    check("membership_minutes_not_zero", sql`${t.minutes} <> 0`),
+  ],
+);
+
+/**
+ * The owners' wording of an email the site sends to clients (Admin → Emails): a row for each email they have changed
+ * or set back. No subject and text: the site's own wording again. `revision` goes up with each save, so that a save
+ * from an editor opened before someone else's is noticed. See src/server/email-templates.ts.
+ */
+export const emailTemplates = pgTable(
+  "email_templates",
+  {
+    /** Which email: a key of `EMAIL_TEMPLATES` in src/lib/email-templates.ts. */
+    key: text("key").primaryKey(),
+    subject: text("subject"),
+    body: text("body"),
+    revision: integer("revision").notNull().default(1),
+    updatedBy: text("updated_by").notNull(),
+    updatedAt: ts("updated_at").notNull(),
+  },
+  (t) => [check("email_templates_wording", sql`(${t.subject} is null) = (${t.body} is null)`)],
+);
 
 // ── The website's content ────────────────────────────────────────────────────
 

@@ -1,9 +1,10 @@
 import { and, eq, inArray, isNotNull, isNull, max, ne, sql } from "drizzle-orm";
-import { bookingEvents, bookings, payments, promoCodes, refunds } from "@/db/schema";
+import { bookingEvents, bookings, membershipMinutes, payments, promoCodes, refunds } from "@/db/schema";
 import type { Db, DbLike } from "@/db/client";
 import { labelOf } from "@/lib/domain/labels";
 import { formatCents } from "@/lib/domain/pricing";
 import { MANUAL_PROVIDER } from "@/lib/payment-methods";
+import { durationLabel } from "@/lib/domain/time";
 import { count, hoursInWords } from "@/lib/words";
 import {
   afterFee,
@@ -16,10 +17,12 @@ import {
   type RescheduleOutcome,
 } from "@/lib/domain/policy";
 import type { AuthUser } from "./auth";
-import { isBookingRef, tokenMatches } from "./bookings";
+import { isBookingRef, tokenMatches, toBookingViews } from "./bookings";
 import {
   cancellationEmail,
   codeRefundEmail,
+  moveRequestReceivedEmail,
+  moveRequestStudioEmail,
   ownerHandRefundNotice,
   ownerRefundNotice,
   ownerRefundWaitingNotice,
@@ -34,7 +37,7 @@ import {
 } from "./email";
 import { BY_CUSTOMER, BY_STUDIO, BY_SYSTEM, recordEvent } from "./history";
 import { releaseHolds } from "./holds";
-import { heldCentsByBooking, netCardPaidCents, paidAtStudioCents } from "./money";
+import { creditLeftCentsByBooking, heldCentsByBooking, moneyByPurposeOf, netCardPaidCents } from "./money";
 import {
   closePayLinkOf,
   lookAtPayLink,
@@ -49,6 +52,7 @@ import type { PaymentProvider } from "./payments";
 import { issuePetCredit, petCreditOf, petFeeCentsOf, petFeeReturnedCents, studioRefundableCents } from "./pet-fee";
 import { issuePromo, rescheduleCodeOf, restorePromo, spendable, takeOffRescheduleCode, type RescheduleCode } from "./promos";
 import { loadSettings, type Settings } from "./settings";
+import { termsFor } from "./terms";
 import { formatInstant } from "./tz";
 
 /**
@@ -91,18 +95,23 @@ async function factsFor(db: DbLike, booking: BookingRow): Promise<BookingFacts> 
   const [code] = booking.promoCodeId
     ? await db.select({ source: promoCodes.source }).from(promoCodes).where(eq(promoCodes.id, booking.promoCodeId)).limit(1)
     : [];
+  // Only what paid the price: what paid the extra charges never travels into a refund or a reschedule code (question
+  // 36), also once the studio has moved a booking that had started (the tester's findings of 2026-11-18,
+  // `moneyByPurposeOf`).
+  const money = await moneyByPurposeOf(db, booking.id);
   return {
     status: booking.status,
     startAt: booking.startAt,
     rescheduledCount: booking.rescheduledCount,
     madeWithRescheduleCode: code?.source === "reschedule",
-    cardPaidCents: await netCardPaidCents(db, booking.id),
+    cardPaidCents: money.priceByCardCents,
     creditAppliedCents: booking.creditAppliedCents,
     // promoDiscountCents holds whatever the code took off: for a credit code that is the credit itself.
     discountCents: booking.promoDiscountCents - booking.creditAppliedCents,
     petFeeCents,
     petCreditGiven: petFeeCents > 0 && (await petCreditOf(db, booking.id)) !== null,
-    paidAtStudioCents: await paidAtStudioCents(db, booking.id),
+    paidAtStudioCents: money.priceAtStudioCents,
+    membershipMinutes: booking.membershipMinutes,
   };
 }
 
@@ -111,13 +120,37 @@ export interface ManageOptions {
   reschedule: RescheduleOutcome;
 }
 
+// ── Membership minutes on a cancellation (follow-up 3) ───────────────────────
+
 /**
- * The terms that apply to one booking. A photography session has to be
- * cancelled earlier than a studio rental to be refunded: the photographer has
- * set the time aside. Everything else is the same.
+ * Whether cancelling now gives a booking's membership minutes back: by the client, at least `memberReturnHours` before
+ * the start, as the booking's own terms say (the owner's answer of 2026-11-18); by the studio, whenever the visit has
+ * not started, as the studio's cancellation gives a code back then.
  */
-function termsFor(booking: Pick<BookingRow, "photographerId">, settings: Settings): Settings {
-  return booking.photographerId ? { ...settings, refundWindowHours: settings.photoRefundWindowHours } : settings;
+function minutesComeBack(booking: Pick<BookingRow, "membershipMinutes" | "startAt">, terms: Pick<Settings, "memberReturnHours">, now: Date, byStudio: boolean): boolean {
+  if (booking.membershipMinutes <= 0) return false;
+  const ahead = booking.startAt.getTime() - now.getTime();
+  return byStudio ? ahead > 0 : ahead >= terms.memberReturnHours * 3_600_000;
+}
+
+/** What cancelling now does with the booking's membership minutes, in a sentence. "" for a booking without any. */
+function minutesOnCancelText(booking: Pick<BookingRow, "membershipMinutes" | "startAt">, terms: Pick<Settings, "memberReturnHours">, now: Date, byStudio: boolean): string {
+  if (booking.membershipMinutes <= 0) return "";
+  const used = `The membership time it used (${durationLabel(booking.membershipMinutes)})`;
+  if (minutesComeBack(booking, terms, now, byStudio)) return `${used} goes back to your membership.`;
+  return byStudio ? "" : `${used} is not given back, as the booking is cancelled less than ${hoursInWords(terms.memberReturnHours)} before it starts.`;
+}
+
+/** Give a cancelled booking's membership minutes back: a line of `membership_minutes`, which adds them to what is left. */
+async function giveMinutesBack(tx: DbLike, booking: BookingRow, actor: string): Promise<void> {
+  await tx.insert(membershipMinutes).values({
+    membershipId: booking.membershipId!,
+    minutes: booking.membershipMinutes,
+    kind: "returned",
+    bookingId: booking.id,
+    note: `Booking ${booking.ref} cancelled`,
+    actor,
+  });
 }
 
 async function manageContext(
@@ -125,16 +158,18 @@ async function manageContext(
   ref: string,
   actor: Actor,
   now: Date,
-): Promise<{ options: ManageOptions; terms: Settings; heldCents: number } | null> {
+): Promise<{ options: ManageOptions; terms: Settings; heldCents: number; booking: BookingRow } | null> {
   if (!isBookingRef(ref)) return null;
   const [booking] = await db.select().from(bookings).where(eq(bookings.ref, ref)).limit(1);
   if (!booking || !mayAct(booking, actor)) return null;
-  const terms = termsFor(booking, await loadSettings(db));
+  const settings = await loadSettings(db);
+  const terms = termsFor(booking, settings);
   const facts = await factsFor(db, booking);
   return {
-    options: { cancel: cancellationOutcome(facts, now, terms), reschedule: rescheduleOutcome(facts, now, terms) },
+    options: { cancel: cancellationOutcome(facts, now, terms), reschedule: rescheduleOutcome(facts, now, terms, settings) },
     terms,
     heldCents: await heldCentsOf(db, booking.id, now),
+    booking,
   };
 }
 
@@ -153,6 +188,8 @@ export interface ManageChoices {
   cancel: { allowed: boolean; text: string };
   /** `offered` is false when the owner has switched moving off: there is then nothing to show. */
   reschedule: { allowed: boolean; text: string; offered: boolean };
+  /** Asking the studio to move it (question 20): set by `getManageChoices`, which knows the booking. */
+  request?: { allowed: boolean; text: string };
 }
 
 /** `heldCents`: what the booking's card holds, not taken yet, which the words say what becomes of. */
@@ -184,13 +221,112 @@ export function rescheduleOfferText(
       : fee
         ? ` That is what you paid ${fee}.`
         : "";
-  return `This booking will be released and you will get a code worth ${formatCents(outcome.creditCents)}, valid for ${count(settings.creditValidDays, "day")}, to book a new time.${discount} A booking made with the code cannot be refunded.`;
+  // The client is told, before they use it, what moving the new booking will cost, or that it cannot be moved online.
+  const next = !outcome.nextMovable
+    ? " The new booking cannot be moved online again."
+    : outcome.feeCents === 0 && outcome.nextFeeCents > 0
+      ? ` Moving the new booking again would cost ${formatCents(outcome.nextFeeCents)}.`
+      : "";
+  return `This booking will be released and you will get a code worth ${formatCents(outcome.creditCents)}, valid for ${count(settings.creditValidDays, "day")}, to book a new time.${discount} A booking made with the code cannot be refunded.${next}`;
 }
 
 /** What cancelling or moving would do, in words. A page asks `noticeBookingPayments` first, so that this counts a link just paid. */
 export async function getManageChoices(db: DbLike, ref: string, actor: Actor, now: Date): Promise<ManageChoices | null> {
   const context = await manageContext(db, ref, actor, now);
-  return context ? describeManageOptions(context.options, context.terms, context.heldCents) : null;
+  if (!context) return null;
+  const choices = describeManageOptions(context.options, context.terms, context.heldCents);
+  // What becomes of membership minutes is part of what the client is told, and agrees to, before cancelling.
+  const minutes = choices.cancel.allowed ? minutesOnCancelText(context.booking, context.terms, now, actor.kind === "owner") : "";
+  return {
+    ...choices,
+    cancel: minutes ? { ...choices.cancel, text: [choices.cancel.text, minutes].filter(Boolean).join(" ") } : choices.cancel,
+    request: moveRequestChoice(context.booking, now),
+  };
+}
+
+// ── Asking the studio to move a booking ──────────────────────────────────────
+
+/** The longest message a client can send with a request to move a booking. */
+export const MOVE_REQUEST_MAX = 1000;
+
+const ALREADY_ASKED = "You have asked the studio to move this booking. The studio will contact you to agree a new time.";
+
+/**
+ * Whether the client can ask the studio to move the booking now, in words. Beside the instant reschedule code, not
+ * in its place (question 20 of 2026-11-17): offered until the visit starts, whatever the booking's terms say about
+ * moving online, because the studio decides.
+ */
+function moveRequestChoice(booking: Pick<BookingRow, "status" | "label" | "startAt">, now: Date): { allowed: boolean; text: string } {
+  if (booking.status !== "confirmed" || now.getTime() >= booking.startAt.getTime()) return { allowed: false, text: "" };
+  if (booking.label === "reschedule_pending") return { allowed: false, text: ALREADY_ASKED };
+  return {
+    allowed: true,
+    text: "Tell the studio when would suit you instead. The studio contacts you to agree a new time, and your booking stays as it is until it is moved.",
+  };
+}
+
+export type MoveRequestResult =
+  | { ok: true }
+  | { ok: false; code: "not_found" | "not_confirmed" | "already_started" | "already_asked" | "bad_message"; message: string };
+
+/**
+ * A client asks the studio to move their booking. The booking is marked Reschedule Pending, which keeps its time, keeps
+ * the scheduled task from completing it and the reminder from being sent; its history says what the client wrote. The
+ * studio is emailed, with a reply that reaches the client, and the client gets a copy. The studio then moves it on the
+ * appointment's page (a move the client asked for), or takes the label off.
+ */
+export async function askStudioToMove(
+  db: Db,
+  ref: string,
+  actor: Actor,
+  message: string,
+  deps: Pick<ManageDeps, "now" | "ownerEmail" | "baseUrl">,
+): Promise<MoveRequestResult> {
+  const notFound = { ok: false as const, code: "not_found" as const, message: "Booking not found." };
+  if (!isBookingRef(ref)) return notFound;
+  const text = message.trim();
+  if (!text) return { ok: false, code: "bad_message", message: "Say when would suit you, so that the studio can find a time." };
+  if (text.length > MOVE_REQUEST_MAX) return { ok: false, code: "bad_message", message: `Please keep it to ${MOVE_REQUEST_MAX} characters.` };
+
+  return db.transaction(async (tx): Promise<MoveRequestResult> => {
+    // Locked, so that two presses at once send one request.
+    const [booking] = await tx.select().from(bookings).where(eq(bookings.ref, ref)).for("update").limit(1);
+    if (!booking || !mayAct(booking, actor)) return notFound;
+    if (booking.status !== "confirmed") return { ok: false, code: "not_confirmed", message: endedText(booking) };
+    if (deps.now.getTime() >= booking.startAt.getTime()) {
+      return { ok: false, code: "already_started", message: "This booking has started. Please talk to the studio." };
+    }
+    if (booking.label === "reschedule_pending") return { ok: false, code: "already_asked", message: ALREADY_ASKED };
+
+    await tx.update(bookings).set({ label: "reschedule_pending" }).where(eq(bookings.id, booking.id));
+    await recordEvent(tx, {
+      bookingId: booking.id,
+      from: labelOf(booking),
+      to: "reschedule_pending",
+      actor: actor.kind === "owner" ? BY_STUDIO : BY_CUSTOMER,
+      at: deps.now,
+      note: `The client asked the studio to move it: ${text}`,
+    });
+    const [view] = await toBookingViews(tx, [booking], deps.now);
+    const when = formatInstant(booking.startAt);
+    if (deps.ownerEmail) {
+      await queueEmail(
+        tx,
+        moveRequestStudioEmail({
+          to: deps.ownerEmail,
+          client: { name: booking.customerName, email: booking.customerEmail, phone: booking.customerPhone },
+          ref: booking.ref,
+          studios: view.studios.map((studio) => studio.name).join(" + "),
+          when,
+          duration: durationLabel(booking.durationMinutes),
+          message: text,
+          appointmentUrl: `${deps.baseUrl.replace(/\/$/, "")}/admin/appointments/${booking.ref}`,
+        }),
+      );
+    }
+    await queueEmail(tx, moveRequestReceivedEmail({ to: booking.customerEmail, name: booking.customerName, ref: booking.ref, when, message: text }));
+    return { ok: true };
+  });
 }
 
 const NOT_CHANGEABLE = "This booking can no longer be changed.";
@@ -221,10 +357,12 @@ export function cancelBlockText(reason: CancelBlock): string {
 
 export function rescheduleBlockText(
   reason: RescheduleBlock,
-  settings: Pick<Settings, "rescheduleCutoffHours" | "rescheduleFeeCents">,
+  settings: Pick<Settings, "rescheduleCutoffHours" | "rescheduleFeeCents" | "memberReturnHours">,
   heldCents = 0,
 ): string {
   switch (reason) {
+    case "membership":
+      return `A booking made with membership hours is moved by cancelling it and booking the new time: its hours go back to your membership when it is cancelled at least ${hoursInWords(settings.memberReturnHours)} before it starts. Or ask the studio to move it.`;
     case "already_started":
       return "This booking has already started.";
     case "not_confirmed":
@@ -695,8 +833,11 @@ async function recordRefunds(
   totalCents: number,
   reason: string,
   automatic: boolean,
+  /** The part of it that gives back what the booking was paid beyond its price (`refunds.credit_cents`, follow-up 5). */
+  creditCents = 0,
 ): Promise<string[]> {
   if (totalCents <= 0) return [];
+  let credit = Math.min(creditCents, totalCents);
   // Only card payments made through the site: money taken at the studio cannot be sent back from here.
   const paid = await tx
     .select()
@@ -714,12 +855,14 @@ async function recordRefunds(
       .where(and(eq(refunds.paymentId, payment.id), inArray(refunds.status, ["pending", "succeeded", "failed"])));
     const amount = Math.min(left, payment.amountCents - already);
     if (amount <= 0) continue;
+    const ofCredit = Math.min(credit, amount);
     const [refund] = await tx
       .insert(refunds)
-      .values({ paymentId: payment.id, amountCents: amount, reason, automatic, status: "pending" })
+      .values({ paymentId: payment.id, amountCents: amount, creditCents: ofCredit, reason, automatic, status: "pending" })
       .returning({ id: refunds.id });
     ids.push(refund.id);
     left -= amount;
+    credit -= ofCredit;
   }
   if (left > 0) throw new Error("Refund exceeds what was paid.");
   return ids;
@@ -892,7 +1035,10 @@ export async function cancelBooking(db: Db, ref: string, actor: Actor, deps: Man
     if (!decision.allowed) return { kind: "blocked" as const, reason: decision.reason, booking: { status: booking.status, cancelReason: booking.cancelReason } };
     // What the card holds, not taken yet: nothing was charged, and the cancellation says it is released.
     const heldCents = await heldCentsOf(tx, booking.id, deps.now);
-    if (seen !== undefined && seen !== cancelOutcomeText(decision, terms, {}, heldCents)) return { kind: "changed" as const };
+    const byStudio = actor.kind === "owner";
+    const minutesText = minutesOnCancelText(booking, terms, deps.now, byStudio);
+    const said = [cancelOutcomeText(decision, terms, {}, heldCents), minutesText].filter(Boolean).join(" ");
+    if (seen !== undefined && seen !== said) return { kind: "changed" as const };
 
     await tx
       .update(bookings)
@@ -901,10 +1047,12 @@ export async function cancelBooking(db: Db, ref: string, actor: Actor, deps: Man
     await releaseHolds(tx, booking.id);
 
     const codeBack = await giveCodeBack(tx, booking, actor.kind === "owner" ? "studio" : "customer");
+    const minutesBack = minutesComeBack(booking, terms, deps.now, byStudio);
+    if (minutesBack) await giveMinutesBack(tx, booking, byStudio ? "the studio" : "the site");
     // The pet is not coming: its fee stays off the card and goes back as studio credit.
     const petCredit =
       decision.creditCents > 0
-        ? await issuePetCredit(tx, booking, decision.creditCents, { now: deps.now, validDays: settings.creditValidDays })
+        ? await issuePetCredit(tx, booking, decision.creditCents, { now: deps.now, validDays: terms.creditValidDays })
         : null;
     await recordEvent(tx, {
       bookingId: booking.id,
@@ -915,6 +1063,7 @@ export async function cancelBooking(db: Db, ref: string, actor: Actor, deps: Man
       note: [
         decision.refundCents > 0 ? `Refund ${formatCents(decision.refundCents)}` : "No refund",
         ...(petCredit ? [`pet fee of ${formatCents(decision.creditCents)} returned as studio credit`] : []),
+        ...(booking.membershipMinutes > 0 ? [`${durationLabel(booking.membershipMinutes)} of membership time ${minutesBack ? "given back" : "used"}`] : []),
         ...(decision.byHandCents > 0
           ? [
               afterFee(decision.byHandCents, terms.refundFeePercent) > 0
@@ -927,7 +1076,7 @@ export async function cancelBooking(db: Db, ref: string, actor: Actor, deps: Man
 
     const refundIds = await recordRefunds(tx, booking.id, decision.refundCents, `Cancellation of ${booking.ref}`, true);
     const unseenNote = unseen ? await noteUnseenLink(tx, booking, "cancelled", deps) : null;
-    const message = `${cancelOutcomeText(decision, terms, {}, heldCents)}${codeBack ? ` ${CODE_BACK}` : ""}${unseenNote ? ` ${unseenNote}` : ""}`;
+    const message = `${said}${codeBack ? ` ${CODE_BACK}` : ""}${unseenNote ? ` ${unseenNote}` : ""}`;
     // The whole outcome. The card refund is said as sent: if it does not go through, the email is put right (`refundNotSent`).
     const email: CancellationNotice = {
       to: booking.customerEmail,
@@ -937,6 +1086,7 @@ export async function cancelBooking(db: Db, ref: string, actor: Actor, deps: Man
       ...(decision.refundCents > 0 ? { refund: { cents: decision.refundCents, feeCents: decision.feeCents } } : {}),
       lines: [
         cancelOutcomeText(decision, terms, { card: decision.refundCents > 0, pet: true }, heldCents),
+        minutesText,
         ...(codeBack ? [CODE_BACK] : []),
         ...(unseenNote ? [unseenNote] : []),
       ].filter(Boolean),
@@ -1026,16 +1176,19 @@ export async function requestRescheduleCode(db: Db, ref: string, actor: Actor, d
     const [booking] = await tx.select().from(bookings).where(eq(bookings.ref, ref)).for("update").limit(1);
     if (!booking || !mayAct(booking, actor)) return { kind: "not_found" as const };
 
-    const decision = rescheduleOutcome(await factsFor(tx, booking), deps.now, settings);
+    // The terms the booking was made under: its moving rules, and how long the code it gives stays valid.
+    const terms = termsFor(booking, settings);
+    const decision = rescheduleOutcome(await factsFor(tx, booking), deps.now, terms, settings);
     if (!decision.allowed) {
       return {
         kind: "blocked" as const,
         reason: decision.reason,
         booking: { status: booking.status, cancelReason: booking.cancelReason },
         heldCents: await heldCentsOf(tx, booking.id, deps.now),
+        terms,
       };
     }
-    if (seen !== undefined && seen !== rescheduleOfferText(decision, settings)) return { kind: "changed" as const };
+    if (seen !== undefined && seen !== rescheduleOfferText(decision, terms)) return { kind: "changed" as const };
 
     await tx
       .update(bookings)
@@ -1055,7 +1208,7 @@ export async function requestRescheduleCode(db: Db, ref: string, actor: Actor, d
           : `Released for a reschedule code worth ${formatCents(decision.creditCents)}`,
     });
 
-    const expiresAt = new Date(deps.now.getTime() + settings.creditValidDays * 86_400_000);
+    const expiresAt = new Date(deps.now.getTime() + terms.creditValidDays * 86_400_000);
     const photographyOnly = booking.photographerId !== null;
     const bookPath: "/book" | "/book/photography" = photographyOnly ? "/book/photography" : "/book";
     const issued = await issuePromo(tx, {
@@ -1101,7 +1254,7 @@ export async function requestRescheduleCode(db: Db, ref: string, actor: Actor, d
         : look === "foreign"
           ? " The site cannot check the payment link for this booking. If you paid it, please contact us."
           : " We could not check just now whether the payment link for this booking was paid. If you paid it, please try again later, or call us.";
-    const said = outcome.reason === "not_confirmed" ? endedText(outcome.booking) : rescheduleBlockText(outcome.reason, settings, outcome.heldCents);
+    const said = outcome.reason === "not_confirmed" ? endedText(outcome.booking) : rescheduleBlockText(outcome.reason, outcome.terms, outcome.heldCents);
     return { ok: false, status: 409, code: outcome.reason, message: `${said}${unseenNote}` };
   }
   if (outcome.kind === "changed") return { ok: false, status: 409, code: "changed", message: LOOK_AGAIN };
@@ -1214,11 +1367,15 @@ export async function ownerCancelBooking(
         ...(atStudio > 0
           ? [`${formatCents(atStudio)} of what was paid at the studio is for the studio to give back by hand${petAside > 0 ? " (its pet fee was returned as studio credit)" : ""}`]
           : []),
+        ...(booking.membershipMinutes > 0 ? [`${durationLabel(booking.membershipMinutes)} of membership time ${deps.now.getTime() < booking.startAt.getTime() ? "given back" : "used"}`] : []),
       ].join("; "),
     });
     // A visit that has not started was taken from the customer, so the code that paid for it goes back to them.
     // After the start the code has done its work: a later cancellation is the owner settling a refund.
     const codeBack = deps.now.getTime() < booking.startAt.getTime() && (await giveCodeBack(tx, booking, "studio"));
+    // Its membership minutes too, by the same rule.
+    const minutesBack = minutesComeBack(booking, { memberReturnHours: 0 }, deps.now, true);
+    if (minutesBack) await giveMinutesBack(tx, booking, "the studio");
     const unseenNote = unseen ? await noteUnseenLink(tx, booking, "cancelled", deps) : null;
     const email: CancellationNotice = {
       to: booking.customerEmail,
@@ -1235,9 +1392,10 @@ export async function ownerCancelBooking(
                 : `What you paid at the studio (${formatCents(atStudio)}) cannot be sent back online: the studio will be in touch with you about it.`,
             ]
           : []),
+        ...(minutesBack ? [minutesOnCancelText(booking, { memberReturnHours: 0 }, deps.now, true)] : []),
         ...(codeBack ? [CODE_BACK] : []),
         ...(unseenNote ? [unseenNote] : []),
-        "Please contact us with any questions.",
+        // Then "Please contact us with any questions.", which is the owners' wording in the email's template.
       ],
     };
     const emailId = await queueEmail(tx, noticeEmail(email, "sent"));
@@ -1303,7 +1461,10 @@ export async function ownerRefund(
         }
       : null;
     const toldId = told ? await queueEmail(tx, codeRefundEmail({ ...told, state: "sent" })) : null;
-    const refundIds = await recordRefunds(tx, booking.id, input.amountCents, reason || `Refund for ${booking.ref}`, false);
+    // A refund while the booking was paid beyond its price gives that back first: should its price go up again, it owes
+    // that part again, and not the rest, which is the studio's goodwill (`paidTowardPriceCentsByBooking`).
+    const creditLeft = (await creditLeftCentsByBooking(tx, [booking])).get(booking.id) ?? 0;
+    const refundIds = await recordRefunds(tx, booking.id, input.amountCents, reason || `Refund for ${booking.ref}`, false, creditLeft);
     const label = labelOf(booking);
     await recordEvent(tx, {
       bookingId: booking.id,

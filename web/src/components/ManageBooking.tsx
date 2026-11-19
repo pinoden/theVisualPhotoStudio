@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useActionState, useState } from "react";
-import { cancelBookingAction, rescheduleBookingAction, type ManageState } from "@/app/booking/actions";
+import { askStudioToMoveAction, cancelBookingAction, rescheduleBookingAction, type ManageState } from "@/app/booking/actions";
 
 const IDLE: ManageState = { status: "idle", message: "" };
 
@@ -29,7 +29,7 @@ export function ManageBooking({
   bookingRef: string;
   /** The secret from the customer's link. Omitted for a signed-in customer. */
   token?: string;
-  choices: { cancel: ManageChoice; reschedule: ManageChoice } | null;
+  choices: { cancel: ManageChoice; reschedule: ManageChoice; request?: ManageChoice } | null;
   /**
    * In a list, the page is not re-rendered after the action: the booking's
    * card would move away and take the result message with it.
@@ -38,11 +38,26 @@ export function ManageBooking({
 }) {
   const [cancelState, cancelAction, cancelling] = useActionState(cancelBookingAction, IDLE);
   const [moveState, moveAction, moving] = useActionState(rescheduleBookingAction, IDLE);
-  const [asking, setAsking] = useState<"cancel" | "move" | null>(null);
-  const busy = cancelling || moving;
+  const [requestState, requestAction, requesting] = useActionState(askStudioToMoveAction, IDLE);
+  const [asking, setAsking] = useState<"cancel" | "move" | "request" | null>(null);
+  const busy = cancelling || moving || requesting;
 
-  const result = moveState.status === "rescheduled" ? moveState : cancelState.status === "cancelled" ? cancelState : null;
-  const error = cancelState.status === "error" ? cancelState.message : moveState.status === "error" ? moveState.message : "";
+  const result =
+    moveState.status === "rescheduled"
+      ? moveState
+      : cancelState.status === "cancelled"
+        ? cancelState
+        : requestState.status === "requested"
+          ? requestState
+          : null;
+  const error =
+    cancelState.status === "error"
+      ? cancelState.message
+      : moveState.status === "error"
+        ? moveState.message
+        : requestState.status === "error"
+          ? requestState.message
+          : "";
 
   if (result) {
     return (
@@ -99,6 +114,44 @@ export function ManageBooking({
           <button type="button" className="btn btn-outline" onClick={() => setAsking("cancel")} disabled={busy}>
             Cancel booking
           </button>
+          {choices.request?.allowed && (
+            <button type="button" className="btn btn-outline" onClick={() => setAsking("request")} disabled={busy}>
+              Ask the studio to move it
+            </button>
+          )}
+        </div>
+      )}
+      {asking === null && choices.request && !choices.request.allowed && choices.request.text && (
+        <p style={{ fontSize: ".85rem", marginBottom: 0 }}>{choices.request.text}</p>
+      )}
+
+      {asking === "request" && choices.request && (
+        <div className="notice">
+          <strong style={{ color: "var(--color-dark)" }}>Ask the studio to move this booking?</strong>
+          <p>{choices.request.text}</p>
+          <form action={requestAction}>
+            {hidden}
+            <label className="form-label" htmlFor={`move-request-${bookingRef}`}>
+              When would suit you?
+            </label>
+            <textarea
+              id={`move-request-${bookingRef}`}
+              name="message"
+              className="form-control"
+              rows={3}
+              maxLength={1000}
+              required
+              placeholder="For example: any weekday afternoon next week"
+            />
+            <div style={{ display: "flex", gap: ".75rem", flexWrap: "wrap", marginTop: ".75rem" }}>
+              <button type="submit" className="btn btn-dark" disabled={busy}>
+                {requesting ? "Sending…" : "Send my request"}
+              </button>
+              <button type="button" className="btn btn-outline" onClick={() => setAsking(null)} disabled={busy}>
+                Back
+              </button>
+            </div>
+          </form>
         </div>
       )}
 

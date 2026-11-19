@@ -503,6 +503,51 @@ function policies(): BuiltInPage {
   };
 }
 
+/**
+ * Memberships (follow-up 3), as the owners answered on 2026-11-17 and 2026-11-18. Added 2026-11-18: a database made
+ * before gets it from `ensureBuiltInPages`, unless a page of its own already has the address.
+ */
+function memberships(): BuiltInPage {
+  const b = maker("memberships");
+  const how =
+    "<h2>How It Works</h2>" +
+    "<ul>" +
+    "<li>Each month you get your plan's studio hours, to use as you like: in one long session or over several bookings, on any day the studio is open, for a booking of any length.</li>" +
+    "<li>Hours you do not use carry over to the next month.</li>" +
+    "<li>A bundle membership can be used in any one of its studios, or in its studios booked together.</li>" +
+    "<li>You book on this site with your membership code, which we email you when you join. If a booking is longer than the hours you have left, you use what is left and pay for the rest.</li>" +
+    "<li>A membership covers studio time only. Extra guests, add-ons and overtime are paid as usual.</li>" +
+    "<li>{if free hours}Visits made with your membership earn loyalty stamps like any other.</li>" +
+    "</ul>";
+  const terms =
+    "<h2>Membership Terms</h2>" +
+    "<ul>" +
+    "<li>Your membership starts the day you join, when its first month is paid. It is then billed monthly, on the same day of each month, to the card you joined with, which our card processor, Square, keeps for the monthly payments.</li>" +
+    "<li>You can cancel at any time in your account, with no minimum term. Cancelling stops the monthly payments: the month you paid for runs to its end, and the hours you have not used stay yours to use.</li>" +
+    "<li>Membership payments are not refunded.</li>" +
+    "<li>A booking made with membership hours and cancelled {member hours back} or more before it starts gives its hours back to your membership. Cancelled later, its hours are used.</li>" +
+    '<li>Bookings made with membership hours follow the <a href="/policies">studio policies</a>.</li>' +
+    "</ul>";
+  return {
+    key: "memberships",
+    slug: "memberships",
+    title: "Memberships",
+    content: {
+      meta: META,
+      blocks: [
+        b("Banner", {
+          eyebrow: "Memberships",
+          title: "Studio Memberships",
+          text: "Studio hours every month, for photographers and creators who shoot often.",
+        }),
+        b("Section", { background: "page", content: [b("MembershipPlans", { joinLabel: "Join" })] }),
+        b("Section", { background: "card", width: "narrow", content: [b("Text", { text: how })] }),
+        b("Section", { background: "page", width: "narrow", anchor: "terms", content: [b("Text", { text: terms })] }),
+      ],
+    },
+  };
+}
+
 function contact(): BuiltInPage {
   const b = maker("contact");
   return {
@@ -538,7 +583,7 @@ function contact(): BuiltInPage {
 
 /** Every page the website was built with, the home page first. */
 export function builtInPages(): BuiltInPage[] {
-  return [home(), studios(), rates(), services(), faq(), policies(), contact()];
+  return [home(), studios(), rates(), services(), faq(), policies(), memberships(), contact()];
 }
 
 /** One of them by its key, or undefined. */

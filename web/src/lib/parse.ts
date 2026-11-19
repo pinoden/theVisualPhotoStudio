@@ -38,6 +38,18 @@ export const MONEY_FIELD = {
 /** A money field for a price: the same, up to $100,000. */
 export const PRICE_FIELD = { inputMode: "decimal", pattern: PRICE_PATTERN, title: "An amount in dollars up to 100,000, for example 88 or 88.50" } as const;
 
+/** A fee the owners set in Settings: an amount in dollars of at most $1,000, which the server keeps to (`MONEY_SETTING_RANGES`). */
+export const FEE_PATTERN = String.raw`\s*\$?(\d{1,3}(\.\d{1,2})?|1,?000(\.0{1,2})?)\s*`;
+
+/** A money field for a fee in Settings: the same, up to $1,000. */
+export const FEE_FIELD = { inputMode: "decimal", pattern: FEE_PATTERN, title: "An amount in dollars up to 1,000, for example 20 or 20.50" } as const;
+
+/** An extra charge on an appointment, cleaning or damage: at most $10,000, which the server keeps to (`CHARGE_MAX_CENTS`). */
+export const CHARGE_PATTERN = String.raw`\s*\$?((\d{1,4}|\d,\d{3})(\.\d{1,2})?|10,?000(\.0{1,2})?)\s*`;
+
+/** A money field for an extra charge: the same, up to $10,000. */
+export const CHARGE_FIELD = { inputMode: "decimal", pattern: CHARGE_PATTERN, title: "An amount in dollars up to 10,000, for example 50 or 50.50" } as const;
+
 /** A money field for a code's credit: the same, above zero. */
 export const CREDIT_FIELD = { inputMode: "decimal", pattern: POSITIVE_DOLLARS_PATTERN, title: "An amount in dollars above zero, for example 40 or 40.50" } as const;
 

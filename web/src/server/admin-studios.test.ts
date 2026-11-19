@@ -100,8 +100,7 @@ describe("what the owner can change about add-ons", () => {
 
   it("starts with what each of the first add-ons is for, and lets the owner say it for any other", async () => {
     expect((await listAddons(world.db)).map((addon) => [addon.slug, addon.kind])).toEqual([
-      ["extra-people-1-2", "people"],
-      ["extra-people-3-5", "people"],
+      ["extra-guest", "people"],
       ["pet-fee", "pet"],
     ]);
     const dogs = await saveAddon(world.db, null, {

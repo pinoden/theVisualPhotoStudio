@@ -1,3 +1,4 @@
+import { durationLabel } from "@/lib/domain/time";
 import { and, asc, desc, eq, inArray, notInArray } from "drizzle-orm";
 import { bookings, paymentLinks, payments, refunds } from "@/db/schema";
 import type { DbLike } from "@/db/client";
@@ -120,6 +121,8 @@ function linesOf(booking: BookingView): ReceiptLine[] {
           : "Discount code";
     lines.push({ label, cents: -booking.promoDiscountCents });
   }
+  if (booking.membershipCents > 0) lines.push({ label: `Paid with membership hours (${durationLabel(booking.membershipMinutes)})`, cents: -booking.membershipCents });
+  for (const charge of booking.charges) lines.push({ label: charge.label, cents: charge.cents });
   return lines;
 }
 
@@ -213,14 +216,24 @@ export async function loadReceipts(db: DbLike, email: string): Promise<{ receipt
       photography: booking.photography !== null,
       bookingStatus: customerStatus(booking).text,
       lines: linesOf(booking),
-      totalCents: booking.totalCents,
+      totalCents: booking.totalCents + booking.chargesCents,
       payments: list,
       paidCents,
       refundedCents,
       netCents: paidCents - refundedCents,
       dueCents: booking.dueCents,
-      // Partly paid: less than the total, whether the rest is still owed or the booking ended before it was.
-      status: refundedCents >= paidCents ? "refunded" : refundedCents > 0 ? "partly_refunded" : paidCents < booking.totalCents ? "partly_paid" : "paid",
+      // Partly paid: something is still owed (first: a refund must not hide it, the tester's finding of 2026-11-18), or
+      // less than the total was paid before the booking ended.
+      status:
+        booking.dueCents > 0
+          ? "partly_paid"
+          : refundedCents >= paidCents
+            ? "refunded"
+            : refundedCents > 0
+              ? "partly_refunded"
+              : paidCents < booking.totalCents + booking.chargesCents
+                ? "partly_paid"
+                : "paid",
       paidAt: list[0].at,
     });
   }

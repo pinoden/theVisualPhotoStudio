@@ -1,0 +1,27 @@
+# Update pull requests, once a month, into rebuild (where work happens), so that each update goes through CI
+# and reaches master with the next release. Minor and patch updates come grouped in one pull request each month;
+# a major update comes on its own, because it can need changes to the code (read its notes first).
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /web
+    target-branch: rebuild
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+    commit-message:
+      prefix: "Update"
+
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: rebuild
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "Update"

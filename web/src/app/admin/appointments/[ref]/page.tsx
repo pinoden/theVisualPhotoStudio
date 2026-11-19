@@ -9,17 +9,22 @@ import { getDb } from "@/db/client";
 import { LABEL_MEANING, LABEL_TEXT } from "@/lib/domain/labels";
 import { formatCents } from "@/lib/domain/pricing";
 import { durationLabel, isIsoDate, longDateLabel, minutesToLabel } from "@/lib/domain/time";
-import { centsToInput, MONEY_FIELD } from "@/lib/parse";
+import { centsToInput, CHARGE_FIELD, MONEY_FIELD } from "@/lib/parse";
 import { PAYMENT_METHODS } from "@/lib/payment-methods";
-import { getAppointment, moveOptions } from "@/server/appointments";
+import { hoursInWords } from "@/lib/words";
+import { getAppointment, moveOptions, type MovePricePreview } from "@/server/appointments";
+import { CHARGE_NOTE_MAX, OVERTIME_MAX_MINUTES, overtimeBlocks, overtimeCents } from "@/server/charges";
 import { BY_CUSTOMER, BY_SYSTEM } from "@/server/history";
 import { resolvePayments } from "@/server/payments";
+import { PRICED_AS } from "@/server/reprice";
 import { requireStaff } from "@/server/session";
 import { loadSettings } from "@/server/settings";
 import { moneyKindOf, payLinkPossible } from "@/server/test-mode";
 import { formatInstant, formatRange, localDateOf } from "@/server/tz";
+import { ownerRefundAction } from "../../actions";
 import { AdminFrame, AdminLoading } from "../../frame";
 import {
+  addChargeAction,
   cancelPayLinkAction,
   checkPayLinkAction,
   closePayLinkByHandAction,
@@ -28,6 +33,7 @@ import {
   recordPaymentAction,
   sendPayLinkAction,
   setLabelAction,
+  voidChargeAction,
   voidPaymentAction,
 } from "../actions";
 
@@ -42,6 +48,22 @@ export default function AppointmentPage(props: PageProps<"/admin/appointments/[r
 }
 
 const WHO: Record<string, string> = { [BY_CUSTOMER]: "The customer", [BY_SYSTEM]: "The site" };
+
+/** Square's Dashboard, where a payment is found by the receipt number on its receipt (Square's help: "View and search transactions"). */
+const SQUARE_TRANSACTIONS = "https://squareup.com/dashboard/sales/transactions";
+
+/** What moving the booking to `date` does to its price (follow-up 5), in a sentence: its amounts only for a viewer who sees prices. */
+function movePriceSentence(price: MovePricePreview, date: string, seesPrices: boolean): string {
+  const day = `${longDateLabel(date)} is priced as ${PRICED_AS[price.dayType]}`;
+  if (!seesPrices) return `${day}, so the booking’s price changes with the move. The client is emailed the new price.`;
+  return [
+    `${day}: the booking’s total becomes ${formatCents(price.nowCents)} instead of ${formatCents(price.wasCents)}.`,
+    ...(price.codeBackCents > 0 ? [`${formatCents(price.codeBackCents)} of the credit it was paid with goes back on its code.`] : []),
+    ...(price.owedCents > 0 ? [`The client will then owe ${formatCents(price.owedCents)}.`] : []),
+    ...(price.creditLeftCents > 0 ? [`The client will then have paid ${formatCents(price.creditLeftCents)} more than its price: it is theirs, to refund.`] : []),
+    "The client is emailed the new price.",
+  ].join(" ");
+}
 
 /**
  * One appointment, for every level of the admin. `getAppointment` decides
@@ -78,6 +100,8 @@ async function AppointmentDetails({
   const otherMoney = processorName !== null && moneyKindOf(processorName) !== appointment.moneyKind ? appointment.moneyKind : null;
   // A payment link can be made: a card processor is set up, and it moves the booking's own kind of money (sendPayLink).
   const linkPossible = cardProcessor !== "disabled" && payLinkPossible(processorName, appointment.moneyKind);
+  // What was paid toward its price: received, less what was given back of a payment beyond it (follow-up 5).
+  const paidTowardPrice = appointment.payments ? appointment.payments.receivedCents - appointment.payments.creditReturnedCents : 0;
 
   return (
     <AdminFrame
@@ -156,6 +180,31 @@ async function AppointmentDetails({
           <dt>Reference</dt>
           <dd>{appointment.ref}</dd>
         </dl>
+        {/* The terms it was made under, which a cancellation and a move follow (question 10). */}
+        <details className="booking-terms" style={{ marginBottom: ".75rem" }}>
+          <summary style={{ cursor: "pointer" }}>
+            Terms of this booking{appointment.terms.changedSince ? ": the settings have changed since it was made" : ""}
+          </summary>
+          <ul style={{ fontSize: ".85rem", margin: ".5rem 0 0" }}>
+            <li>
+              Refunded when cancelled {hoursInWords(appointment.terms.refundWindowHours)} or more before it starts
+              {appointment.terms.refundFeePercent > 0 ? `, less the ${appointment.terms.refundFeePercent}% processing fee` : ""}.
+            </li>
+            <li>
+              {appointment.terms.maxReschedules > 0
+                ? `Moved online until ${hoursInWords(appointment.terms.rescheduleCutoffHours)} before it starts: ${
+                    appointment.terms.maxReschedules === 1 ? "once" : `${appointment.terms.maxReschedules} times`
+                  } free${appointment.terms.rescheduleFeeCents > 0 ? `, then ${formatCents(appointment.terms.rescheduleFeeCents)} each time` : ", then no more"}.`
+                : "Not moved online: moving was switched off when it was made."}
+            </li>
+            <li>A reschedule code or credit it gives is valid for {appointment.terms.creditValidDays} days.</li>
+          </ul>
+          {appointment.terms.changedSince && (
+            <p style={{ fontSize: ".8rem", margin: ".5rem 0 0" }}>
+              A booking keeps the terms it was made under; the settings of today apply to bookings made from now on.
+            </p>
+          )}
+        </details>
         <p style={{ marginBottom: 0 }}>
           <Link href={`/admin/calendar?view=day&date=${day}`}>This day in the calendar</Link>
           {" · "}
@@ -228,6 +277,11 @@ async function AppointmentDetails({
               {appointment.studios.join(" + ")}.
             </p>
           )}
+          {moveDate && moveTimes?.ok && moveTimes.starts.length > 0 && moveTimes.price && (
+            <p className="move-price" role="status">
+              {movePriceSentence(moveTimes.price, moveDate, appointment.money !== null)}
+            </p>
+          )}
           {moveDate && moveTimes?.ok && moveTimes.starts.length > 0 && (
             <form action={moveBookingAction}>
               <input type="hidden" name="ref" value={appointment.ref} />
@@ -249,13 +303,13 @@ async function AppointmentDetails({
                   Move booking
                 </button>
               </div>
-              {settings.maxReschedules > 0 ? (
+              {appointment.terms.maxReschedules > 0 ? (
                 <label style={{ display: "block", fontSize: ".85rem" }}>
                   <input type="checkbox" name="countsAsClientMove" defaultChecked /> The client asked for this move. It
                   counts as a reschedule of theirs: the booking is then no longer refunded automatically, as the rental
                   terms say
-                  {settings.rescheduleFeeCents > 0
-                    ? `, and once their free ${settings.maxReschedules === 1 ? "reschedule is" : "reschedules are"} used, moving it online costs them ${formatCents(settings.rescheduleFeeCents)}`
+                  {appointment.terms.rescheduleFeeCents > 0
+                    ? `, and each move beyond their ${appointment.terms.maxReschedules === 1 ? "free one" : `${appointment.terms.maxReschedules} free ones`} costs them ${formatCents(appointment.terms.rescheduleFeeCents)} online`
                     : ""}
                   . Untick it when the studio needs the change.
                 </label>
@@ -268,9 +322,10 @@ async function AppointmentDetails({
             </form>
           )}
           <p style={{ fontSize: ".78rem", margin: ".75rem 0 0" }}>
-            The studio and the length stay the same, and what was paid stays as it is. Only times that are free are
-            offered: inside opening hours, and at least 15 minutes from any other appointment in the studio. The client
-            is emailed the new time.
+            The studio and the length stay the same. Moved to a day of the other kind (a weekday or a weekend), the
+            booking takes that day&rsquo;s price, from today&rsquo;s prices: the client then owes the difference, or has
+            paid more than its price, which the studio refunds. Only times that are free are offered: inside opening
+            hours, and at least 15 minutes from any other appointment in the studio. The client is emailed the new time.
           </p>
         </div>
       )}
@@ -282,17 +337,187 @@ async function AppointmentDetails({
         </div>
       )}
 
+      {appointment.charges && (appointment.charges.canAdd || appointment.charges.lines.length > 0) && (
+        <div className="admin-card" id="charges">
+          <h3>Extra charges</h3>
+          {appointment.charges.lines.length > 0 && (
+            <ul className="charge-list">
+              {appointment.charges.lines.map((charge) => (
+                <li key={charge.id}>
+                  <span style={charge.voided ? { textDecoration: "line-through" } : undefined}>
+                    {charge.label}: {formatCents(charge.amountCents)}
+                  </span>
+                  <span style={{ fontSize: ".8rem" }}>
+                    {" "}
+                    · {formatInstant(new Date(charge.at))}, by {charge.createdBy}
+                    {charge.kind === "overtime" && charge.minutes && charge.hourlyCents
+                      ? ` · ${overtimeBlocks(charge.minutes)} × 15 minutes started, each a quarter of ${formatCents(charge.hourlyCents)} an hour`
+                      : ""}
+                  </span>
+                  {charge.note && <div style={{ fontSize: ".8rem" }}>{charge.note}</div>}
+                  {charge.voided && <div style={{ fontSize: ".8rem" }}>Taken back by {charge.voidedBy}: it does not count.</div>}
+                  {appointment.may.changePayments && !charge.voided && (
+                    <details>
+                      <summary style={{ fontSize: ".8rem", cursor: "pointer" }}>Added by mistake</summary>
+                      <form action={voidChargeAction}>
+                        <input type="hidden" name="ref" value={appointment.ref} />
+                        <input type="hidden" name="chargeId" value={charge.id} />
+                        <label className="form-label" htmlFor={`void-charge-${charge.id}`}>
+                          Why it is taken back
+                        </label>
+                        <input id={`void-charge-${charge.id}`} name="reason" className="form-control" maxLength={CHARGE_NOTE_MAX} />
+                        <button type="submit" className="btn btn-outline btn-small">
+                          Take this charge back
+                        </button>
+                      </form>
+                    </details>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {appointment.charges.canAdd && appointment.charges.overtime && (
+            <form action={addChargeAction} className="payment-form">
+              <input type="hidden" name="ref" value={appointment.ref} />
+              <input type="hidden" name="kind" value="overtime" />
+              <h4>Overtime</h4>
+              {appointment.charges.hourlyCents !== null ? (
+                <>
+                  <div className="admin-form-row">
+                    <div className="form-group">
+                      <label className="form-label" htmlFor="overtime-minutes">
+                        Minutes past the end
+                      </label>
+                      <input
+                        id="overtime-minutes"
+                        name="minutes"
+                        className="form-control"
+                        type="number"
+                        min={1}
+                        max={OVERTIME_MAX_MINUTES}
+                        step={1}
+                        required
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label" htmlFor="overtime-note">
+                        Note (optional)
+                      </label>
+                      <input id="overtime-note" name="note" className="form-control" maxLength={CHARGE_NOTE_MAX} />
+                    </div>
+                    <button type="submit" className="btn btn-dark btn-small">
+                      Add overtime
+                    </button>
+                  </div>
+                  <p style={{ fontSize: ".78rem", margin: ".5rem 0 0" }}>
+                    Each 15 minutes started costs {formatCents(overtimeCents(appointment.charges.hourlyCents, 1))}, a quarter of
+                    the hourly rate of {formatCents(appointment.charges.hourlyCents)}
+                    {appointment.studios.length > 1 ? " (the one-hour prices of its studios for this day, added together)" : " (the studio's one-hour price for this day)"}.
+                    For example, 20 minutes is {formatCents(overtimeCents(appointment.charges.hourlyCents, 20))}.
+                  </p>
+                </>
+              ) : (
+                <p className="field-error" style={{ marginBottom: 0 }}>
+                  {appointment.charges.missingRate.join(" and ") || "This booking's studio"}{" "}
+                  {appointment.charges.missingRate.length > 1 ? "have" : "has"} no one-hour price for this day under Prices, so
+                  overtime cannot be worked out. Add the price, or add the amount below as a cleaning or damage charge.
+                </p>
+              )}
+            </form>
+          )}
+
+          {appointment.charges.canAdd && (
+            <details className="payment-form">
+              <summary style={{ cursor: "pointer" }}>Cleaning or damage</summary>
+              <form action={addChargeAction}>
+                <input type="hidden" name="ref" value={appointment.ref} />
+                <div className="admin-form-row">
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="charge-kind">
+                      Charge for
+                    </label>
+                    <select id="charge-kind" name="kind" className="form-control" defaultValue="cleaning" required>
+                      <option value="cleaning">Cleaning</option>
+                      <option value="damage">Damage</option>
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="charge-amount">
+                      Amount ($)
+                    </label>
+                    <input id="charge-amount" name="amount" className="form-control" required {...CHARGE_FIELD} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="charge-note">
+                      What it is for
+                    </label>
+                    <input id="charge-note" name="note" className="form-control" maxLength={CHARGE_NOTE_MAX} required />
+                  </div>
+                  <button type="submit" className="btn btn-dark btn-small">
+                    Add the charge
+                  </button>
+                </div>
+                <p style={{ fontSize: ".78rem", margin: ".5rem 0 0" }}>
+                  The client sees the charge and what it is for on their receipt.
+                </p>
+              </form>
+            </details>
+          )}
+
+          <p style={{ fontSize: ".78rem", margin: ".75rem 0 0" }}>
+            A charge adds to what the booking owes: collect it below, at the studio (Mark as paid) or with a payment link.
+          </p>
+        </div>
+      )}
+
       {/* Also for an open link of a booking that ended with nothing paid: an owner may have to close it by hand. */}
       {appointment.payments && (appointment.payments.payments.length > 0 || appointment.payments.dueCents > 0 || appointment.payLink) && (
         <div className="admin-card" id="payment">
           <h3>Payment</h3>
+          {/* What was paid, what is owed and what was paid beyond the price (question 14 of 2026-11-17, follow-up 5). */}
+          {!ended && (
+            <dl className="reward-facts payment-facts">
+              <div>
+                <dt>Paid</dt>
+                <dd>
+                  {formatCents(appointment.payments.paidCents)}
+                  {appointment.payments.receivedCents > appointment.payments.paidCents && (
+                    <small> after {formatCents(appointment.payments.receivedCents - appointment.payments.paidCents)} refunded</small>
+                  )}
+                </dd>
+              </div>
+              <div>
+                <dt>Outstanding balance</dt>
+                <dd>{appointment.payments.dueCents > 0 ? formatCents(appointment.payments.dueCents) : "None"}</dd>
+              </div>
+              <div>
+                <dt>Remaining credit</dt>
+                <dd>{appointment.payments.creditLeftCents > 0 ? formatCents(appointment.payments.creditLeftCents) : "None"}</dd>
+              </div>
+            </dl>
+          )}
           <p>
-            {appointment.payments.dueCents > 0 ? (
+            {appointment.payments.creditLeftCents > 0 && !ended ? (
+              <>
+                <strong>{formatCents(appointment.payments.creditLeftCents)} was paid beyond the price.</strong> The
+                booking costs less than the client paid for it, as its price went down afterwards (a move to a day that
+                costs less, or a charge taken back). It is the client&rsquo;s: it is refunded when the studio agrees, to
+                the card below, or given back at the studio and recorded against its payment.
+              </>
+            ) : appointment.payments.dueCents > 0 ? (
               <>
                 <strong>{formatCents(appointment.payments.dueCents)} is still to pay.</strong>{" "}
-                {appointment.payments.madeInAdmin
-                  ? "This booking was made in the admin, so nothing was charged online."
-                  : `The amount its card held lapsed before it was taken, so the card was not charged: collect the price at the studio${linkPossible ? ", or with a payment link" : ""}.`}
+                {appointment.payments.chargesCents > 0 &&
+                paidTowardPrice >= appointment.payments.totalCents - appointment.payments.chargesCents
+                  ? `That is for the extra charges: collect it at the studio${linkPossible ? ", or with a payment link" : ""}.`
+                  : appointment.payments.madeInAdmin
+                    ? "This booking was made in the admin, so nothing was charged online."
+                    : appointment.payments.cardLapsed
+                      ? `The amount its card held lapsed before it was taken, so the card was not charged: collect ${paidTowardPrice > 0 ? "the rest" : "the price"} at the studio${linkPossible ? ", or with a payment link" : ""}.`
+                      : paidTowardPrice > 0
+                        ? `That is what its price went up by after it was paid, when it was moved to a day that costs more. Collect it at the studio${linkPossible ? ", or with a payment link" : ""}.`
+                        : `Its code or membership hours paid what it cost when it was booked; that is what its price went up by afterwards, when it was moved to a day that costs more. Collect it at the studio${linkPossible ? ", or with a payment link" : ""}.`}
               </>
             ) : appointment.payments.held && appointment.payments.ended ? (
               <>
@@ -347,6 +572,15 @@ async function AppointmentDetails({
                         <span style={payment.voided ? { textDecoration: "line-through" } : undefined}>
                           {formatCents(payment.amountCents)} · {payment.how}
                         </span>
+                        {/* Square's own page of the payment, asked for when the link is followed (follow-up 5). */}
+                        {!payment.held && (payment.processor === "square" || payment.processor === "square-sandbox") && (
+                          <>
+                            {" · "}
+                            <a href={`/admin/appointments/${appointment.ref}/receipt/${payment.id}`} target="_blank" rel="noopener noreferrer">
+                              Receipt in Square
+                            </a>
+                          </>
+                        )}
                         {payment.voided && <div style={{ fontSize: ".8rem" }}>Taken back: it does not count.</div>}
                         {payment.held && (
                           <div style={{ fontSize: ".8rem" }}>
@@ -405,6 +639,68 @@ async function AppointmentDetails({
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+          {appointment.payments.payments.some((payment) => payment.processor === "square" && !payment.held) && (
+            <p style={{ fontSize: ".78rem", margin: ".5rem 0 0" }}>
+              Square&rsquo;s receipt of a card payment shows its receipt number. Search for it under{" "}
+              <a href={SQUARE_TRANSACTIONS} target="_blank" rel="noopener noreferrer">
+                Transactions in Square&rsquo;s Dashboard
+              </a>{" "}
+              to see the card or refund from there.
+            </p>
+          )}
+
+          {appointment.payments.creditLeftCents > 0 && !ended && (
+            <div className="payment-form" id="credit-left">
+              <h4>Refund the remaining credit</h4>
+              {appointment.may.refund && appointment.payments.cardRefundableCents > 0 ? (
+                <form action={ownerRefundAction}>
+                  <input type="hidden" name="ref" value={appointment.ref} />
+                  <input type="hidden" name="back" value={`/admin/appointments/${appointment.ref}`} />
+                  <div className="admin-form-row">
+                    <div className="form-group">
+                      <label className="form-label" htmlFor="credit-refund">
+                        Refund to the card ($)
+                      </label>
+                      <input
+                        id="credit-refund"
+                        name="amount"
+                        className="form-control"
+                        defaultValue={centsToInput(Math.min(appointment.payments.creditLeftCents, appointment.payments.cardRefundableCents))}
+                        required
+                        {...MONEY_FIELD}
+                      />
+                    </div>
+                    <div className="form-group" style={{ flex: "2 1 16rem" }}>
+                      <label className="form-label" htmlFor="credit-reason">
+                        Reason
+                      </label>
+                      <input
+                        id="credit-reason"
+                        name="reason"
+                        className="form-control"
+                        maxLength={180}
+                        defaultValue="The difference: the booking's price went down after it was paid"
+                      />
+                    </div>
+                    <button type="submit" className="btn btn-dark btn-small">
+                      Refund to the card
+                    </button>
+                  </div>
+                  <p style={{ fontSize: ".78rem", margin: ".5rem 0 0" }}>
+                    {appointment.payments.cardRefundableCents < appointment.payments.creditLeftCents
+                      ? `The card can take back ${formatCents(appointment.payments.cardRefundableCents)} of it; give the rest back at the studio, and record it against its payment above.`
+                      : "Sent to the card through the card processor, as a refund from Bookings is."}
+                  </p>
+                </form>
+              ) : (
+                <p style={{ marginBottom: 0 }}>
+                  {appointment.payments.cardRefundableCents > 0
+                    ? "An owner, or a manager the owners allow to refund, refunds it to the card here."
+                    : "It was paid at the studio: give it back there, then record the refund against its payment above."}
+                </p>
+              )}
             </div>
           )}
 

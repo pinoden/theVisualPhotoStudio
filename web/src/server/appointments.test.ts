@@ -8,6 +8,8 @@ import { loadCatalog } from "./catalog";
 import { cancelBooking, getManageChoices, getManageOptions } from "./manage";
 import { getDaySheet } from "./staff";
 import { completeVisits } from "./tasks";
+import { DEFAULT_SETTINGS } from "./settings";
+import { termsAtBooking } from "./terms";
 import { BASE_URL, createTestWorld, expectOk, h, hoursAfter, NEAR, NOW, type TestWorld } from "./testing";
 
 let world: TestWorld;
@@ -17,6 +19,9 @@ let riley: AuthUser; // staff, assigned to nothing
 let jane: AuthUser; // a customer
 let morningRef: string; // Bob, Dayglow, 9:00 to 10:00 on NEAR
 let nextDayRef: string; // Jane, Blanche, 10:00 to 12:00 the day after
+/** The booking as if it had been made under these terms (question 10: a booking keeps the terms it was made under). */
+const madeUnder = (ref: string, changes: Partial<ReturnType<typeof termsAtBooking>>) =>
+  world.db.update(bookings).set({ terms: { ...termsAtBooking(DEFAULT_SETTINGS, false), ...changes } }).where(eq(bookings.ref, ref));
 
 const NEXT_DAY = "2026-11-19";
 const START = new Date("2026-11-18T14:00:00Z"); // 9:00 studio time
@@ -326,34 +331,36 @@ describe("moving a booking to a new time", () => {
     // Moved, not made with a reschedule code: the client is told so, and why.
     expect(options?.cancel).toMatchObject({ allowed: true, refundCents: 0, why: "moved" });
     // It was their free reschedule: moving it again online costs the fee.
-    expect(options?.reschedule).toEqual({ allowed: true, creditCents: 15600, discountCents: 0, feeCents: 2000 });
+    expect(options?.reschedule).toEqual({ allowed: true, creditCents: 15600, discountCents: 0, feeCents: 2000, nextFeeCents: 2000, nextMovable: true });
     expect((await getManageChoices(world.db, nextDayRef, { kind: "owner" }, NOW))?.cancel.text).toBe(
       "No refund is due, because this booking was moved at your request: a moved booking is not refunded.",
     );
     const [mail] = await world.emails("booking_moved");
     expect(mail.body).toContain(
-      "As you asked for this change, it counts as your reschedule under the rental terms: if the booking is cancelled now, it is not refunded. Moving it again online costs $20.",
+      "As you asked for this change, it counts as a reschedule under the rental terms: if the booking is cancelled now, it is not refunded. Moving it again online costs $20.",
     );
   });
 
   it("says a booking moved for the client cannot be moved again online while the owners set no fee", async () => {
-    await world.db.insert(settings).values({ key: "rescheduleFeeCents", value: 0 });
+    // Made while the owners set no fee for a further move: a booking keeps the terms it was made under.
+    await madeUnder(nextDayRef, { rescheduleFeeCents: 0 });
     await moveBooking(world.db, owner, nextDayRef, to(h(14), "2026-12-09", true), NOW);
     expect((await getManageOptions(world.db, nextDayRef, { kind: "owner" }, NOW))?.reschedule).toEqual({ allowed: false, reason: "limit_reached" });
     const [mail] = await world.emails("booking_moved");
     expect(mail.body).toContain(
-      "As you asked for this change, it counts as your reschedule under the rental terms: if the booking is cancelled now, it is not refunded, and it cannot be moved again online.",
+      "As you asked for this change, it counts as a reschedule under the rental terms: if the booking is cancelled now, it is not refunded, and it cannot be moved again online.",
     );
   });
 
   it("does not count against the client while moving is switched off, which the rental terms then do not mention", async () => {
-    await world.db.insert(settings).values({ key: "maxReschedules", value: 0 }).onConflictDoUpdate({ target: settings.key, set: { value: 0 } });
+    // Made while moving was switched off.
+    await madeUnder(nextDayRef, { maxReschedules: 0 });
     await moveBooking(world.db, owner, nextDayRef, to(h(14), "2026-12-09", true), NOW);
     expect(await row(nextDayRef)).toMatchObject({ rescheduledCount: 0 });
     // Still refunded as the terms say: 7 days or more ahead.
     expect((await getManageOptions(world.db, nextDayRef, { kind: "owner" }, NOW))?.cancel).toMatchObject({ allowed: true, why: "refund" });
     const [mail] = await world.emails("booking_moved");
-    expect(mail.body).not.toContain("counts as your reschedule");
+    expect(mail.body).not.toContain("counts as a reschedule");
   });
 
   it("is only for a booking that is still to come", async () => {

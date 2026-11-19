@@ -6,6 +6,7 @@ export const ACCOUNT_TABS = [
   { href: "/account", label: "Overview" },
   { href: "/account/appointments", label: "My Appointments" },
   { href: "/account/rewards", label: "My Rewards" },
+  { href: "/account/membership", label: "My Membership" },
   { href: "/account/receipts", label: "Receipts & Payments" },
 ] as const;
 

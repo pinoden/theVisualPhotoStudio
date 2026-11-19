@@ -1,0 +1,69 @@
+# The checks every change must pass before it can be merged into master.
+# Branch protection on master requires both jobs below ("checks" and "browser") to pass.
+# The site needs no secrets for these: it uses its embedded database and the pretend card processor.
+
+name: CI
+
+on:
+  pull_request:
+    branches: [master, rebuild] # rebuild: Dependabot's update pull requests
+  push:
+    branches: [rebuild, master]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: web
+
+jobs:
+  checks:
+    name: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: web/.nvmrc # the one Node version: on developers' machines, here and on the host
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - name: Type check
+        run: npm run typecheck
+      - name: Lint
+        run: npm run lint
+      - name: Unit and integration tests
+        run: npm test
+
+  browser:
+    name: browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: web/.nvmrc # the one Node version: on developers' machines, here and on the host
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Browser tests
+        run: npm run test:e2e
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+      - name: Keep the results of a failed run
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-test-results
+          path: web/test-results/
+          retention-days: 14

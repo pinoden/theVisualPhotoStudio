@@ -31,7 +31,7 @@ import type { AuthUser } from "./auth";
 import { adjustStamps, cancelReward } from "./rewards";
 import { contactMessageEmail, loginCodeEmail, queueEmail } from "./email";
 import { owedCents } from "./money";
-import { DEFAULT_SETTINGS } from "./settings";
+import { DEFAULT_SETTINGS, saveSetting } from "./settings";
 import { createTestWorld, daysAfter, expectOk, FAR, h, hoursAfter, NEAR, NOW, OWNER_EMAIL, type TestWorld } from "./testing";
 
 let world: TestWorld;
@@ -233,7 +233,7 @@ describe("cancelling", () => {
     const early = expectOk(await world.book({ date: FAR }));
     expect(await getManageOptions(world.db, early.ref, byToken(early.manageToken), NOW)).toEqual({
       cancel: { allowed: true, refundCents: 16720, feeCents: 880, creditCents: 0, byHandCents: 0, why: "refund" },
-      reschedule: { allowed: true, creditCents: 17600, discountCents: 0, feeCents: 0 },
+      reschedule: { allowed: true, creditCents: 17600, discountCents: 0, feeCents: 0, nextFeeCents: 2000, nextMovable: true },
     });
     const late = expectOk(await world.book({ date: NEAR }));
     expect(await getManageOptions(world.db, late.ref, byToken(late.manageToken), NOW)).toMatchObject({
@@ -414,6 +414,18 @@ describe("a refund the processor accepted without completing it", () => {
 });
 
 describe("the reschedule code", () => {
+  it("says what moving the new booking again costs by today's settings, which the new booking takes (the tester's finding of 2026-11-18)", async () => {
+    const first = expectOk(await world.book({ date: FAR }));
+    // The owners raise the fee for a further move from $20 to $35 after the booking was made.
+    expect(await saveSetting(world.db, "rescheduleFeeCents", 3500)).toBe(true);
+    const told = (await getManageChoices(world.db, first.ref, byToken(first.manageToken), NOW))!.reschedule.text;
+    expect(told).toContain("Moving the new booking again would cost $35.");
+    const released = expectOk(await requestRescheduleCode(world.db, first.ref, byToken(first.manageToken), world.manageDeps()));
+    const second = expectOk(await world.book({ date: FAR, startMinute: h(14), promoCode: released.code, paymentToken: undefined }));
+    // The new booking was made under today's terms: what it was told is what it costs.
+    expect((await getManageChoices(world.db, second.ref, byToken(second.manageToken), NOW))!.reschedule.text).toContain("less the $35 fee");
+  });
+
   it("releases the booking and emails a code worth what was paid", async () => {
     const booked = expectOk(await world.book({ date: NEAR })); // inside the refund window
     const row = await bookingRow(booked.ref);
@@ -455,7 +467,7 @@ describe("the reschedule code", () => {
     expect(choices?.reschedule).toEqual({
       allowed: true,
       offered: true,
-      text: "This booking will be released and you will get a code worth $176, valid for 90 days, to book a new time. That is what you paid plus the $17.60 your discount code took off. A booking made with the code cannot be refunded.",
+      text: "This booking will be released and you will get a code worth $176, valid for 90 days, to book a new time. That is what you paid plus the $17.60 your discount code took off. A booking made with the code cannot be refunded. Moving the new booking again would cost $20.",
     });
     const moved = expectOk(await requestRescheduleCode(world.db, first.ref, byToken(first.manageToken), world.manageDeps()));
     expect(moved.valueCents).toBe(17600);
@@ -497,7 +509,7 @@ describe("the reschedule code", () => {
     // 25 days ahead would normally be refundable. A moved booking is not. It can be moved again, for the fee.
     expect(await getManageOptions(world.db, second.ref, byToken(second.manageToken), NOW)).toEqual({
       cancel: { allowed: true, refundCents: 0, feeCents: 0, creditCents: 0, byHandCents: 0, why: "rescheduled" },
-      reschedule: { allowed: true, creditCents: 15600, discountCents: 0, feeCents: 2000 },
+      reschedule: { allowed: true, creditCents: 15600, discountCents: 0, feeCents: 2000, nextFeeCents: 2000, nextMovable: true },
     });
     const cancelled = expectOk(await cancelBooking(world.db, second.ref, byToken(second.manageToken), world.manageDeps()));
     expect(cancelled).toMatchObject({ refundCents: 0, refund: "none" });
@@ -544,40 +556,47 @@ describe("the reschedule code", () => {
       creditCents: 15600,
       discountCents: 0,
       feeCents: 2000,
+      nextFeeCents: 2000,
+      nextMovable: true,
     });
   });
 
-  it("asks the customer to look again when the fee changed while the page was open", async () => {
+  it("keeps the fee the booking was made under when the owners change it while the page is open", async () => {
     const first = expectOk(await world.book({ date: NEAR }));
     const one = expectOk(await requestRescheduleCode(world.db, first.ref, byToken(first.manageToken), world.manageDeps()));
     const second = expectOk(await world.book({ date: FAR, promoCode: one.code, paymentToken: undefined }));
     const seen = (await getManageChoices(world.db, second.ref, byToken(second.manageToken), NOW))!.reschedule.text;
+    // A change of the settings applies to bookings made from then on (question 10): what the client read still holds.
     await world.db.insert(settings).values({ key: "rescheduleFeeCents", value: 3000 });
-    expect(await requestRescheduleCode(world.db, second.ref, byToken(second.manageToken), world.manageDeps(), seen)).toMatchObject({ ok: false, code: "changed" });
-    expect((await bookingRow(second.ref)).status).toBe("confirmed");
+    expect(await requestRescheduleCode(world.db, second.ref, byToken(second.manageToken), world.manageDeps(), seen)).toMatchObject({ ok: true, valueCents: 15600 });
   });
 
   it("refuses a second move whose fee would leave no credit, and any second move while the owners set no fee", async () => {
     const first = expectOk(await world.book({ date: NEAR, durationMinutes: 60 })); // $88
     const one = expectOk(await requestRescheduleCode(world.db, first.ref, byToken(first.manageToken), world.manageDeps()));
-    const second = expectOk(await world.book({ date: FAR, durationMinutes: 60, promoCode: one.code, paymentToken: undefined }));
-
+    // Made while a further move costs $88: the booking keeps that fee (question 10).
     await world.db.insert(settings).values({ key: "rescheduleFeeCents", value: 8800 });
+    const second = expectOk(await world.book({ date: FAR, durationMinutes: 60, promoCode: one.code, paymentToken: undefined }));
     expect(await requestRescheduleCode(world.db, second.ref, byToken(second.manageToken), world.manageDeps())).toMatchObject({
       ok: false,
       code: "fee_not_covered",
       message: "Moving a booking again costs $88, and this booking is not worth more than that, so no credit would be left to move. Please call the studio.",
     });
+    expect((await bookingRow(second.ref)).status).toBe("confirmed");
 
+    // Made while the owners set no fee for a further move: it cannot be moved again online.
+    const firstAgain = expectOk(await world.book({ date: NEAR, startMinute: h(14), durationMinutes: 60 }));
+    const two = expectOk(await requestRescheduleCode(world.db, firstAgain.ref, byToken(firstAgain.manageToken), world.manageDeps()));
     await world.db.update(settings).set({ value: 0 }).where(eq(settings.key, "rescheduleFeeCents"));
-    expect(await getManageChoices(world.db, second.ref, byToken(second.manageToken), NOW)).toMatchObject({
+    const third = expectOk(await world.book({ date: FAR, startMinute: h(14), durationMinutes: 60, promoCode: two.code, paymentToken: undefined }));
+    expect(await getManageChoices(world.db, third.ref, byToken(third.manageToken), NOW)).toMatchObject({
       reschedule: { allowed: false, offered: true, text: "This booking was already moved and cannot be moved again online. Please call the studio." },
     });
-    expect(await requestRescheduleCode(world.db, second.ref, byToken(second.manageToken), world.manageDeps())).toMatchObject({
+    expect(await requestRescheduleCode(world.db, third.ref, byToken(third.manageToken), world.manageDeps())).toMatchObject({
       ok: false,
       code: "limit_reached",
     });
-    expect((await bookingRow(second.ref)).status).toBe("confirmed");
+    expect((await bookingRow(third.ref)).status).toBe("confirmed");
   });
 
   it("charges only the difference for a dearer time and carries the whole value if moved again", async () => {
@@ -614,8 +633,12 @@ describe("the reschedule code", () => {
     });
     expect((await bookingRow(booked.ref)).status).toBe("confirmed");
 
+    // A shorter cut-off applies to bookings made from then on; this one keeps its 24 hours (question 10).
     await world.db.insert(settings).values({ key: "rescheduleCutoffHours", value: 2 });
-    expect((await requestRescheduleCode(world.db, booked.ref, byToken(booked.manageToken), late)).ok).toBe(true);
+    expect((await requestRescheduleCode(world.db, booked.ref, byToken(booked.manageToken), late)).ok).toBe(false);
+    const later = expectOk(await world.book({ date: NEAR, startMinute: h(14) }));
+    const lateForLater = world.manageDeps({ now: hoursAfter(NEAR_START, -19) }); // 23 hours before 14:00
+    expect((await requestRescheduleCode(world.db, later.ref, byToken(later.manageToken), lateForLater)).ok).toBe(true);
   });
 
   it("issues one code when asked twice at the same moment", async () => {
@@ -1460,5 +1483,23 @@ describe("a client's change of a booking that stopped being confirmed while thei
       code: "not_confirmed",
       message: "This visit has taken place, so the booking can no longer be changed online.",
     });
+  });
+});
+
+describe("what moving the new booking costs, by today's settings (the tester's third pass of 2026-11-18)", () => {
+  it("does not promise a paid move when the owners have switched moving off since the booking was made", async () => {
+    const first = expectOk(await world.book({ date: FAR }));
+    // Moving online is switched off today; the booking keeps the terms it was made under, which allow one free move.
+    expect(await saveSetting(world.db, "maxReschedules", 0)).toBe(true);
+    const told = (await getManageChoices(world.db, first.ref, byToken(first.manageToken), NOW))!.reschedule;
+    expect(told.allowed).toBe(true);
+    const released = expectOk(await requestRescheduleCode(world.db, first.ref, byToken(first.manageToken), world.manageDeps()));
+    const second = expectOk(await world.book({ date: FAR, startMinute: h(14), promoCode: released.code, paymentToken: undefined }));
+    const next = (await getManageChoices(world.db, second.ref, byToken(second.manageToken), NOW))!.reschedule;
+    // The new booking cannot be moved online at all...
+    expect(next).toMatchObject({ allowed: false, offered: false });
+    // ...and the client is told so, not that moving it again would cost $20.
+    expect(told.text).not.toContain("Moving the new booking again would cost");
+    expect(told.text).toContain("The new booking cannot be moved online again.");
   });
 });

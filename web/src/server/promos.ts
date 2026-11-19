@@ -153,6 +153,17 @@ export async function restorePromo(tx: DbLike, promoId: string, kind: PromoKind,
 }
 
 /**
+ * Put `cents` back on a code of credit, in the caller's transaction: what a booking moved to a day that costs less no
+ * longer takes of it (follow-up 5, src/server/reprice.ts). The code was used, and stays used: only its amount grows.
+ */
+export async function addBackToCode(tx: DbLike, codeId: string, cents: number): Promise<void> {
+  await tx
+    .update(promoCodes)
+    .set({ value: sql`${promoCodes.value} + ${cents}` })
+    .where(and(eq(promoCodes.id, codeId), eq(promoCodes.kind, "amount")));
+}
+
+/**
  * A booking that was never made (its card was refused, or its hold on the
  * time ran out before it was paid) gives back what it spent of its code: an
  * amount, and a use.

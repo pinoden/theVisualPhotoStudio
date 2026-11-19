@@ -5,6 +5,7 @@ import { noticeHours, type StudioDay } from "@/lib/domain/availability";
 import { daysBetween, isIsoDate, isoWeekday, type DayType, type IsoDate } from "@/lib/domain/time";
 import { dayTypeFor, type Catalog } from "./catalog";
 import { releaseHolds } from "./holds";
+import { giveBackUnmadeMinutes } from "./membership-minutes";
 import { giveBackUnmade } from "./promos";
 import { clockChangeOn, dayBoundsUtc, localDateOf, localMinuteOn, localMinuteOnFloor } from "./tz";
 
@@ -32,6 +33,10 @@ export async function releaseExpiredHolds(db: DbLike, now: Date): Promise<number
       expired.map((b) => b.id),
     );
     for (const booking of expired) await giveBackUnmade(tx, booking);
+    await giveBackUnmadeMinutes(
+      tx,
+      expired.map((b) => b.id),
+    );
     return expired.length;
   });
 }

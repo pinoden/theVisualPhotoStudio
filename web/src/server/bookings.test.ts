@@ -137,7 +137,7 @@ describe("creating a booking", () => {
   it("charges add-ons and refuses ones that do not fit the booking", async () => {
     const catalog = await loadCatalog(db);
     const pet = catalog.addons.find((a) => a.slug === "pet-fee")!;
-    const people = catalog.addons.find((a) => a.slug === "extra-people-1-2")!;
+    const people = catalog.addons.find((a) => a.slug === "extra-guest")!;
 
     const refused = await book({ addons: [{ addonId: pet.id, quantity: 1 }] }); // Blanche only
     expect(refused).toMatchObject({ ok: false, status: 422, code: "invalid_price" });
@@ -147,10 +147,38 @@ describe("creating a booking", () => {
       durationMinutes: 60,
       addons: [
         { addonId: pet.id, quantity: 1 },
-        { addonId: people.id, quantity: 1 },
+        { addonId: people.id, quantity: 4 },
       ],
     });
-    expect(ok).toMatchObject({ ok: true, totalCents: 7800 + 4000 + 3000 });
+    expect(ok).toMatchObject({ ok: true, totalCents: 7800 + 4000 + 4 * 500 });
+  });
+
+  it("takes extra guests at $5 each, up to each studio's number, and every guest counts for studios together", async () => {
+    const people = (await loadCatalog(db)).addons.find((a) => a.slug === "extra-guest")!;
+    const guests = (quantity: number) => [{ addonId: people.id, quantity }];
+    // Blanche: 6 extra. Paris: 4.
+    expect(await book({ studioIds: [ids.blanche], addons: guests(6), startMinute: 9 * 60 })).toMatchObject({ ok: true, totalCents: 17600 + 3000 });
+    expect(await book({ studioIds: [ids.blanche], addons: guests(7), startMinute: 12 * 60 })).toMatchObject({
+      ok: false,
+      status: 422,
+      code: "invalid_price",
+      message: "At most 6 extra guests can come with this booking.",
+    });
+    expect(await book({ studioIds: [ids.paris], addons: guests(5), startMinute: 12 * 60 })).toMatchObject({ ok: false, message: "At most 4 extra guests can come with this booking." });
+    // Paris and Dayglow include 4 + 6 guests: the limit of 10 for two studios leaves none extra.
+    expect(await book({ studioIds: [ids.paris, ids.dayglow], addons: guests(1), startMinute: 15 * 60, durationMinutes: 60 })).toMatchObject({
+      ok: false,
+      message: "No extra guests can come with this booking.",
+    });
+    // All three include 16: the limit of 20 leaves 4.
+    expect(await book({ studioIds: [ids.blanche, ids.dayglow, ids.paris], addons: guests(5), startMinute: 17 * 60, durationMinutes: 60 })).toMatchObject({
+      ok: false,
+      message: "At most 4 extra guests can come with this booking.",
+    });
+    expect(await book({ studioIds: [ids.blanche, ids.dayglow, ids.paris], addons: guests(4), startMinute: 17 * 60, durationMinutes: 60 })).toMatchObject({ ok: true });
+    // The owners raise the limit for two studios: Paris and Dayglow then take what is left above 10.
+    await db.insert(settings).values({ key: "twoStudioGuestLimit", value: 13 });
+    expect(await book({ studioIds: [ids.paris, ids.dayglow], addons: guests(3), startMinute: 15 * 60, durationMinutes: 60 })).toMatchObject({ ok: true });
   });
 });
 

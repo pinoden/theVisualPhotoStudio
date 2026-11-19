@@ -48,11 +48,12 @@ export default defineConfig({
       // The site's own address, as production has it: the addresses in pages' metadata and emails are made with it.
       SITE_URL: `http://localhost:${PORT}`,
       NEXT_DIST_DIR: `.next-${NAME}`,
-      // Eleven owners: sign-in codes are limited to three per address in 15 minutes. The fourth is for
+      // Thirteen owners: sign-in codes are limited to three per address in 15 minutes. The fourth is for
       // z-mobile.spec.ts, the fifth for the customers test of site.spec.ts, the sixth to tenth for website.spec.ts,
-      // the eleventh for a11y.spec.ts.
+      // the eleventh for a11y.spec.ts, the twelfth for z-mobile.spec.ts's iPad, the thirteenth for the emails test of
+      // site.spec.ts.
       OWNER_EMAILS:
-        "owner@studio.test,owner2@studio.test,owner3@studio.test,owner4@studio.test,owner5@studio.test,owner6@studio.test,owner7@studio.test,owner8@studio.test,owner9@studio.test,owner10@studio.test,owner11@studio.test,owner12@studio.test",
+        "owner@studio.test,owner2@studio.test,owner3@studio.test,owner4@studio.test,owner5@studio.test,owner6@studio.test,owner7@studio.test,owner8@studio.test,owner9@studio.test,owner10@studio.test,owner11@studio.test,owner12@studio.test,owner13@studio.test,owner14@studio.test",
       // The whole suite books from one address, more often than the ten times a minute a visitor is allowed.
       BOOKING_REQUESTS_PER_MINUTE: "200",
       NEXT_TELEMETRY_DISABLED: "1",

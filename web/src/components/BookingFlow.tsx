@@ -10,7 +10,7 @@ import {
   studiosFreeAt,
   type SlotOptions,
 } from "@/lib/domain/availability";
-import { multiStudioOffer, studioCombinationError } from "@/lib/catalog-view";
+import { extraGuestsFor, multiStudioOffer, studioCombinationError } from "@/lib/catalog-view";
 import {
   bookableDurations,
   findPrice,
@@ -35,6 +35,7 @@ import { count, hoursInWords } from "@/lib/words";
 import type { DayAvailability } from "@/server/availability";
 import type { Catalog } from "@/server/catalog";
 import type { PaymentClientConfig } from "@/server/payments";
+import { loadScript, squareScript, type SquareCard } from "./square-card";
 
 type Mode = "studio" | "time";
 type Step = "studios" | "when" | "time" | "details" | "pay";
@@ -73,30 +74,16 @@ interface AppliedCode {
   photographyOnly?: boolean;
   /** Where the code came from: "reschedule" for a moved booking's money. */
   source?: string;
+  /**
+   * A membership's code (follow-up 3): the minutes left on it, and whether weekends pay the difference. It pays with
+   * minutes, never as a discount: `kind` and `value` are not used then.
+   */
+  membership?: { minutesLeft: number; weekendDifference: boolean; studioIds: string[]; studioNames: string[] };
   email: string;
 }
 
-interface SquareCard {
-  attach(selector: string): Promise<void>;
-  tokenize(): Promise<{ status: string; token?: string; errors?: { message: string }[] }>;
-  destroy(): Promise<void>;
-}
-declare global {
-  interface Window {
-    Square?: { payments(appId: string, locationId: string): { card(): Promise<SquareCard> } };
-  }
-}
-
-function loadScript(src: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (document.querySelector(`script[src="${src}"]`)) return resolve();
-    const el = document.createElement("script");
-    el.src = src;
-    el.onload = () => resolve();
-    el.onerror = () => reject(new Error("script failed"));
-    document.head.appendChild(el);
-  });
-}
+/** "Studio Blanche or Studio Paris". */
+const orList = (names: string[]) => (names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} or ${names[names.length - 1]}`);
 
 /** Today's date is only known in the browser, on the studio's clock wherever the device is; the server renders without it. */
 const browserToday = () => studioToday();
@@ -143,7 +130,8 @@ export function BookingFlow({
   const date = isIsoDate(dateInput) ? dateInput : "";
   const [durationChoice, setDuration] = useState(0);
   const [start, setStart] = useState<number | null>(null);
-  const [addonIds, setAddonIds] = useState<string[]>([]);
+  /** How many of each add-on: 1 for one ticked, more for one taken in a quantity (an extra guest). */
+  const [addonCounts, setAddonCounts] = useState<Record<string, number>>({});
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
@@ -246,12 +234,22 @@ export function BookingFlow({
   );
 
   const availableAddons = catalog.addons.filter((a) => a.studioId === null || studioIds.includes(a.studioId));
+  // Extra guests these studios can take: each studio's own, and the owners' limit for studios booked together.
+  const guestsAllowed = extraGuestsFor(catalog, studioIds);
+  /** The most of an add-on this booking can take. */
+  const mostOf = (addon: (typeof catalog.addons)[number]) => (addon.kind === "people" ? Math.min(addon.maxQuantity, guestsAllowed) : addon.maxQuantity);
   const studioOffer = multiStudioOffer(catalog);
   const combinationError = studioCombinationError(catalog.studios, studioIds);
 
   // A code is tied to an email address, so it stops applying if the address changes.
   const normalizedEmail = email.trim().toLowerCase();
-  const promo = applied && applied.email === normalizedEmail ? applied : null;
+  const current = applied && applied.email === normalizedEmail ? applied : null;
+  const promo = current && !current.membership ? current : null;
+  // A membership's hours pay only for the studios of its plan, never a photography session: chosen otherwise after the
+  // code was applied, they are left out of the price, and the screen says why (the tester's finding of 2026-11-18).
+  const memberApplied = current?.membership ? current : null;
+  const memberFits = memberApplied !== null && !photography && studioIds.every((id) => memberApplied.membership!.studioIds.includes(id));
+  const member = memberFits ? memberApplied : null;
 
   const price: Quote | null = useMemo(() => {
     if (studioIds.length === 0 || duration <= 0 || combinationError) return null;
@@ -264,18 +262,21 @@ export function BookingFlow({
         rules,
         multiStudioPercent: settings.multiStudioPercent,
         addonCatalog: catalog.addons,
-        addons: addonIds
-          .filter((id) => availableAddons.some((a) => a.id === id))
-          .map((addonId) => ({ addonId, quantity: 1 })),
+        extraGuestsAllowed: guestsAllowed,
+        // A number chosen before the studios changed is kept within what the booking can now take.
+        addons: availableAddons
+          .map((addon) => ({ addonId: addon.id, quantity: Math.min(addonCounts[addon.id] ?? 0, mostOf(addon)) }))
+          .filter((selection) => selection.quantity > 0),
         promo,
+        membership: member?.membership ?? null,
         photoPackage: session ? { priceCents: session.priceCents } : null,
       });
     } catch {
       return null;
     }
-    // availableAddons is derived from studioIds and the catalog.
+    // availableAddons, guestsAllowed and mostOf are derived from studioIds and the catalog.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [studioIds, dayType, duration, rules, settings.multiStudioPercent, catalog.addons, addonIds, promo, photography, session, combinationError]);
+  }, [studioIds, dayType, duration, rules, settings.multiStudioPercent, catalog.addons, addonCounts, promo, member, photography, session, combinationError]);
 
   const needsCard = price !== null && price.totalCents > 0;
 
@@ -307,11 +308,7 @@ export function BookingFlow({
     if (step !== "pay" || config?.mode !== "square" || !needsCard) return;
     let cancelled = false;
     (async () => {
-      await loadScript(
-        config.squareEnvironment === "production"
-          ? "https://web.squarecdn.com/v1/square.js"
-          : "https://sandbox.web.squarecdn.com/v1/square.js",
-      );
+      await loadScript(squareScript(config));
       if (cancelled || !window.Square) return;
       const card = await window.Square.payments(config.squareApplicationId!, config.squareLocationId!).card();
       if (cancelled) return void card.destroy();
@@ -354,8 +351,13 @@ export function BookingFlow({
         ok?: boolean;
         message?: string;
         promo?: Omit<AppliedCode, "email"> | null;
+        membership?: { code: string; minutesLeft: number; weekendDifference: boolean; studioIds: string[]; studioNames: string[] } | null;
       };
-      if (response.ok && data.ok && data.promo) {
+      if (response.ok && data.ok && data.membership) {
+        const { code: memberCode, ...membership } = data.membership;
+        setApplied({ code: memberCode, kind: "amount", value: 0, membership, email: normalizedEmail });
+        setCodeInput("");
+      } else if (response.ok && data.ok && data.promo) {
         setApplied({ ...data.promo, email: normalizedEmail });
         setCodeInput("");
       } else {
@@ -487,7 +489,7 @@ export function BookingFlow({
           notes: notes.trim(),
           addons: price.addonLines.map((line) => ({ addonId: line.addonId, quantity: line.quantity })),
           // A code that does not fit this selection is not used, which the summary says.
-          promoCode: promo && !price.promoMisfit ? promo.code : undefined,
+          promoCode: member ? member.code : promo && !price.promoMisfit ? promo.code : undefined,
           photography,
           acceptTerms: true,
           paymentToken,
@@ -573,7 +575,10 @@ export function BookingFlow({
       )}
       {price.addonLines.map((line) => (
         <div className="price-row" key={line.addonId}>
-          <span>{line.name}</span>
+          <span>
+            {line.name}
+            {line.quantity > 1 ? ` × ${line.quantity}` : ""}
+          </span>
           <span>{formatCents(line.totalCents)}</span>
         </div>
       ))}
@@ -591,8 +596,16 @@ export function BookingFlow({
           <span>{formatCents(-price.promoDiscountCents)}</span>
         </div>
       )}
+      {member && price.membershipCents > 0 && (
+        <div className="price-row price-discount">
+          <span>
+            Membership hours, code {member.code} ({durationLabel(price.membershipMinutes)})
+          </span>
+          <span>{formatCents(-price.membershipCents)}</span>
+        </div>
+      )}
       <div className="price-row total">
-        <span>{promo ? "To pay" : "Total"}</span>
+        <span>{promo || member ? "To pay" : "Total"}</span>
         <span>{formatCents(price.totalCents)}</span>
       </div>
       {session && (
@@ -604,6 +617,14 @@ export function BookingFlow({
       {promo && price.promoMisfit && (
         <p className="field-error" role="status" style={{ margin: ".75rem 0 0" }}>
           {PROMO_MISFIT_TEXT[price.promoMisfit]} Code {promo.code} is not used on this booking and stays yours.
+        </p>
+      )}
+      {memberApplied && !member && (
+        <p className="field-error" role="status" style={{ margin: ".75rem 0 0" }}>
+          {photography
+            ? "Membership hours are for studio rentals: they cannot pay for a photography session."
+            : `The hours of membership ${memberApplied.code} are for ${orList(memberApplied.membership!.studioNames)}: they cannot pay for these studios.`}{" "}
+          They are not used on this booking and stay yours.
         </p>
       )}
     </div>
@@ -958,16 +979,49 @@ export function BookingFlow({
           {availableAddons.length > 0 && (
             <div className="price-summary">
               <span className="form-label">Add-ons</span>
-              {availableAddons.map((addon) => (
+              {availableAddons.map((addon) =>
+                addon.maxQuantity > 1 ? (
+                  // Taken in a quantity: how many, from none to what this booking can take.
+                  <div className="addon-row addon-quantity" key={addon.id}>
+                    <select
+                      id={`addon-${addon.id}`}
+                      className="form-control addon-count"
+                      value={Math.min(addonCounts[addon.id] ?? 0, mostOf(addon))}
+                      disabled={mostOf(addon) === 0}
+                      aria-describedby={`addon-${addon.id}-limit`}
+                      onChange={(event) => setAddonCounts((current) => ({ ...current, [addon.id]: Number(event.target.value) }))}
+                    >
+                      {Array.from({ length: mostOf(addon) + 1 }, (_, n) => (
+                        <option key={n} value={n}>
+                          {n}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="addon-text">
+                      <span className="addon-head">
+                        <label htmlFor={`addon-${addon.id}`}>
+                          <strong>{addon.name}</strong>
+                        </label>
+                        <span className="addon-price">{formatCents(addon.priceCents)} each</span>
+                      </span>
+                      {addon.description && <span className="addon-description">{addon.description}</span>}
+                      <span className="addon-description" id={`addon-${addon.id}-limit`}>
+                        {addon.kind !== "people"
+                          ? `Up to ${addon.maxQuantity}.`
+                          : guestsAllowed > 0
+                            ? `Up to ${count(guestsAllowed, "extra guest")} with ${studioIds.length > 1 ? "these studios" : "this studio"}.`
+                            : studioIds.length > 1
+                              ? `No extra guests with these studios together: ${count(studioIds.length === 2 ? settings.twoStudioGuestLimit : settings.threeStudioGuestLimit, "guest")} at most in all, and their prices include that many.`
+                              : "No extra guests with this studio."}
+                      </span>
+                    </span>
+                  </div>
+                ) : (
                 <label className="addon-row" key={addon.id}>
                   <input
                     type="checkbox"
-                    checked={addonIds.includes(addon.id)}
-                    onChange={() =>
-                      setAddonIds((current) =>
-                        current.includes(addon.id) ? current.filter((x) => x !== addon.id) : [...current, addon.id],
-                      )
-                    }
+                    checked={(addonCounts[addon.id] ?? 0) > 0}
+                    onChange={(event) => setAddonCounts((current) => ({ ...current, [addon.id]: event.target.checked ? 1 : 0 }))}
                   />
                   {/* The name and its price on one line, which puts the price under the name when both do not fit; the description below. */}
                   <span className="addon-text">
@@ -978,7 +1032,8 @@ export function BookingFlow({
                     {addon.description && <span className="addon-description">{addon.description}</span>}
                   </span>
                 </label>
-              ))}
+                ),
+              )}
             </div>
           )}
 
@@ -986,10 +1041,16 @@ export function BookingFlow({
             <label className="form-label" htmlFor="promo-code">
               Have a code?
             </label>
-            {promo ? (
+            {current ? (
               <div className="price-row">
                 <span>
-                  Code <strong>{promo.code}</strong> applied.
+                  Code <strong>{current.code}</strong> applied.
+                  {member && price && price.membershipMinutes < duration && (
+                    <>
+                      {" "}
+                      It has {durationLabel(member.membership!.minutesLeft)} left: the rest of the time is paid.
+                    </>
+                  )}
                 </span>
                 <button type="button" className="link-button" onClick={() => setApplied(null)}>
                   Remove
@@ -1000,7 +1061,7 @@ export function BookingFlow({
                 <input
                   id="promo-code"
                   className="form-control"
-                  placeholder={photography ? "Photography code" : "Discount, reward or credit code"}
+                  placeholder={photography ? "Photography code" : "Discount, reward, credit or membership code"}
                   autoCapitalize="characters"
                   autoComplete="off"
                   value={codeInput}
@@ -1021,7 +1082,7 @@ export function BookingFlow({
                 {codeError}
               </p>
             )}
-            {applied && !promo && (
+            {applied && !current && (
               <p className="field-error">The code was removed because the email address changed. Apply it again.</p>
             )}
           </div>
