@@ -1886,8 +1886,10 @@ fieldset { min-inline-size: 0; }
 /* An ordinary block, not a flex column: a block with automatic side margins then takes the width it is allowed. */
 .blk-root { display: flow-root; min-width: 0; }
 /* A block placed on a page outside any section gets the width a section would give it, and room above and below.
-   Written with descendant selectors, so that it holds in the editor too, where the editor wraps each block. */
-.blk-root .blk:not(.blk-section, .blk-section .blk, .blk-columns .blk, .blk-studio-details, .blk-banner) {
+   Written with descendant selectors, so that it holds in the editor too, where the editor wraps each block. A title
+   band and a slideshow go from edge to edge instead, as the old website's slideshow did; in a section, they take its
+   width. */
+.blk-root .blk:not(.blk-section, .blk-section .blk, .blk-columns .blk, .blk-studio-details, .blk-banner, .blk-slideshow) {
   max-width: min(1200px, calc(100% - 3rem));
   margin-inline: auto;
   margin-block: 2rem;
@@ -2043,6 +2045,41 @@ fieldset { min-inline-size: 0; }
 .picture-row-arrow[data-side="back"] { left: .75rem; }
 .picture-row-arrow[data-side="next"] { right: .75rem; }
 .picture-row[data-arrows] .picture-row-arrow { display: flex; }
+
+/* The slideshow (the Slideshow block): the sideways row with one slide in view. Each slide is a picture across the
+   page with its words over it, as the old website's home page opened: a pale veil and dark words, as there, or the
+   title band's dark shade and white words. */
+.slideshow-list > li.slide {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: min(78vh, 680px);
+  overflow: hidden;
+  background: var(--color-ivory);
+  text-align: center;
+}
+.slideshow-list > li.slide::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: rgba(255, 255, 255, .3);
+  pointer-events: none;
+}
+.slideshow-list .slide-picture { object-fit: cover; object-position: var(--focus, center); z-index: 0; }
+.slide-content { position: relative; z-index: 2; max-width: 760px; padding: 2rem 5.5rem; }
+.slide-content h2 { --h2-base: clamp(2rem, 4.5vw, 3.25rem); margin: 0 0 1rem; color: var(--color-dark); }
+.slide-content p { margin: 0 0 .5rem; font-size: 1.15rem; color: var(--color-dark); }
+.slide-content .btn { display: inline-block; overflow: visible; margin-top: 1.5rem; }
+.blk-slideshow[data-shade="dark"] .slideshow-list > li.slide { background: var(--color-dark); }
+.blk-slideshow[data-shade="dark"] .slideshow-list > li.slide::before { background: linear-gradient(180deg, rgba(28, 22, 20, .28) 0%, rgba(28, 22, 20, .42) 100%); }
+.blk-slideshow[data-shade="dark"] .slide-content :is(h2, p, em) { color: #fff; }
+.blk-slideshow[data-shade="dark"] .slide-content .btn-outline { border-color: #fff; color: #fff; }
+.blk-slideshow[data-shade="dark"] .slide-content .btn-outline:hover { background: #fff; color: var(--color-dark); }
+.blk-slideshow .picture-row-arrow { width: 56px; height: 56px; font-size: 1.4rem; }
+.blk-slideshow .picture-row-arrow[data-side="back"] { left: 2rem; }
+.blk-slideshow .picture-row-arrow[data-side="next"] { right: 2rem; }
 /* Logos: the brands the studio has worked for, all as tall as each other, in a row that wraps. */
 .blk-logos { --logo-h: 48px; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 1.75rem 3rem; list-style: none; margin: 0; padding: 0; }
 .blk-logos[data-height="small"] { --logo-h: 32px; }
@@ -2139,6 +2176,12 @@ fieldset { min-inline-size: 0; }
   .picture-row-list > li { flex-basis: calc((100% - (var(--cols-phone, 1) - 1) * var(--gap)) / var(--cols-phone, 1)); }
   .picture-row .picture-row-arrow { display: none; }
   .picture-row[data-arrows-phone] .picture-row-arrow { display: flex; }
+  /* On a phone, as on the old website: the slideshow's two arrows side by side under the words. */
+  .slideshow-list > li.slide { min-height: min(78vh, 640px); }
+  .slide-content { padding: 2rem 1.25rem 6rem; }
+  .blk-slideshow .picture-row-arrow { top: auto; bottom: 1.5rem; width: 44px; height: 44px; font-size: 1.15rem; transform: none; }
+  .blk-slideshow .picture-row-arrow[data-side="back"] { left: calc(50% - 52px); }
+  .blk-slideshow .picture-row-arrow[data-side="next"] { right: calc(50% - 52px); }
   .blk-banner-picture { object-position: var(--focus-phone, var(--focus, center)); }
   .hero.has-picture { min-height: min(80vh, 640px); }
   .blk-reviews { grid-template-columns: repeat(var(--cols-phone, 1), minmax(0, 1fr)); }

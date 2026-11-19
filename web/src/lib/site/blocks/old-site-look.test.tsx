@@ -88,6 +88,55 @@ describe("a gallery in one row that scrolls sideways", () => {
   });
 });
 
+describe("a slideshow, as the old website's home page opened", () => {
+  const site: SiteContext = { ...EMPTY_SITE, pictures: library(3) };
+  const slide = (n: number, more: Record<string, unknown> = {}) => ({
+    picture: id(n),
+    focus: "center",
+    title: `Studio ${n}`,
+    text: "",
+    buttonLabel: "Book Now",
+    buttonLink: `/book?studio=s${n}`,
+    ...more,
+  });
+
+  it("shows one slide at a time, each picture under its words, with arrows from one to the next", () => {
+    const html = drawn([block("Slideshow", { slides: [slide(1, { text: "a romantic space\n\nnow available ", focus: "bottom" }), slide(2), slide(3)] })], site);
+    expect(html).toContain('<section class="blk blk-slideshow" data-shade="light">');
+    // The sideways row, one slide in view on a computer and on a phone, so the arrows show on both.
+    expect(html).toContain('class="picture-row" data-arrows="" data-arrows-phone=""');
+    expect(html).toContain('<ul class="picture-row-list slideshow-list" data-gap="none" data-scrolls-sideways="" aria-label="Slideshow">');
+    expect(html.match(/<li class="slide"/g)).toHaveLength(3);
+    expect(html).toContain('<li class="slide" aria-label="1 of 3">');
+    expect(html).toContain('aria-label="Previous slide"');
+    expect(html).toContain('aria-label="Next slide"');
+    // Its title, each line of its words on its own in italics, and its button to its studio.
+    expect(html).toContain("<h2>Studio 1</h2><p><em>a romantic space</em></p><p><em>now available</em></p>");
+    expect(html).toContain('href="/book?studio=s1"');
+    expect(html).toContain("--focus:bottom");
+    // The words come after the picture, so they are drawn over it.
+    expect(html.indexOf('class="slide-picture"')).toBeLessThan(html.indexOf("<h2>Studio 1</h2>"));
+    // Every picture asked for at once, so the next is there when an arrow moves to it; the first before the others.
+    expect(html.match(/<img[^>]*loading="eager"/g)).toHaveLength(3);
+    expect(html.match(/<img[^>]*fetchPriority="high"/g)).toHaveLength(1);
+  });
+
+  it("leaves out a slide whose picture left the library, and shows visitors nothing without one", () => {
+    const html = drawn([block("Slideshow", { slides: [slide(1), slide(9)] })], site);
+    expect(html.match(/<li class="slide"/g)).toHaveLength(1);
+    // A single slide needs no arrows.
+    expect(html).not.toContain("data-arrows");
+    expect(drawn([block("Slideshow", { slides: [slide(9)] })], site)).toBe("");
+    expect(drawn([block("Slideshow")], site)).toBe("");
+  });
+
+  it("can have the title band's dark shade and white words, and a slide without a button", () => {
+    const html = drawn([block("Slideshow", { slides: [slide(1, { buttonLabel: "" }), slide(2, { buttonLink: "" })], shade: "dark" })], site);
+    expect(html).toContain('data-shade="dark"');
+    expect(html).not.toContain("btn");
+  });
+});
+
 describe("the studios' own pictures", () => {
   let world: TestWorld;
   let catalog: Catalog;

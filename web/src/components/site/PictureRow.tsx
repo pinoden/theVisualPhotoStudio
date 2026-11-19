@@ -22,10 +22,15 @@ export function PictureRow({
   gap = "normal",
   count,
   listClassName,
+  backLabel = "Previous pictures",
+  nextLabel = "Next pictures",
   children,
 }: {
   /** What a screen reader calls the row. */
   label: string;
+  /** What a screen reader calls the arrows: a slideshow's move by a slide. */
+  backLabel?: string;
+  nextLabel?: string;
   columns: number;
   columnsPhone: number;
   /** Each picture's shape, as CSS writes it: "1 / 1". */
@@ -58,10 +63,10 @@ export function PictureRow({
       <ul ref={list} className={`picture-row-list${listClassName ? ` ${listClassName}` : ""}`} data-gap={gap} data-scrolls-sideways="" aria-label={label}>
         {children}
       </ul>
-      <button type="button" className="picture-row-arrow" data-side="back" aria-label="Previous pictures" onClick={() => move(-1)}>
+      <button type="button" className="picture-row-arrow" data-side="back" aria-label={backLabel} onClick={() => move(-1)}>
         <span aria-hidden="true">←</span>
       </button>
-      <button type="button" className="picture-row-arrow" data-side="next" aria-label="Next pictures" onClick={() => move(1)}>
+      <button type="button" className="picture-row-arrow" data-side="next" aria-label={nextLabel} onClick={() => move(1)}>
         <span aria-hidden="true">→</span>
       </button>
     </div>
