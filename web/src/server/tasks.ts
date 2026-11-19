@@ -2,6 +2,7 @@ import { and, asc, eq, gt, inArray, isNull, lte, ne, or, sql } from "drizzle-orm
 import { bookings, payments } from "@/db/schema";
 import type { Db } from "@/db/client";
 import { releaseExpiredHolds } from "./availability";
+import { pruneRateLimits } from "./rate-limit";
 import { durationLabel } from "@/lib/domain/time";
 import { toBookingViews } from "./bookings";
 import { bookingReminderEmail, deliverPendingEmails, queueEmail, reviewRequestEmail, type EmailTransport } from "./email";
@@ -256,6 +257,7 @@ export async function runScheduledTasks(db: Db, deps: TaskDeps): Promise<TaskSum
   const billing = await runMembershipBilling(db, deps);
   const mail = await deliverPendingEmails(db, deps.email, deps.now);
   const pagesRemoved = await emptyOldTrash(db, deps.now);
+  await pruneRateLimits(db, deps.now);
   return {
     holdsReleased,
     paymentsFlagged,

@@ -5,7 +5,7 @@ import { getDb } from "@/db/client";
 import { CONTACT_LIMITS } from "@/lib/contact";
 import { formText } from "@/lib/parse";
 import { sendContactMessage, type ContactField } from "@/server/contact";
-import { RateLimiter } from "@/server/rate-limit";
+import { clientAddress, limitRate } from "@/server/rate-limit";
 import { flushEmailsSoon, ownerNotifyEmail } from "@/server/runtime";
 import { loadBusiness } from "@/server/website";
 
@@ -21,8 +21,8 @@ export interface ContactState {
 
 const EMPTY = { name: "", email: "", topic: "", message: "" };
 
-// Five messages in ten minutes from one address. Kept in memory, like the booking limit.
-const limiter = new RateLimiter({ windowMs: 10 * 60_000, maxRequests: 5 });
+// Five messages in ten minutes from one address, counted in the database (src/server/rate-limit.ts).
+const CONTACT_LIMIT = { max: 5, windowMs: 10 * 60_000 };
 
 // Line breaks are made single before the cut, as the box counted them, so nothing the box accepted is lost.
 // One character over the limit is kept so an over-long value is refused, not silently cut.
@@ -38,12 +38,13 @@ export async function sendMessageAction(previous: ContactState, formData: FormDa
     topic: field(formData, "topic", 40),
     message: field(formData, "message", CONTACT_LIMITS.message),
   };
-  const address = (await headers()).get("x-forwarded-for")?.split(",")[0].trim() || "unknown";
+  const address = clientAddress(await headers());
+  const db = await getDb();
 
   const result = await sendContactMessage(
-    await getDb(),
+    db,
     { ...values, trap: formData.get("leave_blank") },
-    { ownerEmail: ownerNotifyEmail(), allowSend: () => limiter.check(address).allowed },
+    { ownerEmail: ownerNotifyEmail(), allowSend: async () => (await limitRate(db, { key: `contact:${address}`, ...CONTACT_LIMIT }, new Date())).allowed },
   );
 
   if (result.ok) {

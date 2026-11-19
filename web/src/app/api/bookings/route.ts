@@ -2,18 +2,16 @@ import type { NextRequest } from "next/server";
 import { getDb } from "@/db/client";
 import { createBooking } from "@/server/bookings";
 import { resolvePayments } from "@/server/payments";
-import { RateLimiter } from "@/server/rate-limit";
+import { clientAddress, limitRate } from "@/server/rate-limit";
 import { flushEmailsSoon, ownerNotifyEmail } from "@/server/runtime";
 
 // Ten booking attempts a minute from one address. The browser tests all come from one address and make
 // more than that, so their server raises the number with BOOKING_REQUESTS_PER_MINUTE. Production ignores it.
 const perMinute = process.env.NODE_ENV === "production" ? 10 : Number(process.env.BOOKING_REQUESTS_PER_MINUTE) || 10;
-const limiter = new RateLimiter({ windowMs: 60_000, maxRequests: perMinute });
 
 /** POST /api/bookings: validate, hold the slot, charge, confirm. */
 export async function POST(request: NextRequest) {
-  const ip = request.headers.get("x-forwarded-for")?.split(",")[0].trim() || "unknown";
-  const check = limiter.check(ip);
+  const check = await limitRate(await getDb(), { key: `booking:${clientAddress(request.headers)}`, max: perMinute, windowMs: 60_000 }, new Date());
   if (!check.allowed) {
     return Response.json(
       { ok: false, code: "rate_limited", message: "Too many requests. Please wait a moment." },

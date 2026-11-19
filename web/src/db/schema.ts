@@ -83,6 +83,21 @@ export const loginCodes = pgTable(
   (t) => [index("login_codes_email_idx").on(t.email)],
 );
 
+/**
+ * How many requests a key (an IP address with what it asked for) made in one window of time: the rate limits, kept in
+ * the database so that every server copy counts against the same limit (src/server/rate-limit.ts). Old windows are
+ * removed by the scheduled task.
+ */
+export const rateLimitHits = pgTable(
+  "rate_limit_hits",
+  {
+    key: text("key").notNull(),
+    windowStart: ts("window_start").notNull(),
+    count: integer("count").notNull().default(1),
+  },
+  (t) => [primaryKey({ columns: [t.key, t.windowStart] }), index("rate_limit_hits_window_idx").on(t.windowStart)],
+);
+
 export const sessions = pgTable("sessions", {
   id: id(),
   userId: uuid("user_id")

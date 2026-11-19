@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
-import { and, desc, eq, gt, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, lt, sql } from "drizzle-orm";
 import { loginCodes, sessions, users } from "@/db/schema";
 import type { Db, DbLike } from "@/db/client";
 import { EMAIL_RULE } from "@/lib/parse";
@@ -23,6 +23,8 @@ export const CODE_TTL_MINUTES = 10;
 export const MAX_CODE_ATTEMPTS = 5;
 export const MAX_CODES_PER_WINDOW = 3;
 export const CODE_WINDOW_MINUTES = 15;
+/** Codes one address may be sent in a day: with five tries each, at most fifty guesses a day at a million codes. */
+export const MAX_CODES_PER_DAY = 10;
 export const SESSION_DAYS = 30;
 
 /** An email address as the site keeps it: trimmed and in small letters, by the rule every email field follows (`EMAIL_RULE`). */
@@ -59,6 +61,11 @@ export async function requestLoginCode(db: DbLike, rawEmail: unknown, now: Date)
     .from(loginCodes)
     .where(and(eq(loginCodes.email, email), gt(loginCodes.createdAt, windowStart)));
   if (count >= MAX_CODES_PER_WINDOW) return { ok: false, code: "too_many" };
+  const [{ today }] = await db
+    .select({ today: sql<number>`count(*)::int` })
+    .from(loginCodes)
+    .where(and(eq(loginCodes.email, email), gt(loginCodes.createdAt, new Date(now.getTime() - 86_400_000))));
+  if (today >= MAX_CODES_PER_DAY) return { ok: false, code: "too_many" };
 
   const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
   const expiresAt = new Date(now.getTime() + CODE_TTL_MINUTES * 60_000);
@@ -94,14 +101,18 @@ export async function verifyLoginCode(db: Db, rawEmail: unknown, rawCode: unknow
     .orderBy(desc(loginCodes.createdAt))
     .limit(1);
   if (!row) return { ok: false, code: "invalid" };
-  if (row.attempts >= MAX_CODE_ATTEMPTS) return { ok: false, code: "too_many_attempts" };
+
+  // Each try is counted before the code is compared, in one statement that only counts while tries are left: guesses
+  // sent at the same moment cannot all read "no tries yet" (the security review of 2026-11-19).
+  const [tried] = await db
+    .update(loginCodes)
+    .set({ attempts: sql`${loginCodes.attempts} + 1` })
+    .where(and(eq(loginCodes.id, row.id), lt(loginCodes.attempts, MAX_CODE_ATTEMPTS), isNull(loginCodes.consumedAt)))
+    .returning({ attempts: loginCodes.attempts });
+  if (!tried) return { ok: false, code: "too_many_attempts" };
 
   if (!safeEqualHex(row.codeHash, codeHash(email, code))) {
-    await db
-      .update(loginCodes)
-      .set({ attempts: sql`${loginCodes.attempts} + 1` })
-      .where(eq(loginCodes.id, row.id));
-    return { ok: false, code: row.attempts + 1 >= MAX_CODE_ATTEMPTS ? "too_many_attempts" : "invalid" };
+    return { ok: false, code: tried.attempts >= MAX_CODE_ATTEMPTS ? "too_many_attempts" : "invalid" };
   }
 
   // Consume the code; if another request used it in the meantime, refuse.

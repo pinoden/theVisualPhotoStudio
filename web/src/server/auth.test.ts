@@ -5,6 +5,7 @@ import {
   deleteSession,
   effectiveRole,
   getSessionUser,
+  MAX_CODES_PER_DAY,
   normalizeEmail,
   parseOwnerEmails,
   requestLoginCode,
@@ -96,6 +97,22 @@ describe("signing in with an emailed code", () => {
     expect(await verifyLoginCode(world.db, "jane@example.com", wrong(code), deps())).toEqual({ ok: false, code: "too_many_attempts" });
     expect(await verifyLoginCode(world.db, "jane@example.com", code, deps())).toEqual({ ok: false, code: "too_many_attempts" });
     expect(await world.db.select().from(sessions)).toHaveLength(0);
+  });
+
+  it("counts every guess before comparing it, so guesses sent at the same moment cannot get past five (security review, 2026-11-19)", async () => {
+    await requestLoginCode(world.db, "jane@example.com", NOW);
+    const code = await emailedCode("jane@example.com");
+    const results = await Promise.all(Array.from({ length: 20 }, () => verifyLoginCode(world.db, "jane@example.com", wrong(code), deps())));
+    expect(results.filter((result) => !result.ok && result.code === "invalid")).toHaveLength(4);
+    const [row] = await world.db.select({ attempts: loginCodes.attempts }).from(loginCodes);
+    expect(row.attempts).toBe(5);
+    expect(await verifyLoginCode(world.db, "jane@example.com", code, deps())).toEqual({ ok: false, code: "too_many_attempts" });
+  });
+
+  it("sends one address ten codes a day at most, whatever the quarter of an hour", async () => {
+    for (let i = 0; i < MAX_CODES_PER_DAY; i++) expect((await requestLoginCode(world.db, "jane@example.com", minutesAfter(NOW, i * 16))).ok).toBe(true);
+    expect(await requestLoginCode(world.db, "jane@example.com", minutesAfter(NOW, MAX_CODES_PER_DAY * 16))).toEqual({ ok: false, code: "too_many" });
+    expect((await requestLoginCode(world.db, "jane@example.com", minutesAfter(NOW, 24 * 60 + 1))).ok).toBe(true);
   });
 
   it("does not accept a code sent to a different address", async () => {
