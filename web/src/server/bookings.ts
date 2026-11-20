@@ -124,7 +124,8 @@ export interface BookingDeps {
 
 const REF_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
 
-function newRef(): string {
+/** A new booking reference, "VS-" and six characters. Unique in the database: on a clash, make another. */
+export function newRef(): string {
   let out = "VS-";
   for (let i = 0; i < 6; i++) out += REF_ALPHABET[randomInt(REF_ALPHABET.length)];
   return out;
@@ -716,8 +717,12 @@ export interface BookingView {
   chargesCents: number;
   /** Money received for the booking so far, by card through the site or at the studio, before any refund. */
   receivedCents: number;
-  /** The part of it taken at the studio and recorded by hand; the rest came by card (online, or through a payment link). */
+  /**
+   * The part of it taken at the studio and recorded by hand. The part paid in Acuity before the booking was imported
+   * is `receivedThroughAcuityCents`; the rest came by card (online, or through a payment link).
+   */
   receivedAtStudioCents: number;
+  receivedThroughAcuityCents: number;
   /** What was given back of what it was paid beyond its price (follow-up 5): `receivedCents` less this was paid toward it. */
   creditReturnedCents: number;
   /**
@@ -743,7 +748,7 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[], now: Date =
   if (rows.length === 0) return [];
   const ids = rows.map((r) => r.id);
   const codeIds = rows.map((r) => r.promoCodeId).filter((id): id is string => id !== null);
-  const [holdRows, addonRows, codeRows, received, atStudio, owed, held, charged, creditLeft, creditReturned] = await together(db, [
+  const [holdRows, addonRows, codeRows, received, atStudio, throughAcuity, owed, held, charged, creditLeft, creditReturned] = await together(db, [
     () => db
       .select({ bookingId: studioHolds.bookingId, name: studios.name, priceCents: studioHolds.priceCents, sort: studios.sortOrder })
       .from(studioHolds)
@@ -758,6 +763,7 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[], now: Date =
       : [],
     () => receivedCentsByBooking(db, ids),
     () => receivedCentsByBooking(db, ids, "at_studio"),
+    () => receivedCentsByBooking(db, ids, "through_acuity"),
     () => owedCentsByBooking(db, rows, now),
     () => heldCentsByBooking(db, ids, now),
     () => activeChargesByBooking(db, ids),
@@ -798,6 +804,7 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[], now: Date =
     chargesCents: (charged.get(booking.id) ?? []).reduce((sum, charge) => sum + charge.cents, 0),
     receivedCents: received.get(booking.id) ?? 0,
     receivedAtStudioCents: atStudio.get(booking.id) ?? 0,
+    receivedThroughAcuityCents: throughAcuity.get(booking.id) ?? 0,
     creditReturnedCents: creditReturned.get(booking.id) ?? 0,
     dueCents: owed.get(booking.id) ?? 0,
     heldCents: held.get(booking.id) ?? 0,

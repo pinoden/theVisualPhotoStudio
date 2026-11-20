@@ -1,0 +1,2 @@
+ALTER TABLE "bookings" ADD COLUMN "imported_from" text;--> statement-breakpoint
+CREATE UNIQUE INDEX "bookings_imported_from" ON "bookings" USING btree ("imported_from") WHERE "bookings"."imported_from" is not null;

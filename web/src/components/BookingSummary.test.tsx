@@ -32,6 +32,7 @@ const PAID_ONLINE: BookingView = {
   chargesCents: 0,
   receivedCents: 17600,
   receivedAtStudioCents: 0,
+  receivedThroughAcuityCents: 0,
   dueCents: 0,
   heldCents: 0,
   creditLeftCents: 0,
@@ -60,6 +61,20 @@ describe("a booking's summary", () => {
     expect(lastRow({ madeByAdmin: true })).toEqual(["Paid by card", "$176"]);
     // A booking that ended shows what it cost.
     expect(lastRow({ status: "cancelled", receivedCents: 0 })).toEqual(["Total", "$176"]);
+  });
+
+  it("says that a booking imported from Acuity was paid there, not at the studio", () => {
+    const imported = { madeByAdmin: true, receivedAtStudioCents: 0 };
+    expect(lastRow({ ...imported, receivedThroughAcuityCents: 17600 })).toEqual(["Paid through Acuity", "$176"]);
+    // What was left was paid at the studio, or by card through a payment link.
+    expect(lastRow({ ...imported, receivedThroughAcuityCents: 5000, receivedAtStudioCents: 12600 })).toEqual(["Paid through Acuity and at the studio", "$176"]);
+    expect(lastRow({ ...imported, receivedThroughAcuityCents: 5000 })).toEqual(["Paid through Acuity and by card", "$176"]);
+    // Still owing: what was paid is "so far", whatever paid it, and the rest is paid at the studio.
+    const html = renderToStaticMarkup(
+      <BookingSummary booking={{ ...PAID_ONLINE, ...imported, receivedCents: 5000, receivedThroughAcuityCents: 5000, dueCents: 12600 }} />,
+    );
+    expect(html).toContain("<span>Paid so far</span><span>$50</span>");
+    expect(lastRow({ ...imported, receivedCents: 5000, receivedThroughAcuityCents: 5000, dueCents: 12600 })).toEqual(["To pay at the studio", "$126"]);
   });
 
   it("says what a missed booking still owes, as its payment card does", () => {
