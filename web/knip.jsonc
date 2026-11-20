@@ -1,4 +1,4 @@
-// knip finds files, exports and packages nothing uses: `npx knip@5.88.1` from web/ (see "Commands" in ProjectLibrary.md).
+// knip finds files, exports and packages nothing uses: `npm run knip` from web/, and in CI's `checks` job.
 {
   "$schema": "https://unpkg.com/knip@5/schema.json",
   // The scripts run by hand (`npx tsx scripts/...`) and the Neon CLI's own configuration.

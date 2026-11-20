@@ -63,7 +63,9 @@ DATABASE_URL="" npm run dev   # http://localhost:3000, embedded database, preten
 npm test             # unit and integration tests (vitest), about a minute
 npm run typecheck
 npm run lint
+npm run knip         # files, exports and packages nothing uses (web/knip.jsonc)
 npm run test:e2e     # browser tests (Playwright), about 11 minutes, own server on port 3211
+E2E_NAME=webkit E2E_PORT=3214 npx playwright test --browser=webkit   # the same in WebKit, Safari's engine (`npx playwright install webkit` once)
 npm run db:generate  # after editing src/db/schema.ts
 npx drizzle-kit generate --custom --name <name>   # a migration written by hand
 npm run check:square # the Square code against Square's sandbox; needs web/.env.square-sandbox
@@ -73,11 +75,16 @@ To show the owner the site: `DATABASE_URL="" OWNER_EMAILS=owner@studio.test npm 
 
 ## Verification
 
-Before a commit of code: `npm run typecheck`, `npm run lint` and `npm test`, all clean. Before a pull request, and after any change to pages, forms or booking: the whole browser suite too. Read the last lines of a test log before saying it passed. Say in `HANDOFF.md` exactly what was run.
+Before a commit of code: `npm run typecheck`, `npm run lint`, `npm run knip` and `npm test`, all clean. Before a pull request, and after any change to pages, forms or booking: the whole browser suite too. Read the last lines of a test log before saying it passed. Say in `HANDOFF.md` exactly what was run.
 
 A migration is tried on a copy of a database that holds real rows before it is committed (see "Conventions and gotchas").
 
-GitHub runs the same checks (`.github/workflows/ci.yml`) on every pull request into `master` and every push to `rebuild`: the job `checks` (type check, lint, unit and integration tests) and the job `browser` (the whole browser suite). Branch protection on `master` requires both to pass before a pull request can be merged, for everyone, the owner included, and refuses direct pushes to `master`. A failed browser run keeps its screenshots and traces as an artifact for 14 days. Dependabot opens update pull requests into `rebuild` once a month (`.github/dependabot.yml`); CI runs on them too, and they are merged like any other change. CI runs in UTC, as the host will. Running the suites locally before pushing is still expected: CI is the gate, not the first check.
+GitHub runs the same checks (`.github/workflows/ci.yml`) on every pull request into `master` and every push to `rebuild`:
+- the job `checks`: type check, lint, unused code (`knip`), unit and integration tests;
+- the job `browser`: the whole browser suite in Chromium;
+- the job `webkit`: the same suite in WebKit, Safari's engine.
+
+Branch protection on `master` requires `checks` and `browser` to pass before a pull request can be merged, for everyone, the owner included, and refuses direct pushes to `master`. `webkit` becomes required once it has passed a few times (the owner agreed on 2026-11-20). A failed browser run keeps its screenshots and traces as an artifact for 14 days. The repository is public, so CI's minutes are free. Dependabot opens update pull requests into `rebuild` once a month (`.github/dependabot.yml`); CI runs on them too, and they are merged like any other change. CI runs in UTC, as the host will. Running the suites locally before pushing is still expected: CI is the gate, not the first check.
 
 ## Rules that are easy to break
 

@@ -31,7 +31,7 @@ E2E_NAME=tester E2E_PORT=3213 npm run test:e2e        # a second run at the same
 npx playwright test -g "staff see the day sheet"      # one browser test by name (they build on each other; see below)
 npm run typecheck    # generates Next.js route types, then runs tsc
 npm run lint
-npx knip@5.88.1      # files, exports and packages nothing uses (web/knip.jsonc says what counts); reports nothing since 2026-11-20
+npm run knip         # files, exports and packages nothing uses (web/knip.jsonc says what counts); in CI's checks job since 2026-11-20
 npm run build
 npm run check:square # the site's own Square code against Square's sandbox (charges, refunds, a payment link); reads web/.env.square-sandbox; no money moves
 npm run db:generate  # after editing src/db/schema.ts: writes a migration into drizzle/
@@ -158,7 +158,7 @@ Local development needs no database install and no credentials. Without `DATABAS
   - WebKit reports a request cut off by leaving the page as an error of the page left ("Load failed"), such as the rest of a server action's answer when a test opens the next page as soon as the result shows; Next's development tools may then add errors of their own. The tests' one browser watcher, `watchBrowser` in `e2e/helpers.ts`, leaves out "Load failed" only while a page is being left, and the development tools' messages (`frameworkNoise`) always: no production page has them;
   - WebKit's page editor takes no simulated drag whose mouse jumps onto the page in one burst of moves, as Playwright's `mouse.move` with `steps` makes it: no drop line is ever drawn, and Puck drops a block nowhere else. A person's mouse glides, and so does the test's drag (`dragBlockOnce`: a move each time the browser draws), which lets go once the editor has drawn its line (`[data-puck-line-placeholder]`).
 
-  CI runs Chromium only.
+  CI runs it too, in the job `webkit`, on Linux; it is not required for merging until it has passed a few times.
 - **Square replays a request only when it is the same.** Under an idempotency key used before, any other detail (a new card token, another note) is refused with `IDEMPOTENCY_KEY_REUSED`, and the first request may have gone through. A retry sends the same request again (`useCardForm` keeps the attempt's token), and that refusal is read as no answer (`charge` in payments.ts). Seen in Square's sandbox on 2026-11-20.
 - **A test that something is absent from serialized data does not look for a few digits.** The random ids in it hold any four digits now and then: a door code, "4821", was found inside an id in about one run in twenty. Look for an amount as a value of its own (`asAmount` in `src/server/testing.ts`), or for text no id can hold.
 - **`web/.env.local` holds staging's `DATABASE_URL`**, written by `neon link`, and `next dev`, `next build` and `next start` read it. Started without `DATABASE_URL=""`, a local server runs on the database that the hosted preview shares, with whatever card processor its own environment sets. The browser tests blank it (`playwright.config.ts`); a script run with `tsx` reads only its own environment. On 2026-11-20 a scratch server for Square's sandbox was started without it and made five test bookings on staging. They were undone; see the decision log.
@@ -989,6 +989,19 @@ Known weaknesses:
   - administrators included.
 
   A branch need not be up to date with `master` first.
+- 2026-11-20: On the owner's word ("Go ahead with 1-3"):
+  1. **PR #23** (the Safari test fixes and tidy-ups) merged as `d6000ca`. Branch protection held it until the pull request's own CI run had passed, though the push run on the same commit already had.
+  2. **Dependabot's #10, #11 and #14 merged into `rebuild`:**
+     - #10: GitHub's checkout, setup-node and upload-artifact actions to v7;
+     - #11: react and react-dom 19.3.1, @testing-library/user-event 14.6.12;
+     - #14: `@types/node` 26, which matches the Node the site runs on (`web/.nvmrc` and `engines`, which Vercel follows); the types were 24's.
+
+     They merged with no conflict, and `npm ci` took the merged lock file. Type check, lint, `knip` and the 1,130 unit tests passed with them. #13 (TypeScript 7) stays open: it fails the type check.
+  3. **CI checks more, now that its minutes are free:**
+     - `knip` is a development package (`npm run knip`) and a step of the job `checks`;
+     - a third job, `webkit`, runs the whole browser suite in WebKit, Safari's engine, on Linux.
+
+     `webkit` is not required for merging until it has passed a few times (`HANDOFF.md`, "Now" 0). `AGENTS.md` says what the jobs run, and that `npm run knip` is part of the checks before a commit.
 
 ### Handoff for the next coding session
 
