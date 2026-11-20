@@ -25,6 +25,12 @@ export default defineConfig({
   // One database shared by every test: run them in order, one at a time.
   fullyParallel: false,
   workers: 1,
+  // No retries, in CI either. Playwright retries a serial file from its first test, on the database the failed try
+  // left, and those files sign in with several owner addresses three times each, the most the site allows in 15
+  // minutes: the second pass is refused a code. A failed CI job is read, then run again by hand (AGENTS.md).
+  retries: 0,
+  // A `test.only` left in a file would make CI run that one test, and pass.
+  forbidOnly: Boolean(process.env.CI),
   reporter: [["list"]],
   outputDir: `test-results${SUFFIX}`,
   use: {
