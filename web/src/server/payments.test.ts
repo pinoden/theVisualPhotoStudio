@@ -67,6 +67,7 @@ describe("charging through Square", () => {
       reference_id: "VS-ABC234",
       note: "VS-ABC234 Studio Blanche, Jane Smith",
       buyer_email_address: "jane@example.com",
+      customer_details: { customer_initiated: true, seller_keyed_in: false },
       autocomplete: true,
     });
   });
@@ -84,6 +85,7 @@ describe("charging through Square", () => {
     ["INVALID_EXPIRATION", "The card's expiry date is not right."],
     ["CARD_EXPIRED", "The card has expired."],
     ["INSUFFICIENT_FUNDS", "The card does not have enough funds."],
+    ["CARD_DECLINED_VERIFICATION_REQUIRED", "The card's bank did not confirm this payment. Please try again, or use another card."],
     ["SOME_CODE_ADDED_LATER", "The card was declined."],
   ])("turns Square's %s into a sentence for the customer", async (code, sentence) => {
     stubSquare(declined(code));

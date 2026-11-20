@@ -6,7 +6,10 @@ import { STUDIO_TIME_ZONE } from "@/lib/domain/time";
 
 export interface ChargeRequest {
   amountCents: number;
-  /** One-time card token produced in the browser by Square's card form. */
+  /**
+   * One-time card token produced in the browser by Square's card form, typed in by the client, whose bank checked
+   * them there when it asked (3-D Secure, `buyerVerification` in src/components/square-card.ts).
+   */
   token: string;
   /** Same key = same charge. Retries can never charge twice. */
   idempotencyKey: string;
@@ -338,6 +341,8 @@ const CARD_PROBLEMS: Record<string, string> = {
   INVALID_ACCOUNT: "The card number is not right.",
   CARD_TOKEN_EXPIRED: "The card details went out of date before the payment was sent. Please enter the card again.",
   CARD_TOKEN_USED: "The card details were already used once. Please enter the card again.",
+  // The bank's check of the card holder failed, as with a wrong code, or the token came without one.
+  CARD_DECLINED_VERIFICATION_REQUIRED: "The card's bank did not confirm this payment. Please try again, or use another card.",
 };
 
 function cardProblem(errors: SquareError[]): string {
@@ -527,6 +532,8 @@ export function squareProvider(config: SquareConfig): PaymentProvider {
         note: request.note.slice(0, 500),
         buyer_email_address: request.buyerEmail,
         ...(request.customerId ? { customer_id: request.customerId } : {}),
+        // The client paid, with a card they typed into Square's form themselves: so the bank's check applies (3-D Secure).
+        customer_details: { customer_initiated: true, seller_keyed_in: false },
         // Reserved, the payment waits to be completed or cancelled; one left alone is cancelled by Square.
         ...(request.reserve ? { autocomplete: false, delay_action: "CANCEL", delay_duration: `PT${RESERVE_HOURS}H` } : { autocomplete: true }),
       });

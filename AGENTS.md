@@ -59,7 +59,7 @@ Sections of `ProjectLibrary.md` worth knowing:
 Run from `web/`. A shell that did not load the login profile needs `. ~/.nvm/nvm.sh` first. `web/.nvmrc` holds the one Node version (CI reads it too): `nvm use` in `web/` picks it.
 
 ```bash
-npm run dev          # http://localhost:3000, embedded database, pretend card processor
+DATABASE_URL="" npm run dev   # http://localhost:3000, embedded database, pretend card processor (see below)
 npm test             # unit and integration tests (vitest), about a minute
 npm run typecheck
 npm run lint
@@ -69,7 +69,7 @@ npx drizzle-kit generate --custom --name <name>   # a migration written by hand
 npm run check:square # the Square code against Square's sandbox; needs web/.env.square-sandbox
 ```
 
-To show the owner the site: `OWNER_EMAILS=owner@studio.test npm run dev -- --hostname localhost`, then sign in at `/account` with that address. The sign-in code is at `/dev/outbox`.
+To show the owner the site: `DATABASE_URL="" OWNER_EMAILS=owner@studio.test npm run dev -- --hostname localhost`, then sign in at `/account` with that address. The sign-in code is at `/dev/outbox`.
 
 ## Verification
 
@@ -82,6 +82,7 @@ GitHub runs the same checks (`.github/workflows/ci.yml`) on every pull request i
 ## Rules that are easy to break
 
 - **Next.js 16 is not the Next.js you know.** Read the guide in `web/node_modules/next/dist/docs/` before using an API you have not verified there.
+- **`web/.env.local` points at staging.** `neon link` wrote staging's `DATABASE_URL` there, and `next dev`, `next build` and `next start` read it. A local server started without `DATABASE_URL=""` writes to the database that the hosted preview shares: on 2026-11-20 a scratch server made test bookings there. The browser tests blank it themselves (`playwright.config.ts`). Reach staging only on purpose.
 - **A migration that was pushed is never edited.** Correct it with a new one. A migration must also be right for a database that already holds values and pages the owners changed.
 - **Money is integer cents.** The server recomputes every price: never trust a total from the browser.
 - **Business rules are settings or data, not constants.** Prices, hours, windows and fees are changed by the owners in the admin. A new rule gets a setting, and the public pages read it through live values.

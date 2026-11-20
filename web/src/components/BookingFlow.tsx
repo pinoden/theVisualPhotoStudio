@@ -35,7 +35,7 @@ import { count, hoursInWords } from "@/lib/words";
 import type { DayAvailability } from "@/server/availability";
 import type { Catalog } from "@/server/catalog";
 import type { PaymentClientConfig } from "@/server/payments";
-import { loadScript, squareScript, type SquareCard } from "./square-card";
+import { buyerVerification, loadScript, squareScript, tokenizeCard, type SquareCard } from "./square-card";
 
 type Mode = "studio" | "time";
 type Step = "studios" | "when" | "time" | "details" | "pay";
@@ -465,12 +465,13 @@ export function BookingFlow({
         if (config?.mode === "mock") {
           paymentToken = MOCK_TOKEN;
         } else if (config?.mode === "square" && cardRef.current) {
-          const result = await cardRef.current.tokenize();
-          if (result.status !== "OK" || !result.token) {
-            setError(`Card error: ${(result.errors ?? []).map((e) => e.message).join(", ") || "please check your card details."}`);
+          // The card's bank may check the client here, on this page, before Square gives the token (3-D Secure).
+          const card = await tokenizeCard(cardRef.current, buyerVerification({ amountCents: price.totalCents, intent: "CHARGE", name, email }));
+          if (!card.ok) {
+            setError(card.message);
             return;
           }
-          paymentToken = result.token;
+          paymentToken = card.token;
         } else {
           setError("Online payment is not available right now. Please contact the studio.");
           return;

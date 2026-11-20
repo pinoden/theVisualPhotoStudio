@@ -9,7 +9,7 @@ import { durationLabel, longDateLabel } from "@/lib/domain/time";
 import { EMAIL_FIELD } from "@/lib/parse";
 import type { MembershipView } from "@/server/memberships";
 import { CopyCode } from "./CopyCode";
-import { useCardForm } from "./square-card";
+import { buyerVerification, useCardForm } from "./square-card";
 
 const CARD_CONTAINER = "membership-card";
 
@@ -54,7 +54,8 @@ export function MembershipCheckout({
     setError("");
     setSending(true);
     try {
-      const token = await card.token();
+      // The card is kept for the monthly billing: the bank is told so when it checks the client (3-D Secure).
+      const token = await card.token(buyerVerification({ amountCents: plan.priceCents, intent: "CHARGE_AND_STORE", name, email }));
       if (!token.ok) {
         setError(token.message);
         return;
