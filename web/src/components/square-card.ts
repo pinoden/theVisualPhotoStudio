@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { centsToInput } from "@/lib/parse";
+import { splitName } from "@/lib/names";
 import type { PaymentClientConfig } from "@/server/payments";
 
 /**
@@ -16,7 +16,7 @@ import type { PaymentClientConfig } from "@/server/payments";
  * `tokenize(verificationDetails)`, which replaced `verifyBuyer` and its separate verification token.
  */
 export interface BuyerVerification {
-  /** In dollars, as Square reads it: "88" or "88.50". */
+  /** In dollars with two decimals, as Square's examples write it: "88.00". */
   amount: string;
   currencyCode: "USD";
   /** CHARGE_AND_STORE when the card is kept and billed again: a membership's first month. */
@@ -35,7 +35,8 @@ export interface SquareTokenResult {
 
 export interface SquareCard {
   attach(selector: string): Promise<void>;
-  tokenize(verification?: BuyerVerification): Promise<SquareTokenResult>;
+  /** Never without the verification: a token made without it is declined for a card whose bank wants its check. */
+  tokenize(verification: BuyerVerification): Promise<SquareTokenResult>;
   destroy(): Promise<void>;
 }
 
@@ -46,14 +47,13 @@ export interface SquareCard {
  * refuses a payment whose total changed from the one on screen.
  */
 export function buyerVerification(input: { amountCents: number; intent: BuyerVerification["intent"]; name: string; email: string }): BuyerVerification {
-  const [givenName = "", ...rest] = input.name.trim().split(/\s+/);
+  const { given, family } = splitName(input.name);
   const email = input.email.trim();
   return {
-    amount: centsToInput(input.amountCents),
+    amount: `${Math.floor(input.amountCents / 100)}.${String(input.amountCents % 100).padStart(2, "0")}`,
     currencyCode: "USD",
     intent: input.intent,
-    // One name alone is the given name, as Square asks.
-    billingContact: { givenName, ...(rest.length > 0 ? { familyName: rest.join(" ") } : {}), ...(email ? { email } : {}) },
+    billingContact: { givenName: given, ...(family ? { familyName: family } : {}), ...(email ? { email } : {}) },
     customerInitiated: true,
     sellerKeyedIn: false,
   };
@@ -72,7 +72,7 @@ const loading = new Map<string, Promise<void>>();
  * on the page, as this did until 2026-11-18, let a card form started again during the load (React's development mode
  * starts a page twice) find no Square, and show no card fields. One that failed can be tried again.
  */
-export function loadScript(src: string): Promise<void> {
+function loadScript(src: string): Promise<void> {
   let loaded = loading.get(src);
   if (!loaded) {
     loaded = new Promise<void>((resolve, reject) => {
@@ -90,7 +90,7 @@ export function loadScript(src: string): Promise<void> {
   return loaded;
 }
 
-export const squareScript = (config: PaymentClientConfig) =>
+const squareScript = (config: PaymentClientConfig) =>
   config.squareEnvironment === "production" ? "https://web.squarecdn.com/v1/square.js" : "https://sandbox.web.squarecdn.com/v1/square.js";
 
 /** What the card form gives: a one-time token, or why there is none, in words for the client. */
@@ -103,35 +103,45 @@ export function cardTokenOf(result: SquareTokenResult): CardToken {
   return { ok: false, message: `Card error: ${said || "please check your card details."}` };
 }
 
-/** What the client reads when the card's bank check was not finished. */
-export const NOT_CONFIRMED = "Your card's bank did not confirm the payment, so nothing was charged. Please try again, or use another card.";
+/** What the client reads when Square's form made no token and gave no reason: the bank's check closed, or failed. */
+export const NOT_CONFIRMED = "The card was not confirmed, so nothing was charged. Please try again, or use another card.";
 
 /**
  * The card's token, with the payment's verification. Square's form does not answer but throws when the client closes
- * the bank's check (seen in Square's sandbox on 2026-11-20), as when the check cannot be shown: a payment not
- * confirmed, which the pages would otherwise take for the site out of reach.
+ * the bank's check (seen in Square's sandbox on 2026-11-20), and when the check cannot be shown or reach the bank:
+ * a payment not confirmed, which the pages would otherwise take for the site out of reach. What Square's form threw is
+ * kept in the browser's console, for whoever helps the client.
  */
 export async function tokenizeCard(card: SquareCard, verification: BuyerVerification): Promise<CardToken> {
   try {
     return cardTokenOf(await card.tokenize(verification));
-  } catch {
+  } catch (error) {
+    console.error("Square's card form made no token:", error instanceof Error ? error.message : error);
     return { ok: false, message: NOT_CONFIRMED };
   }
 }
 
 /** The token the pretend processor takes, in test mode. */
-export const MOCK_CARD_TOKEN = "mock-card-ok";
+const MOCK_CARD_TOKEN = "mock-card-ok";
 
 /**
- * The payment configuration, and Square's card form attached to the element `containerId` while `active`. `token()`
- * gives the card's one-time token, the card's bank having checked the client when it asked (`buyerVerification`): the
- * pretend token in test mode, none when no card processor is set up.
+ * The payment configuration, and Square's card form attached to the element `containerId` while `active`. The booking
+ * screen and the membership's checkout both pay through it.
+ *  - `token()` gives the card's one-time token, the card's bank having checked the client when it asked
+ *    (`buyerVerification`): the pretend token in test mode, none when no card processor is set up.
+ *  - It gives the same token again until `newAttempt()`: a press that follows no answer is the same attempt, sent
+ *    again. Square answers a request sent again under its key as it did the first time only when it is the same
+ *    request: with a new token it is refused (IDEMPOTENCY_KEY_REUSED) while the first payment may have gone through,
+ *    and the client's bank would be asked a second time.
+ *  - `newAttempt()`: the attempt is over (any answer but "no answer yet", or a step back), and the next press makes a
+ *    new token.
  */
 export function useCardForm(active: boolean, containerId: string) {
   const [config, setConfig] = useState<PaymentClientConfig | null>(null);
   const [ready, setReady] = useState(false);
   const [problem, setProblem] = useState("");
   const card = useRef<SquareCard | null>(null);
+  const attemptToken = useRef<string | null>(null);
 
   useEffect(() => {
     if (!active || config) return;
@@ -163,9 +173,16 @@ export function useCardForm(active: boolean, containerId: string) {
 
   async function token(verification: BuyerVerification): Promise<CardToken> {
     if (config?.mode === "mock") return { ok: true, token: MOCK_CARD_TOKEN };
+    if (attemptToken.current) return { ok: true, token: attemptToken.current };
     if (config?.mode !== "square" || !card.current) return { ok: false, message: "Online payment is not available right now. Please contact the studio." };
-    return tokenizeCard(card.current, verification);
+    const made = await tokenizeCard(card.current, verification);
+    if (made.ok) attemptToken.current = made.token;
+    return made;
   }
 
-  return { config, ready, problem, token };
+  function newAttempt() {
+    attemptToken.current = null;
+  }
+
+  return { config, ready, problem, token, newAttempt };
 }

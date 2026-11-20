@@ -47,6 +47,15 @@ export function MembershipCheckout({
   async function join(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (sending) return;
+    // As the server checks them, before the card's bank is asked: spaces alone pass the fields' own length rules.
+    if (name.trim().length < 2) {
+      setError("Please enter your name.");
+      return;
+    }
+    if (phone.trim().length < 7) {
+      setError("Please enter your phone number.");
+      return;
+    }
     if (!terms) {
       setError("Please agree to the membership terms.");
       return;
@@ -73,8 +82,12 @@ export function MembershipCheckout({
         setJoined(result.membership);
         return;
       }
-      // Without an answer the same attempt is sent again, so that the card is charged once; any answer starts anew.
-      if (result.code !== "no_answer") setRequestId(crypto.randomUUID());
+      // Without an answer the same attempt is sent again, with the same card token, so that the card is charged once
+      // (`useCardForm`); any other answer starts anew.
+      if (result.code !== "no_answer") {
+        setRequestId(crypto.randomUUID());
+        card.newAttempt();
+      }
       setError(result.message);
       if (result.code === "price_changed") {
         // The terms name the monthly price: they are agreed to again at the new one.

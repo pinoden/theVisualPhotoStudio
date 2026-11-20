@@ -2,7 +2,7 @@ import { and, asc, eq, gt, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { bookingCharges, payments, refunds } from "@/db/schema";
 import { together, type DbLike } from "@/db/client";
 import { clientChargeLabel } from "@/lib/charge-label";
-import { ACUITY_METHOD, MANUAL_PROVIDER } from "@/lib/payment-methods";
+import { ACUITY_METHOD, handPaidPlace, MANUAL_PROVIDER } from "@/lib/payment-methods";
 import { RESERVE_HOURS } from "./payments";
 
 /**
@@ -36,6 +36,21 @@ export async function netCardPaidCents(db: DbLike, bookingId: string): Promise<n
     .innerJoin(payments, eq(payments.id, refunds.paymentId))
     .where(and(viaSite, eq(payments.status, "succeeded"), inArray(refunds.status, ["pending", "succeeded", "failed"])));
   return paid.total - back.total;
+}
+
+/**
+ * Where the money recorded by hand for a booking was paid, in words (`handPaidPlace`): at the studio, or through Acuity
+ * for an appointment imported from the old site, which a cancellation then names (the review of 2026-11-20). Only
+ * what was not given back counts.
+ */
+export async function handPaidPlaceOf(db: DbLike, bookingId: string): Promise<string> {
+  const rows = await db
+    .select({ method: payments.method, net: sql<number>`coalesce(sum(${payments.amountCents} - ${payments.refundedCents}), 0)::int` })
+    .from(payments)
+    .where(and(eq(payments.bookingId, bookingId), eq(payments.provider, MANUAL_PROVIDER), eq(payments.status, "succeeded")))
+    .groupBy(payments.method);
+  const kept = rows.filter((row) => row.net > 0);
+  return handPaidPlace({ atStudio: kept.some((row) => row.method !== ACUITY_METHOD), throughAcuity: kept.some((row) => row.method === ACUITY_METHOD) });
 }
 
 /** Money taken at the studio for a booking and recorded by hand, less what was given back by hand. */

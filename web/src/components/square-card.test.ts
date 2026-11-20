@@ -11,13 +11,13 @@ describe("what the card's bank is told of a payment (3-D Secure)", () => {
       customerInitiated: true,
       sellerKeyedIn: false,
     });
-    expect(buyerVerification({ amountCents: 8800, intent: "CHARGE", name: "Jane Smith", email: "jane@client.test" }).amount).toBe("88");
+    expect(buyerVerification({ amountCents: 8800, intent: "CHARGE", name: "Jane Smith", email: "jane@client.test" }).amount).toBe("88.00");
     expect(buyerVerification({ amountCents: 5, intent: "CHARGE", name: "Jane Smith", email: "jane@client.test" }).amount).toBe("0.05");
   });
 
   it("says when the card is kept to be billed again: a membership's first month", () => {
     expect(buyerVerification({ amountCents: 30000, intent: "CHARGE_AND_STORE", name: "Jane Smith", email: "jane@client.test" })).toMatchObject({
-      amount: "300",
+      amount: "300.00",
       intent: "CHARGE_AND_STORE",
     });
   });
@@ -63,9 +63,13 @@ describe("asking the card form for a token", () => {
   });
 
   it("reads a form that throws, as Square's does when the client closes the bank's check, as a payment not confirmed", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
     const card = cardThat(async () => {
       throw new Error("Verification cancelled");
     });
     expect(await tokenizeCard(card, verification)).toEqual({ ok: false, message: NOT_CONFIRMED });
+    // What Square's form threw stays in the console, for whoever helps the client.
+    expect(logged).toHaveBeenCalledWith("Square's card form made no token:", "Verification cancelled");
+    logged.mockRestore();
   });
 });

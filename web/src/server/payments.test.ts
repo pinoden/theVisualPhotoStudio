@@ -32,6 +32,7 @@ const CHARGE: ChargeRequest = {
   reference: "VS-ABC234",
   note: "VS-ABC234 Studio Blanche, Jane Smith",
   buyerEmail: "jane@example.com",
+  customerInitiated: true,
 };
 
 const declined = (code: string) =>
@@ -94,6 +95,23 @@ describe("charging through Square", () => {
       message: sentence,
       detail: `${code}: Authorization error: '${code}'`,
     });
+  });
+
+  it("never calls a key sent before with other details a refused card: the first request may have taken the money", async () => {
+    // As Square's sandbox answered on 2026-11-20 to a second request under one key with a new note.
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    stubSquare(
+      json(400, {
+        errors: [{ category: "INVALID_REQUEST_ERROR", code: "IDEMPOTENCY_KEY_REUSED", detail: "Different request parameters used for the same idempotency_key." }],
+      }),
+    );
+    expect(await square().charge(CHARGE)).toEqual({
+      ok: false,
+      unknown: true,
+      message: "We could not reach the card processor.",
+      detail: "IDEMPOTENCY_KEY_REUSED: Different request parameters used for the same idempotency_key.",
+    });
+    expect(logged).toHaveBeenCalledTimes(1);
   });
 
   it("does not call a payment taken until Square says it is completed", async () => {

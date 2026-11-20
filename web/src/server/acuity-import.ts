@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, or, sql } from "drizzle-orm";
 import { bookings, payments, photographerHolds, photographers, studioHolds, studios } from "@/db/schema";
 import { pgErrorCode, PG_EXCLUSION_VIOLATION, PG_UNIQUE_VIOLATION, type Db, type DbLike, type Tx } from "@/db/client";
 import { studiosOfAppointment, type AcuityAppointment } from "@/lib/acuity";
@@ -30,8 +30,11 @@ import { localToUtc } from "./tz";
  * hand (`ACUITY_METHOD`): the site cannot refund it, as the money never went
  * through it, so a refund of it is made in Square and recorded here by hand.
  * The rest is paid at the studio, as for a booking made in the admin. Nothing
- * is charged, and no email is sent; the reminder before the visit is left to
- * Acuity unless `remind` says otherwise. The readings it is built on, which
+ * is charged, and the import sends no email; the reminder before the visit is
+ * left to Acuity unless `remind` says otherwise. After the visit the booking is
+ * any booking: the scheduled task marks it completed, counts its loyalty stamp
+ * and sends the review request (question 49 (d), as the owner confirmed). The
+ * readings it is built on, which
  * the owner confirmed as built: question 49 under "Rules built on the
  * builder's reading" in ProjectLibrary.md.
  *
@@ -322,20 +325,18 @@ async function whatTakes(
 ): Promise<string> {
   const during = (until: Date) =>
     sql`tstzrange(${startAt.toISOString()}::timestamptz, ${until.toISOString()}::timestamptz, '[)')`;
-  // Each studio with its own clean-up gap, as it would have been held.
-  const longest = Math.max(0, ...catalog.studios.filter((studio) => studioIds.includes(studio.id)).map((studio) => studio.bufferMinutes));
+  // Each studio with its own clean-up gap, as it would have been held: not the longest of them, which named a booking
+  // clear of a studio with a shorter gap (the review of 2026-11-20).
+  const gapOf = (studioId: string) => catalog.studios.find((studio) => studio.id === studioId)?.bufferMinutes ?? 0;
+  const clashes = studioIds.map((studioId) =>
+    and(eq(studioHolds.studioId, studioId), sql`${studioHolds.occupied} && ${during(new Date(endAt.getTime() + gapOf(studioId) * 60_000))}`),
+  );
   const taken = await db
     .select({ studio: studios.name, ref: bookings.ref, importedFrom: bookings.importedFrom })
     .from(studioHolds)
     .innerJoin(studios, eq(studios.id, studioHolds.studioId))
     .leftJoin(bookings, eq(bookings.id, studioHolds.bookingId))
-    .where(
-      and(
-        eq(studioHolds.active, true),
-        inArray(studioHolds.studioId, studioIds),
-        sql`${studioHolds.occupied} && ${during(new Date(endAt.getTime() + longest * 60_000))}`,
-      ),
-    )
+    .where(and(eq(studioHolds.active, true), or(...clashes)))
     .orderBy(asc(studios.sortOrder))
     .limit(3);
   const by = (ref: string | null, importedFrom: string | null) =>

@@ -33,3 +33,12 @@ export function handPaymentWords(method: string | null): string {
 
 /** The `provider` of a payment recorded by hand. The site cannot refund it: the money never passed through it. */
 export const MANUAL_PROVIDER = "manual";
+
+/**
+ * Where a booking's money recorded by hand was paid, in words: "at the studio", "through Acuity" (an appointment
+ * imported from the old site, `ACUITY_METHOD`), or both. What the studio gives back by hand is described by it.
+ */
+export function handPaidPlace(paid: { atStudio: boolean; throughAcuity: boolean }): string {
+  if (paid.throughAcuity) return paid.atStudio ? "at the studio and through Acuity" : "through Acuity";
+  return "at the studio";
+}

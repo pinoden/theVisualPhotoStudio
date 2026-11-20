@@ -101,6 +101,16 @@ describe("Acuity's export", () => {
     expect(again.ok && again.appointments[0]).toMatchObject({ id: "42", end: { minute: 690 }, name: "Bo", priceCents: 10200, markedPaid: true, paidOnlineCents: 0 });
   });
 
+  it("reads a column by its first name the file has, wherever it is: an intake question called Price or ID to its left is not it", () => {
+    // An intake form's questions are columns too, and could be called "Price" or "ID" (the review of 2026-11-20).
+    const names = ["ID", "Price", "Appointment ID", "Start Time", "End Time", "First Name", "Last Name", "Email", "Type", "Appointment Price"];
+    const reading = readAcuityExport(csv([names, ["form-7", "$999.00", "42", "2026-11-20 10:00", "2026-11-20 11:00", "C", "D", "c@client.test", "Studio Dayglow Booking (1 hr)", "$78.00"]]));
+    expect(reading.ok && reading.appointments[0]).toMatchObject({ id: "42", priceCents: 7800 });
+    // A file with only the shorter names is read by them.
+    const short = readAcuityExport(csv([["ID", "Start Time", "End Time", "First Name", "Last Name", "Email", "Type", "Price"], ["43", "2026-11-20 10:00", "2026-11-20 11:00", "C", "D", "c@client.test", "Studio Dayglow Booking (1 hr)", "$78.00"]]));
+    expect(short.ok && short.appointments[0]).toMatchObject({ id: "43", priceCents: 7800 });
+  });
+
   it("stops at a missing column the import needs, and names the columns the file has", () => {
     const reading = readAcuityExport(csv([COLUMNS.filter((name) => name !== "Appointment ID" && name !== "Email"), []]));
     expect(reading).toEqual({ ok: false, message: expect.stringContaining('The file has no column "Appointment ID", "Email", which the import needs. Its columns are: "Start Time", "End Time"') });

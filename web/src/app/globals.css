@@ -2278,6 +2278,19 @@ fieldset { min-inline-size: 0; }
   input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]),
   select,
   textarea { font-size: 16px !important; min-height: 44px; }
+  /* Safari draws a select in its own style and at its own height, whatever min-height says: 24px tall on an iPhone
+     and an iPad (WebKit, 2026-11-20). Drawn plain, it takes the height a finger can press, with an arrow of its own.
+     The class beats .form-control's background; the arrow's room beats the narrower fields' padding. */
+  select,
+  select.form-control {
+    -webkit-appearance: none;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%23555' stroke-width='1.6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right .85rem center;
+    background-size: .75rem auto;
+    padding-right: 2.25rem !important;
+  }
   .btn, .btn-small { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; text-align: center; }
   button, .chip, .cal-tabs a, a.cal-studio { min-height: 44px; }
   .time-slot-btn { min-width: 5.5rem; }

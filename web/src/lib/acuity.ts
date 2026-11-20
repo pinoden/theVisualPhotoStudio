@@ -129,7 +129,9 @@ export function readAcuityExport(text: string): ExportReading {
   const at = {} as Record<Column, number>;
   const missing: string[] = [];
   for (const [column, { names: options, required }] of Object.entries(COLUMNS) as [Column, (typeof COLUMNS)[Column]][]) {
-    at[column] = found.findIndex((name) => options.some((option) => header(option) === name));
+    // Its names in their order, wherever each column is: "Appointment Price" before a column called just "Price", which
+    // an intake form's question could be, even to its left (the review of 2026-11-20).
+    at[column] = options.map((option) => found.indexOf(header(option))).find((index) => index !== -1) ?? -1;
     if (at[column] === -1 && required) missing.push(`"${options[0]}"`);
   }
   if (missing.length > 0) {

@@ -3,6 +3,7 @@
  * Square directly, so tests and local development can run without credentials.
  */
 import { STUDIO_TIME_ZONE } from "@/lib/domain/time";
+import { splitName } from "@/lib/names";
 
 export interface ChargeRequest {
   amountCents: number;
@@ -11,6 +12,12 @@ export interface ChargeRequest {
    * them there when it asked (3-D Secure, `buyerVerification` in src/components/square-card.ts).
    */
   token: string;
+  /**
+   * The client is paying, in front of the card form, rather than the studio charging them: what the bank is told
+   * (Square's `customer_details`), and which payments its check of the card holder applies to. Every charge today is
+   * the client's own; one the studio makes without them must say false.
+   */
+  customerInitiated: boolean;
   /** Same key = same charge. Retries can never charge twice. */
   idempotencyKey: string;
   reference: string;
@@ -417,12 +424,12 @@ export function squareProvider(config: SquareConfig): PaymentProvider {
 
   const memberships: MembershipBilling = {
     async createCustomer(input) {
-      const [given, ...rest] = input.name.trim().split(/\s+/);
+      const { given, family } = splitName(input.name);
       // No phone number: Square refuses a whole customer over a number it does not like, and the site keeps the phone.
       const answer = await post("/v2/customers", {
         idempotency_key: input.idempotencyKey,
-        given_name: given ?? "",
-        family_name: rest.join(" "),
+        given_name: given,
+        family_name: family,
         email_address: input.email,
       });
       const id = answer?.ok ? answer.data.customer?.id : undefined;
@@ -532,8 +539,8 @@ export function squareProvider(config: SquareConfig): PaymentProvider {
         note: request.note.slice(0, 500),
         buyer_email_address: request.buyerEmail,
         ...(request.customerId ? { customer_id: request.customerId } : {}),
-        // The client paid, with a card they typed into Square's form themselves: so the bank's check applies (3-D Secure).
-        customer_details: { customer_initiated: true, seller_keyed_in: false },
+        // Who pays: the client, with a card they typed into Square's form themselves, so the bank's check applies.
+        customer_details: { customer_initiated: request.customerInitiated, seller_keyed_in: false },
         // Reserved, the payment waits to be completed or cancelled; one left alone is cancelled by Square.
         ...(request.reserve ? { autocomplete: false, delay_action: "CANCEL", delay_duration: `PT${RESERVE_HOURS}H` } : { autocomplete: true }),
       });
@@ -554,6 +561,11 @@ export function squareProvider(config: SquareConfig): PaymentProvider {
       // A refusal that is not about the card is ours to fix (keys, location, request), so make it visible.
       if (!errors.some((error) => error.category === "PAYMENT_METHOD_ERROR")) {
         console.error(`Square refused a payment for ${request.reference}: ${detail}`);
+      }
+      // Its key came before with other details (a new card token on a retry): Square replays only the same request,
+      // and what the first one did is not known here. It may have taken the money, so it is never a refused card.
+      if (errors.some((error) => error.code === "IDEMPOTENCY_KEY_REUSED")) {
+        return { ok: false, unknown: true, message: "We could not reach the card processor.", detail };
       }
       return { ok: false, message: cardProblem(errors), detail };
     },

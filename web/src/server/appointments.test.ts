@@ -10,7 +10,7 @@ import { getDaySheet } from "./staff";
 import { completeVisits } from "./tasks";
 import { DEFAULT_SETTINGS } from "./settings";
 import { termsAtBooking } from "./terms";
-import { BASE_URL, createTestWorld, expectOk, h, hoursAfter, NEAR, NOW, type TestWorld } from "./testing";
+import { asAmount, BASE_URL, createTestWorld, expectOk, h, hoursAfter, NEAR, NOW, type TestWorld } from "./testing";
 
 let world: TestWorld;
 let owner: AuthUser;
@@ -193,7 +193,7 @@ describe("the two levels of the admin", () => {
       money: null,
       may: { setLabels: true, move: false },
     });
-    expect(JSON.stringify(appointment)).not.toContain("7800");
+    expect(JSON.stringify(appointment)).not.toMatch(asAmount(7800));
 
     await allow("staffSeesContact", false);
     const hidden = (await getAppointment(world.db, sam, morningRef, NOW))!;

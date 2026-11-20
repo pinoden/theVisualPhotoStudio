@@ -10,7 +10,7 @@ import { isBookingRef } from "./bookings";
 import { codeRefundEmail, paymentReceivedEmail, queueEmail } from "./email";
 import { recordEvent } from "./history";
 import { openPayLinkOf } from "./pay-links";
-import { chargesCentsByBooking, creditLeftCentsByBooking, creditReturnedCentsByBooking, netCardPaidCents, netPaidCentsByBooking, owedCents, paidAtStudioCents, STANDS } from "./money";
+import { chargesCentsByBooking, creditLeftCentsByBooking, creditReturnedCentsByBooking, handPaidPlaceOf, netCardPaidCents, netPaidCentsByBooking, owedCents, paidAtStudioCents, STANDS } from "./money";
 import { RESERVE_HOURS } from "./payments";
 import { petFeeCentsOf, petFeeReturnedCents, studioRefundableCents } from "./pet-fee";
 import { codeStanding, rescheduleCodeOf, spendable, takeOffRescheduleCode } from "./promos";
@@ -81,6 +81,8 @@ export interface BookingMoney {
   creditLeftCents: number;
   /** What a refund to the card can still give back: what the card paid and kept, less a pet fee returned as credit. */
   cardRefundableCents: number;
+  /** Where the money recorded by hand was paid, in words: "at the studio", or "through Acuity" before this website. */
+  handPaidPlace: string;
   /** A card's amount for the booking was reserved and never taken, the reservation lapsing: no card paid it. */
   cardLapsed: boolean;
   /** How the booking ended, if it has: then nothing more is to pay, whatever was received. */
@@ -131,6 +133,7 @@ export async function moneyOf(
     dueCents: await owedCents(db, booking, now),
     creditLeftCents: (await creditLeftCentsByBooking(db, [booking])).get(booking.id) ?? 0,
     cardRefundableCents: Math.max(0, card - Math.min(card, await petFeeReturnedCents(db, booking.id))),
+    handPaidPlace: await handPaidPlaceOf(db, booking.id),
     // Marked failed by the scheduled task, or run out before the task marked it (it may not run, nor ever mark another
     // processor's reservation), as what is owed counts it already (the tester's third pass of 2026-11-18).
     cardLapsed:

@@ -1256,8 +1256,9 @@ test("a free hour takes one hour off a booking of one studio, and is not for sev
   await confirmAndGetRef(page, "Confirm booking");
 });
 
-test("the account lists every reward with its status, and a code is copied with one press", async ({ page }) => {
-  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+test("the account lists every reward with its status, and a code is copied with one press", async ({ page, browserName }) => {
+  // Chromium is given the clipboard here; WebKit has no such permissions, and lets a press write to it.
+  if (browserName === "chromium") await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
   await signIn(page, jane.email, "/account/rewards");
   await expect(page.getByRole("heading", { name: "My Rewards", level: 1 })).toBeVisible();
 
@@ -1281,7 +1282,8 @@ test("the account lists every reward with its status, and a code is copied with 
   // Copy Code puts the code on the clipboard and says so.
   await spare.getByRole("button", { name: `Copy code ${freeHourCodes[2]}` }).click();
   await expect(spare.getByRole("button", { name: `Copy code ${freeHourCodes[2]}` })).toHaveText("Copied");
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(freeHourCodes[2]);
+  // Reading it back takes a permission only Chromium can be given here.
+  if (browserName === "chromium") expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(freeHourCodes[2]);
 
   // The overview offers the same reward, and the appointments made with the others.
   await page.getByRole("link", { name: "Overview", exact: true }).click();

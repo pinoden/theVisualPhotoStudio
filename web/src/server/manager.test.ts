@@ -11,7 +11,7 @@ import { givePetFeeCredit } from "./pet-fee";
 import { blockPhotographer, savePhotoPackage, listPhotoPackages } from "./photography";
 import { canViewDay, getDaySheet } from "./staff";
 import { recordStudioPayment, voidStudioPayment } from "./studio-payments";
-import { BASE_URL, createTestWorld, expectOk, FAR, h, NEAR, NOW, type TestWorld } from "./testing";
+import { asAmount, BASE_URL, createTestWorld, expectOk, FAR, h, NEAR, NOW, type TestWorld } from "./testing";
 
 /**
  * The owner's three levels (2026-11-15). A Studio Manager "manages
@@ -134,7 +134,7 @@ describe("what the owners' switches open for a manager", () => {
     expect(page.upcoming).toHaveLength(1);
     expect(page.upcoming[0]).toMatchObject({ ref: nearRef, totalCents: 0, receivedCents: 0 });
     // Not one amount of the booking ($78) is in what a manager without prices is given.
-    expect(JSON.stringify(page)).not.toContain("7800");
+    expect(JSON.stringify(page)).not.toMatch(asAmount(7800));
 
     await allow("managerSeesPrices");
     const withMoney = (await getCustomer(world.db, mia, "bob@example.com", NOW))!;

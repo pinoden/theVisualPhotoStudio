@@ -301,7 +301,7 @@ export async function ownerCancelAction(formData: FormData): Promise<void> {
   flushEmailsSoon();
   if (!result.ok) failed(back, result.message);
   const atStudio = result.atStudioCents
-    ? ` ${formatCents(result.atStudioCents)} of what was paid at the studio can be given back: give back what is owed by hand, then record it on the appointment's page.`
+    ? ` ${formatCents(result.atStudioCents)} of what was paid ${result.handPaidPlace ?? "at the studio"} can be given back: give back what is owed by hand, then record it on the appointment's page.`
     : "";
   const unseen =
     result.unseenLink === "foreign"

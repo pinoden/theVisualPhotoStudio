@@ -9,8 +9,26 @@ import {
   longDateLabel,
   minutesToHHMM,
   minutesToLabel,
+  studioClock,
+  studioDayAndClock,
   studioToday,
 } from "./time";
+
+describe("a moment on the studio's clock, written the same on the server and in every browser", () => {
+  it("is the studio's time, in winter and in summer, at midnight and at noon", () => {
+    expect(studioClock(new Date("2026-11-20T07:30:00Z"))).toBe("2:30 AM");
+    expect(studioDayAndClock(new Date("2026-11-20T07:30:00Z"))).toBe("Nov 20, 2026, 2:30 AM");
+    expect(studioDayAndClock(new Date("2026-07-04T16:05:00Z"))).toBe("Jul 4, 2026, 12:05 PM");
+    expect(studioClock(new Date("2026-11-21T05:00:00Z"))).toBe("12:00 AM");
+  });
+
+  it("joins its parts with plain words and spaces of its own: Node wrote \"at\" where Safari wrote a comma", () => {
+    // The page editor's history drawn on the server did not match the same history in Safari (2026-11-20).
+    const written = studioDayAndClock(new Date("2026-11-20T07:30:00Z"));
+    expect(written).toMatch(/^[A-Z][a-z]{2} \d{1,2}, \d{4}, \d{1,2}:\d{2} [AP]M$/);
+    expect(written).not.toMatch(/[  ]| at /);
+  });
+});
 
 describe("dates", () => {
   it("accepts real dates and rejects impossible ones", () => {

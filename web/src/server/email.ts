@@ -602,17 +602,17 @@ export function payLinkEmail(input: {
 }
 
 /**
- * A booking paid at the studio was cancelled early enough to be refunded. The
- * site cannot send that money back, so the owner is asked to.
+ * A booking paid at the studio, or through Acuity before this website (`place`, `handPaidPlaceOf`), was cancelled
+ * early enough to be refunded. The site cannot send that money back, so the owner is asked to.
  */
-export function ownerHandRefundNotice(input: { to: string; ref: string; customer: string; paidCents: number; feePercent: number }): QueuedEmail {
+export function ownerHandRefundNotice(input: { to: string; ref: string; customer: string; paidCents: number; feePercent: number; place?: string }): QueuedEmail {
   return written(
     "owner_hand_refund",
     { to: input.to, kind: "owner_hand_refund" },
     {
       customer: input.customer,
       reference: input.ref,
-      refund: `Of what was paid at the studio, ${money(input.paidCents)} is refunded by the rental terms${
+      refund: `Of what was paid ${input.place ?? "at the studio"}, ${money(input.paidCents)} is refunded by the rental terms${
         input.feePercent > 0 ? `, less the ${input.feePercent}% fee: ${money(afterFee(input.paidCents, input.feePercent))}` : ", in full"
       }. The site cannot send that back.`,
     },

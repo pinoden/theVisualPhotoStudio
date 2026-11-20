@@ -574,6 +574,7 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
     const charge = await provider.charge({
       amountCents: price.totalCents,
       token: input.paymentToken!,
+      customerInitiated: true,
       idempotencyKey: bookingId,
       reference: ref,
       note: `${ref} ${studioNames}, ${input.customer.name}`,
