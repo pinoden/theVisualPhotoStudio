@@ -1001,7 +1001,7 @@ Known weaknesses:
      - `knip` is a development package (`npm run knip`) and a step of the job `checks`;
      - a third job, `webkit`, runs the whole browser suite in WebKit, Safari's engine, on Linux.
 
-     `webkit` is not required for merging until it has passed a few times (`HANDOFF.md`, "Now" 0). `AGENTS.md` says what the jobs run, and that `npm run knip` is part of the checks before a commit.
+     `webkit` is not required for merging until it has passed a few times (`HANDOFF.md`, "Now" 0). Its first run, on `928173f`, passed all 63 tests in 15.3 min; `checks` with `knip` took 4.5 min, and `browser` 12. `AGENTS.md` says what the jobs run, and that `npm run knip` is part of the checks before a commit.
 
 ### Handoff for the next coding session
 
