@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, inArray, isNotNull, lt, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lt, ne, sql } from "drizzle-orm";
 import {
   addons,
   blocks,
@@ -15,7 +15,7 @@ import {
   studios,
   users,
 } from "@/db/schema";
-import { PG_EXCLUSION_VIOLATION, pgErrorCode, queryRows, type Db, type DbLike } from "@/db/client";
+import { PG_EXCLUSION_VIOLATION, pgErrorCode, queryRows, together, type Db, type DbLike } from "@/db/client";
 import { isAdminLevel, type AdminLevel } from "@/lib/abilities";
 import { isAddonKind, type AddonKind } from "@/lib/addon-kinds";
 import type { PromoKind } from "@/lib/domain/pricing";
@@ -24,6 +24,7 @@ import { MANUAL_PROVIDER } from "@/lib/payment-methods";
 import { parseStudioFacts, type StudioFacts } from "@/lib/studio-facts";
 import { deleteAllSessions, normalizeEmail } from "./auth";
 import { toBookingViews, type BookingView } from "./bookings";
+import { handPaidByBooking } from "./money";
 import { issuePromo } from "./promos";
 import { dayBoundsUtc, localToUtc } from "./tz";
 
@@ -302,8 +303,13 @@ export interface AdminBooking extends BookingView {
   cardHeldCents: number;
   /** What the studio can still send back to the card: what it holds, less a pet fee already returned as studio credit. */
   refundableCents: number;
-  /** Money taken at the studio and not given back: the site cannot send it anywhere, the studio gives it back by hand. */
+  /**
+   * Money recorded by hand and not given back, taken at the studio or paid through Acuity before this website: the site
+   * cannot send it anywhere, the studio gives it back by hand.
+   */
   studioHeldCents: number;
+  /** Where that money was paid, in words (`handPaidByBooking`): "at the studio", "through Acuity", or both. */
+  studioHeldPlace: string;
   /**
    * For a booking released for a reschedule code: the code its money went into, what is left on it, and whether an
    * owner cancelled it. A refund comes off it; what was spent of it cannot come back.
@@ -333,54 +339,53 @@ export async function listBookings(
   if (rows.length === 0) return [];
 
   const ids = rows.map((r) => r.id);
-  const paid = await db
-    .select({
-      bookingId: payments.bookingId,
-      paidCents: sql<number>`coalesce(sum(${payments.amountCents}), 0)::int`,
-    })
-    .from(payments)
-    // Card money charged through the site only: what was taken at the studio cannot be refunded from here.
-    .where(and(inArray(payments.bookingId, ids), eq(payments.status, "succeeded"), ne(payments.provider, MANUAL_PROVIDER)))
-    .groupBy(payments.bookingId);
-  const back = await db
-    .select({
-      bookingId: payments.bookingId,
-      status: refunds.status,
-      cents: sql<number>`coalesce(sum(${refunds.amountCents}), 0)::int`,
-    })
-    .from(refunds)
-    .innerJoin(payments, eq(payments.id, refunds.paymentId))
-    .where(and(inArray(payments.bookingId, ids), ne(payments.provider, MANUAL_PROVIDER)))
-    .groupBy(payments.bookingId, refunds.status);
-
-  // The reschedule codes the money of released bookings went into, cancelled by an owner or not: what was spent of
-  // a code cannot come back, and what is left is that money still.
-  const codes = await db
-    .select({ bookingId: promoCodes.originBookingId, code: promoCodes.code, valueCents: promoCodes.value, voidedAt: promoCodes.voidedAt })
-    .from(promoCodes)
-    .where(and(inArray(promoCodes.originBookingId, ids), eq(promoCodes.source, "reschedule")));
-
-  // Money taken at the studio, less what the studio gave back by hand.
-  const atStudio = await db
-    .select({ bookingId: payments.bookingId, cents: sql<number>`coalesce(sum(${payments.amountCents} - ${payments.refundedCents}), 0)::int` })
-    .from(payments)
-    .where(and(inArray(payments.bookingId, ids), eq(payments.status, "succeeded"), eq(payments.provider, MANUAL_PROVIDER)))
-    .groupBy(payments.bookingId);
-
-  // The pet fees already returned as studio credit (see src/server/pet-fee.ts), for what each credit was issued for,
-  // which can be part of the fee: not to be refunded to the card or by hand as well.
-  const petReturned = await db
-    .select({ bookingId: promoCodes.originBookingId, cents: sql<number>`coalesce(${promoCodes.issuedCents}, ${promoCodes.value})::int` })
-    .from(promoCodes)
-    .where(and(inArray(promoCodes.originBookingId, ids), eq(promoCodes.source, "pet_fee")));
-
-  const views = await toBookingViews(db, rows);
+  const [paid, back, codes, byHand, petReturned, views] = await together(db, [
+    () =>
+      db
+        .select({
+          bookingId: payments.bookingId,
+          paidCents: sql<number>`coalesce(sum(${payments.amountCents}), 0)::int`,
+        })
+        .from(payments)
+        // Card money charged through the site only: what was taken at the studio cannot be refunded from here.
+        .where(and(inArray(payments.bookingId, ids), eq(payments.status, "succeeded"), ne(payments.provider, MANUAL_PROVIDER)))
+        .groupBy(payments.bookingId),
+    () =>
+      db
+        .select({
+          bookingId: payments.bookingId,
+          status: refunds.status,
+          cents: sql<number>`coalesce(sum(${refunds.amountCents}), 0)::int`,
+        })
+        .from(refunds)
+        .innerJoin(payments, eq(payments.id, refunds.paymentId))
+        .where(and(inArray(payments.bookingId, ids), ne(payments.provider, MANUAL_PROVIDER)))
+        .groupBy(payments.bookingId, refunds.status),
+    // The reschedule codes the money of released bookings went into, cancelled by an owner or not: what was spent of
+    // a code cannot come back, and what is left is that money still.
+    () =>
+      db
+        .select({ bookingId: promoCodes.originBookingId, code: promoCodes.code, valueCents: promoCodes.value, voidedAt: promoCodes.voidedAt })
+        .from(promoCodes)
+        .where(and(inArray(promoCodes.originBookingId, ids), eq(promoCodes.source, "reschedule"))),
+    // Money recorded by hand, less what the studio gave back by hand, and where it was paid.
+    () => handPaidByBooking(db, ids),
+    // The pet fees already returned as studio credit (see src/server/pet-fee.ts), for what each credit was issued for,
+    // which can be part of the fee: not to be refunded to the card or by hand as well.
+    () =>
+      db
+        .select({ bookingId: promoCodes.originBookingId, cents: sql<number>`coalesce(${promoCodes.issuedCents}, ${promoCodes.value})::int` })
+        .from(promoCodes)
+        .where(and(inArray(promoCodes.originBookingId, ids), eq(promoCodes.source, "pet_fee"))),
+    () => toBookingViews(db, rows),
+  ]);
   return views.map((view, i) => {
     const refundRows = back.filter((b) => b.bookingId === view.id);
     const returned = refundRows.reduce((sum, b) => sum + b.cents, 0);
     const cardHeldCents = (paid.find((p) => p.bookingId === view.id)?.paidCents ?? 0) - returned;
     const asCredit = Math.min(Math.max(0, cardHeldCents), petReturned.find((p) => p.bookingId === view.id)?.cents ?? 0);
     const code = codes.find((row) => row.bookingId === view.id);
+    const hand = byHand.get(view.id);
     return {
       ...view,
       customerPhone: rows[i].customerPhone,
@@ -390,9 +395,10 @@ export async function listBookings(
       refundableCents: Math.min(Math.max(0, cardHeldCents - asCredit), code?.valueCents ?? Infinity),
       // The pet fee returned as credit that the card did not hold comes off what the studio gives back by hand.
       studioHeldCents: Math.min(
-        Math.max(0, (atStudio.find((p) => p.bookingId === view.id)?.cents ?? 0) - ((petReturned.find((p) => p.bookingId === view.id)?.cents ?? 0) - asCredit)),
+        Math.max(0, (hand?.cents ?? 0) - ((petReturned.find((p) => p.bookingId === view.id)?.cents ?? 0) - asCredit)),
         code?.valueCents ?? Infinity,
       ),
+      studioHeldPlace: hand?.place ?? "at the studio",
       rescheduleCode: code ? { code: code.code, valueCents: code.valueCents, voided: code.voidedAt !== null } : null,
       refundProblem: refundRows.some((b) => b.status === "failed"),
     };
@@ -540,15 +546,6 @@ export async function countUpcoming(db: DbLike, now: Date): Promise<number> {
     .select({ n: sql<number>`count(*)::int` })
     .from(bookings)
     .where(and(eq(bookings.status, "confirmed"), gte(bookings.startAt, now)));
-  return row.n;
-}
-
-/** Codes still usable that came from a visit or a move. For the admin overview. */
-export async function countLiveCodes(db: DbLike): Promise<number> {
-  const [row] = await db
-    .select({ n: sql<number>`count(*)::int` })
-    .from(promoCodes)
-    .where(and(isNotNull(promoCodes.originBookingId), sql`${promoCodes.voidedAt} is null`));
   return row.n;
 }
 

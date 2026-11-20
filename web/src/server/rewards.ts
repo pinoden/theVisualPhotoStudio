@@ -35,7 +35,7 @@ export const REWARD_STATUS_TEXT: Record<RewardStatus, string> = {
   cancelled: "Canceled",
 };
 
-export const REWARD_NAME = "Free Studio Hour";
+const REWARD_NAME = "Free Studio Hour";
 
 export interface Reward {
   id: string;

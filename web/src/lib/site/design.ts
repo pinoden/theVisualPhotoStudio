@@ -222,7 +222,7 @@ function rem(pixels: number): string {
 const em = (value: number) => (value === 0 ? "0" : `${String(Number(value.toFixed(3))).replace(/^(-?)0\./, "$1.")}em`);
 
 /** The width up to which the phone values apply. */
-export const DESIGN_PHONE_WIDTH = 640;
+const DESIGN_PHONE_WIDTH = 640;
 
 /**
  * The design as CSS variables, in two groups: the values for every screen,

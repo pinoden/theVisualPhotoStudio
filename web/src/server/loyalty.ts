@@ -29,7 +29,7 @@ export const FREE_HOUR_MINUTES = 60;
 const DAY = 86_400_000;
 
 /** The stamps an administrator added or took away for a customer, in total: since `since`, when loyalty started over. */
-export async function stampAdjustmentOf(db: DbLike, email: string, since: Date | null = null): Promise<number> {
+async function stampAdjustmentOf(db: DbLike, email: string, since: Date | null = null): Promise<number> {
   const [row] = await db
     .select({ total: sql<number>`coalesce(sum(${loyaltyLedger.stamps}), 0)::int` })
     .from(loyaltyLedger)

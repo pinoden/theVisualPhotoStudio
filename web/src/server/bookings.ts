@@ -204,7 +204,7 @@ function photoPackageFor(catalog: Catalog, studioIds: string[], durationMinutes:
 
 // ── Price preview ────────────────────────────────────────────────────────────
 
-export const quoteInput = z.object({
+const quoteInput = z.object({
   studioIds: z.array(z.uuid()).min(1).max(10),
   date: z.string().max(10),
   durationMinutes: z.number().int().positive().max(1440),
@@ -675,7 +675,7 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
   return { ok: true, ref, manageToken, totalCents: price.totalCents };
 }
 
-export function manageUrl(baseUrl: string, ref: string, token: string): string {
+function manageUrl(baseUrl: string, ref: string, token: string): string {
   return `${baseUrl.replace(/\/$/, "")}/booking/${ref}?t=${encodeURIComponent(token)}`;
 }
 

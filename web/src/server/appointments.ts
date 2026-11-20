@@ -11,7 +11,7 @@ import {
   type LabelKey,
   type SettableLabel,
 } from "@/lib/domain/labels";
-import { durationLabel, isIsoDate, type DayType, type IsoDate } from "@/lib/domain/time";
+import { durationLabel, isIsoDate, type DayType } from "@/lib/domain/time";
 import { can, type Ability } from "@/lib/abilities";
 import type { AuthUser } from "./auth";
 import { loadDayAvailability } from "./availability";
@@ -585,9 +585,4 @@ export async function createAdminBooking(
     return { ok: false, status: 403, code: "forbidden", message: "You cannot make bookings for clients." };
   }
   return createBooking(db, { ...input, acceptTerms: true }, { ...deps, processor: deps.processor ?? null, payments: null, madeBy: viewer.email });
-}
-
-/** The date of a booking, for links back to its day. */
-export function dayOf(startAt: Date): IsoDate {
-  return localDateOf(startAt);
 }

@@ -278,7 +278,7 @@ export function transactionsOf(receipts: Receipt[]): Transaction[] {
 }
 
 /** The calendar year, on the studio's clock, in which something was paid or given back. */
-export function yearOf(instant: string): number {
+function yearOf(instant: string): number {
   return Number(localDateOf(new Date(instant)).slice(0, 4));
 }
 

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { accessibilityProblems, byLabel, dateAhead, fillDetails, frameworkNoise, next, pickStudio, signIn } from "./helpers";
+import { accessibilityProblems, byLabel, dateAhead, fillDetails, next, pickStudio, signIn, watchBrowser } from "./helpers";
 
 /**
  * Accessibility: what a screen reader, a keyboard and a person who enlarges
@@ -19,14 +19,7 @@ import { accessibilityProblems, byLabel, dateAhead, fillDetails, frameworkNoise,
 let browserProblems: string[] = [];
 test.beforeEach(({ page }) => {
   browserProblems = [];
-  page.on("pageerror", (error) => {
-    if (!frameworkNoise(error.message)) browserProblems.push(`script error: ${error.message}`);
-  });
-  page.on("console", (message) => {
-    if (message.type() === "error" && !message.text().startsWith("Failed to load resource")) {
-      browserProblems.push(`console error: ${message.text().slice(0, 400)}`);
-    }
-  });
+  watchBrowser(page, (problem) => browserProblems.push(problem));
 });
 test.afterEach(() => {
   expect(browserProblems, "errors reported by the browser").toEqual([]);

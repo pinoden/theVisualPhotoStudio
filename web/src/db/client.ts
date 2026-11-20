@@ -105,7 +105,7 @@ export function openOnce<T>(open: () => Promise<T>, retryAfterMs: number, clock:
 }
 
 /** How long a database that could not be opened, or was refused, is not tried again. */
-export const REOPEN_AFTER_MS = 10_000;
+const REOPEN_AFTER_MS = 10_000;
 
 async function openAppDb(): Promise<Db> {
   const url = process.env.DATABASE_URL;

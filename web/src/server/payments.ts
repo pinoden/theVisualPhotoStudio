@@ -185,7 +185,7 @@ export const MOCK_TOKEN_DECLINED = "mock-card-declined";
  * browser what happens when a refund does not go through. The booking screen
  * never offers it; a test sends it.
  */
-export const MOCK_TOKEN_REFUNDS_REFUSED = "mock-card-refunds-refused";
+const MOCK_TOKEN_REFUNDS_REFUSED = "mock-card-refunds-refused";
 
 /**
  * The day `months` months after `day` (both `YYYY-MM-DD`), on the same date, or on the month's last day when it is
@@ -706,7 +706,7 @@ const warned = new Set<string>();
  * and links keep the account that made them, and a site that took the live
  * account for the sandbox would leave live money unseen.
  */
-export function squareEnvironment(applicationId: string, declared: string | undefined): "sandbox" | "production" | { problem: string } {
+function squareEnvironment(applicationId: string, declared: string | undefined): "sandbox" | "production" | { problem: string } {
   const fromId = applicationId.trim().startsWith("sandbox-") ? "sandbox" : "production";
   const said = (declared ?? "").trim().toLowerCase();
   if (said === "" || said === fromId) return fromId;

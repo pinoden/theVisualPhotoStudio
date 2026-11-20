@@ -19,13 +19,13 @@ export interface AuthUser {
   role: Role;
 }
 
-export const CODE_TTL_MINUTES = 10;
-export const MAX_CODE_ATTEMPTS = 5;
-export const MAX_CODES_PER_WINDOW = 3;
-export const CODE_WINDOW_MINUTES = 15;
+const CODE_TTL_MINUTES = 10;
+const MAX_CODE_ATTEMPTS = 5;
+const MAX_CODES_PER_WINDOW = 3;
+const CODE_WINDOW_MINUTES = 15;
 /** Codes one address may be sent in a day: with five tries each, at most fifty guesses a day at a million codes. */
 export const MAX_CODES_PER_DAY = 10;
-export const SESSION_DAYS = 30;
+const SESSION_DAYS = 30;
 
 /** An email address as the site keeps it: trimmed and in small letters, by the rule every email field follows (`EMAIL_RULE`). */
 export function normalizeEmail(raw: unknown): string | null {

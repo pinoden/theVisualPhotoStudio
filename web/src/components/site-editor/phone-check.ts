@@ -22,7 +22,7 @@ import { previewUrl } from "./parts";
  */
 
 /** The widths a page is checked at: the first iPhone SE, and an iPhone. */
-export const CHECK_WIDTHS = [320, 390] as const;
+const CHECK_WIDTHS = [320, 390] as const;
 
 /** How long a page may take to load in its frame before the check gives up. */
 const LOAD_MS = 30_000;

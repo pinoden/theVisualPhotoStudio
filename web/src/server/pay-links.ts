@@ -63,7 +63,7 @@ export interface PayLinkView {
 }
 
 /** The address the client is emailed: a page of this site that shows what is owed and leads to the processor. */
-export function payPageUrl(baseUrl: string, linkId: string): string {
+function payPageUrl(baseUrl: string, linkId: string): string {
   return `${baseUrl.replace(/\/$/, "")}/pay/${linkId}`;
 }
 
@@ -435,7 +435,7 @@ export async function lookAtPayLink(db: Db, booking: { id: string; status: strin
  * it; the studio's own cancellation goes ahead, and the link is withdrawn
  * afterwards, as before.
  */
-export async function noticePaidLink(db: Db, bookingId: string, deps: PayLinkDeps): Promise<LinkLook> {
+async function noticePaidLink(db: Db, bookingId: string, deps: PayLinkDeps): Promise<LinkLook> {
   try {
     const [link] = await db
       .select({ id: paymentLinks.id })

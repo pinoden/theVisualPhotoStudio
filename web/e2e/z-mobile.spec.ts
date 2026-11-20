@@ -7,7 +7,6 @@ import {
   confirmAndGetRef,
   dateAhead,
   fillDetails,
-  frameworkNoise,
   latestEmail,
   next,
   onScreen,
@@ -15,6 +14,7 @@ import {
   shot,
   signIn,
   totalRow,
+  watchBrowser,
 } from "./helpers";
 import {
   brokenWords as brokenWordsIn,
@@ -59,14 +59,7 @@ const mia = { name: "Mia Mobile", email: "mia.mobile@example.com", phone: "407-5
 let browserProblems: string[] = [];
 test.beforeEach(({ page }) => {
   browserProblems = [];
-  page.on("pageerror", (error) => {
-    if (!frameworkNoise(error.message)) browserProblems.push(`script error: ${error.message}`);
-  });
-  page.on("console", (message) => {
-    if (message.type() === "error" && !message.text().startsWith("Failed to load resource")) {
-      browserProblems.push(`console error: ${message.text().slice(0, 400)}`);
-    }
-  });
+  watchBrowser(page, (problem) => browserProblems.push(problem));
 });
 test.afterEach(() => {
   expect(browserProblems, "errors reported by the browser").toEqual([]);
@@ -389,14 +382,7 @@ test("a tablet's touch screen gets the touch rules: controls a finger can press,
   const context = await browser.newContext({ viewport: { width: 768, height: 1024 }, hasTouch: true, isMobile: true });
   const page = await context.newPage();
   // Its errors go where the other tests' go, and fail the test after it.
-  page.on("pageerror", (error) => {
-    if (!frameworkNoise(error.message)) browserProblems.push(`script error on an iPad: ${error.message}`);
-  });
-  page.on("console", (message) => {
-    if (message.type() === "error" && !message.text().startsWith("Failed to load resource")) {
-      browserProblems.push(`console error on an iPad: ${message.text().slice(0, 400)}`);
-    }
-  });
+  watchBrowser(page, (problem) => browserProblems.push(problem), { where: " on an iPad" });
   expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches), "an iPad's pointer is coarse").toBe(true);
   const touchable = async (where: string) => {
     expect(await hardToTouch(page), `${where} on an iPad: hard to use by touch`).toEqual([]);
@@ -529,9 +515,7 @@ test("the admin fits a phone: the calendar in its three views, an appointment, a
   expect(linkMail.subject).toMatch(/^Pay for your booking VS-/);
   const payPath = new URL(/https?:\/\/\S+\/pay\/[0-9a-f-]{36}/.exec(linkMail.body)![0]).pathname;
   const client = await page.context().newPage();
-  client.on("pageerror", (error) => {
-    if (!frameworkNoise(error.message)) browserProblems.push(`script error: ${error.message}`);
-  });
+  watchBrowser(client, (problem) => browserProblems.push(problem), { consoleErrors: false });
   await client.setViewportSize({ width: 390, height: 844 });
   await client.goto(payPath);
   await expect(client.getByRole("heading", { name: "Pay for Your Booking" })).toBeVisible();

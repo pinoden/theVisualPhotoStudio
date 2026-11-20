@@ -23,14 +23,65 @@ export function dateAhead(minDays: number, kind: "weekday" | "saturday" = "weekd
 }
 
 /**
- * Errors of the development build's own tooling, not of the site: React's
- * performance timeline sometimes measures a part of a page from before it
- * started ("'\u200bBookings [Prerender]' cannot have a negative time stamp",
- * seen when a signed-in client or staff member opens an owner's page). A
- * production build has no such timeline. The browser tests leave out this one
- * message; any other error the browser reports fails the test.
+ * Errors of the development build's own tooling, not of the site. A production
+ * build has none of it. The browser tests leave out these messages; any other
+ * error the browser reports fails the test.
+ * - React's performance timeline sometimes measures a part of a page from
+ *   before it started ("'\u200bBookings [Prerender]' cannot have a negative
+ *   time stamp", seen when a signed-in client or staff member opens an owner's
+ *   page).
+ * - Next's development tools in WebKit, once (2026-11-20, during the font
+ *   test of website.spec.ts; not brought about again): the chunk of their own
+ *   hot-reload client failed to load ("ChunkLoadError: Failed to load chunk
+ *   /_next/static/chunks/%5Bturbopack%5D_browser_dev_hmr-client_..."), and the
+ *   development overlay's request for that error's stack was refused
+ *   (".../__nextjs_original-stack-frames due to access control checks.").
  */
-export const frameworkNoise = (text: string) => /^Failed to execute 'measure' on 'Performance': '.*' cannot have a negative time stamp\.?$/.test(text);
+const frameworkNoise = (text: string) =>
+  /^Failed to execute 'measure' on 'Performance': '.*' cannot have a negative time stamp\.?$/.test(text) ||
+  /^ChunkLoadError: Failed to load chunk \/_next\/static\/chunks\/%5Bturbopack%5D_browser_dev_/.test(text) ||
+  /\/__nextjs_original-stack-frames due to access control checks\.$/.test(text);
+
+/**
+ * WebKit's words for a request of the page that was cut off ("TypeError: Load
+ * failed"). It reports one as an error of the page when the page is left while
+ * the request is still coming in, such as the rest of a server action's answer
+ * after its result is shown (2026-11-20: "Saved." was on the page, the test
+ * opened the next one 450 ms later, and the answer was still streaming).
+ * Chromium says nothing then. While the page is being left, it is the browser
+ * leaving, not the site failing; at any other moment it fails the test.
+ */
+const CUT_OFF = "Load failed";
+
+/**
+ * Watch a page for what its browser says went wrong, and report each problem:
+ * errors of its scripts, and errors in its console (unless `consoleErrors` is
+ * false). Left out: the development build's own (`frameworkNoise`), requests
+ * the console says failed (pages that answer "not found" on purpose log one,
+ * and the tests check what the page shows), and a request cut off by leaving
+ * the page for another (`CUT_OFF`). `where` follows "script error" in a
+ * report: " on an iPad".
+ */
+export function watchBrowser(page: Page, report: (problem: string) => void, { where = "", consoleErrors = true } = {}) {
+  // From the request for the next document until it is shown, the page is being left.
+  let leaving = false;
+  page.on("request", (request) => {
+    if (request.isNavigationRequest() && request.frame() === page.mainFrame()) leaving = true;
+  });
+  page.on("framenavigated", (frame) => {
+    if (frame === page.mainFrame()) leaving = false;
+  });
+  page.on("pageerror", (error) => {
+    if (frameworkNoise(error.message) || (leaving && error.message === CUT_OFF)) return;
+    report(`script error${where}: ${error.message}`);
+  });
+  if (!consoleErrors) return;
+  page.on("console", (message) => {
+    if (message.type() === "error" && !message.text().startsWith("Failed to load resource")) {
+      report(`console error${where}: ${message.text().slice(0, 400)}`);
+    }
+  });
+}
 
 /*
  * After an in-app navigation the framework keeps the previous pages in the

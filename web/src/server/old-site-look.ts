@@ -36,7 +36,7 @@ import { listPages, listPageVersions, loadPageForEditing, savePageDraft } from "
  * page editor, which checks them on phones first.
  */
 
-export const LOOK_ID = "old-site-look";
+const LOOK_ID = "old-site-look";
 
 /** The library's names of the photos placed here. */
 export const LOOK_PHOTOS = {
@@ -68,14 +68,14 @@ export const CHRISTMAS_WORDS = {
 };
 
 /** The old site's line over its home page's gallery. */
-export const INSTAGRAM_WORDS = { eyebrow: "Follow us on Instagram", heading: "@thevisuals.photostudio" };
+const INSTAGRAM_WORDS = { eyebrow: "Follow us on Instagram", heading: "@thevisuals.photostudio" };
 
 /**
  * The old site's slideshow at the top of its home page (read on 2026-11-19): a slide for each studio, in its order,
  * with its words as they were and what stayed in view of each photo. Its buttons led to the old booking page; here
  * each books its own studio.
  */
-export const SLIDES = [
+const SLIDES = [
   { photo: "slideParis", studio: "paris", title: "Studio Paris", text: "a romantic space with vintage charm\nnow available for bookings", focus: "bottom" },
   { photo: "slideBlanche", studio: "blanche", title: "Studio Blanche", text: "a modern, all-white space with sleek design", focus: "center" },
   { photo: "slideDayglow", studio: "dayglow", title: "Studio Dayglow", text: "a natural, boho-style studio with warm vibes", focus: "center" },
@@ -207,7 +207,7 @@ export function homeLook(loaded: StoredBlock[], library: LookLibrary, today: str
   return { blocks, changes };
 }
 
-export function servicesLook(loaded: StoredBlock[], library: LookLibrary): PageLook {
+function servicesLook(loaded: StoredBlock[], library: LookLibrary): PageLook {
   const blocks = copy(loaded);
   const changes: string[] = [];
   const leadId = `${LOOK_ID}-lead`;
@@ -232,7 +232,7 @@ export function servicesLook(loaded: StoredBlock[], library: LookLibrary): PageL
   return { blocks, changes };
 }
 
-export function ratesLook(loaded: StoredBlock[], library: LookLibrary): PageLook {
+function ratesLook(loaded: StoredBlock[], library: LookLibrary): PageLook {
   const blocks = copy(loaded);
   const changes: string[] = [];
   pictureBehind(firstOf(blocks, "Banner"), library.photos.ratesBand, "the sofa photo across the title band", changes);
@@ -256,7 +256,7 @@ export interface PageLookReport {
 export type LookResult = { ok: true; pages: PageLookReport[]; missing: string[] } | { ok: false; message: string };
 
 /** The library's ids of the photos and the collection the changes place, and the names not found. */
-export async function lookLibrary(db: Db): Promise<{ library: LookLibrary; missing: string[] }> {
+async function lookLibrary(db: Db): Promise<{ library: LookLibrary; missing: string[] }> {
   // By the name without its ending as well: the library gives a file the ending of what it really is.
   const stem = (name: string) => name.replace(/\.[a-z0-9]+$/i, "");
   const files = await db.select({ id: media.id, filename: media.filename }).from(media).orderBy(asc(media.createdAt));

@@ -8,7 +8,6 @@ import {
   confirmAndGetRef,
   dateAhead,
   fillDetails,
-  frameworkNoise,
   latestEmail,
   next,
   onScreen,
@@ -17,6 +16,7 @@ import {
   signIn,
   todayInStudio,
   totalRow,
+  watchBrowser,
 } from "./helpers";
 
 /**
@@ -68,15 +68,7 @@ let freeHourCodes: string[] = [];
 let browserProblems: string[] = [];
 test.beforeEach(({ page }) => {
   browserProblems = [];
-  page.on("pageerror", (error) => {
-    if (!frameworkNoise(error.message)) browserProblems.push(`script error: ${error.message}`);
-  });
-  page.on("console", (message) => {
-    // Pages that deliberately answer "not found" log a failed request; that is expected.
-    if (message.type() === "error" && !message.text().startsWith("Failed to load resource")) {
-      browserProblems.push(`console error: ${message.text().slice(0, 400)}`);
-    }
-  });
+  watchBrowser(page, (problem) => browserProblems.push(problem));
 });
 test.afterEach(() => {
   expect(browserProblems, "errors reported by the browser").toEqual([]);

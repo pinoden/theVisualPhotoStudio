@@ -107,7 +107,7 @@ async function freeSlug(db: DbLike, wanted: string, except?: string): Promise<st
  * collections it names, the studio's data (studios, prices, hours, add-ons,
  * settings) and contact details, and the live values its text can name.
  */
-export async function pageSite(db: DbLike, content: PageContent, now: Date): Promise<SiteContext> {
+async function pageSite(db: DbLike, content: PageContent, now: Date): Promise<SiteContext> {
   const references = pageReferences(content);
   const today = localDateOf(now);
   const collections: SiteContext["collections"] = {};

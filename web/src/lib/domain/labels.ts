@@ -67,7 +67,7 @@ export function labelOf(booking: Pick<LabelFacts, "status" | "label">): LabelKey
 }
 
 /** A client may arrive a little early: Checked In can be set from an hour before the start. */
-export const CHECK_IN_OPENS_MINUTES = 60;
+const CHECK_IN_OPENS_MINUTES = 60;
 
 export type LabelBlock =
   /** Cancelled, never paid for, or still being paid for. */
