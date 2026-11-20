@@ -31,9 +31,9 @@ import { localToUtc } from "./tz";
  * through it, so a refund of it is made in Square and recorded here by hand.
  * The rest is paid at the studio, as for a booking made in the admin. Nothing
  * is charged, and no email is sent; the reminder before the visit is left to
- * Acuity unless `remind` says otherwise. What the import decides that the
- * owners have not: question 49 under "Rules built on the builder's reading"
- * in ProjectLibrary.md.
+ * Acuity unless `remind` says otherwise. The readings it is built on, which
+ * the owner confirmed as built: question 49 under "Rules built on the
+ * builder's reading" in ProjectLibrary.md.
  *
  * Each appointment is imported once: the booking keeps Acuity's id
  * (`bookings.imported_from`), so a second run of the same export, or of a

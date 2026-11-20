@@ -1,7 +1,7 @@
 # Project handoff
 
 - **Project:** The Visuals Photo Studio
-- **Updated:** 2026-11-19
+- **Updated:** 2026-11-20
 - **Branch:** `rebuild`
 
 ## Current state
@@ -10,13 +10,12 @@
 - **`master`** is at PR #20 (`ed70625`, 2026-11-19): the home page's slideshow (below). Before it came PR #19 (the old website's look and the editors' `Group` fix) and PR #18 (the security review's fixes). `rebuild` is ahead by the Acuity import (below) and these notes, which go to `master` with the next pull request, on the owner's word.
 - **Scheduled tasks on the preview** run once a day (`web/vercel.json`, at 12:00 UTC), the most the Hobby plan allows. Between runs `/api/health` answers 503 and the admin overview says the tasks are late: expected until Vercel Pro, where they run every five minutes (step 10). Emails go out right after whatever queued them; reminders, free hours, review requests, refund retries and membership months wait for the daily run.
 - **Email:** Resend's domain `thevisualsphotostudio.com` is not verified yet. Until it is, `EMAIL_FROM` is Resend's test sender (`onboarding@resend.dev`), which delivers only to the Resend account's own address. Once Resend shows the domain verified, set `EMAIL_FROM` to `The Visuals Photo Studio <bookings@thevisualsphotostudio.com>` and redeploy.
-- **The owners' answers of 2026-11-18 are all built:** questions 40, 41 and 48 (see "Owner decisions"). Migrations run from `0000` to `0049`; staging has all of them.
+- **The owners' answers are all built:** questions 40, 41 and 48 (2026-11-18), and question 49 (2026-11-20), which confirmed the Acuity import as built (see "Owner decisions"). Migrations run from `0000` to `0049`; staging has all of them.
 - **Importing Acuity's appointments still to come (step 5, 2026-11-19, in `rebuild`, not on `master` yet):**
   - **What it is:** `scripts/import-acuity.ts` turns each upcoming appointment of an Acuity export into a booking that holds its studios and the photographer. A booking keeps Acuity's price and what was paid there. Nothing is charged and no email is sent.
   - **Rehearsal first:** without `--write`, the script writes nothing and prints what it would do. A second run adds only what is new.
-  - **Waiting on the owners:**
-    - A real export, or just its first line (the column names), to confirm the column names and time formats the reader expects. It stops and names the columns it found if one it needs is missing.
-    - The readings it is built on: question 49 in `ProjectLibrary.md`.
+  - **The readings it is built on** (question 49 in `ProjectLibrary.md`) were confirmed by the owner as built on 2026-11-20.
+  - **Waiting on the owners:** a real export, or just its first line (the column names), to confirm the column names and time formats the reader expects. It stops and names the columns it found if one it needs is missing.
   - **Tried** on a Neon branch of staging, with a made-up export (see "Verification").
   - **Migration `0049_acuity_import`:** it adds `bookings.imported_from` and was applied to staging (2026-11-19). The column is invisible to `master`'s code, and the merge needs it.
 - **Security review of 2026-11-19:** its high and medium findings and the missing headers are fixed and live (see the decision log in `ProjectLibrary.md`). Checked on the hosted preview after the deploy: the new headers are sent and `X-Powered-By` is not, the open-redirect probe stays on the site, and the database rate limit counted an empty booking request, which was refused with no booking made. The limit on asking for sign-in codes has counted a request there; the limit on tries waits for a code to be entered (step 3). Still open: shorter sessions for owners and staff, Square's buyer verification and risk rules before the live keys, Vercel deployment protection for previews, and two-factor sign-in on GitHub, Resend, Square and the inboxes in `OWNER_EMAILS` (Vercel's is on).
@@ -54,10 +53,10 @@ The localhost check used mock payments and sent no email. The hosted Vercel prev
 
 | Check | Status |
 | --- | --- |
-| Type check and lint | Clean on the commit that added the Acuity import (2026-11-19) |
-| Unit and integration tests | 1,106 passed across 83 files on that commit |
-| Browser tests (local) | 63 passed on that commit (10.7 min), none retried |
-| GitHub CI | Both jobs (`checks`, `browser`) passed on PR #20 (`11250a6`), which merged the slideshow. They passed before on `bba0800`, PR #19 and `49a14b0`. |
+| Type check and lint | Clean on the commit that recorded question 49 (2026-11-20), which changed only notes and one comment, and before it on the commit that added the Acuity import (2026-11-19) |
+| Unit and integration tests | 1,106 passed across 83 files on both commits |
+| Browser tests (local) | 63 passed on the Acuity import's commit (10.7 min), none retried |
+| GitHub CI | Both jobs (`checks`, `browser`) passed on `322c745` (2026-11-19), the Acuity import's last commit, and on PR #20 (`11250a6`), which merged the slideshow. They passed before on `bba0800`, PR #19 and `49a14b0`. |
 | The slideshow on staging's content | First on a Neon branch of staging, then on staging after the merge. Each time, the script changed only the home page and the page editor published it after its phone check. Staging's outbox was the same before and after. |
 | Hosted preview | Checked in Chromium at 1280px and 390px after PR #20 deployed (`ed70625`) and the home page was published:<br>• the slideshow's three slides and photos loaded<br>• the arrows went 1, 2, 3, back to 1, and from 1 back to 3, at the sides on a desktop and under the words on a phone<br>• no page was wider than the screen, and the console showed no error<br>• the home, studios, photography and rates pages answer 200, with no broken picture<br>• the studios page draws three rows and the photography page one, and each row's next arrow moves it<br>After PR #19 (`4a96095`), every picture in those rows (33 and 25) loaded once scrolled into view, with no image request refused. |
 | Acuity import | Tried on a Neon branch of staging (`acuity-trial`, deleted afterwards), with a made-up export of seven rows:<br>• migration `0049` applied<br>• the rehearsal wrote nothing; it reported three to import, one over, two refused with their reasons (one taken by the site's clean-up gap after another appointment of the export) and one row it could not read<br>• the real run made the three bookings (four studio holds, three payments through Acuity, no email), and a second run added nothing<br>• on a local server on the branch, the appointment's page, the calendar, the client's account and receipts showed them |
@@ -79,7 +78,7 @@ Not yet covered by an independent tester pass: the fourth pass's fixes, question
 
 ### Before cutover (tools not built yet)
 
-5. **Import upcoming appointments from Acuity.** Built (2026-11-19): `scripts/import-acuity.ts`. Read an Acuity export into bookings that hold their rooms and photographer like any other booking, with nothing charged and no email sent. Refuse and list any that clash. Each row is matched by Acuity's ID, so a second run of the same export adds nothing. Still to do:
+5. **Import upcoming appointments from Acuity.** Built (2026-11-19), with its readings confirmed by the owner (2026-11-20): `scripts/import-acuity.ts`. Read an Acuity export into bookings that hold their rooms and photographer like any other booking, with nothing charged and no email sent. Refuse and list any that clash. Each row is matched by Acuity's ID, so a second run of the same export adds nothing. Still to do:
    - **The owners:** export the appointments and save the file outside the project folder, never in it: it holds clients' details. In Acuity: Reports → Import/Export, dates from today on, cancelled appointments not included, then Export appointments, which gives a CSV file. A file that listed cancelled ones without saying so would import them as booked.
    - **Then:** run a rehearsal against staging, adjust the reader if the columns differ, and rehearse the real import (item 9). Run it with `--money live` on the production database at cutover.
 6. **Carry over active members.** The site's memberships are billed by Square subscriptions that the site creates. A member billed today by Acuity or Squarespace cannot be moved onto one. Two ways, for the owners to choose: the member joins again on the site with their card, and the old subscription is cancelled; or the site imports the member's balance as a membership without billing, which the old provider keeps billing until it is cancelled.
@@ -135,8 +134,9 @@ The early site audit also found membership prices that differed between the webs
 
 ## Owner decisions
 
-### Confirmed (2026-11-18 and before)
+### Confirmed (2026-11-20 and before)
 
+- Question 49 (the Acuity import, 2026-11-20): as built. Acuity's price stands, weekends included. What was paid in Acuity counts as paid; a refund of it is made in Square or Acuity and recorded by hand. The site's terms of the day apply. The site sends no reminder while Acuity sends its own, and the review request and the loyalty stamp follow the site's rules. The site's 15-minute clean-up gap stands, so an appointment Acuity put closer after another is listed for the owners. Add-ons stay inside Acuity's price, and what is left on a code stays in Acuity until step 6.
 - Vercel and Neon are acceptable. Keep the existing domain. Sign-in starts with emailed codes; Google sign-in may come later.
 - Question 48 (extra charges): the price is paid first, then the charges; a paid charge is given back as a refund; a booking with charges is not moved. As built.
 - Questions 42, 43, 45 and 46 (memberships): as built. Question 44: Blanche's plans are $380 and $700, as built.
@@ -152,7 +152,6 @@ The early site audit also found membership prices that differed between the webs
 
 | Area | Decision needed |
 | --- | --- |
-| Acuity's appointments, imported | Question 49 in `ProjectLibrary.md`:<br>• Acuity's price stands (weekends included)<br>• what was paid in Acuity counts, refunded by hand<br>• the site's terms of the day apply<br>• no reminder from the site while Acuity sends its own (or `--remind`)<br>• the site's 15-minute clean-up gap can refuse an appointment Acuity put 7 minutes after another |
 | The old website's look | Whether to add more of the old site: a page for each studio with its Christmas photos, its Styled Setups page, the reviews on its home page ("What Our Customers Say"), and its colours, fonts and spacing (left as they are). The Christmas section comes off the home page after January 2, 2027. |
 | Members at cutover | Each current member joins again on the site, or is carried over as a balance while the old provider keeps billing until it is cancelled (next step 6) |
 | Launch | Approve the cutover after the hosted preview and the import rehearsal. DNS ownership, the transactional email provider and sender address, the privacy policy and sales tax |
