@@ -18,6 +18,35 @@ export function studioToday(now: Date = new Date()): IsoDate {
   return studioDate.format(now);
 }
 
+const studioClockParts = new Intl.DateTimeFormat("en-US", {
+  timeZone: STUDIO_TIME_ZONE,
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+});
+
+function partsOf(instant: Date): Record<string, string> {
+  return Object.fromEntries(studioClockParts.formatToParts(instant).map((part) => [part.type, part.value]));
+}
+
+/**
+ * "2:30 AM" on the studio's clock. Only the parts come from the browser's formatter, and the words between them are
+ * written here: Node and Safari join a date and a time differently ("at" against a comma) and put different spaces
+ * before "AM", and a page drawn on the server would not match the same page in the browser.
+ */
+export function studioClock(instant: Date): string {
+  const parts = partsOf(instant);
+  return `${parts.hour}:${parts.minute} ${parts.dayPeriod}`;
+}
+
+/** "Nov 20, 2026, 2:30 AM" on the studio's clock, the same on the server and in every browser (see `studioClock`). */
+export function studioDayAndClock(instant: Date): string {
+  const parts = partsOf(instant);
+  return `${parts.month} ${parts.day}, ${parts.year}, ${parts.hour}:${parts.minute} ${parts.dayPeriod}`;
+}
+
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 export function parseIsoDate(value: string): { year: number; month: number; day: number } | null {

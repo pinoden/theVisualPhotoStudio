@@ -1,20 +1,11 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { studioClock, studioDayAndClock } from "@/lib/domain/time";
 import type { VersionSummary } from "@/server/website";
 import type { DocumentEditor } from "./useDocumentEditor";
 
 /** The parts every editor of the website shares: the bar with its buttons, the preview, the history and the form fields. */
-
-const clock = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" });
-const dayAndClock = new Intl.DateTimeFormat("en-US", {
-  timeZone: "America/New_York",
-  month: "short",
-  day: "numeric",
-  year: "numeric",
-  hour: "numeric",
-  minute: "2-digit",
-});
 
 /** Where a preview starts: the route that switches the preview on, then the page. */
 export const previewUrl = (path: string) => `/admin/website/preview?to=${encodeURIComponent(path)}`;
@@ -32,7 +23,7 @@ function statusText<T>(editor: DocumentEditor<T>): string {
       return "Not saved: changed somewhere else.";
     default:
       if (!editor.hasDraft) return "Nothing to publish: the website shows exactly this.";
-      return editor.savedAt ? `Draft saved at ${clock.format(new Date(editor.savedAt))}. Visitors do not see it yet.` : "Draft saved. Visitors do not see it yet.";
+      return editor.savedAt ? `Draft saved at ${studioClock(new Date(editor.savedAt))}. Visitors do not see it yet.` : "Draft saved. Visitors do not see it yet.";
   }
 }
 
@@ -131,7 +122,7 @@ export function EditorBar<T>({
         <div className="flash flash-error" role="alert">
           This was changed somewhere else
           {editor.conflict.by && ` by ${editor.conflict.by}`}
-          {editor.conflict.at && ` at ${clock.format(new Date(editor.conflict.at))}`} since you opened it, so your changes were
+          {editor.conflict.at && ` at ${studioClock(new Date(editor.conflict.at))}`} since you opened it, so your changes were
           not saved.{" "}
           <button type="button" className="btn btn-outline btn-small" disabled={editor.busy} onClick={editor.reload}>
             Load that version
@@ -288,7 +279,7 @@ export function History<T>({
                 <strong>Version {version.number}</strong>
                 {version.current && <em> · on the website now</em>}
                 <br />
-                {dayAndClock.format(new Date(version.publishedAt))}, by {version.publishedBy}
+                {studioDayAndClock(new Date(version.publishedAt))}, by {version.publishedBy}
               </span>
               {!version.current && (
                 <button type="button" className="btn btn-outline btn-small" disabled={editor.busy} onClick={() => void editor.restore(version.id)}>

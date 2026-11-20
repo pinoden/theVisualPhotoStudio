@@ -3,12 +3,11 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { checkPathsAction, discardAction, publishAction, restoreVersionAction, saveDraftAction, type DocumentKind } from "@/app/admin/website/actions";
+import { studioClock } from "@/lib/domain/time";
 import { checkWebsiteOnPhones } from "./phone-check";
 
 /** How long after the last change the draft is saved by itself. */
 const AUTOSAVE_MS = 900;
-
-const clock = new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" });
 
 /** The keys that only move about a page, which a busy editor lets through in a place that takes typing. */
 const MOVES = /^(Tab|Escape|Arrow(Up|Down|Left|Right)|Page(Up|Down)|Home|End|F\d{1,2}|Shift|Control|Alt|Meta|CapsLock)$/;
@@ -199,7 +198,7 @@ export function useDraftEditor<T>(initial: DraftStart<T>, actions: DraftActions<
           // Asked only to know the draft is still this one, with nothing changed here: nothing of this window's can be
           // lost, so the draft as it is stored now is shown, and nothing is offered to be saved over it.
           if (ask && json === stored.current) {
-            const who = `${result.by ? ` by ${result.by}` : ""}${result.at ? ` at ${clock.format(new Date(result.at))}` : ""}`;
+            const who = `${result.by ? ` by ${result.by}` : ""}${result.at ? ` at ${studioClock(new Date(result.at))}` : ""}`;
             shownTheirs.current = true;
             startRefresh(() => {
               report(
