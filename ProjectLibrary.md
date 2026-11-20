@@ -109,7 +109,7 @@ Local development needs no database install and no credentials. Without `DATABAS
 - **`src/server/admin.ts`** holds what only the owner can do: staff and shifts, prices, special dates, opening hours, blocked time, the bookings list, codes, each studio's text, guest number and clean-up time, and the add-ons.
 - **Importing Acuity's appointments still to come (step 5 of the plan in `HANDOFF.md`, 2026-11-19).** Before the switch, each upcoming appointment in Acuity becomes a booking here that holds its studios and the photographer, so that the site books around it.
   - *Running it:* `scripts/import-acuity.ts <export.csv> --as <owner> [--money live|test] [--remind] [--write]`, run by an owner from `web/` against the site's database. Without `--write` it is a rehearsal.
-  - *Reading the export:* `src/lib/acuity.ts` reads Acuity's appointments export (CSV). The columns are found by their names, a missing one the import needs stops it, and a row whose time or amount cannot be read is set aside with the reason. Times are on the studio's clock, in the ways Acuity writes them.
+  - *Reading the export:* `src/lib/acuity.ts` reads Acuity's appointments export (CSV). The columns are found by their names, each by its names in order wherever it is ("Appointment Price" before a question called "Price"), a missing one the import needs stops it, and a row whose time or amount cannot be read is set aside with the reason. Times are on the studio's clock, in the ways Acuity writes them.
   - *Which studios:* read from the appointment type's name ("Blanche + Paris (2 hr)", "Photography DAYGLOW (1 hr)", which also holds the photographer). Acuity books every bundle on Paris's calendar, so the calendar is used only when the type names no studio.
   - *The booking* (`importAcuityAppointments` in `src/server/acuity-import.ts`):
     - It keeps Acuity's price (`total_cents`). A bundle's price is shared between its studios as the site's own prices share theirs (`shareOf`).
@@ -119,6 +119,7 @@ Local development needs no database install and no credentials. Without `DATABAS
   - *Money paid in Acuity* becomes payments recorded by hand, with the method `acuity` ("Through Acuity, before this website"): what was paid online, and, when Acuity marks the appointment paid, the rest. The note says which, and names a code that paid. The site cannot refund these.
     - The price summary says "Paid through Acuity" (`receivedThroughAcuityCents` in `BookingView`), not "at the studio".
     - A receipt says "Through Acuity, before this website" (`handPaymentWords`).
+    - A cancellation, its email, the owner's notice and the appointment's page say what of it is given back by hand was paid through Acuity, not at the studio (`handPaidPlaceOf`).
   - *Sends nothing:* nothing is charged and no email is sent. `reminder_sent_at` is set unless `--remind`, since Acuity sends its own reminder while it holds the appointments.
   - *Holds:* written as `createBooking` writes them, each studio's clean-up gap after the booking and the photographer's after a session. The rules a client meets (opening hours, notice, the photographer's hours) do not apply: Acuity booked these.
   - *Refused, with the reason:*
@@ -697,6 +698,7 @@ Not connected to the outside world yet:
 
 Known weaknesses:
 
+- **The admin's list of bookings calls money paid through Acuity "paid at the studio"** in its one line about what can be given back by hand. The appointment's page, the cancellations and their emails name it rightly (2026-11-20); the list would need where each booking's money was paid, read for every row.
 - **The bank's check runs before the server checks the booking** (the review of 2026-11-20). The token, and the bank's check with it, are made on the page, and the server then checks the time, the price and the code. A time taken meanwhile, or a price changed, sends the client back, and the next try asks the bank again. The bank asks for a check only now and then for US cards, and such a clash is rare; checking with the server before asking the bank would cost every booking a request.
 - Conditions follow the switches of the site (pets, moving, photography, free hours, getting in, several studios, add-ons). A number set to 0 is not one of them: with a refund fee of 0 the policies would say "(0%)", and the owners reword the sentence.
 - A link cannot name a live value. The guest information's "Open in Maps" link and the studios page's "7457 Aloma Ave" are text: if the studio moves, change them with the header and footer.
@@ -949,6 +951,12 @@ Known weaknesses:
   - a booking's membership minutes, 3.
 
   Only indexes, nothing else, for the 10,000 bookings the plan expects. Tried on a Neon branch of staging: the indexes were made, and a booking's payments are then found through `payments_booking_idx`. To be applied to staging with the next merge; the code does not depend on them.
+- 2026-11-20 (night): The code-review workflow on PR #21, for the Acuity import, which no review had read. Five of its ten findings were fixed already on `rebuild`. Of the other five:
+  - **Money paid through Acuity was called "paid at the studio"** when an imported booking was cancelled: in the client's choice and confirmation, the cancellation email, the owner's notice of a refund by hand, the history, the owner's cancel and the appointment's page. The amounts and the refund by hand were right; the words now say where the money was paid: at the studio, through Acuity, or both (`handPaidPlaceOf` in money.ts, `handPaidPlace` in payment-methods.ts). The admin's list of bookings still says "at the studio" in its one line (Known gaps).
+  - **The export's columns are read by their names in order**, wherever each is: an intake form's question called "Price" or "ID", to the left of "Appointment Price" or "Appointment ID", was read in their place.
+  - **A refused appointment's report names what takes each studio by that studio's own clean-up gap.** It used the longest gap of the studios booked, and could name a booking that did not clash; the new test failed on the old code.
+  - **The review emails and loyalty stamps after an imported visit** are the owner's answer to question 49 (d): not a defect. The import's comment now says so.
+  - **Three queries over payments for each list of bookings**, where one could do: left for now, as a list's cost is a few milliseconds on Neon.
 
 ### Handoff for the next coding session
 

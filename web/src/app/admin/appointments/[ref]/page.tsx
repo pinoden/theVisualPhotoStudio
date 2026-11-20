@@ -705,7 +705,9 @@ async function AppointmentDetails({
                 <p style={{ marginBottom: 0 }}>
                   {appointment.payments.cardRefundableCents > 0
                     ? "An owner, or a manager the owners allow to refund, refunds it to the card here."
-                    : "It was paid at the studio: give it back there, then record the refund against its payment above."}
+                    : appointment.payments.handPaidPlace === "at the studio"
+                      ? "It was paid at the studio: give it back there, then record the refund against its payment above."
+                      : `It was paid ${appointment.payments.handPaidPlace}: give back what was paid through Acuity in Square or Acuity, the rest at the studio, then record each refund against its payment above.`}
                 </p>
               )}
             </div>

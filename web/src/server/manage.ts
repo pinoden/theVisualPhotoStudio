@@ -37,7 +37,7 @@ import {
 } from "./email";
 import { BY_CUSTOMER, BY_STUDIO, BY_SYSTEM, recordEvent } from "./history";
 import { releaseHolds } from "./holds";
-import { creditLeftCentsByBooking, heldCentsByBooking, netCardPaidCents, paidAtStudioCents } from "./money";
+import { creditLeftCentsByBooking, handPaidPlaceOf, heldCentsByBooking, netCardPaidCents, paidAtStudioCents } from "./money";
 import {
   closePayLinkOf,
   lookAtPayLink,
@@ -192,10 +192,10 @@ export interface ManageChoices {
 }
 
 /** `heldCents`: what the booking's card holds, not taken yet, which the words say what becomes of. */
-export function describeManageOptions(options: ManageOptions, settings: Settings, heldCents = 0): ManageChoices {
+export function describeManageOptions(options: ManageOptions, settings: Settings, heldCents = 0, place = "at the studio"): ManageChoices {
   return {
     cancel: options.cancel.allowed
-      ? { allowed: true, text: cancelOutcomeText(options.cancel, settings, {}, heldCents) }
+      ? { allowed: true, text: cancelOutcomeText(options.cancel, settings, {}, heldCents, place) }
       : { allowed: false, text: cancelBlockText(options.cancel.reason) },
     reschedule: options.reschedule.allowed
       ? { allowed: true, offered: true, text: rescheduleOfferText(options.reschedule, settings) }
@@ -233,7 +233,9 @@ export function rescheduleOfferText(
 export async function getManageChoices(db: DbLike, ref: string, actor: Actor, now: Date): Promise<ManageChoices | null> {
   const context = await manageContext(db, ref, actor, now);
   if (!context) return null;
-  const choices = describeManageOptions(context.options, context.terms, context.heldCents);
+  // Where the money to be given back by hand was paid: the same words as the cancellation itself uses (`cancelBooking`).
+  const place = context.options.cancel.allowed && context.options.cancel.byHandCents > 0 ? await handPaidPlaceOf(db, context.booking.id) : undefined;
+  const choices = describeManageOptions(context.options, context.terms, context.heldCents, place);
   // What becomes of membership minutes is part of what the client is told, and agrees to, before cancelling.
   const minutes = choices.cancel.allowed ? minutesOnCancelText(context.booking, context.terms, now, actor.kind === "owner") : "";
   return {
@@ -384,16 +386,17 @@ export function rescheduleBlockText(
 
 /**
  * What a cancellation leaves to the studio to refund by hand, of what was
- * paid at the studio: the amount after the fee. A fee of 100% keeps it all,
+ * paid at the studio, or through Acuity for an imported appointment (`place`,
+ * `handPaidPlaceOf`): the amount after the fee. A fee of 100% keeps it all,
  * and then there is nothing to ask the studio for.
  */
-function handRefundSentence(byHandCents: number, settings: Pick<Settings, "refundFeePercent">): string {
+function handRefundSentence(byHandCents: number, settings: Pick<Settings, "refundFeePercent">, place: string): string {
   const back = afterFee(byHandCents, settings.refundFeePercent);
   if (back <= 0) {
-    return `Of what you paid at the studio (${formatCents(byHandCents)}), nothing is refunded: the ${settings.refundFeePercent}% processing fee is not refundable.`;
+    return `Of what you paid ${place} (${formatCents(byHandCents)}), nothing is refunded: the ${settings.refundFeePercent}% processing fee is not refundable.`;
   }
   const fee = back < byHandCents ? ` (${formatCents(byHandCents)}, less the ${settings.refundFeePercent}% processing fee)` : "";
-  return `Of what you paid at the studio, ${formatCents(back)} is refunded${fee}: that cannot be sent back online, so please contact the studio about it.`;
+  return `Of what you paid ${place}, ${formatCents(back)} is refunded${fee}: that cannot be sent back online, so please contact the studio about it.`;
 }
 
 /**
@@ -420,9 +423,11 @@ export function cancelOutcomeText(
   without: { card?: boolean; pet?: boolean } = {},
   /** What the booking's card holds, not taken yet: released by a cancellation, which says so. */
   heldCents = 0,
+  /** Where the money recorded by hand was paid (`handPaidPlaceOf`). */
+  place = "at the studio",
 ): string {
   const pet = without.pet || outcome.creditCents <= 0 ? "" : petCreditSentence(outcome);
-  const byHand = outcome.byHandCents > 0 ? handRefundSentence(outcome.byHandCents, settings) : "";
+  const byHand = outcome.byHandCents > 0 ? handRefundSentence(outcome.byHandCents, settings, place) : "";
   switch (outcome.why) {
     case "refund": {
       // Only the pet fee was on the card, and an administrator has already returned it as credit.
@@ -1036,7 +1041,8 @@ export async function cancelBooking(db: Db, ref: string, actor: Actor, deps: Man
     const heldCents = await heldCentsOf(tx, booking.id, deps.now);
     const byStudio = actor.kind === "owner";
     const minutesText = minutesOnCancelText(booking, terms, deps.now, byStudio);
-    const said = [cancelOutcomeText(decision, terms, {}, heldCents), minutesText].filter(Boolean).join(" ");
+    const place = decision.byHandCents > 0 ? await handPaidPlaceOf(tx, booking.id) : "at the studio";
+    const said = [cancelOutcomeText(decision, terms, {}, heldCents, place), minutesText].filter(Boolean).join(" ");
     if (seen !== undefined && seen !== said) return { kind: "changed" as const };
 
     await tx
@@ -1066,8 +1072,8 @@ export async function cancelBooking(db: Db, ref: string, actor: Actor, deps: Man
         ...(decision.byHandCents > 0
           ? [
               afterFee(decision.byHandCents, terms.refundFeePercent) > 0
-                ? `${formatCents(afterFee(decision.byHandCents, terms.refundFeePercent))} of what was paid at the studio is to be refunded by hand`
-                : `nothing of the ${formatCents(decision.byHandCents)} paid at the studio is refunded (the ${terms.refundFeePercent}% fee)`,
+                ? `${formatCents(afterFee(decision.byHandCents, terms.refundFeePercent))} of what was paid ${place} is to be refunded by hand`
+                : `nothing of the ${formatCents(decision.byHandCents)} paid ${place} is refunded (the ${terms.refundFeePercent}% fee)`,
             ]
           : []),
       ].join("; "),
@@ -1084,7 +1090,7 @@ export async function cancelBooking(db: Db, ref: string, actor: Actor, deps: Man
       when: formatInstant(booking.startAt),
       ...(decision.refundCents > 0 ? { refund: { cents: decision.refundCents, feeCents: decision.feeCents } } : {}),
       lines: [
-        cancelOutcomeText(decision, terms, { card: decision.refundCents > 0, pet: true }, heldCents),
+        cancelOutcomeText(decision, terms, { card: decision.refundCents > 0, pet: true }, heldCents, place),
         minutesText,
         ...(codeBack ? [CODE_BACK] : []),
         ...(unseenNote ? [unseenNote] : []),
@@ -1113,6 +1119,7 @@ export async function cancelBooking(db: Db, ref: string, actor: Actor, deps: Man
           customer: booking.customerName,
           paidCents: decision.byHandCents,
           feePercent: terms.refundFeePercent,
+          place,
         }),
       );
     }
@@ -1278,6 +1285,8 @@ export type OwnerRefundResult =
       refundCents: number;
       /** Money taken at the studio for a booking the studio cancelled: the studio gives back by hand what it owes of it. */
       atStudioCents?: number;
+      /** Where that money was paid, in words (`handPaidPlaceOf`). */
+      handPaidPlace?: string;
       /** The processor could not say whether the booking's payment link was paid, or it was another processor's (`noteUnseenLink`). */
       unseenLink?: "unseen" | "foreign" | "none";
     }
@@ -1355,6 +1364,7 @@ export async function ownerCancelBooking(
     // Money taken at the studio cannot be sent back from here: the studio gives back by hand what it owes of it, the
     // pet fee aside when it was already returned as studio credit.
     const { cents: atStudio, petReturnedCents: petAside } = await studioRefundableCents(tx, booking.id);
+    const place = atStudio > 0 ? await handPaidPlaceOf(tx, booking.id) : "at the studio";
     await recordEvent(tx, {
       bookingId: booking.id,
       from: labelOf(booking),
@@ -1364,7 +1374,7 @@ export async function ownerCancelBooking(
       note: [
         input.refundCents > 0 ? `Refund ${formatCents(input.refundCents)}` : "No refund",
         ...(atStudio > 0
-          ? [`${formatCents(atStudio)} of what was paid at the studio is for the studio to give back by hand${petAside > 0 ? " (its pet fee was returned as studio credit)" : ""}`]
+          ? [`${formatCents(atStudio)} of what was paid ${place} is for the studio to give back by hand${petAside > 0 ? " (its pet fee was returned as studio credit)" : ""}`]
           : []),
         ...(booking.membershipMinutes > 0 ? [`${durationLabel(booking.membershipMinutes)} of membership time ${deps.now.getTime() < booking.startAt.getTime() ? "given back" : "used"}`] : []),
       ].join("; "),
@@ -1387,8 +1397,8 @@ export async function ownerCancelBooking(
         ...(atStudio > 0
           ? [
               petAside > 0
-                ? `Of what you paid at the studio, ${formatCents(atStudio)} can be given back (the rest was for the pet fee, which was returned to you as studio credit): it cannot be sent back online, so the studio will be in touch with you about it.`
-                : `What you paid at the studio (${formatCents(atStudio)}) cannot be sent back online: the studio will be in touch with you about it.`,
+                ? `Of what you paid ${place}, ${formatCents(atStudio)} can be given back (the rest was for the pet fee, which was returned to you as studio credit): it cannot be sent back online, so the studio will be in touch with you about it.`
+                : `What you paid ${place} (${formatCents(atStudio)}) cannot be sent back online: the studio will be in touch with you about it.`,
             ]
           : []),
         ...(minutesBack ? [minutesOnCancelText(booking, { memberReturnHours: 0 }, deps.now, true)] : []),
@@ -1398,7 +1408,7 @@ export async function ownerCancelBooking(
       ],
     };
     const emailId = await queueEmail(tx, noticeEmail(email, "sent"));
-    return { kind: "done" as const, refundIds, bookingId: booking.id, email, emailId, atStudio, unseenNote };
+    return { kind: "done" as const, refundIds, bookingId: booking.id, email, emailId, atStudio, place, unseenNote };
   });
 
   if (outcome.kind === "not_found") return { ok: false, status: 404, code: "not_found", message: "Booking not found." };
@@ -1422,7 +1432,7 @@ export async function ownerCancelBooking(
     ok: true,
     refund,
     refundCents: input.refundCents,
-    ...(outcome.atStudio > 0 ? { atStudioCents: outcome.atStudio } : {}),
+    ...(outcome.atStudio > 0 ? { atStudioCents: outcome.atStudio, handPaidPlace: outcome.place } : {}),
     ...(outcome.unseenNote ? { unseenLink: look === "foreign" ? (deps.payments ? ("foreign" as const) : ("none" as const)) : ("unseen" as const) } : {}),
   };
 }

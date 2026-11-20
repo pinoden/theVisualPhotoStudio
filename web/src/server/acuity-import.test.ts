@@ -1,11 +1,12 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
-import { bookings, payments, photographerHolds, studioHolds } from "@/db/schema";
+import { bookings, payments, photographerHolds, studioHolds, studios } from "@/db/schema";
 import type { AcuityAppointment } from "@/lib/acuity";
 import { importAcuityAppointments, shareOf, type ImportOptions } from "./acuity-import";
 import { getAppointment } from "./appointments";
 import type { AuthUser } from "./auth";
 import { listBookingsForEmail } from "./bookings";
+import { cancelBooking, getManageChoices } from "./manage";
 import { loadReceipts } from "./receipts";
 import { createTestWorld, expectOk, FAR, h, NOW, type TestWorld } from "./testing";
 
@@ -223,6 +224,38 @@ describe("importing Acuity's appointments still to come", () => {
     expect(report.imported.map((line) => line.id)).toEqual(["1006"]);
     // Nothing of the refused one stays behind.
     expect(await bookingOf("1001")).toBeUndefined();
+  });
+
+  it("says the money given back by hand was paid through Acuity when the client cancels, not at the studio (the review of 2026-11-20)", async () => {
+    // Paid in full online in Acuity, more than a week ahead: the site's terms refund it by hand, less the 5% fee.
+    const report = await importAcuityAppointments(world.db, [appointment()], options());
+    const { ref } = report.imported[0];
+    const client = { kind: "customer", email: "ana@client.test" } as const;
+    const said = "Of what you paid through Acuity, $167.20 is refunded ($176, less the 5% processing fee): that cannot be sent back online, so please contact the studio about it.";
+    expect((await getManageChoices(world.db, ref, client, NOW))?.cancel.text).toContain(said);
+    expectOk(await cancelBooking(world.db, ref, client, world.manageDeps()));
+    const [notice] = await world.emails("owner_hand_refund");
+    expect(notice.body).toContain("Of what was paid through Acuity, $176 is refunded by the rental terms, less the 5% fee: $167.20.");
+    const [toClient] = await world.emails("booking_cancelled");
+    expect(toClient.body).toContain("Of what you paid through Acuity, $167.20 is refunded");
+  });
+
+  it("names what takes each studio by that studio's own clean-up gap, not the longest (the review of 2026-11-20)", async () => {
+    // Paris keeps 45 minutes after a booking here, Blanche its 15.
+    await world.db.update(studios).set({ bufferMinutes: 45 }).where(eq(studios.id, world.ids.paris));
+    try {
+      const paris = expectOk(await world.book({ studioIds: [world.ids.paris], date: FAR, startMinute: h(12) + 30, durationMinutes: 60 }));
+      // Half an hour after the appointment ends: clear of Blanche's 15 minutes, though not of Paris's 45.
+      expectOk(await world.book({ studioIds: [world.ids.blanche], date: FAR, startMinute: h(14) + 30, durationMinutes: 60 }));
+      const report = await importAcuityAppointments(
+        world.db,
+        [appointment({ type: "Blanche + Paris (1 hr)", calendar: "Paris", start: { date: FAR, minute: h(13) }, end: { date: FAR, minute: h(14) } })],
+        options(),
+      );
+      expect(report.refused.map((line) => line.reason)).toEqual([`its time is taken: Studio Paris is taken then by booking ${paris.ref}`]);
+    } finally {
+      await world.db.update(studios).set({ bufferMinutes: 15 }).where(eq(studios.id, world.ids.paris));
+    }
   });
 
   it("leaves out what is over or cancelled, and refuses what the site cannot hold, saying why", async () => {
