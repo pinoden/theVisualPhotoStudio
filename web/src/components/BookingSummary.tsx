@@ -1,5 +1,6 @@
 import { formatCents } from "@/lib/domain/pricing";
 import { durationLabel } from "@/lib/domain/time";
+import { listInWords } from "@/lib/words";
 import type { BookingView } from "@/server/bookings";
 import { STANDS } from "@/server/money";
 import { formatRange } from "@/server/tz";
@@ -23,19 +24,23 @@ export function BookingSummary({ booking }: { booking: BookingView }) {
   const when = formatRange(new Date(booking.startAt), new Date(booking.endAt));
   // A booking that stands, missed ones included, is paid or owes; one that ended shows what it cost.
   const paidStatus = STANDS.includes(booking.status);
+  /** What was paid in Acuity, the old website's booking system, before the booking was imported from it. */
+  const throughAcuity = booking.receivedThroughAcuityCents;
   /** What came by card: online, or through a payment link. */
-  const byCard = booking.receivedCents - booking.receivedAtStudioCents;
+  const byCard = booking.receivedCents - booking.receivedAtStudioCents - throughAcuity;
   /** How a booking that owes nothing was paid. */
   const paidHow =
     booking.heldCents > 0
       ? "Held on card"
-      : booking.receivedAtStudioCents > 0
-        ? byCard > 0
-          ? "Paid by card and at the studio"
-          : "Paid at the studio"
-        : booking.madeByAdmin
-          ? "Paid by card"
-          : "Charged to card";
+      : throughAcuity > 0
+        ? `Paid ${listInWords(["through Acuity", ...(byCard > 0 ? ["by card"] : []), ...(booking.receivedAtStudioCents > 0 ? ["at the studio"] : [])])}`
+        : booking.receivedAtStudioCents > 0
+          ? byCard > 0
+            ? "Paid by card and at the studio"
+            : "Paid at the studio"
+          : booking.madeByAdmin
+            ? "Paid by card"
+            : "Charged to card";
   /** Paid beyond what it costs now, after a move to a day that costs less (follow-up 5): the studio refunds it. */
   const creditLeft = paidStatus ? booking.creditLeftCents : 0;
   return (
@@ -114,7 +119,7 @@ export function BookingSummary({ booking }: { booking: BookingView }) {
       {/* A booking paid in parts (made in the admin, or one whose card was never charged): what was received, then what is owed. */}
       {paidStatus && booking.receivedCents - booking.creditReturnedCents > 0 && booking.dueCents > 0 && (
         <div className="price-row">
-          <span>{byCard > 0 ? "Paid so far" : "Paid at the studio so far"}</span>
+          <span>{byCard > 0 || throughAcuity > 0 ? "Paid so far" : "Paid at the studio so far"}</span>
           {/* Toward its price: what was given back of a payment beyond it does not count (follow-up 5). */}
           <span>{formatCents(booking.receivedCents - booking.creditReturnedCents)}</span>
         </div>

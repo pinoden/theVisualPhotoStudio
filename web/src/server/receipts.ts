@@ -2,7 +2,7 @@ import { durationLabel } from "@/lib/domain/time";
 import { and, asc, desc, eq, inArray, notInArray } from "drizzle-orm";
 import { bookings, paymentLinks, payments, refunds } from "@/db/schema";
 import type { DbLike } from "@/db/client";
-import { isPaymentMethod, MANUAL_PROVIDER, PAYMENT_METHODS } from "@/lib/payment-methods";
+import { handPaymentWords, MANUAL_PROVIDER } from "@/lib/payment-methods";
 import { customerStatus } from "./account";
 import { toBookingViews, type BookingView } from "./bookings";
 import { creditName } from "./promos";
@@ -181,7 +181,7 @@ export async function loadReceipts(db: DbLike, email: string): Promise<{ receipt
       at: payment.createdAt.toISOString(),
       how:
         payment.provider === MANUAL_PROVIDER
-          ? `At the studio: ${isPaymentMethod(payment.method) ? PAYMENT_METHODS[payment.method].toLowerCase() : "payment"}`
+          ? handPaymentWords(payment.method)
           : throughLink.has(payment.id)
             ? "Card, through a payment link"
             : "Card, online",

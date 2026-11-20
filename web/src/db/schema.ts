@@ -418,6 +418,12 @@ export const bookings = pgTable(
      * a booking moved by the studio to a time closer than the reminder: the email about the move tells the new time.
      */
     reminderSentAt: ts("reminder_sent_at"),
+    /**
+     * For a booking imported from another booking system, where it came from: `acuity:<Acuity's appointment id>`
+     * (src/server/acuity-import.ts). One booking per appointment, so a second import of the same export adds nothing.
+     * Null for a booking made on this site.
+     */
+    importedFrom: text("imported_from"),
     cancelledAt: ts("cancelled_at"),
     createdAt: createdAt(),
   },
@@ -425,6 +431,7 @@ export const bookings = pgTable(
     index("bookings_email_idx").on(t.customerEmail),
     index("bookings_start_idx").on(t.startAt),
     uniqueIndex("bookings_request_key").on(t.requestKey).where(sql`${t.requestKey} is not null`),
+    uniqueIndex("bookings_imported_from").on(t.importedFrom).where(sql`${t.importedFrom} is not null`),
     check("bookings_money_kind", sql`${t.moneyKind} in ('test', 'live')`),
   ],
 );

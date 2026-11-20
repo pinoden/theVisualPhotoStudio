@@ -1,8 +1,8 @@
-import { and, asc, eq, gt, inArray, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { bookingCharges, payments, refunds } from "@/db/schema";
 import { together, type DbLike } from "@/db/client";
 import { clientChargeLabel } from "@/lib/charge-label";
-import { MANUAL_PROVIDER } from "@/lib/payment-methods";
+import { ACUITY_METHOD, MANUAL_PROVIDER } from "@/lib/payment-methods";
 import { RESERVE_HOURS } from "./payments";
 
 /**
@@ -105,9 +105,17 @@ export async function owedCents(db: DbLike, booking: { id: string; totalCents: n
 /**
  * For several bookings at once: what each has received (every payment that
  * succeeded, before refunds). A booking that received nothing is not in the map.
+ * `at_studio`: only what was recorded by hand for money taken at the studio;
+ * `through_acuity`: only what was paid in Acuity before the booking was
+ * imported (recorded by hand as well, but not paid at the studio).
  */
-export async function receivedCentsByBooking(db: DbLike, bookingIds: string[], where: "anywhere" | "at_studio" = "anywhere"): Promise<Map<string, number>> {
+export async function receivedCentsByBooking(
+  db: DbLike,
+  bookingIds: string[],
+  where: "anywhere" | "at_studio" | "through_acuity" = "anywhere",
+): Promise<Map<string, number>> {
   if (bookingIds.length === 0) return new Map();
+  const byHand = eq(payments.provider, MANUAL_PROVIDER);
   const rows = await db
     .select({ bookingId: payments.bookingId, total: sql<number>`coalesce(sum(${payments.amountCents}), 0)::int` })
     .from(payments)
@@ -115,7 +123,11 @@ export async function receivedCentsByBooking(db: DbLike, bookingIds: string[], w
       and(
         inArray(payments.bookingId, bookingIds),
         eq(payments.status, "succeeded"),
-        where === "at_studio" ? eq(payments.provider, MANUAL_PROVIDER) : undefined,
+        where === "at_studio"
+          ? and(byHand, or(isNull(payments.method), ne(payments.method, ACUITY_METHOD)))
+          : where === "through_acuity"
+            ? and(byHand, eq(payments.method, ACUITY_METHOD))
+            : undefined,
       ),
     )
     .groupBy(payments.bookingId);
