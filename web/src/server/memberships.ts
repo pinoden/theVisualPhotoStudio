@@ -353,6 +353,7 @@ export async function joinMembership(db: Db, raw: unknown, deps: JoinDeps): Prom
     const charged = await payments.charge({
       amountCents: row.priceCents,
       token: input.paymentToken,
+      customerInitiated: true,
       idempotencyKey: row.id,
       reference: row.code,
       note: `Membership ${row.code}: ${row.planName}, the first month`,

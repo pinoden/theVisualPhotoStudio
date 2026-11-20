@@ -57,7 +57,8 @@ describe("how to get into the building", () => {
 
     const catalog = await loadCatalog(world.db);
     expect(catalog.accessInfoSent).toBe(true);
-    expect(JSON.stringify(catalog)).not.toContain("4821");
+    // Not "4821" alone: the catalog's random ids hold those four digits in about one run in twenty.
+    for (const part of ["4821#", "Door code", "elevator"]) expect(JSON.stringify(catalog)).not.toContain(part);
     expect(catalog.settings).toEqual(DEFAULT_SETTINGS);
     expect(await loadSettings(world.db)).toEqual(DEFAULT_SETTINGS);
   });

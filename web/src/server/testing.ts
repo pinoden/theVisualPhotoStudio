@@ -62,6 +62,11 @@ export const OWNER_EMAIL = "owner@studio.test";
 export const BASE_URL = "https://studio.test";
 
 export const h = (hours: number) => hours * 60;
+/**
+ * An amount in cents as a value of its own in serialized data (`"totalCents":7800`), never four digits inside a random
+ * id (`…-7800-…` in a uuid): a test that an amount is absent would otherwise fail now and then by chance.
+ */
+export const asAmount = (cents: number) => new RegExp(`(?<![\\w-])${cents}(?![\\w-])`);
 export const minutesAfter = (date: Date, minutes: number) => new Date(date.getTime() + minutes * 60_000);
 export const hoursAfter = (date: Date, hours: number) => minutesAfter(date, hours * 60);
 export const daysAfter = (date: Date, days: number) => hoursAfter(date, days * 24);

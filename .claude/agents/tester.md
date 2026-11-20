@@ -22,7 +22,8 @@ A studio booking site. Customers pick studios, a date and a time and pay by card
 - **Use your own server, never the developer's.** Do not run `npm run dev`, and do not touch `web/.next`, `web/.next-e2e`, `web/.data/pglite` or `web/.data/e2e`. Two processes that share one build folder corrupt it, and every page then reloads in a loop. Your name is `tester` and your port is 3213:
   - The browser tests: `E2E_NAME=tester E2E_PORT=3213 npm run test:e2e`. They start and stop their own server and begin from an empty database.
   - A server to explore by hand, run in the background from `web/`:
-    `PGLITE_DATA_NAME=e2e-tester NEXT_DIST_DIR=.next-e2e-tester OWNER_EMAILS=owner@studio.test,owner2@studio.test NEXT_TELEMETRY_DISABLED=1 npx next dev -p 3213`
+    `DATABASE_URL="" DATABASE_URL_UNPOOLED="" PGLITE_DATA_NAME=e2e-tester NEXT_DIST_DIR=.next-e2e-tester OWNER_EMAILS=owner@studio.test,owner2@studio.test NEXT_TELEMETRY_DISABLED=1 npx next dev -p 3213`
+    The empty `DATABASE_URL` is not optional: `web/.env.local` holds the staging database's address, `next dev` reads it, and without it your bookings land on the database the hosted preview shares. Check that `web/.data/e2e-tester` appears once the server answers.
     Wait until `http://localhost:3213/api/booking-config` answers. Stop it when you finish (`pkill -f "next dev -p 3213"`) and wait for the process to be gone before you start anything else.
   - For a known starting state, delete your own database and build folder while no server of yours is running: `rm -rf .data/e2e-tester .next-e2e-tester`.
   - Before you start a server or the browser tests, check that nothing of yours is still running: `pgrep -fl "next dev -p 3213"`. Never stop a process you did not start.

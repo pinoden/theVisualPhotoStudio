@@ -4,7 +4,7 @@ import type { AuthUser } from "./auth";
 import { loadCatalog } from "./catalog";
 import { cancelBooking } from "./manage";
 import { canViewDay, getDaySheet, listShiftDays } from "./staff";
-import { createTestWorld, expectOk, h, NEAR, type TestWorld } from "./testing";
+import { asAmount, createTestWorld, expectOk, h, NEAR, type TestWorld } from "./testing";
 
 let world: TestWorld;
 let owner: AuthUser;
@@ -74,8 +74,8 @@ describe("the day sheet", () => {
     const sheet = expectOk(await getDaySheet(world.db, sam, NEAR));
     const text = JSON.stringify(sheet);
     expect(Object.keys(sheet.entries[0]).filter((key) => /cent|price|total|paid|amount/i.test(key))).toEqual([]);
-    expect(text).not.toContain("8800"); // Blanche + Paris hour prices
-    expect(text).not.toContain("6800");
+    expect(text).not.toMatch(asAmount(8800)); // Blanche + Paris hour prices
+    expect(text).not.toMatch(asAmount(6800));
     expect(text).not.toContain(nextDayRef);
   });
 

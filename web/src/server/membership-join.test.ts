@@ -173,6 +173,39 @@ describe("buying a membership", () => {
     expect(await world.db.select().from(memberships)).toHaveLength(1);
   });
 
+  it("takes the first month once when its answer was lost after Square took it (the review of 2026-11-20)", async () => {
+    // Square as its sandbox answered on 2026-11-20: a key sent again with the same request gets the first answer again;
+    // with other details, IDEMPOTENCY_KEY_REUSED, which the Square provider answers as no answer (payments.ts).
+    const charge = world.provider.charge;
+    const taken = new Map<string, { token: string; paymentId: string }>();
+    let answerLost = true;
+    world.provider.charge = async (request) => {
+      const before = taken.get(request.idempotencyKey);
+      if (before) return before.token === request.token ? { ok: true, paymentId: before.paymentId } : { ok: false, unknown: true, message: "We could not reach the card processor." };
+      const paymentId = `mock_${request.idempotencyKey}`;
+      taken.set(request.idempotencyKey, { token: request.token, paymentId });
+      world.charges.push(request);
+      if (!answerLost) return { ok: true, paymentId };
+      answerLost = false;
+      return { ok: false, unknown: true, message: "We could not reach the card processor." };
+    };
+    try {
+      const once = input({ paymentToken: "token-first" });
+      expect(await joinMembership(world.db, once, deps())).toMatchObject({ ok: false, code: "no_answer" });
+      const [row] = await world.db.select().from(memberships);
+      // Sent again by a page that made a new token: not a refused card, and nothing is given up.
+      expect(await joinMembership(world.db, { ...once, paymentToken: "token-second" }, deps())).toMatchObject({ ok: false, code: "no_answer" });
+      expect((await rowOf(row.id)).status).toBe("starting");
+      // Sent again with the first token, as the page does: Square's first answer, and the membership starts on it.
+      const { membership } = expectOk(await joinMembership(world.db, once, deps()));
+      expect(membership.status).toBe("active");
+      expect(world.charges).toHaveLength(1);
+      expect((await world.db.select().from(membershipPayments)).map((payment) => payment.processorId)).toEqual([`mock_${row.id}`]);
+    } finally {
+      world.provider.charge = charge;
+    }
+  });
+
   it("refuses a plan no longer offered, details that are not right, and buying with no card processor", async () => {
     expect(await joinMembership(world.db, input({ acceptTerms: false }), deps())).toMatchObject({ ok: false, code: "invalid_input" });
     expect(await joinMembership(world.db, input({ customer: { name: "J", email: "not-an-email", phone: "1" } }), deps())).toMatchObject({ ok: false, code: "invalid_input" });

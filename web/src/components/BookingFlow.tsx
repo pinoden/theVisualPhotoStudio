@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   availabilityGrid,
   combinedStarts,
@@ -34,8 +34,7 @@ import { EMAIL_FIELD, EMAIL_RULE } from "@/lib/parse";
 import { count, hoursInWords } from "@/lib/words";
 import type { DayAvailability } from "@/server/availability";
 import type { Catalog } from "@/server/catalog";
-import type { PaymentClientConfig } from "@/server/payments";
-import { buyerVerification, loadScript, squareScript, tokenizeCard, type SquareCard } from "./square-card";
+import { buyerVerification, useCardForm } from "./square-card";
 
 type Mode = "studio" | "time";
 type Step = "studios" | "when" | "time" | "details" | "pay";
@@ -52,8 +51,6 @@ const STEP_LABEL: Record<Step, string> = {
   details: "Details",
   pay: "Payment",
 };
-
-const MOCK_TOKEN = "mock-card-ok";
 
 /** A random id for one attempt to book (see `requestId` in src/server/bookings.ts). */
 function newRequestId(): string {
@@ -145,11 +142,8 @@ export function BookingFlow({
   const today = useSyncExternalStore(subscribeNever, browserToday, serverToday);
   const [availability, setAvailability] = useState<DayAvailability | null>(null);
   const [loadingSlots, setLoadingSlots] = useState(false);
-  const [config, setConfig] = useState<PaymentClientConfig | null>(null);
-  const [cardReady, setCardReady] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
-  const cardRef = useRef<SquareCard | null>(null);
   /**
    * The id of the attempt to book on its way. Sent again with a retry that
    * follows no answer at all (the connection dropped), so that a booking that
@@ -279,6 +273,8 @@ export function BookingFlow({
   }, [studioIds, dayType, duration, rules, settings.multiStudioPercent, catalog.addons, addonCounts, promo, member, photography, session, combinationError]);
 
   const needsCard = price !== null && price.totalCents > 0;
+  // The payment configuration and Square's card form, on the payment step of a booking that costs money.
+  const cardForm = useCardForm(step === "pay" && needsCard, "card-container");
 
   // ── Loading data ───────────────────────────────────────────────────────────
   const fetchAvailability = useCallback(async (forDate: string) => {
@@ -295,34 +291,6 @@ export function BookingFlow({
       setLoadingSlots(false);
     }
   }, [photography]);
-
-  useEffect(() => {
-    if (step !== "pay" || config) return;
-    fetch("/api/booking-config", { cache: "no-store" })
-      .then((r) => r.json())
-      .then((c: PaymentClientConfig) => setConfig(c))
-      .catch(() => setError("Could not load the payment form. Please refresh the page."));
-  }, [step, config]);
-
-  useEffect(() => {
-    if (step !== "pay" || config?.mode !== "square" || !needsCard) return;
-    let cancelled = false;
-    (async () => {
-      await loadScript(squareScript(config));
-      if (cancelled || !window.Square) return;
-      const card = await window.Square.payments(config.squareApplicationId!, config.squareLocationId!).card();
-      if (cancelled) return void card.destroy();
-      await card.attach("#card-container");
-      cardRef.current = card;
-      setCardReady(true);
-    })().catch(() => setError("The card form failed to load. Please refresh the page."));
-    return () => {
-      cancelled = true;
-      setCardReady(false);
-      void cardRef.current?.destroy();
-      cardRef.current = null;
-    };
-  }, [step, config, needsCard]);
 
   async function applyCode() {
     const code = codeInput.trim();
@@ -373,6 +341,7 @@ export function BookingFlow({
   // ── Navigation ─────────────────────────────────────────────────────────────
   function go(index: number, options: { refetch?: boolean } = {}) {
     requestIdRef.current = null;
+    cardForm.newAttempt();
     setError("");
     setStepIndex(index);
     // Availability is read fresh whenever the customer reaches a step that shows it.
@@ -462,20 +431,14 @@ export function BookingFlow({
     try {
       let paymentToken: string | undefined;
       if (price.totalCents > 0) {
-        if (config?.mode === "mock") {
-          paymentToken = MOCK_TOKEN;
-        } else if (config?.mode === "square" && cardRef.current) {
-          // The card's bank may check the client here, on this page, before Square gives the token (3-D Secure).
-          const card = await tokenizeCard(cardRef.current, buyerVerification({ amountCents: price.totalCents, intent: "CHARGE", name, email }));
-          if (!card.ok) {
-            setError(card.message);
-            return;
-          }
-          paymentToken = card.token;
-        } else {
-          setError("Online payment is not available right now. Please contact the studio.");
+        // The card's bank may check the client here, on this page, before Square gives the token (3-D Secure). A press
+        // after no answer sends the same token again: it is the same attempt (`useCardForm`).
+        const card = await cardForm.token(buyerVerification({ amountCents: price.totalCents, intent: "CHARGE", name, email }));
+        if (!card.ok) {
+          setError(card.message);
           return;
         }
+        paymentToken = card.token;
       }
 
       const response = await fetch("/api/bookings", {
@@ -512,7 +475,10 @@ export function BookingFlow({
         return;
       }
       // An answer: this attempt is over, and the next press is a new one. Unless it is still on its way.
-      if (data.code !== "in_progress") requestIdRef.current = null;
+      if (data.code !== "in_progress") {
+        requestIdRef.current = null;
+        cardForm.newAttempt();
+      }
       if (data.code === "slot_taken") {
         setStart(null);
         go(steps.indexOf("time"), { refetch: true });
@@ -1120,19 +1086,19 @@ export function BookingFlow({
           {!needsCard && price && (
             <div className="notice">Nothing to pay: your code covers this booking. No card is needed.</div>
           )}
-          {needsCard && !config && <p>Loading payment form…</p>}
-          {needsCard && config?.mode === "mock" && (
+          {needsCard && !cardForm.config && !cardForm.problem && <p>Loading payment form…</p>}
+          {needsCard && cardForm.config?.mode === "mock" && (
             <div className="notice notice-warning">
               <strong>Test mode.</strong> No card processor is connected, so no card will be charged. The booking
               will be created as if payment succeeded.
             </div>
           )}
-          {needsCard && config?.mode === "disabled" && (
+          {needsCard && cardForm.config?.mode === "disabled" && (
             <div className="notice notice-warning">
               Online payment is not available right now. Please contact the studio to book.
             </div>
           )}
-          {needsCard && config?.mode === "square" && (
+          {needsCard && cardForm.config?.mode === "square" && (
             <>
               <span className="form-label" style={{ marginBottom: ".5rem" }}>
                 Card details
@@ -1142,6 +1108,11 @@ export function BookingFlow({
                 Secured by Square. Card details never reach our servers.
               </p>
             </>
+          )}
+          {needsCard && cardForm.problem && (
+            <div className="flash flash-error" role="alert">
+              {cardForm.problem}
+            </div>
           )}
           <div className="wizard-actions">
             <button type="button" className="btn btn-outline" onClick={() => go(stepIndex - 1)} disabled={submitting}>
@@ -1154,7 +1125,8 @@ export function BookingFlow({
               disabled={
                 submitting ||
                 !price ||
-                (needsCard && (!config || config.mode === "disabled" || (config.mode === "square" && !cardReady)))
+                (needsCard &&
+                  (!cardForm.config || cardForm.config.mode === "disabled" || (cardForm.config.mode === "square" && !cardForm.ready)))
               }
             >
               {submitting
