@@ -11,9 +11,11 @@
  * database, the report is printed, and nothing is written. Read the report,
  * then run it again with --write. A second run imports only what is new.
  *
- * The export: in Acuity, Reports → Import/Export → Export appointments, as a
- * CSV file, from today on. Keep it out of this repository: it holds clients'
- * details. The report names appointments by Acuity's id, their row in the
+ * The export: in Acuity, Reports → Import/Export, the dates from today on,
+ * cancelled appointments not included, then Export appointments (a CSV
+ * file). Leave the cancelled ones out: a file that lists them without a
+ * column saying so would import them as booked. Keep the file out of this
+ * repository: it holds clients' details. The report names appointments by Acuity's id, their row in the
  * file, their time and type, never a client.
  *
  * Which database: DATABASE_URL when it is set (staging, production), otherwise
