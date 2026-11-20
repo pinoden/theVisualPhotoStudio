@@ -149,7 +149,7 @@ async function Bookings({ searchParams }: Pick<PageProps<"/admin/bookings">, "se
                             )}
                             {b.studioHeldCents > 0 && (
                               <div style={{ fontSize: ".75rem", maxWidth: "12rem" }}>
-                                {formatCents(b.studioHeldCents)} of what was paid at the studio can be given back. It cannot be refunded from here:
+                                {formatCents(b.studioHeldCents)} of what was paid {b.studioHeldPlace} can be given back. It cannot be refunded from here:
                                 give back what is owed by hand, then record it on the appointment&apos;s page.
                               </div>
                             )}

@@ -48,10 +48,10 @@ import { formatInstant } from "./tz";
  * not be, also when a server still running in test mode wrote it beside the
  * live account.
  */
-export const TEST_PROCESSORS = ["mock", "square-sandbox"] as const;
+const TEST_PROCESSORS = ["mock", "square-sandbox"] as const;
 
 /** The processor that takes real money: Square's live account. */
-export const LIVE_PROCESSOR = "square";
+const LIVE_PROCESSOR = "square";
 
 export type MoneyKind = "test" | "live";
 

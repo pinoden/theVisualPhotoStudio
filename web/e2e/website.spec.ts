@@ -1,6 +1,6 @@
 import { expect, test, type Browser, type Locator, type Page } from "@playwright/test";
 import sharp from "sharp";
-import { accessibilityProblems, byLabel, byText, frameworkNoise, onScreen, shot, signIn } from "./helpers";
+import { accessibilityProblems, byLabel, byText, onScreen, shot, signIn, watchBrowser } from "./helpers";
 
 /**
  * The website's editor (the owner's requirements 21, 25, 26 and 27, and the
@@ -21,17 +21,7 @@ const OWNER = "owner6@studio.test";
 const MANAGER = "wes.e2e@studio.test";
 
 let browserProblems: string[] = [];
-const watch = (page: Page) => {
-  page.on("pageerror", (error) => {
-    if (!frameworkNoise(error.message)) browserProblems.push(`script error: ${error.message}`);
-  });
-  page.on("console", (message) => {
-    // Pages that deliberately answer "not found" log a failed request; that is expected.
-    if (message.type() === "error" && !message.text().startsWith("Failed to load resource")) {
-      browserProblems.push(`console error: ${message.text().slice(0, 400)}`);
-    }
-  });
-};
+const watch = (page: Page) => watchBrowser(page, (problem) => browserProblems.push(problem));
 test.beforeEach(({ page }) => {
   browserProblems = [];
   watch(page);
@@ -617,11 +607,13 @@ async function onCanvas(page: Page, element: Locator): Promise<{ x: number; y: n
  * editor: at the bottom of `onto`, which puts it after that block, or in the
  * middle of `onto`, which puts it into an empty place for blocks.
  *
- * On a busy machine the editor can miss a drag altogether: no place to drop
- * is ever shown, and the block stays in the air after the mouse lets go (the
- * tester's run of 2026-11-17, twice, with the machine's load at 7 to 12). So
- * the drag is judged by its outcome, a block more on the page, and one the
- * editor missed is let go of and made again, more slowly.
+ * The mouse moves as a hand moves it, and lets go once the editor shows where
+ * the block will go (`dragBlockOnce`). On a busy machine the editor can still
+ * miss a drag altogether: no place to drop is ever shown, and the block stays
+ * in the air after the mouse lets go (the tester's run of 2026-11-17, twice,
+ * with the machine's load at 7 to 12). So the drag is judged by its outcome,
+ * a block more on the page, and one the editor missed is let go of and made
+ * again, more slowly.
  */
 async function dragBlock(page: Page, name: string, onto: Locator, where: "bottom" | "middle" = "bottom") {
   const onPage = canvasOf(page).locator("[data-puck-component]");
@@ -663,16 +655,35 @@ async function dragBlockOnce(page: Page, name: string, onto: Locator, where: "bo
   const from = (await source.boundingBox())!;
   const target = where === "middle" ? await onCanvas(page, onto) : (await onto.boundingBox())!;
   const to = { x: target.x + target.width / 2, y: where === "middle" ? target.y + target.height / 2 : target.y + target.height - 2 };
-  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+  const start = { x: from.x + from.width / 2, y: from.y + from.height / 2 };
+  // As a hand moves a mouse: a little at a time, a move each time the browser draws. WebKit's editor missed every drag
+  // whose mouse jumped onto the page in one burst of moves, and took every drag that glided there, the first in a
+  // newly opened editor too (a probe of 2026-11-20: 0 of 4 against 8 of 8). Chromium takes both.
+  const glide = async (a: { x: number; y: number }, b: { x: number; y: number }, steps: number) => {
+    for (let step = 1; step <= steps; step++) {
+      await page.mouse.move(a.x + ((b.x - a.x) * step) / steps, a.y + ((b.y - a.y) * step) / steps);
+      await page.waitForTimeout(16);
+    }
+  };
+  await page.mouse.move(start.x, start.y);
   await page.mouse.down();
-  // The editor takes the press for a drag once the mouse has moved a little: it is given the time to.
-  await page.waitForTimeout(100 * slowly);
-  await page.mouse.move(from.x + from.width / 2 + 20, from.y + from.height / 2, { steps: 5 * slowly });
-  await page.waitForTimeout(100 * slowly);
-  await page.mouse.move(to.x, to.y, { steps: 30 * slowly });
-  await page.waitForTimeout(400 * slowly);
-  await page.mouse.move(to.x, to.y + 3, { steps: 5 });
-  await page.waitForTimeout(100 * slowly);
+  // The editor takes the press for a drag once the mouse has moved a little.
+  const off = { x: start.x + 20, y: start.y };
+  await glide(start, off, 10);
+  await glide(off, to, 40 * slowly);
+  // The editor drops a block only where it has drawn its blue line, which it draws inside the place the block will go.
+  // Until the line is there, the mouse moves a pixel either way along its row, as a hand never stays still. Into an
+  // empty place, the line must be inside it: gliding over the page on the way, the editor draws the line on the page
+  // first, and WebKit took longer than 100 ms to move it into the place (2026-11-20). The test's own check says what is
+  // missing if it never comes.
+  const line = (where === "middle" ? onto : canvasOf(page).locator("body")).locator("[data-puck-line-placeholder]");
+  for (let nudge = 0; nudge < 30 && !(await line.isVisible()); nudge++) {
+    await page.waitForTimeout(100);
+    await page.mouse.move(to.x + (nudge % 2 === 0 ? 1 : -1), to.y);
+  }
+  // Once more where the drag aims, so that the line follows the mouse there, then let go.
+  await page.mouse.move(to.x, to.y);
+  await page.waitForTimeout(200 * slowly);
   await page.mouse.up();
 }
 

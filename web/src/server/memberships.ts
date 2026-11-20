@@ -32,9 +32,9 @@ import { localDateOf } from "./tz";
 export const PLAN_NAME_MAX = 80;
 export const PLAN_DESCRIPTION_MAX = 500;
 /** A plan gives whole or half hours: from half an hour to 100 hours a month. */
-export const PLAN_MINUTES_RANGE = [30, 6000] as const;
+const PLAN_MINUTES_RANGE = [30, 6000] as const;
 /** At most $10,000 a month. */
-export const PLAN_PRICE_MAX_CENTS = 1_000_000;
+const PLAN_PRICE_MAX_CENTS = 1_000_000;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -896,7 +896,7 @@ export async function memberDetail(db: DbLike, membershipId: string): Promise<Me
 export const MINUTES_REASON_MIN = 3;
 export const MINUTES_REASON_MAX = 300;
 /** The most minutes added or taken away at once: 100 hours. */
-export const MINUTES_AT_ONCE = 6000;
+const MINUTES_AT_ONCE = 6000;
 
 export type CorrectMinutesResult = { ok: true; minutesLeft: number } | { ok: false; message: string };
 

@@ -92,7 +92,7 @@ export interface ImportReport {
 /** Thrown at the end of a rehearsal, to throw its transaction away. */
 class Rehearsal extends Error {}
 
-export const ACUITY_SOURCE = "acuity";
+const ACUITY_SOURCE = "acuity";
 
 /** Import the appointments that are still to come. */
 export async function importAcuityAppointments(db: Db, appointments: readonly AcuityAppointment[], options: ImportOptions): Promise<ImportReport> {

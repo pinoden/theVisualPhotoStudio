@@ -277,17 +277,16 @@ const VALIDATORS: { [K in Exclude<keyof Settings, "multiStudioPercent">]: (v: un
 };
 
 export type SettingKey = keyof Settings;
-export const SETTING_KEYS = Object.keys(DEFAULT_SETTINGS) as SettingKey[];
 
 /** True when `value` is acceptable for `key`. Used when the owner edits settings. */
-export function isValidSetting(key: string, value: unknown): key is SettingKey {
+function isValidSetting(key: string, value: unknown): key is SettingKey {
   if (key === "multiStudioPercent") return discountTable(value) !== null;
   const check = (VALIDATORS as Record<string, ((v: unknown) => boolean) | undefined>)[key];
   return check !== undefined && check(value);
 }
 
 /** Merge stored values over the defaults, ignoring anything malformed. */
-export function mergeSettings(rows: { key: string; value: unknown }[]): Settings {
+function mergeSettings(rows: { key: string; value: unknown }[]): Settings {
   const out: Settings = { ...DEFAULT_SETTINGS, multiStudioPercent: { ...DEFAULT_SETTINGS.multiStudioPercent } };
   for (const { key, value } of rows) {
     if (!isValidSetting(key, value)) continue;

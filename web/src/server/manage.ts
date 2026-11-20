@@ -192,7 +192,7 @@ export interface ManageChoices {
 }
 
 /** `heldCents`: what the booking's card holds, not taken yet, which the words say what becomes of. */
-export function describeManageOptions(options: ManageOptions, settings: Settings, heldCents = 0, place = "at the studio"): ManageChoices {
+function describeManageOptions(options: ManageOptions, settings: Settings, heldCents = 0, place = "at the studio"): ManageChoices {
   return {
     cancel: options.cancel.allowed
       ? { allowed: true, text: cancelOutcomeText(options.cancel, settings, {}, heldCents, place) }
@@ -208,7 +208,7 @@ export function describeManageOptions(options: ManageOptions, settings: Settings
 }
 
 /** What moving a booking gives the customer, said before they confirm. */
-export function rescheduleOfferText(
+function rescheduleOfferText(
   outcome: Extract<RescheduleOutcome, { allowed: true }>,
   settings: Pick<Settings, "creditValidDays">,
 ): string {
@@ -352,11 +352,11 @@ function endedText(booking: { status: string; cancelReason: string | null }): st
   }
 }
 
-export function cancelBlockText(reason: CancelBlock): string {
+function cancelBlockText(reason: CancelBlock): string {
   return reason === "already_started" ? "This booking has already started." : NOT_CHANGEABLE;
 }
 
-export function rescheduleBlockText(
+function rescheduleBlockText(
   reason: RescheduleBlock,
   settings: Pick<Settings, "rescheduleCutoffHours" | "rescheduleFeeCents" | "memberReturnHours">,
   heldCents = 0,

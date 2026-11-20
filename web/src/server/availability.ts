@@ -60,7 +60,7 @@ export interface DayAvailability {
 }
 
 /** Which dates can be booked right now, and from what time on the first day. */
-export function bookingWindow(
+function bookingWindow(
   date: string,
   now: Date,
   settings: Catalog["settings"],

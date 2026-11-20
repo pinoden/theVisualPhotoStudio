@@ -30,11 +30,8 @@ import { localDateOf } from "./tz";
  */
 
 export type { ChargeKind } from "@/lib/charge-label";
-export { chargeLabel } from "@/lib/charge-label";
 
-export const CHARGE_KINDS: Record<ChargeKind, string> = { overtime: "Overtime", cleaning: "Cleaning", damage: "Damage" };
-
-export const isChargeKind = (value: string): value is ChargeKind => Object.hasOwn(CHARGE_KINDS, value);
+const CHARGE_KINDS: Record<ChargeKind, string> = { overtime: "Overtime", cleaning: "Cleaning", damage: "Damage" };
 
 /** The longest overtime added at once: ten hours. */
 export const OVERTIME_MAX_MINUTES = 600;

@@ -5,7 +5,7 @@
 import { DateTime } from "luxon";
 import { parseIsoDate, STUDIO_TIME_ZONE, type IsoDate } from "@/lib/domain/time";
 
-export const STUDIO_TZ = STUDIO_TIME_ZONE;
+const STUDIO_TZ = STUDIO_TIME_ZONE;
 
 /**
  * The instant at which the studio's clocks show `minute` past midnight on

@@ -9,7 +9,7 @@ import { deleteSession, getSessionUser, parseOwnerEmails, type AuthUser, type Ro
  * action that shows or changes private data must go through these functions;
  * there is no check in a layout, because layouts do not re-run on navigation.
  */
-export const SESSION_COOKIE = "vs_session";
+const SESSION_COOKIE = "vs_session";
 
 export function ownerEmails(): string[] {
   return parseOwnerEmails(process.env.OWNER_EMAILS);
@@ -50,7 +50,7 @@ export async function requireUser(next: string): Promise<AuthUser> {
  * The signed-in user if they hold one of `roles`. Anyone else gets the
  * ordinary "not found" page, so these areas are not advertised.
  */
-export async function requireRole(roles: Role[], next: string): Promise<AuthUser> {
+async function requireRole(roles: Role[], next: string): Promise<AuthUser> {
   const user = await requireUser(next);
   if (!roles.includes(user.role)) notFound();
   return user;

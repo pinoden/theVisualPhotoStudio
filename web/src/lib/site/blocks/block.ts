@@ -63,7 +63,7 @@ export interface BlockSpec<F extends Fields = Fields> {
  * It is the page's business, not the block's: `PageBlocks` leaves out a block
  * whose condition does not hold, and the editor marks it.
  */
-export const WHEN_FIELD = { kind: "choice", label: "Show it", options: WHEN_OPTIONS, start: "" } as const satisfies ChoiceField;
+const WHEN_FIELD = { kind: "choice", label: "Show it", options: WHEN_OPTIONS, start: "" } as const satisfies ChoiceField;
 
 type WithWhen<F extends Fields> = F & { when: typeof WHEN_FIELD };
 
@@ -86,6 +86,3 @@ export function cssVars(values: Record<string, [value: string | number, onPhone?
   }
   return style as CSSProperties;
 }
-
-/** A note the editor shows in place of a block that has nothing to show yet. Never on the website itself. */
-export const EDITOR_NOTE = "blk-note";

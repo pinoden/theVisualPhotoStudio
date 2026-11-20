@@ -31,7 +31,7 @@ export const PAST_STATUSES = {
 } as const;
 export type PastStatus = keyof typeof PAST_STATUSES;
 
-export function isPastStatus(value: unknown): value is PastStatus {
+function isPastStatus(value: unknown): value is PastStatus {
   return typeof value === "string" && Object.hasOwn(PAST_STATUSES, value);
 }
 

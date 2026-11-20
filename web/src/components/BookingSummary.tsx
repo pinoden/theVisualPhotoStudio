@@ -5,7 +5,7 @@ import type { BookingView } from "@/server/bookings";
 import { STANDS } from "@/server/money";
 import { formatRange } from "@/server/tz";
 
-export const STATUS_LABEL: Record<string, string> = {
+const STATUS_LABEL: Record<string, string> = {
   confirmed: "Confirmed",
   completed: "Completed",
   cancelled: "Cancelled",

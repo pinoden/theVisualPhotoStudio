@@ -223,7 +223,7 @@ export async function completeVisits(db: Db, now: Date, baseUrl: string): Promis
  * the charge ended and the processor may have taken the money. Close the
  * record and ask the owner to look, once.
  */
-export async function flagInterruptedPayments(db: Db): Promise<number> {
+async function flagInterruptedPayments(db: Db): Promise<number> {
   const stuck = await db
     .select({ id: payments.id, amountCents: payments.amountCents, ref: bookings.ref, customer: bookings.customerName })
     .from(payments)

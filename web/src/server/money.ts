@@ -39,18 +39,36 @@ export async function netCardPaidCents(db: DbLike, bookingId: string): Promise<n
 }
 
 /**
- * Where the money recorded by hand for a booking was paid, in words (`handPaidPlace`): at the studio, or through Acuity
- * for an appointment imported from the old site, which a cancellation then names (the review of 2026-11-20). Only
- * what was not given back counts.
+ * For several bookings at once: the money recorded by hand for each, less what was given back by hand, and where it
+ * was paid, in words (`handPaidPlace`): at the studio, or through Acuity for an appointment imported from the old site,
+ * which a cancellation and the admin's list of bookings then name (the review of 2026-11-20). Only what was not given
+ * back counts toward where. A booking with no such payment is not in the map.
  */
-export async function handPaidPlaceOf(db: DbLike, bookingId: string): Promise<string> {
+export async function handPaidByBooking(db: DbLike, bookingIds: string[]): Promise<Map<string, { cents: number; place: string }>> {
+  if (bookingIds.length === 0) return new Map();
   const rows = await db
-    .select({ method: payments.method, net: sql<number>`coalesce(sum(${payments.amountCents} - ${payments.refundedCents}), 0)::int` })
+    .select({
+      bookingId: payments.bookingId,
+      method: payments.method,
+      net: sql<number>`coalesce(sum(${payments.amountCents} - ${payments.refundedCents}), 0)::int`,
+    })
     .from(payments)
-    .where(and(eq(payments.bookingId, bookingId), eq(payments.provider, MANUAL_PROVIDER), eq(payments.status, "succeeded")))
-    .groupBy(payments.method);
-  const kept = rows.filter((row) => row.net > 0);
-  return handPaidPlace({ atStudio: kept.some((row) => row.method !== ACUITY_METHOD), throughAcuity: kept.some((row) => row.method === ACUITY_METHOD) });
+    .where(and(inArray(payments.bookingId, bookingIds), eq(payments.provider, MANUAL_PROVIDER), eq(payments.status, "succeeded")))
+    .groupBy(payments.bookingId, payments.method);
+  const byBooking = new Map<string, { method: string | null; net: number }[]>();
+  for (const row of rows) byBooking.set(row.bookingId, [...(byBooking.get(row.bookingId) ?? []), row]);
+  return new Map(
+    [...byBooking].map(([bookingId, methods]) => {
+      const kept = methods.filter((row) => row.net > 0);
+      const place = handPaidPlace({ atStudio: kept.some((row) => row.method !== ACUITY_METHOD), throughAcuity: kept.some((row) => row.method === ACUITY_METHOD) });
+      return [bookingId, { cents: methods.reduce((sum, row) => sum + row.net, 0), place }];
+    }),
+  );
+}
+
+/** Where the money recorded by hand for one booking was paid, in words (`handPaidByBooking`). */
+export async function handPaidPlaceOf(db: DbLike, bookingId: string): Promise<string> {
+  return (await handPaidByBooking(db, [bookingId])).get(bookingId)?.place ?? handPaidPlace({ atStudio: false, throughAcuity: false });
 }
 
 /** Money taken at the studio for a booking and recorded by hand, less what was given back by hand. */
@@ -175,7 +193,7 @@ export async function creditReturnedCentsByBooking(db: DbLike, bookingIds: strin
  * 2026-11-18: credit refunded and the booking moved back to a day that costs more must owe the difference again). A
  * booking that received nothing is not in the map.
  */
-export async function paidTowardPriceCentsByBooking(db: DbLike, bookingIds: string[]): Promise<Map<string, number>> {
+async function paidTowardPriceCentsByBooking(db: DbLike, bookingIds: string[]): Promise<Map<string, number>> {
   if (bookingIds.length === 0) return new Map();
   const [received, returned] = await together(db, [() => receivedCentsByBooking(db, bookingIds), () => creditReturnedCentsByBooking(db, bookingIds)]);
   return new Map([...received].map(([id, cents]) => [id, cents - (returned.get(id) ?? 0)]));

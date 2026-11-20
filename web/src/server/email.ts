@@ -106,7 +106,7 @@ export interface EmailTransport {
 }
 
 /** Development transport: prints the message to the server log. */
-export const logTransport: EmailTransport = {
+const logTransport: EmailTransport = {
   name: "log",
   async send(message) {
     const replyTo = message.replyTo ? ` (reply to ${message.replyTo})` : "";

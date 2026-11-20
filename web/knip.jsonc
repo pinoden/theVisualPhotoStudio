@@ -1,0 +1,10 @@
+// knip finds files, exports and packages nothing uses: `npx knip@5.88.1` from web/ (see "Commands" in ProjectLibrary.md).
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  // The scripts run by hand (`npx tsx scripts/...`) and the Neon CLI's own configuration.
+  "entry": ["scripts/*.ts", "neon.ts"],
+  // A type exported beside the function that returns it, and used there, is that function's to name.
+  "ignoreExportsUsedInFile": { "interface": true, "type": true },
+  // Installed by `neon init` with @neon/config (HANDOFF.md, "Neon staging"); no code imports it.
+  "ignoreDependencies": ["@neon/env"]
+}

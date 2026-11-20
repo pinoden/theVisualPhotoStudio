@@ -48,7 +48,7 @@ const FORMATS: Record<string, { ext: string; contentType: string }> = {
   webp: { ext: "webp", contentType: "image/webp" },
   avif: { ext: "avif", contentType: "image/avif" },
 };
-export const ACCEPTED_PICTURES = "JPEG, PNG, WebP or AVIF";
+const ACCEPTED_PICTURES = "JPEG, PNG, WebP or AVIF";
 
 /** A picture as a page needs it. */
 export interface Picture {
@@ -82,7 +82,7 @@ export interface MediaUse {
 type Row = typeof media.$inferSelect;
 
 /** The address of a picture: its id, its version, and its name for people and search engines. */
-export function mediaUrl(row: Pick<Row, "id" | "version" | "filename">): string {
+function mediaUrl(row: Pick<Row, "id" | "version" | "filename">): string {
   return `/media/${row.id}/${row.version}/${row.filename}`;
 }
 

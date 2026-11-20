@@ -3,11 +3,13 @@ import { eq, sql } from "drizzle-orm";
 import { bookings, payments, photographerHolds, studioHolds, studios } from "@/db/schema";
 import type { AcuityAppointment } from "@/lib/acuity";
 import { importAcuityAppointments, shareOf, type ImportOptions } from "./acuity-import";
+import { listBookings } from "./admin";
 import { getAppointment } from "./appointments";
 import type { AuthUser } from "./auth";
 import { listBookingsForEmail } from "./bookings";
 import { cancelBooking, getManageChoices } from "./manage";
 import { loadReceipts } from "./receipts";
+import { recordStudioPayment } from "./studio-payments";
 import { createTestWorld, expectOk, FAR, h, NOW, type TestWorld } from "./testing";
 
 /**
@@ -238,6 +240,23 @@ describe("importing Acuity's appointments still to come", () => {
     expect(notice.body).toContain("Of what was paid through Acuity, $176 is refunded by the rental terms, less the 5% fee: $167.20.");
     const [toClient] = await world.emails("booking_cancelled");
     expect(toClient.body).toContain("Of what you paid through Acuity, $167.20 is refunded");
+  });
+
+  it("says in the admin's list of bookings where the money to give back by hand was paid: through Acuity, or there and at the studio", async () => {
+    const report = await importAcuityAppointments(
+      world.db,
+      [
+        appointment(),
+        // $50 paid online in Acuity, the rest owed.
+        appointment({ id: "1002", row: 3, start: { date: FAR, minute: h(14) }, end: { date: FAR, minute: h(16) }, markedPaid: false, paidOnlineCents: 5000 }),
+      ],
+      options(),
+    );
+    const [inAcuity, partly] = report.imported.map((row) => row.ref);
+    expectOk(await recordStudioPayment(world.db, owner, partly, { amountCents: 12600, method: "cash", note: "" }, NOW));
+    const listed = await listBookings(world.db, { from: FAR, to: FAR });
+    expect(listed.find((row) => row.ref === inAcuity)).toMatchObject({ studioHeldCents: 17600, studioHeldPlace: "through Acuity" });
+    expect(listed.find((row) => row.ref === partly)).toMatchObject({ studioHeldCents: 17600, studioHeldPlace: "at the studio and through Acuity" });
   });
 
   it("names what takes each studio by that studio's own clean-up gap, not the longest (the review of 2026-11-20)", async () => {

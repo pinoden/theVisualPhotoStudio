@@ -28,7 +28,7 @@ export interface FileStore {
 }
 
 /** Files as rows of `site_files`. Given a transaction, a file is written or removed together with the row that names it. */
-export function databaseFiles(db: DbLike): FileStore {
+function databaseFiles(db: DbLike): FileStore {
   return {
     async put(key, bytes, contentType) {
       await db

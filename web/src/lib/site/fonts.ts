@@ -17,13 +17,6 @@
 
 export type FontGroup = "serif" | "sans" | "display" | "script";
 
-export const FONT_GROUPS: Record<FontGroup, string> = {
-  serif: "Serif: classic, with small strokes at the ends of the letters",
-  sans: "Sans serif: plain and modern",
-  display: "Display: strong shapes, for headings",
-  script: "Script: handwriting, for a few words",
-};
-
 export interface LibraryFont {
   id: string;
   name: string;
