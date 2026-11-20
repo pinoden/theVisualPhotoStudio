@@ -5,6 +5,7 @@ import { connection } from "next/server";
 import { Suspense } from "react";
 import { getDb } from "@/db/client";
 import { emailOutbox } from "@/db/schema";
+import { mayUseTestTools } from "@/server/browser-test-server";
 import { formatInstant } from "@/server/tz";
 import { runTasksNowAction } from "./actions";
 
@@ -13,7 +14,8 @@ export const metadata: Metadata = { title: "Development: emails", robots: { inde
 /**
  * Development aid. No email service is connected locally, so every message
  * the site would send (sign-in codes, confirmations, loyalty and reschedule
- * codes) can be read here. The page does not exist in production.
+ * codes) can be read here. The page does not exist in production, but on the
+ * browser tests' own server for a production build (`mayUseTestTools`).
  */
 export default function OutboxPage(props: PageProps<"/dev/outbox">) {
   return (
@@ -29,7 +31,7 @@ export default function OutboxPage(props: PageProps<"/dev/outbox">) {
 
 async function Outbox({ searchParams }: Pick<PageProps<"/dev/outbox">, "searchParams">) {
   await connection();
-  if (process.env.NODE_ENV === "production") notFound();
+  if (!mayUseTestTools()) notFound();
   const query = await searchParams;
   const db = await getDb();
   const rows = await db.select().from(emailOutbox).orderBy(desc(emailOutbox.createdAt)).limit(50);

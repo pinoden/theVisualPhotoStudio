@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { cache } from "react";
 import { draftMode, headers } from "next/headers";
+import { connection } from "next/server";
 import { getDb } from "@/db/client";
 import { isCheckScope, WEBSITE_CHECK_HEADER, type CheckScope } from "@/lib/site/website-check";
 import type { Picture } from "./media";
@@ -30,6 +31,11 @@ import { DESIGN_DOC, FRAME_DOC, loadDraftOrPublished, websiteAbilities } from ".
 export const isPreview = cache(async (): Promise<boolean> => {
   const { isEnabled } = await draftMode();
   if (!isEnabled) return false;
+  // A preview is drawn when it is asked for. A production build also prefetches each linked page with the visitor's
+  // cookies (Partial Prefetching), and in Draft Mode nothing it would draw is kept: without this, every such prefetch
+  // in a preview read the clock for the session (`new Date()` while prerendering) and missed its caches, which
+  // Next.js logs as errors (the browser tests against a production build, 2026-11-20).
+  await connection();
   const user = await getCurrentUser();
   if (!user) return false;
   const may = await websiteAbilities(await getDb(), user);

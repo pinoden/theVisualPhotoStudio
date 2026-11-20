@@ -68,6 +68,8 @@ const PATHS = [
 ];
 
 export default async function globalSetup(config: FullConfig): Promise<void> {
+  // A production build (E2E_BUILD=1) has compiled every page already.
+  if (process.env.E2E_BUILD === "1") return;
   const baseURL = config.projects[0].use.baseURL;
   for (const path of PATHS) {
     try {

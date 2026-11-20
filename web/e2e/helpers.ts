@@ -54,13 +54,26 @@ const frameworkNoise = (text: string) =>
 const CUT_OFF = "Load failed";
 
 /**
+ * WebKit's words for a fetch that a page started and then left before all of
+ * its answer had come in: "Fetch API cannot load <address> due to access
+ * control checks." (Playwright's WebKit cuts the message at the address's first
+ * colon, so it starts "/localhost:<port>/".) A production build prefetches the
+ * pages linked from the one shown, their page data (`?_rsc=`), and a test that
+ * opens the next page at once cuts some off (2026-11-20: a prefetch answered
+ * 200 was cut off by the next page, and reported 1.8 s later, once that page
+ * had arrived). So it is not tied to leaving; it is kept to the framework's
+ * page data from the site's own address. Chromium says nothing then.
+ */
+const cutOffPageData = (message: string) => /^\/?\/?localhost:\d+\/\S*[?&]_rsc=\S* due to access control checks\.$/.test(message);
+
+/**
  * Watch a page for what its browser says went wrong, and report each problem:
  * errors of its scripts, and errors in its console (unless `consoleErrors` is
  * false). Left out: the development build's own (`frameworkNoise`), requests
  * the console says failed (pages that answer "not found" on purpose log one,
  * and the tests check what the page shows), and a request cut off by leaving
- * the page for another (`CUT_OFF`). `where` follows "script error" in a
- * report: " on an iPad".
+ * the page for another (`CUT_OFF`, `cutOffPageData`). `where` follows "script
+ * error" in a report: " on an iPad".
  */
 export function watchBrowser(page: Page, report: (problem: string) => void, { where = "", consoleErrors = true } = {}) {
   // From the request for the next document until it is shown, the page is being left.
@@ -72,7 +85,7 @@ export function watchBrowser(page: Page, report: (problem: string) => void, { wh
     if (frame === page.mainFrame()) leaving = false;
   });
   page.on("pageerror", (error) => {
-    if (frameworkNoise(error.message) || (leaving && error.message === CUT_OFF)) return;
+    if (frameworkNoise(error.message) || cutOffPageData(error.message) || (leaving && error.message === CUT_OFF)) return;
     report(`script error${where}: ${error.message}`);
   });
   if (!consoleErrors) return;
@@ -81,6 +94,62 @@ export function watchBrowser(page: Page, report: (problem: string) => void, { wh
       report(`console error${where}: ${message.text().slice(0, 400)}`);
     }
   });
+}
+
+/**
+ * Follow a link to a page drawn when it is asked for, and wait for all of it,
+ * as a person waits for a page to load. A production build shows such a page
+ * as soon as its first part has come, and its address changes at once, while
+ * the rest is still on its way (the framework fetches it with `RSC: 1`; a
+ * prefetch adds `Next-Router-Prefetch`). WebKit cuts that off when the test
+ * leaves at once with `page.goto`, and the framework then loads the page again
+ * in full, over the one the test asked for ("Navigation ... is interrupted by
+ * another navigation", 2026-11-20). Chromium says nothing then.
+ */
+export async function followLink(page: Page, link: Locator): Promise<void> {
+  const href = await link.getAttribute("href");
+  if (!href) throw new Error("followLink: the link has no address");
+  const path = new URL(href, page.url()).pathname;
+  const rest = page.waitForResponse((response) => {
+    const headers = response.request().headers();
+    return headers["rsc"] === "1" && !headers["next-router-prefetch"] && new URL(response.url()).pathname === path;
+  });
+  await link.click();
+  await (await rest).finished();
+}
+
+type Answer = { status(): number; headers(): Record<string, string>; text(): Promise<string> } | null;
+
+/*
+ * On Vercel, and from the development server, an address with no page answers
+ * at once with its own status code: 404, or 308 for an address that moved. A
+ * production build that Next.js serves itself (E2E_BUILD, and `next start`
+ * alike) sends a page's shell first, with a 200, and streams the "not found"
+ * or the redirect after it (Next.js's guide, "Status codes": "Sending the
+ * shell starts the response with a 200"). A missing page answers 404 from its
+ * cache after that; an old address, 200 again, or from the cache a 308 with no
+ * Location (Next.js 16.4.6, 2026-11-20). These two accept those, and nothing
+ * else.
+ */
+
+/** Whether an answer is the website's "not found" page: never the page itself. */
+export async function isNotFoundPage(answer: Answer): Promise<boolean> {
+  if (!answer) return false;
+  if (answer.status() === 404) return true;
+  if (process.env.E2E_BUILD !== "1" || answer.status() !== 200) return false;
+  const body = await answer.text();
+  return body.includes('<meta name="robots" content="noindex"') && body.includes("This page could not be found.");
+}
+
+/**
+ * Whether an answer sends the browser on to `to` for good: a 308 to it, or (E2E_BUILD) a page carrying the
+ * framework's own permanent redirect to it, which its router follows in the browser. Follow it with a browser too.
+ */
+export async function isPermanentRedirect(answer: Answer, to: string): Promise<boolean> {
+  if (!answer) return false;
+  if (answer.status() === 308 && answer.headers()["location"] === to) return true;
+  if (process.env.E2E_BUILD !== "1" || ![200, 308].includes(answer.status())) return false;
+  return (await answer.text()).includes(`NEXT_REDIRECT;replace;${to};308;`);
 }
 
 /*

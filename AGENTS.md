@@ -41,7 +41,7 @@ Sections of `ProjectLibrary.md` worth knowing:
 
 - One tool works in this checkout at a time. To work at the same time, give the second tool its own git worktree and its own `npm install`.
 - Never edit files under `web/` while a browser-test run or a tester pass is going: its server reads the working tree, and the run reports failures that are not real.
-- One process per build folder and per local database. A second browser-test run needs its own name and port: `E2E_NAME=<name> E2E_PORT=<port> npm run test:e2e`. Ports in use: 3000 (dev), 3211 (browser tests), 3213 (the tester).
+- One process per build folder and per local database. A second browser-test run needs its own name and port: `E2E_NAME=<name> E2E_PORT=<port> npm run test:e2e`. Ports in use: 3000 (dev), 3211 (browser tests), 3213 (the tester), 3214 (WebKit), 3215 (a production build).
 - Create a migration only on an up-to-date tree, so that two tools never take the same number.
 - End each commit message with a line that names the tool that wrote it (Claude Code adds `Co-Authored-By`; Codex adds `Tool: Codex`), so the history shows whose work a commit is.
 - What one tool learns that the other needs goes in this file or in `ProjectLibrary.md`. A tool's private memory or notes are invisible to the other.
@@ -66,6 +66,7 @@ npm run lint
 npm run knip         # files, exports and packages nothing uses (web/knip.jsonc)
 npm run test:e2e     # browser tests (Playwright), about 11 minutes, own server on port 3211
 E2E_NAME=webkit E2E_PORT=3214 npx playwright test --browser=webkit   # the same in WebKit, Safari's engine (`npx playwright install webkit` once)
+E2E_BUILD=1 E2E_NAME=prod E2E_PORT=3215 npx playwright test --browser=webkit   # the same against a production build, over HTTPS
 npm run db:generate  # after editing src/db/schema.ts
 npx drizzle-kit generate --custom --name <name>   # a migration written by hand
 npm run check:square # the Square code against Square's sandbox; needs web/.env.square-sandbox
@@ -82,9 +83,10 @@ A migration is tried on a copy of a database that holds real rows before it is c
 GitHub runs the same checks (`.github/workflows/ci.yml`) on every pull request into `master` and every push to `rebuild`:
 - the job `checks`: type check, lint, unused code (`knip`), unit and integration tests;
 - the job `browser`: the whole browser suite in Chromium;
-- the job `webkit`: the same suite in WebKit, Safari's engine.
+- the job `webkit`: the same suite in WebKit, Safari's engine;
+- the job `webkit-production`: the same suite in WebKit against a production build, served over HTTPS (since 2026-11-20).
 
-Branch protection on `master` requires all three jobs to pass before a pull request can be merged (`webkit` since 2026-11-20), for everyone, the owner included, and refuses direct pushes to `master`. A failed browser run keeps its screenshots and traces as an artifact for 14 days. CI retries no failed test (`playwright.config.ts` says why) and refuses a `test.only`. Read a failure before running the job again (`gh run rerun <id> --failed`). One that does not come back was a flake: record it in `HANDOFF.md` and fix its cause. The repository is public, so CI's minutes are free. Dependabot opens update pull requests into `rebuild` once a month (`.github/dependabot.yml`); CI runs on them too, and they are merged like any other change. CI runs in UTC, as the host will. Running the suites locally before pushing is still expected: CI is the gate, not the first check.
+Branch protection on `master` requires `checks`, `browser` and `webkit` to pass before a pull request can be merged (`webkit` since 2026-11-20; `webkit-production` not yet), for everyone, the owner included, and refuses direct pushes to `master`. A failed browser run keeps its screenshots and traces as an artifact for 14 days. CI retries no failed test (`playwright.config.ts` says why) and refuses a `test.only`. Read a failure before running the job again (`gh run rerun <id> --failed`). One that does not come back was a flake: record it in `HANDOFF.md` and fix its cause. The repository is public, so CI's minutes are free. Dependabot opens update pull requests into `rebuild` once a month (`.github/dependabot.yml`); CI runs on them too, and they are merged like any other change. CI runs in UTC, as the host will. Running the suites locally before pushing is still expected: CI is the gate, not the first check.
 
 ## Rules that are easy to break
 

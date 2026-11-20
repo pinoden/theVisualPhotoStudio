@@ -8,6 +8,7 @@ import {
   confirmAndGetRef,
   dateAhead,
   fillDetails,
+  followLink,
   latestEmail,
   next,
   onScreen,
@@ -85,8 +86,8 @@ test("public pages show the studios and the live price list", async ({ page }) =
   expect(business).toMatchObject({ "@type": "LocalBusiness", name: "The Visuals Photo Studio", telephone: "(407) 663-6109" });
   expect(business.address).toMatchObject({ addressLocality: "Winter Park", addressRegion: "FL", postalCode: "32792" });
   await expect(page.locator('meta[property="og:title"]')).toHaveAttribute("content", "The Visuals Photo Studio | Winter Park, FL");
-  // The website's own address, made whole with SITE_URL.
-  await expect(page.locator('link[rel="canonical"]')).toHaveAttribute("href", /^http:\/\/localhost:\d+\/?$/);
+  // The website's own address, made whole with SITE_URL (https against a production build, E2E_BUILD=1).
+  await expect(page.locator('link[rel="canonical"]')).toHaveAttribute("href", /^https?:\/\/localhost:\d+\/?$/);
 
   await page.goto("/rates");
   await expect(page.getByRole("heading", { name: "Studio Rates" })).toBeVisible();
@@ -1353,7 +1354,7 @@ test("the owners look a customer up, see what they paid, and correct their stamp
   // From an appointment, the client's name leads to this page.
   await onScreen(page.locator("#appointments")).getByRole("link").first().click();
   await expect(page.getByRole("heading", { name: "Jane Smith", level: 1 })).toBeVisible();
-  await onScreen(page.locator(".detail-list")).getByRole("link", { name: "Jane Smith" }).click();
+  await followLink(page, onScreen(page.locator(".detail-list")).getByRole("link", { name: "Jane Smith" }));
   await expect(page).toHaveURL(new RegExp(`/admin/customers/${encodeURIComponent(jane.email).replace(/[.]/g, "\\.")}`));
 
   // Loyalty switched off and on again starts every client's stamps over, and the free hours they hold stay valid

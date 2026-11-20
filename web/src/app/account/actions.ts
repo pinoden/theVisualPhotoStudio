@@ -4,6 +4,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getDb } from "@/db/client";
 import { requestLoginCode, verifyLoginCode } from "@/server/auth";
+import { mayUseTestTools } from "@/server/browser-test-server";
 import { clientAddress, limitRate } from "@/server/rate-limit";
 import { flushEmailsSoon } from "@/server/runtime";
 import { openSession, ownerEmails, safeNextPath } from "@/server/session";
@@ -17,8 +18,8 @@ export interface SignInState {
 
 // From one address in 15 minutes: ten codes asked for, thirty codes tried, counted in the database (the security review
 // of 2026-11-19). The browser tests all come from one address and sign in more often than that, so their server raises
-// the number with SIGN_IN_REQUESTS_PER_IP. Production ignores it.
-const perAddress = process.env.NODE_ENV === "production" ? 10 : Number(process.env.SIGN_IN_REQUESTS_PER_IP) || 10;
+// the number with SIGN_IN_REQUESTS_PER_IP. Production ignores it, but on their own server (`mayUseTestTools`).
+const perAddress = mayUseTestTools() ? Number(process.env.SIGN_IN_REQUESTS_PER_IP) || 10 : 10;
 const SIGN_IN_WINDOW_MS = 15 * 60_000;
 const TOO_MANY_HERE = "Too many sign-in attempts from this network. Please wait 15 minutes and try again.";
 

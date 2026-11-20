@@ -1,6 +1,7 @@
 # The checks every change must pass before it can be merged into master.
-# Branch protection on master requires all three jobs to pass: "checks", "browser" and "webkit" (the browser suite in
-# Safari's engine; since 2026-11-20, after five runs in a row passed). No job retries a failed test (AGENTS.md).
+# Branch protection on master requires "checks", "browser" and "webkit" to pass ("webkit", the browser suite in
+# Safari's engine, since 2026-11-20, after five runs in a row passed). "webkit-production", the same suite against a
+# production build, runs beside them and is not required yet. No job retries a failed test (AGENTS.md).
 # The site needs no secrets for these: it uses its embedded database and the pretend card processor.
 # The repository is public, so GitHub's standard runners cost nothing here.
 
@@ -99,4 +100,36 @@ jobs:
         with:
           name: webkit-test-results
           path: web/test-results-webkit/
+          retention-days: 14
+
+  webkit-production:
+    # The same browser suite in WebKit against a production build (`next build`), served over HTTPS as the host serves
+    # the site (E2E_BUILD in playwright.config.ts): its prefetching, caching and Secure cookies, which the development
+    # server has not.
+    name: webkit-production
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: web/.nvmrc # the one Node version: on developers' machines, here and on the host
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - name: Install WebKit
+        run: npx playwright install --with-deps webkit
+      - name: Browser tests in WebKit, against a production build
+        run: npx playwright test --browser=webkit
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+          # Its own build, database and results folders, named as on a developer's machine (ProjectLibrary.md).
+          E2E_NAME: prod
+          E2E_BUILD: "1"
+      - name: Keep the results of a failed run
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: webkit-production-test-results
+          path: web/test-results-prod/
           retention-days: 14
