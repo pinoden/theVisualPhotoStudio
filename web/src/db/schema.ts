@@ -556,7 +556,10 @@ export const payments = pgTable("payments", {
   /** What the administrator wrote beside it. */
   note: text("note").notNull().default(""),
   createdAt: createdAt(),
-});
+}, (t) => [
+  // A booking's payments are read on nearly every page that shows money (migration 0050).
+  index("payments_booking_idx").on(t.bookingId),
+]);
 
 /**
  * A request for payment emailed to a client: a page of the card processor
@@ -655,7 +658,11 @@ export const refunds = pgTable(
     settledAt: ts("settled_at"),
     createdAt: createdAt(),
   },
-  (t) => [check("refunds_credit_cents", sql`${t.creditCents} >= 0 and ${t.creditCents} <= ${t.amountCents}`)],
+  (t) => [
+    check("refunds_credit_cents", sql`${t.creditCents} >= 0 and ${t.creditCents} <= ${t.amountCents}`),
+    // A payment's refunds are read with the payment (migration 0050).
+    index("refunds_payment_idx").on(t.paymentId),
+  ],
 );
 
 /** Every email the system wants to send. A sender delivers the unsent rows. */
@@ -813,7 +820,11 @@ export const membershipPayments = pgTable(
     /** Set when it was given back: a first month whose membership could not be set up. */
     refundedAt: ts("refunded_at"),
   },
-  (t) => [check("membership_payments_amount", sql`${t.amountCents} > 0`)],
+  (t) => [
+    check("membership_payments_amount", sql`${t.amountCents} > 0`),
+    // A membership's months, read for its pages and its billing (migration 0050).
+    index("membership_payments_membership_idx").on(t.membershipId),
+  ],
 );
 
 /**
@@ -841,6 +852,8 @@ export const membershipMinutes = pgTable(
   },
   (t) => [
     index("membership_minutes_membership_idx").on(t.membershipId),
+    // A booking's minutes, given back when it is cancelled (migration 0050).
+    index("membership_minutes_booking_idx").on(t.bookingId),
     check("membership_minutes_kind", sql`${t.kind} in ('month', 'booking', 'returned', 'correction')`),
     check("membership_minutes_not_zero", sql`${t.minutes} <> 0`),
   ],

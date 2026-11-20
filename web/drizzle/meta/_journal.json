@@ -351,6 +351,13 @@
       "when": 1795132918831,
       "tag": "0049_acuity_import",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1795162254850,
+      "tag": "0050_lookup_indexes",
+      "breakpoints": true
     }
   ]
 }

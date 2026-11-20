@@ -155,6 +155,7 @@ Local development needs no database install and no credentials. Without `DATABAS
 - **Square replays a request only when it is the same.** Under an idempotency key used before, any other detail (a new card token, another note) is refused with `IDEMPOTENCY_KEY_REUSED`, and the first request may have gone through. A retry sends the same request again (`useCardForm` keeps the attempt's token), and that refusal is read as no answer (`charge` in payments.ts). Seen in Square's sandbox on 2026-11-20.
 - **A test that something is absent from serialized data does not look for a few digits.** The random ids in it hold any four digits now and then: a door code, "4821", was found inside an id in about one run in twenty. Look for an amount as a value of its own (`asAmount` in `src/server/testing.ts`), or for text no id can hold.
 - **`web/.env.local` holds staging's `DATABASE_URL`**, written by `neon link`, and `next dev`, `next build` and `next start` read it. Started without `DATABASE_URL=""`, a local server runs on the database that the hosted preview shares, with whatever card processor its own environment sets. The browser tests blank it (`playwright.config.ts`); a script run with `tsx` reads only its own environment. On 2026-11-20 a scratch server for Square's sandbox was started without it and made five test bookings on staging. They were undone; see the decision log.
+- **PostgreSQL does not index a foreign key by itself.** A column that pages look rows up by (a booking's payments) needs an index of its own in the schema, beside its `.references()`. Migration `0050` added the four that were missing (2026-11-20).
 - **PGlite's data folder can be opened by one process at a time.** Stop `npm run dev` before running anything else against `web/.data`. `next build` without `DATABASE_URL` prerenders from an in-memory copy of the starting catalog.
 - **Tests** come in four kinds: domain unit tests; server tests against an in-memory PGlite, set up by `src/server/testing.ts` (the real constraints are exercised); component tests of the booking screen in jsdom; and browser tests in `web/e2e/`. The pretend processor has a card whose every refund is refused (`MOCK_TOKEN_REFUNDS_REFUSED`), which a browser test sends in place of the usual one, so that a refund that fails can be tried in a browser. Resend has never been called. Square has been called in its sandbox only, by `npm run check:square`, which is not part of `npm test`.
 - **The accessibility tests** (`e2e/a11y.spec.ts`) scan the public pages, every step of a booking, a customer's account and the pages of the admin with axe-core, against WCAG 2.1 A and AA. They run first, on an empty database: the pages that need a booking, a customer or a page are scanned in the other test files, where those exist, with `accessibilityProblems` (`e2e/helpers.ts`, whose `exclude` leaves out what is not the site's own). Colour contrast is left out: the brand's colours are the owners' choice. A new page or control has to pass them: a link inside a sentence is underlined (the rule after the base link style in `globals.css`), and a control named with `aria-label` has its visible words in that name.
@@ -941,6 +942,13 @@ Known weaknesses:
     - The rewards test granted a clipboard permission that WebKit does not have. It now grants and reads the clipboard only in Chromium.
     - The other failures followed from these: bookings that tests depend on were never made.
   - **After the fixes:** 53 passed. The one failure was Next's development tools failing to load a chunk, which a production page does not have. The page editor's tests, run alone, passed 9, and one simulated drag missed three times.
+- 2026-11-20 (night): Migration `0050_lookup_indexes`. PostgreSQL does not index a foreign key by itself, and four were read often with no index starting with them:
+  - a booking's payments, read in 45 places;
+  - a payment's refunds, 12;
+  - a membership's months, 5;
+  - a booking's membership minutes, 3.
+
+  Only indexes, nothing else, for the 10,000 bookings the plan expects. Tried on a Neon branch of staging: the indexes were made, and a booking's payments are then found through `payments_booking_idx`. To be applied to staging with the next merge; the code does not depend on them.
 
 ### Handoff for the next coding session
 
