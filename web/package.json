@@ -55,7 +55,7 @@
     "jsdom": "^31.0.1",
     "knip": "^5.88.1",
     "tsx": "^4.23.15",
-    "typescript": "^5",
+    "typescript": "^7",
     "vitest": "^5.1.0"
   },
   "allowScripts": {
