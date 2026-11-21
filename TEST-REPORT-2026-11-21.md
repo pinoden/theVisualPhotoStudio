@@ -49,7 +49,7 @@ The test found fourteen things for the owners: eight on the customer's side, fou
 13. **The phone number field takes any words.** It accepts anything from 7 to 40 characters, such as "no phone". Decide whether it should need digits.
 14. **Twelve addresses of your current site lead nowhere on the new one.** Your current site lists 18 pages for search engines. On the preview two keep their address (the home page and `/contact`), four are sent on to their new page (`/guestinfo`, `/rates-1`, `/services-2-1` and `/studio-memberships`), and twelve answer "page not found". After the switch, a link to one of those from Google, Instagram or an old email would reach that message. Six have an obvious new home: `/appointments` (the booking page), `/blanche-1`, `/dayglow-1` and `/paris` (the studios page), `/membership` (the memberships page) and `/home-1` (the home page). Six have no page on the new site yet: `/christmas-2026-dayglow`, `/christmas-2026-paris`, `/styled-setups`, `/events`, `/store` and `/privacy-policy`. Decide where each should lead. You add one under Admin, Website, Pages, "Old addresses".
 
-Seven faults from the fourth round are fixed in the code. They reach the preview with the next merge.
+Seven faults from the fourth round are fixed. The fixes have been on the preview since the afternoon of November 21. Six were tried again there after that. The seventh, line breaks in a name, is covered by the site's own tests, because trying it on the preview would take another booking.
 
 - **The booking pages' address for search engines.** `/book` and `/book/photography` now give a canonical address, and a shared link to either shows that page's own title.
 - **Choosing a studio with the keyboard.** The three studio choices showed no sign of which one the keyboard was on. The card now gets a dark outline.
@@ -224,7 +224,7 @@ The fourth round tried what people do with a browser, a keyboard and a phone, an
 
 | What was tried | What the site did |
 | --- | --- |
-| A booking with the keyboard alone | Booked with Tab, Space, Enter and typing. Three gaps on the way are fixed in the code, as listed above. |
+| A booking with the keyboard alone | Booked with Tab, Space, Enter and typing. Three gaps on the way are fixed, as listed above, and work on the preview. |
 | Six time zones and four languages | A computer set to Hawaii, California, New York, Germany, Japan or the far side of the date line saw the same days, times, booking pages, calendar and day sheet. The first day on offer was November 22 for each, though it was still November 20 in Hawaii. |
 | The answer to "Confirm booking" is lost | The page said it could not tell whether the booking went through, and to press again. Pressing again opened the booking: one booking, one email. |
 | No connection | Each step said so in words: "Could not load availability. Please try again." and "Could not check the code. Please try again." Nothing was booked until the connection came back, and then once. |
