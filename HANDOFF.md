@@ -9,7 +9,7 @@
 
 - **Hosted preview:** https://the-visual-photo-studio.vercel.app, on Vercel (Hobby plan, team "The Visuals Photo Studio"). It deploys every change to `master` by itself. Its database is the Neon staging project below, with Square's sandbox keys. Owners sign in with emailed codes, through Resend.
 - **`master`** is at PR #24 (`93579f1`, 2026-11-21, merged on the owner's word: "Merge that"). It brought Dependabot's #10, #11 and #14, CI's four jobs (see "GitHub"), the browser suite against a production build with its one change to the site, the Acuity import's changes for the owners' real export and the import of Acuity's history (all below), and codes an owner names (Admin → Codes, "Code (optional)"). Vercel deployed it to the hosted preview a minute later, with no migration to run. Before it came PR #23 (the Safari test fixes and tidy-ups), PR #22 (the overnight pass), PR #21 (the Acuity import and Square's buyer verification), PR #20 (the home page's slideshow) and PR #19 (the old website's look).
-- **On `rebuild`, not yet on `master` or the preview (2026-11-21):** three changes to the site, each verified (see "Verification") and found by the test of the hosted preview. A pull request waits for the owner's word.
+- **On `rebuild`, not yet on `master` or the preview (2026-11-21):** three changes to the site, each verified (see "Verification") and found by the test of the hosted preview. PR #25 carries them, opened on the owner's word ("Pr"); it is merged on the owner's word once its four checks pass. It has no migration.
   - `97a7efd`: `/book` and `/book/photography` give search engines their own address, and their own title when a link is shared.
   - `76c124d`: the booking screen from the keyboard (an outline on the studio the keyboard is on, the focus on each new step's heading, Enter applying a code), underlined links on a staff member's account page, and a customer's name and phone number kept on one line.
   - `724c873`: the photography booking screen no longer draws a bare radio button above each studio's card. With it, a browser test waits between two saves ("Now" 5).
@@ -141,7 +141,7 @@ Not yet covered by an independent tester pass: the fourth pass's fixes, question
 
 ### Now
 
-0. **Three commits on `rebuild` wait for a pull request** (`97a7efd`, `76c124d` and `724c873`, see "Current state"): open it on the owner's word. PR #24 went into `master` on 2026-11-21 and is live on the hosted preview. What is next for a builder, none of it started:
+0. **PR #25 is open** (`rebuild` into `master`): the three fixes `97a7efd`, `76c124d` and `724c873` (see "Current state") and the notes since PR #24. Merge it on the owner's word, once its four checks pass, then check the preview after Vercel deploys it. PR #24 went into `master` on 2026-11-21 and is live on the hosted preview. What is next for a builder, none of it started:
    - the owners' decisions of 2026-11-20 ("November 20 implementation brief" below), the Square cancellation change first;
    - the points the test of the hosted preview found, once the owners have said which they want ("Remaining questions and owner actions"). Needing no decision: the three flakes in item 5, and from the keyboard, the times as one stop and a link that skips the menu ("Known gaps" in `ProjectLibrary.md`).
 
