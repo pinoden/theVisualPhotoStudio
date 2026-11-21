@@ -1,4 +1,4 @@
-import { isIsoDate, type IsoDate } from "./domain/time";
+import { isIsoDate, STUDIO_TIME_ZONE, type IsoDate } from "./domain/time";
 
 /**
  * Reading an appointments export of Acuity Scheduling, the old website's
@@ -11,7 +11,13 @@ import { isIsoDate, type IsoDate } from "./domain/time";
  * it before anything is read, with the names the file has; a row whose time
  * or amount cannot be read is set aside with the reason, and the others are
  * read. Acuity's times are on the studio's clock (America/New_York, the same
- * as the site's), so they are kept as a date and the minutes past midnight.
+ * as the site's), so they are kept as a date and the minutes past midnight;
+ * the export's Timezone column says so for each row, and a row in another
+ * time zone is set aside. Acuity's Email field holds the client's own address
+ * first, then any the client asked Acuity to copy its emails to: the first is
+ * the client's (`email`), the rest are kept apart (`otherEmails`). The real
+ * export of 2026-11-20 had all these columns: see "Importing Acuity's
+ * appointments still to come" in ProjectLibrary.md.
  *
  * Nothing here touches the database: it turns text into appointments, and an
  * appointment's type into the studios it books.
@@ -32,7 +38,10 @@ export interface AcuityAppointment {
   start: WallTime;
   end: WallTime;
   name: string;
+  /** The client's own address: the first of Acuity's Email field. */
   email: string;
+  /** The other addresses of Acuity's Email field, which Acuity copied its emails to, as the export writes them. */
+  otherEmails: string[];
   phone: string;
   /** The appointment type's name, which says the studios it books: "Blanche + Paris (2 hr)". */
   type: string;
@@ -81,6 +90,7 @@ const COLUMNS = {
   notes: { names: ["Notes"], required: false },
   scheduled: { names: ["Date Scheduled"], required: false },
   canceled: { names: ["Canceled", "Cancelled", "Canceled?", "Cancelled?"], required: false },
+  timeZone: { names: ["Timezone", "Time Zone"], required: false },
 } as const satisfies Record<string, { names: readonly string[]; required: boolean }>;
 
 type Column = keyof typeof COLUMNS;
@@ -149,6 +159,8 @@ export function readAcuityExport(text: string): ExportReading {
     const id = cell("id");
     const problem = (text: string) => unreadable.push({ row, id, problem: text });
     if (id === "") return problem("it has no appointment ID");
+    const zone = cell("timeZone");
+    if (zone !== "" && zone !== STUDIO_TIME_ZONE) return problem(`its times are in ${zone}, not on the studio's clock (${STUDIO_TIME_ZONE})`);
     const start = readWallTime(cell("start"));
     if (!start) return problem(`its start time cannot be read ("${cell("start")}")`);
     const end = readWallTime(cell("end"), start.date);
@@ -157,13 +169,16 @@ export function readAcuityExport(text: string): ExportReading {
     if (priceCents === null) return problem(`its price cannot be read ("${cell("price")}")`);
     const paidOnlineCents = readCents(cell("paidOnline"));
     if (paidOnlineCents === null) return problem(`what was paid online cannot be read ("${cell("paidOnline")}")`);
+    // "ana@client.test, bo@client.test": Acuity separates them with commas; no address holds a comma, a semicolon or a space.
+    const [email = "", ...otherEmails] = cell("email").split(/[\s,;]+/).filter((part) => part !== "");
     appointments.push({
       id,
       row,
       start,
       end,
       name: `${cell("firstName")} ${cell("lastName")}`.trim().replace(/\s+/g, " "),
-      email: cell("email"),
+      email,
+      otherEmails,
       phone: cell("phone"),
       type: cell("type").replace(/\s+/g, " "),
       calendar: cell("calendar"),

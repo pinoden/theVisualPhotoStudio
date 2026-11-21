@@ -73,6 +73,7 @@ describe("Acuity's export", () => {
           end: { date: "2026-11-20", minute: 720 },
           name: "Ana Lima",
           email: "ana@client.test",
+          otherEmails: [],
           phone: "(407) 555-0100",
           type: "Blanche + Paris (2 hr)",
           calendar: "Paris",
@@ -138,6 +139,49 @@ describe("Acuity's export", () => {
       { row: 4, id: "11", problem: 'its end time cannot be read ("later")' },
       { row: 5, id: "12", problem: 'its price cannot be read ("free")' },
       { row: 6, id: "", problem: "it has no appointment ID" },
+    ]);
+  });
+
+  it("reads the columns of Acuity's real export: the client's own address first in Email, those copied apart, the time zone and the cancelled", () => {
+    // The columns of the owners' export of 2026-11-20, in its order; the values are made up.
+    const names = [
+      "Start Time", "End Time", "Timezone", "First Name", "Last Name", "Phone", "Email", "Type", "Calendar", "Appointment Price",
+      "Paid?", "Amount Paid Online", "Certificate Code", "Notes", "Date Scheduled", "Label", "Scheduled By", "Date Rescheduled",
+      "Canceled", "Date Canceled", "Appointment ID",
+    ];
+    const row = (cells: Record<string, string>) => names.map((name) => cells[name] ?? "");
+    const base = {
+      "Start Time": "March 3, 2027 9:20 am",
+      "End Time": "March 3, 2027 12:20 pm",
+      Timezone: "America/New_York",
+      "First Name": "Ana",
+      "Last Name": "Lima",
+      Email: "ana@client.test, bo@client.test",
+      Type: "Studio Paris + Studio Dayglow (3 hr)",
+      Calendar: "Paris",
+      "Appointment Price": "300.00",
+      "Paid?": "yes",
+      "Amount Paid Online": "300.00",
+      "Date Scheduled": "2027-02-01",
+      "Appointment ID": "1769000001",
+    };
+    const reading = readAcuityExport(
+      csv([
+        names,
+        row(base),
+        row({ ...base, "Appointment ID": "1769000002", Email: "Cy@Client.test;dee@client.test  eve@client.test," }),
+        row({ ...base, "Appointment ID": "1769000003", Timezone: "America/Los_Angeles" }),
+        row({ ...base, "Appointment ID": "1769000004", Canceled: "canceled", "Date Canceled": "2026-11-02" }),
+      ]),
+    );
+    expect(reading.ok && reading.appointments.map((a) => [a.id, a.email, a.otherEmails, a.start, a.end, a.canceled])).toEqual([
+      ["1769000001", "ana@client.test", ["bo@client.test"], { date: "2027-03-03", minute: 560 }, { date: "2027-03-03", minute: 740 }, false],
+      ["1769000002", "Cy@Client.test", ["dee@client.test", "eve@client.test"], { date: "2027-03-03", minute: 560 }, { date: "2027-03-03", minute: 740 }, false],
+      ["1769000004", "ana@client.test", ["bo@client.test"], { date: "2027-03-03", minute: 560 }, { date: "2027-03-03", minute: 740 }, true],
+    ]);
+    // A row in another time zone would be read at the wrong time: it is set aside.
+    expect(reading.ok && reading.unreadable).toEqual([
+      { row: 4, id: "1769000003", problem: "its times are in America/Los_Angeles, not on the studio's clock (America/New_York)" },
     ]);
   });
 });

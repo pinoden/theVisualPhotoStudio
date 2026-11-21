@@ -12,11 +12,13 @@
  * then run it again with --write. A second run imports only what is new.
  *
  * The export: in Acuity, Reports → Import/Export, the dates from today on,
- * cancelled appointments not included, then Export appointments (a CSV
- * file). Leave the cancelled ones out: a file that lists them without a
- * column saying so would import them as booked. Keep the file out of this
- * repository: it holds clients' details. The report names appointments by Acuity's id, their row in the
- * file, their time and type, never a client.
+ * then Export appointments (a CSV file). Acuity's export has a Canceled
+ * column (the owners' of 2026-11-20 did), which the import reads: the
+ * cancelled appointments it lists are left out. A file without that column
+ * must not list them, or they would be imported as booked. Keep the file out
+ * of this repository: it holds clients' details. The report names
+ * appointments by Acuity's id, their row in the file, their time and type,
+ * never a client.
  *
  * Which database: DATABASE_URL when it is set (staging, production), otherwise
  * the local one in web/.data/<PGLITE_DATA_NAME or pglite>, which no running
