@@ -240,6 +240,7 @@ The fourth round tried what people do with a browser, a keyboard and a phone, an
 | Files and headers | Private files such as `/.env` are not served. Browsers are told to use HTTPS only, and not to show the site inside another website. The daily task's address refuses a caller without its password. Another website cannot send a booking from a visitor's browser. |
 | Private pages and search engines | The admin, account, employee, booking and payment pages are closed in the robots file and marked "noindex". |
 | The current site's 18 page addresses | Two are the same on the preview, four are sent on to their new page, and twelve answer "page not found" (point 14). |
+| The daily task of November 21 | Ran at 7:31 AM Eastern. It wrote no email and changed no booking: the first visit, Sunday at 10:00 AM, was more than 24 hours away. Its reminder is due with the run of Sunday morning. |
 | Vercel's own firewall | After about 45 probing requests in under a minute, some of them for private files, Vercel showed its "Security Checkpoint" page to everything coming from the test computer, a real browser included. About ten minutes later it let the computer back in by itself. |
 
 ## Not tested
@@ -251,7 +252,7 @@ Four things were left out, each for a reason.
 - **The owners' own pages.** Prices, codes, settings, the website editor, refunds and the list of bookings need an owner's sign-in, and that code goes to an owner's inbox. A manager's and an attendant's pages were tested in the second round.
 - **A real phone and real Safari.** The phone booking used a phone-sized browser window, and the Safari booking used Safari's engine on a computer.
 
-What happens after a visit will show by itself from November 22: visits marked completed, stamps counted, and review requests sent to the test address. The preview runs these tasks once a day, between 7:00 and 8:00 AM Eastern, the most its free plan allows. So a reminder there goes out on the morning of the visit, not 24 hours before. The paid plan runs them every five minutes.
+What happens after a visit will show by itself from November 22: visits marked completed, stamps counted, and review requests sent to the test address. The preview runs these tasks once a day, the most its free plan allows: at 7:31 AM Eastern on both November 20 and 21. So a reminder there goes out on the morning of the visit, not 24 hours before. The paid plan runs them every five minutes. The run of November 21 sent nothing and changed nothing, as it should: no visit was within 24 hours, and none was over.
 
 ## Test codes and clean-up
 
