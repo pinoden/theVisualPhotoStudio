@@ -121,6 +121,20 @@ async function AppointmentDetails({
           </p>
         </div>
       )}
+      {appointment.endRequest && (
+        <div className="admin-card" id="waiting-request">
+          <h3>{appointment.endRequest.kind === "cancel" ? "A cancellation waits" : "A release for a reschedule code waits"}</h3>
+          <p style={{ margin: 0 }}>
+            The client asked on {formatInstant(new Date(appointment.endRequest.at))} to{" "}
+            {appointment.endRequest.kind === "cancel" ? "cancel this booking" : "release this booking for a reschedule code"}, while the site
+            could not tell whether its payment link was paid. Nothing has been done yet: the booking keeps its time until the site knows. It
+            is then {appointment.endRequest.kind === "cancel" ? "cancelled" : "released"} under its terms as they stood when the client
+            asked, and the client is emailed. The site asks by itself with its scheduled task; to finish it now, press &ldquo;Check whether it
+            was paid&rdquo; under <a href="#payment-link">Payment link</a>, or look the link up in Square and, when it was not paid, close it
+            there by hand.
+          </p>
+        </div>
+      )}
       <div className="admin-card">
         <h3>
           {when.day} <StatusBadge label={appointment.label} />

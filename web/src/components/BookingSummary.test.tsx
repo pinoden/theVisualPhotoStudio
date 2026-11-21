@@ -38,6 +38,7 @@ const PAID_ONLINE: BookingView = {
   creditLeftCents: 0,
   creditReturnedCents: 0,
   rescheduledCount: 0,
+  endRequest: null,
 };
 
 /** The summary's last row, as its two sides read. */

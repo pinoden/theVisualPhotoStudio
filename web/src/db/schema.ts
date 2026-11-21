@@ -53,6 +53,8 @@ export const promoKind = pgEnum("promo_kind", ["percent", "amount", "free_hour"]
 /** `pet_fee`: the pet fee of a booking, given back as studio credit because the pet did not come. */
 export const promoSource = pgEnum("promo_source", ["loyalty", "reschedule", "manual", "pet_fee"]);
 export const cancelReason = pgEnum("cancel_reason", ["customer", "rescheduled", "owner"]);
+/** What a client asked for that waits for the card processor (`bookings.endRequest`): a cancellation, or a release for a reschedule code. */
+export const endRequest = pgEnum("end_request", ["cancel", "reschedule"]);
 /** A label an administrator puts on a confirmed booking. See src/lib/domain/labels.ts. */
 export const bookingLabel = pgEnum("booking_label", ["checked_in", "reschedule_pending", "rescheduled"]);
 
@@ -424,6 +426,14 @@ export const bookings = pgTable(
      * Null for a booking made on this site.
      */
     importedFrom: text("imported_from"),
+    /**
+     * A client's cancellation, or release for a reschedule code, that waits: asked for while the card processor could
+     * not say whether the booking's payment link was paid (the owners' answer of 2026-11-20 to question 23). The booking
+     * stays confirmed and keeps its time until the site knows; it is then ended under its terms as they stood at
+     * `endRequestedAt` (`finishWaitingEnd` in src/server/manage.ts). Both null otherwise, set and cleared together.
+     */
+    endRequest: endRequest("end_request"),
+    endRequestedAt: ts("end_requested_at"),
     cancelledAt: ts("cancelled_at"),
     createdAt: createdAt(),
   },
@@ -432,7 +442,10 @@ export const bookings = pgTable(
     index("bookings_start_idx").on(t.startAt),
     uniqueIndex("bookings_request_key").on(t.requestKey).where(sql`${t.requestKey} is not null`),
     uniqueIndex("bookings_imported_from").on(t.importedFrom).where(sql`${t.importedFrom} is not null`),
+    // The scheduled task's look at the requests that wait (`finishWaitingEnds`).
+    index("bookings_end_requested_idx").on(t.endRequestedAt).where(sql`${t.endRequestedAt} is not null`),
     check("bookings_money_kind", sql`${t.moneyKind} in ('test', 'live')`),
+    check("bookings_end_request", sql`(${t.endRequest} is null) = (${t.endRequestedAt} is null)`),
   ],
 );
 

@@ -622,49 +622,51 @@ export function ownerHandRefundNotice(input: { to: string; ref: string; customer
 }
 
 /**
- * A booking ended while the card processor could not say whether its payment
- * link had been paid. The client is told the same (`UNSEEN_LINK`).
+ * A client asked to cancel a booking, or to release it for a reschedule code, while the site could not tell whether its
+ * payment link had been paid. Nothing was done yet (the owners' answer of 2026-11-20 to question 23): the booking stays
+ * confirmed until the site knows, and is then ended under its terms as they stood when the client asked. The owners are
+ * told how to find out when the processor cannot (`waitToEnd` in manage.ts).
  */
-export const UNSEEN_LINK =
-  "We could not check just now whether the payment link for this booking was paid. If it was, that payment is refunded to your card in full once the card processor tells us.";
-
-/** The same, for a link of another processor than the one set up now, which the site can never ask. */
-export const FOREIGN_LINK = "The site cannot check the payment link for this booking. If you paid it, please contact us, and we will refund it.";
-
 export function ownerUnseenLinkNotice(input: {
   to: string;
   ref: string;
   customer: string;
   linkCents: number;
-  ended: "cancelled" | "released";
+  asked: "cancel" | "reschedule";
   /**
    * `unseen`: the processor could not say. `other`: the link was made by another processor than the one set up now (in
    * test mode, or with Square's other account), which the site can never ask. `none`: no processor was set up.
    */
   kind: "unseen" | "other" | "none";
 }): QueuedEmail {
-  const ended = `${input.customer}'s booking ${input.ref} was ${input.ended === "released" ? "released for a reschedule code" : "cancelled"}`;
-  const close = 'close it on the appointment\'s page with "Close it by hand"';
-  const settle = `When it was not paid, ${close}. When it was paid, refund it to the client there, as the client was told to ask, then ${close}.`;
-  const whatHappened =
-      input.kind === "other"
-        ? [
-            `${ended}. Its payment link for ${money(input.linkCents)} was made by another card processor than the one set up now (in test mode, or with Square's other account), which the site cannot ask whether it was paid.`,
-            "",
-            `Look the link up there. ${settle}`,
-          ].join("\n")
-        : input.kind === "none"
-          ? [
-              `${ended} while no card processor was set up, so the site could not ask whether its payment link for ${money(input.linkCents)} had been paid.`,
-              "",
-              `Look the link up in Square. ${settle}`,
-            ].join("\n")
-          : [
-              `${ended} while the card processor could not say whether its payment link for ${money(input.linkCents)} had been paid.`,
-              "",
-              "If it was paid, the payment is refunded to the card in full once the processor tells the site, and the client was told so. The site keeps asking.",
-              `If the processor never can (a link it no longer knows), look the link up in Square. When it was not paid, ${close}. When Square shows it was paid, the site will never see that payment: refund it to the client in Square, as they were promised, then ${close}.`,
-            ].join("\n");
+  const link = `its payment link for ${money(input.linkCents)}`;
+  const asked =
+    input.asked === "cancel"
+      ? `${input.customer} asked to cancel their booking ${input.ref}`
+      : `${input.customer} asked for their booking ${input.ref} to be released for a reschedule code`;
+  const done = input.asked === "cancel" ? "cancelled" : "released";
+  const why =
+    input.kind === "other"
+      ? `${asked}. ${link[0].toUpperCase()}${link.slice(1)} was made by another card processor than the one set up now (in test mode, or with Square's other account), which the site cannot ask whether it was paid.`
+      : input.kind === "none"
+        ? `${asked} while no card processor was set up, so the site could not ask whether ${link} had been paid.`
+        : `${asked} while the card processor could not say whether ${link} had been paid.`;
+  const close = 'close the link on the appointment\'s page with "Close it by hand"';
+  const paid = `When it shows it was paid, the site will never see that payment: ${close}, which ${done === "cancelled" ? "cancels" : "releases"} the booking without it, then give back what the booking's terms allow of it where it was paid.`;
+  const whatToDo =
+    input.kind === "unseen"
+      ? [
+          `The site keeps asking, and finishes it by itself once the processor answers; "Check whether it was paid" on the appointment's page asks at once.`,
+          `If the processor never can (a link it no longer knows), look the link up in Square. When it was not paid, delete it there and ${close}: that finishes it. ${paid}`,
+        ]
+      : [`Look the link up ${input.kind === "other" ? "there" : "in Square"}. When it was not paid, ${close}: that finishes it. ${paid}`];
+  const whatHappened = [
+    why,
+    "",
+    `Nothing has been done yet: the booking stays confirmed, and keeps its time, until the site knows whether the link was paid. It is then ${done} under its terms as they stood when the client asked, counting the link's payment if there was one, and the client is emailed.`,
+    "",
+    ...whatToDo,
+  ].join("\n");
   return written(
     "owner_unseen_link",
     { to: input.to, kind: "owner_unseen_link" },
@@ -684,8 +686,8 @@ export function rescheduleCodeEmail(input: {
   feeCents?: number;
   expires: string;
   bookUrl: string;
-  /** What the client is told of a payment link the site could not check (`UNSEEN_LINK`, `FOREIGN_LINK`). */
-  unseenNote?: string | null;
+  /** Said of a release that waited for the card processor: when the client asked, and why it waited (`askedOn` in manage.ts). */
+  note?: string | null;
 }): QueuedEmail {
   const fee = (input.feeCents ?? 0) > 0 ? `less the ${money(input.feeCents!)} fee for moving a booking again` : "";
   const credit =
@@ -702,7 +704,7 @@ export function rescheduleCodeEmail(input: {
       reference: input.ref,
       credit,
       value: money(input.valueCents),
-      link_note: input.unseenNote ?? "",
+      link_note: input.note ?? "",
       code: input.code,
       valid_until: input.expires,
       book_link: input.bookUrl,

@@ -7,7 +7,7 @@ import { ManageBooking } from "@/components/ManageBooking";
 import { getDb } from "@/db/client";
 import { telHref } from "@/lib/site/frame";
 import { getBookingByToken, isUpcomingVisit } from "@/server/bookings";
-import { getManageChoices, noticeBookingPayments } from "@/server/manage";
+import { endRequestText, getManageChoices, noticeBookingPayments } from "@/server/manage";
 import { finishAfterResponse, payLinkDeps } from "@/server/runtime";
 import { loadAccessInstructions } from "@/server/settings";
 import { siteFrame } from "@/server/site";
@@ -77,8 +77,13 @@ async function BookingDetails({ params, searchParams }: Pick<PageProps<"/booking
       ? { heading: "Released for Rescheduling", icon: "↻" }
       : (HEADING[booking.status] ?? HEADING.confirmed);
   const now = new Date();
+  // A cancellation or release the client asked for that waits for the card processor is said in place of the choices.
+  const waiting =
+    booking.status === "confirmed" && booking.endRequest
+      ? { kind: booking.endRequest.kind, text: endRequestText({ kind: booking.endRequest.kind, at: new Date(booking.endRequest.at) }) }
+      : null;
   const choices =
-    booking.status === "confirmed" ? await getManageChoices(db, booking.ref, { kind: "token", token }, now) : null;
+    booking.status === "confirmed" && !waiting ? await getManageChoices(db, booking.ref, { kind: "token", token }, now) : null;
   // Only someone holding the private link of a confirmed booking that has not ended is told how to get in.
   const access = isUpcomingVisit(booking, now) ? await loadAccessInstructions(db) : "";
 
@@ -119,7 +124,7 @@ async function BookingDetails({ params, searchParams }: Pick<PageProps<"/booking
         </>
       )}
 
-      {unseenLink && booking.status === "confirmed" && (
+      {unseenLink && booking.status === "confirmed" && !waiting && (
         <div className="notice">
           {unseenLink === "foreign"
             ? "The site cannot check the payment link for this booking. If you paid it, please contact us: what this page says does not count that payment."
@@ -127,7 +132,7 @@ async function BookingDetails({ params, searchParams }: Pick<PageProps<"/booking
         </div>
       )}
 
-      <ManageBooking bookingRef={booking.ref} token={token} choices={choices} />
+      <ManageBooking bookingRef={booking.ref} token={token} choices={choices} waiting={waiting} />
 
       <div style={{ display: "flex", gap: "1rem", justifyContent: "center", marginTop: "2rem", flexWrap: "wrap" }}>
         <Link href="/" className="btn btn-outline">

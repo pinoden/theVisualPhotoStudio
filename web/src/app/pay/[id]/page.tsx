@@ -116,8 +116,10 @@ async function Pay({ params }: Pick<PageProps<"/pay/[id]">, "params">) {
 
       {page.closed && (
         <p>
-          Booking {page.ref} {page.closed.released ? "was released for a reschedule code" : "was cancelled"}, so nothing is to be paid
-          here. If you have a question about it, please call us at <a href={telHref(business.phone)}>{business.phone}</a>.
+          {page.closed.waiting
+            ? `You have asked to ${page.closed.released ? "release booking " + page.ref + " for a reschedule code" : "cancel booking " + page.ref}, and that waits while we confirm whether this link was paid, so nothing is to be paid here.`
+            : `Booking ${page.ref} ${page.closed.released ? "was released for a reschedule code" : "was cancelled"}, so nothing is to be paid here.`}{" "}
+          If you have a question about it, please call us at <a href={telHref(business.phone)}>{business.phone}</a>.
         </p>
       )}
 

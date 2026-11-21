@@ -740,6 +740,11 @@ export interface BookingView {
    */
   creditLeftCents: number;
   rescheduledCount: number;
+  /**
+   * A cancellation, or a release for a reschedule code, the client asked for that waits until the site knows whether the
+   * booking's payment link was paid (`waitToEnd` in manage.ts); `at` is when they asked. Null otherwise.
+   */
+  endRequest: { kind: "cancel" | "reschedule"; at: string } | null;
 }
 
 type BookingRow = typeof bookings.$inferSelect;
@@ -811,6 +816,7 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[], now: Date =
     heldCents: held.get(booking.id) ?? 0,
     creditLeftCents: creditLeft.get(booking.id) ?? 0,
     rescheduledCount: booking.rescheduledCount,
+    endRequest: booking.endRequest && booking.endRequestedAt ? { kind: booking.endRequest, at: booking.endRequestedAt.toISOString() } : null,
   }));
 }
 

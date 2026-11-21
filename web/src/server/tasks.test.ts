@@ -178,6 +178,7 @@ describe("the scheduled run", () => {
       refundsRejected: 0,
       payLinksPaid: 0,
       payLinksClosed: 0,
+      waitingEndsFinished: 0,
       membershipMonthsPaid: 0,
       membershipProblems: 0,
       membershipsCarriedOn: 0,

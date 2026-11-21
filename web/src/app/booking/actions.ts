@@ -10,7 +10,8 @@ import { formatInstant } from "@/server/tz";
 import { formText } from "@/lib/parse";
 
 export interface ManageState {
-  status: "idle" | "cancelled" | "rescheduled" | "requested" | "error";
+  /** `waiting`: the cancellation or release was asked for, and waits for the card processor (`waitToEnd` in manage.ts). */
+  status: "idle" | "cancelled" | "rescheduled" | "requested" | "waiting" | "error";
   message: string;
   /** The reschedule code, shown once on screen as well as emailed. */
   code?: string;
@@ -30,11 +31,22 @@ async function actorFrom(formData: FormData): Promise<Actor | null> {
 
 const SIGNED_OUT: ManageState = { status: "error", message: "Please sign in again, or use the link from your confirmation email." };
 
+/**
+ * A cancellation or release that waits for the card processor (`waitToEnd` in manage.ts): the owners' notice goes, and
+ * the page is drawn again with the request in place of the choices.
+ */
+function waitingState(message: string, formData: FormData): ManageState {
+  flushEmailsSoon();
+  if (!formData.get("keepInPlace")) refresh();
+  return { status: "waiting", message };
+}
+
 export async function cancelBookingAction(_previous: ManageState, formData: FormData): Promise<ManageState> {
   const actor = await actorFrom(formData);
   if (!actor) return SIGNED_OUT;
   const seen = formData.get("seen");
   const result = await cancelBooking(await getDb(), String(formData.get("ref") ?? ""), actor, await manageDeps(), typeof seen === "string" ? seen : undefined);
+  if (!result.ok && result.code === "waiting") return waitingState(result.message, formData);
   // Refused because something changed since the page was drawn: it is drawn again, with what can be done now. Not
   // when the booking has ended meanwhile: the page drawn again would have nowhere to say why nothing was done.
   if (!result.ok) {
@@ -56,6 +68,7 @@ export async function rescheduleBookingAction(_previous: ManageState, formData: 
   if (!actor) return SIGNED_OUT;
   const seen = formData.get("seen");
   const result = await requestRescheduleCode(await getDb(), String(formData.get("ref") ?? ""), actor, await manageDeps(), typeof seen === "string" ? seen : undefined);
+  if (!result.ok && result.code === "waiting") return waitingState(result.message, formData);
   if (!result.ok) {
     if (result.code !== "not_confirmed") refresh();
     return { status: "error", message: result.message };
@@ -66,9 +79,7 @@ export async function rescheduleBookingAction(_previous: ManageState, formData: 
     status: "rescheduled",
     code: result.code,
     bookPath: result.bookPath,
-    message: `Your booking was released. Your code is worth ${formatCents(result.valueCents)} and is valid until ${formatInstant(result.expiresAt)}. We also emailed it to you.${
-      result.unseenNote ? ` ${result.unseenNote}` : ""
-    }`,
+    message: `Your booking was released. Your code is worth ${formatCents(result.valueCents)} and is valid until ${formatInstant(result.expiresAt)}. We also emailed it to you.`,
   };
 }
 

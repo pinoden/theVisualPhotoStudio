@@ -186,7 +186,7 @@ describe("every email to a client", () => {
       emails.ownerRefundWaitingNotice({ to: "o@x.test", ref: "VS-1", customer: "Jane", amountCents: 100, reason: "R" }),
       emails.ownerCaptureNotice({ to: "o@x.test", ref: "VS-1", customer: "Jane", amountCents: 100, reason: "R", givenBackAt: new Date("2026-12-20T15:00:00Z") }),
       emails.ownerReservationLapsedNotice({ to: "o@x.test", ref: "VS-1", customer: "Jane", amountCents: 100, dueCents: 100 }),
-      emails.ownerUnseenLinkNotice({ to: "o@x.test", ref: "VS-1", customer: "Jane", linkCents: 100, ended: "cancelled", kind: "unseen" }),
+      emails.ownerUnseenLinkNotice({ to: "o@x.test", ref: "VS-1", customer: "Jane", linkCents: 100, asked: "cancel", kind: "unseen" }),
       emails.ownerMembershipRefundNotice({ to: "o@x.test", code: "C", customer: "Jane", amountCents: 100, reason: "R" }),
       emails.ownerMembershipProblemNotice({ to: "o@x.test", code: "C", customer: "Jane", planName: "P", problem: "It did not go through." }),
       emails.ownerMembershipUnfinishedNotice({ to: "o@x.test", code: "C", customer: "Jane", planName: "P", amountCents: 100 }),

@@ -337,11 +337,11 @@ const TEMPLATES: readonly EmailTemplateSpec[] = [
       { key: "value", label: "The credit on the code", sample: "$176" },
       {
         key: "link_note",
-        label: "What happens to a payment link of the booking that the site could not check",
-        only: "Only when the booking had a payment link the site could not check",
+        label: "When the client asked, for a release that waited until the site knew whether the booking's payment link was paid",
+        only: "Only when the release waited for the card processor",
         required: true,
         sample:
-          "We could not check just now whether the payment link for this booking was paid. If it was, that payment is refunded to your card in full once the card processor tells us.",
+          "You asked for this on Tuesday, January 12, 2027 at 11:00 AM. It waited until we could confirm with the card processor whether the payment link for this booking was paid.",
       },
       { key: "code", label: "The reschedule code", required: true, sample: "MOVE-4K7P2X" },
       VALID_UNTIL,
@@ -950,7 +950,7 @@ const NOTICES: readonly EmailTemplateSpec[] = [
     key: "owner_unseen_link",
     title: "A payment link to check",
     group: "Notices to the studio",
-    when: "When a booking ends while the site cannot tell whether its payment link was paid.",
+    when: "When a client asks to cancel a booking, or to release it for a reschedule code, and it waits because the site cannot tell whether the booking's payment link was paid.",
     subject: "CHECK THE PAYMENT LINK of {{reference}}",
     body: "{{what_happened}}",
     parts: [
@@ -958,11 +958,11 @@ const NOTICES: readonly EmailTemplateSpec[] = [
       CUSTOMER,
       {
         key: "what_happened",
-        label: "How the booking ended, why the site cannot tell whether the link was paid, and what to do in Square and on the appointment's page",
+        label: "What the client asked for, why the site cannot tell whether the link was paid, what happens next, and what to do in Square and on the appointment's page",
         lines: true,
         required: true,
         sample:
-          "Jane Smith's booking VS-7K2M9Q was cancelled while the card processor could not say whether its payment link for $40 had been paid.\n\nIf it was paid, the payment is refunded to the card in full once the processor tells the site, and the client was told so. The site keeps asking.",
+          "Jane Smith asked to cancel their booking VS-7K2M9Q while the card processor could not say whether its payment link for $40 had been paid.\n\nNothing has been done yet: the booking stays confirmed, and keeps its time, until the site knows whether the link was paid. It is then cancelled under its terms as they stood when the client asked, counting the link's payment if there was one, and the client is emailed.\n\nThe site keeps asking, and finishes it by itself once the processor answers.",
       },
     ],
   },
