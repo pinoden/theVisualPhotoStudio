@@ -3,11 +3,18 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { BookingFlow } from "@/components/BookingFlow";
 import { getCatalog } from "@/server/cached";
+import { shareMetadata } from "@/server/site";
 
-export const metadata: Metadata = {
-  title: "Book a Studio",
-  description: "Reserve one or more studios at The Visuals Photo Studio. Instant confirmation.",
-};
+const TITLE = "Book a Studio";
+const DESCRIPTION = "Reserve one or more studios at The Visuals Photo Studio. Instant confirmation.";
+
+/**
+ * The page's own address for search engines: one page, whichever studio a link chose (`?studio=`). And its own
+ * title and description when a link to it is shared, in place of the website's.
+ */
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: TITLE, description: DESCRIPTION, ...(await shareMetadata({ title: TITLE, description: DESCRIPTION, path: "/book" })) };
+}
 
 export default async function BookPage() {
   const catalog = await getCatalog();

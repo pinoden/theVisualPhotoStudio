@@ -466,6 +466,33 @@ describe("studio-first flow", () => {
     expect(posted[0].promoCode).toBeUndefined(); // the code is not sent, so it is not spent
   });
 
+  it("is usable from the keyboard: each new step takes the focus to its heading, and Enter applies a code", async () => {
+    render(<BookingFlow catalog={catalog} navigate={nav.push} />);
+    // Nothing takes the focus as the page opens.
+    expect(document.activeElement).toBe(document.body);
+    await user.click(studioBox("Studio Paris"));
+    await next();
+    // The button that was pressed is gone with its step: the focus is on the new step's heading, not lost.
+    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Select date & duration" }));
+    pickDate(WED);
+    await pickDuration("1 hr");
+    await next();
+    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Choose a time" }));
+    await pickTime("9:00 AM");
+    await next();
+    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Your details" }));
+    await user.click(screen.getByRole("button", { name: /Back/ }));
+    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Choose a time" }));
+    await next();
+
+    await fillDetails();
+    await user.type(screen.getByLabelText("Have a code?"), "thanks-free-hour{Enter}");
+    expect(await screen.findByText("Free hour, code THANKS-FREE-HOUR")).toBeTruthy();
+    // Enter checked the code and did nothing else: the customer is still on their details.
+    expect(screen.getByRole("heading", { name: "Your details" })).toBeTruthy();
+    expect(posted).toHaveLength(0);
+  });
+
   it("sends the same attempt again after no answer at all, so a booking that was made is found", async () => {
     render(<BookingFlow catalog={catalog} navigate={nav.push} />);
     await user.click(studioBox("Studio Paris"));

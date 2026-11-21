@@ -13,6 +13,7 @@ import {
   next,
   onScreen,
   pickStudio,
+  requestsSettled,
   shot,
   signIn,
   todayInStudio,
@@ -121,6 +122,14 @@ test("public pages show the studios and the live price list", async ({ page }) =
   await shot(page, "02a-photography");
   await page.getByRole("link", { name: "Book a Photographer" }).click();
   await expect(page.getByRole("heading", { name: "Book a Photographer" })).toBeVisible();
+  // The booking screens have an address of their own for search engines too, and say what they are when shared.
+  await expect(page.locator('link[rel="canonical"]')).toHaveAttribute("href", /\/book\/photography$/);
+  await expect(page.locator('meta[property="og:title"]')).toHaveAttribute("content", "Book a Photographer");
+  // One address, whichever studio a link chose.
+  await page.goto("/book?studio=paris");
+  await expect(page.getByRole("heading", { name: "Reserve Your Studio" })).toBeVisible();
+  await expect(page.locator('link[rel="canonical"]')).toHaveAttribute("href", /\/book$/);
+  await expect(page.locator('meta[property="og:title"]')).toHaveAttribute("content", "Book a Studio");
 });
 
 test("guest information answers with the current rules and prices", async ({ page }) => {
@@ -215,6 +224,24 @@ test("a visitor's message reaches the owner, who can reply straight to the visit
   const request = await latestEmail(page, "contact_message", OWNER);
   expect(request.subject).toBe("Website message from Vera Visitor: After-hours booking");
   expect(request.body).toContain("x".repeat(3600));
+});
+
+test("the booking screen can be used from the keyboard", async ({ page }) => {
+  await page.goto("/book");
+  const paris = onScreen(page.locator("label.studio-option", { hasText: "Studio Paris" }));
+  const box = paris.getByRole("checkbox");
+  // A studio's checkbox is not drawn itself: its card shows where the keyboard is, and Space chooses it.
+  await page.keyboard.press("Tab");
+  await box.focus();
+  await expect(box).toBeFocused();
+  await expect(paris.locator(".studio-option-card")).toHaveCSS("outline-style", "solid");
+  await page.keyboard.press("Space");
+  await expect(box).toBeChecked();
+  // "Next" goes away with its step. The focus moves to the new step's heading, so that Tab goes on from there, not
+  // from the top of the page again, and a screen reader says where the customer is now.
+  await page.getByRole("button", { name: /^Next/ }).focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: "Select date & duration" })).toBeFocused();
 });
 
 test("books two studios together, starting from the studios", async ({ page }) => {
@@ -1054,6 +1081,8 @@ test("the owner changes an add-on's price and a studio's guest number, and custo
   await onScreen(page.locator("#addon-pet-fee-price")).fill("45");
   await page.getByRole("button", { name: "Save Pet fee" }).click();
   await expect(byText(page, "Add-on saved.")).toBeVisible();
+  // The next save is not pressed while this one's screen is still fetching the pages it links to (`requestsSettled`).
+  await requestsSettled(page);
 
   // A description of several paragraphs, at the box's limit of 2,000 characters, is saved and keeps its paragraphs.
   const opening = "A vintage Parisian apartment.\n\nNatural light all day.\n\n";
@@ -1462,8 +1491,12 @@ test("a client without a photographer books a session, and the photographer cann
   await callout.getByRole("link", { name: "Book a Photographer" }).click();
   await expect(page.getByRole("heading", { name: "Book a Photographer" })).toBeVisible();
 
-  // A session in Studio Blanche: its length, its price and what it includes.
+  // A session in Studio Blanche: its length, its price and what it includes. The card is the control: no bare radio
+  // button is drawn beside it, and the card says which studio is chosen.
+  const blancheCard = onScreen(page.locator("label.studio-option", { hasText: "Studio Blanche" }));
+  await expect(blancheCard.getByRole("radio")).toHaveCSS("opacity", "0");
   await pickStudio(page, "Studio Blanche");
+  await expect(blancheCard.getByRole("radio")).toBeChecked();
   await next(page);
   await byLabel(page, "Date").fill(PHOTO_DAY);
   const oneHour = page.getByRole("button", { name: /1 hour · \$375/ });

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   availabilityGrid,
   combinedStarts,
@@ -152,6 +152,15 @@ export function BookingFlow({
    */
   const requestIdRef = useRef<string | null>(null);
   const topRef = useRef<HTMLDivElement>(null);
+  // A new step takes the keyboard's focus to its heading. The button that was pressed goes away with its step, so
+  // without this the next Tab starts again from the top of the page, and a screen reader says nothing of the change.
+  // Not on the first one: the page has only just opened.
+  const shownStep = useRef(stepIndex);
+  useEffect(() => {
+    if (shownStep.current === stepIndex) return;
+    shownStep.current = stepIndex;
+    topRef.current?.querySelector<HTMLElement>(".wizard-panel h3")?.focus({ preventScroll: true });
+  }, [stepIndex]);
 
   const steps = ORDER[mode];
   const step = steps[stepIndex];
@@ -666,7 +675,7 @@ export function BookingFlow({
       {/* ── Studios ── */}
       {step === "studios" && (
         <div className="wizard-panel active">
-          <h3 style={{ fontSize: "1.6rem", marginBottom: ".5rem" }}>
+          <h3 tabIndex={-1} style={{ fontSize: "1.6rem", marginBottom: ".5rem" }}>
             {photography ? "Choose your studio" : mode === "time" ? "Studios free at your time" : "Select studio(s)"}
           </h3>
           <p className="text-muted mb-3">
@@ -731,7 +740,7 @@ export function BookingFlow({
       {/* ── Date and duration ── */}
       {step === "when" && (
         <div className="wizard-panel active">
-          <h3 style={{ fontSize: "1.6rem", marginBottom: ".5rem" }}>{photography ? "Select date & session" : "Select date & duration"}</h3>
+          <h3 tabIndex={-1} style={{ fontSize: "1.6rem", marginBottom: ".5rem" }}>{photography ? "Select date & session" : "Select date & duration"}</h3>
           <p className="text-muted mb-3">
             {mode === "studio" && chosenNames ? `${chosenNames}. ` : ""}
             {leadHours > 0
@@ -830,7 +839,7 @@ export function BookingFlow({
       {/* ── Time ── */}
       {step === "time" && (
         <div className="wizard-panel active">
-          <h3 style={{ fontSize: "1.6rem", marginBottom: ".5rem" }}>Choose a time</h3>
+          <h3 tabIndex={-1} style={{ fontSize: "1.6rem", marginBottom: ".5rem" }}>Choose a time</h3>
           <p className="text-muted mb-3">
             {longDateLabel(date)}, {durationLabel(duration)}
             {mode === "studio" && chosenNames ? `, ${chosenNames}` : ""}. Times are Eastern Time.
@@ -886,7 +895,7 @@ export function BookingFlow({
       {/* ── Details ── */}
       {step === "details" && (
         <div className="wizard-panel active">
-          <h3 style={{ fontSize: "1.6rem", marginBottom: "1rem" }}>Your details</h3>
+          <h3 tabIndex={-1} style={{ fontSize: "1.6rem", marginBottom: "1rem" }}>Your details</h3>
           <div className="form-grid">
             <div className="form-group">
               <label className="form-label" htmlFor="customer-name">
@@ -1033,6 +1042,12 @@ export function BookingFlow({
                   autoComplete="off"
                   value={codeInput}
                   onChange={(event) => setCodeInput(event.target.value)}
+                  // Enter does what "Apply" does: a code typed and entered is not left unchecked.
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter") return;
+                    event.preventDefault();
+                    void applyCode();
+                  }}
                 />
                 <button
                   type="button"
@@ -1081,7 +1096,7 @@ export function BookingFlow({
       {/* ── Payment ── */}
       {step === "pay" && (
         <div className="wizard-panel active">
-          <h3 style={{ fontSize: "1.6rem", marginBottom: ".5rem" }}>Payment</h3>
+          <h3 tabIndex={-1} style={{ fontSize: "1.6rem", marginBottom: ".5rem" }}>Payment</h3>
           {summary}
           {!needsCard && price && (
             <div className="notice">Nothing to pay: your code covers this booking. No card is needed.</div>
