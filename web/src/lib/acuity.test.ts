@@ -84,6 +84,7 @@ describe("Acuity's export", () => {
           notes: "Bringing a dog, and a ring light",
           scheduled: "November 1, 2026 9:15am",
           canceled: false,
+          label: "",
         },
       ],
     });
@@ -164,20 +165,21 @@ describe("Acuity's export", () => {
       "Amount Paid Online": "300.00",
       "Date Scheduled": "2027-02-01",
       "Appointment ID": "1769000001",
+      Label: "Completed",
     };
     const reading = readAcuityExport(
       csv([
         names,
         row(base),
-        row({ ...base, "Appointment ID": "1769000002", Email: "Cy@Client.test;dee@client.test  eve@client.test," }),
+        row({ ...base, "Appointment ID": "1769000002", Email: "Cy@Client.test;dee@client.test  eve@client.test,", Label: "No-show" }),
         row({ ...base, "Appointment ID": "1769000003", Timezone: "America/Los_Angeles" }),
-        row({ ...base, "Appointment ID": "1769000004", Canceled: "canceled", "Date Canceled": "2026-11-02" }),
+        row({ ...base, "Appointment ID": "1769000004", Canceled: "canceled", "Date Canceled": "2026-11-02", Label: "" }),
       ]),
     );
-    expect(reading.ok && reading.appointments.map((a) => [a.id, a.email, a.otherEmails, a.start, a.end, a.canceled])).toEqual([
-      ["1769000001", "ana@client.test", ["bo@client.test"], { date: "2027-03-03", minute: 560 }, { date: "2027-03-03", minute: 740 }, false],
-      ["1769000002", "Cy@Client.test", ["dee@client.test", "eve@client.test"], { date: "2027-03-03", minute: 560 }, { date: "2027-03-03", minute: 740 }, false],
-      ["1769000004", "ana@client.test", ["bo@client.test"], { date: "2027-03-03", minute: 560 }, { date: "2027-03-03", minute: 740 }, true],
+    expect(reading.ok && reading.appointments.map((a) => [a.id, a.email, a.otherEmails, a.start, a.end, a.canceled, a.label])).toEqual([
+      ["1769000001", "ana@client.test", ["bo@client.test"], { date: "2027-03-03", minute: 560 }, { date: "2027-03-03", minute: 740 }, false, "Completed"],
+      ["1769000002", "Cy@Client.test", ["dee@client.test", "eve@client.test"], { date: "2027-03-03", minute: 560 }, { date: "2027-03-03", minute: 740 }, false, "No-show"],
+      ["1769000004", "ana@client.test", ["bo@client.test"], { date: "2027-03-03", minute: 560 }, { date: "2027-03-03", minute: 740 }, true, ""],
     ]);
     // A row in another time zone would be read at the wrong time: it is set aside.
     expect(reading.ok && reading.unreadable).toEqual([

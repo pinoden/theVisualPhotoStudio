@@ -50,6 +50,7 @@ function appointment(changes: Partial<AcuityAppointment> = {}): AcuityAppointmen
     notes: "A dog comes too",
     scheduled: "November 1, 2026 9:15am",
     canceled: false,
+    label: "",
     ...changes,
   };
 }

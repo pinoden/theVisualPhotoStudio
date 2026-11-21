@@ -59,7 +59,17 @@ export interface AcuityAppointment {
   scheduled: string;
   /** Cancelled in Acuity: an export can list cancelled appointments too. */
   canceled: boolean;
+  /** Acuity's label of it, as the export writes it ("Completed", "No-show", "ReschedulePend"), or empty. */
+  label: string;
 }
+
+/**
+ * What an imported booking's `imported_from` begins with, before Acuity's id: `acuity` for an appointment still to
+ * come (src/server/acuity-import.ts), `acuity-history` for a past visit (src/server/acuity-history.ts). An appointment
+ * is imported once, by one or the other: each looks for both before it adds a booking.
+ */
+export const ACUITY_SOURCE = "acuity";
+export const ACUITY_HISTORY_SOURCE = "acuity-history";
 
 /** A row that could not be read, and why. */
 export interface UnreadableRow {
@@ -91,6 +101,7 @@ const COLUMNS = {
   scheduled: { names: ["Date Scheduled"], required: false },
   canceled: { names: ["Canceled", "Cancelled", "Canceled?", "Cancelled?"], required: false },
   timeZone: { names: ["Timezone", "Time Zone"], required: false },
+  label: { names: ["Label"], required: false },
 } as const satisfies Record<string, { names: readonly string[]; required: boolean }>;
 
 type Column = keyof typeof COLUMNS;
@@ -189,6 +200,7 @@ export function readAcuityExport(text: string): ExportReading {
       notes: cell("notes"),
       scheduled: cell("scheduled"),
       canceled: isYes(cell("canceled")),
+      label: cell("label"),
     });
   });
   return { ok: true, appointments, unreadable };

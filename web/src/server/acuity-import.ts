@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { and, asc, eq, or, sql } from "drizzle-orm";
 import { bookings, payments, photographerHolds, photographers, studioHolds, studios } from "@/db/schema";
 import { pgErrorCode, PG_EXCLUSION_VIOLATION, PG_UNIQUE_VIOLATION, type Db, type DbLike, type Tx } from "@/db/client";
-import { studiosOfAppointment, type AcuityAppointment } from "@/lib/acuity";
+import { ACUITY_HISTORY_SOURCE, ACUITY_SOURCE, studiosOfAppointment, type AcuityAppointment } from "@/lib/acuity";
 import { studioCombinationError } from "@/lib/catalog-view";
 import { findPrice, formatCents } from "@/lib/domain/pricing";
 import { minutesToLabel } from "@/lib/domain/time";
@@ -95,8 +95,6 @@ export interface ImportReport {
 /** Thrown at the end of a rehearsal, to throw its transaction away. */
 class Rehearsal extends Error {}
 
-const ACUITY_SOURCE = "acuity";
-
 /** Import the appointments that are still to come. */
 export async function importAcuityAppointments(db: Db, appointments: readonly AcuityAppointment[], options: ImportOptions): Promise<ImportReport> {
   const report: ImportReport = { imported: [], already: [], refused: [], past: 0, cancelled: 0, totals: { priceCents: 0, paidCents: 0, dueCents: 0 } };
@@ -154,7 +152,12 @@ async function importOne(tx: Tx, appointment: AcuityAppointment, { catalog, phot
     return;
   }
   const importedFrom = `${ACUITY_SOURCE}:${appointment.id}`;
-  const [before] = await tx.select({ ref: bookings.ref }).from(bookings).where(eq(bookings.importedFrom, importedFrom)).limit(1);
+  // Brought in by this import or by the history's (src/server/acuity-history.ts): an appointment is imported once.
+  const [before] = await tx
+    .select({ ref: bookings.ref })
+    .from(bookings)
+    .where(or(eq(bookings.importedFrom, importedFrom), eq(bookings.importedFrom, `${ACUITY_HISTORY_SOURCE}:${appointment.id}`)))
+    .limit(1);
   if (before) {
     report.already.push({ ...line, ref: before.ref });
     return;
