@@ -760,6 +760,11 @@ details.faq-item[open] .faq-icon { transform: rotate(45deg); }
   border-color: var(--color-rose);
   background: color-mix(in srgb, var(--color-rose) 6%, transparent);
 }
+/* The checkbox itself is not drawn, so its card shows where the keyboard is. */
+.studio-option input:focus-visible + .studio-option-card {
+  outline: 2px solid var(--color-dark);
+  outline-offset: 2px;
+}
 .studio-option-card h4 {
   font-size: 1.25rem;
   margin: 0 0 .3rem;
@@ -1342,6 +1347,8 @@ button { font-family: inherit; }
 
 /* ── A customer's account ── */
 .account-who { display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; align-items: center; }
+/* Links among words are told apart by more than their colour. */
+.account-who a { text-decoration: underline; text-underline-offset: 3px; }
 .account-tabs, .tab-row { display: flex; flex-wrap: wrap; gap: .5rem; margin: 0 0 1.75rem; }
 .account-tabs a, .tab-row a {
   display: inline-flex; align-items: center; min-height: 40px; padding: .35rem 1rem;

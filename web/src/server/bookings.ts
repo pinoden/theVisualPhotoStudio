@@ -25,7 +25,7 @@ import { BY_CUSTOMER, recordEvent } from "./history";
 import { releaseHolds } from "./holds";
 import { giveBackReserved, takeReserved } from "./reserved";
 import { activeChargesByBooking, creditLeftCentsByBooking, creditReturnedCentsByBooking, heldCentsByBooking, owedCentsByBooking, receivedCentsByBooking } from "./money";
-import { emailField, hashToken, textField } from "./input-fields";
+import { emailField, hashToken, lineField, textField } from "./input-fields";
 import { giveBackUnmadeMinutes, takeBookingMinutes } from "./membership-minutes";
 import { findUsableMembership, isMembershipCode, type UsableMembership } from "./memberships";
 export { hashToken };
@@ -55,9 +55,9 @@ export const bookingInput = z.object({
   startMinute: z.number().int().min(0).max(1439),
   durationMinutes: z.number().int().positive().max(1440),
   customer: z.object({
-    name: textField(2, 120),
+    name: lineField(2, 120),
     email: emailField,
-    phone: textField(7, 40),
+    phone: lineField(7, 40),
   }),
   notes: textField(0, 2000).default(""),
   addons: addonsField,

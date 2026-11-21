@@ -6,7 +6,7 @@ import { bookings, MEMBERSHIP_STATUSES, membershipMinutes, membershipPayments, m
 import { studioCombinationError } from "@/lib/catalog-view";
 import { formatCents } from "@/lib/domain/pricing";
 import { durationLabel, longDateLabel } from "@/lib/domain/time";
-import { emailField, hashToken, textField } from "./input-fields";
+import { emailField, hashToken, lineField } from "./input-fields";
 import {
   membershipCancelledEmail,
   membershipMonthPaidEmail,
@@ -160,7 +160,7 @@ export function planStudioChoices(all: readonly { id: string; name: string; slug
 
 const joinInput = z.object({
   planId: z.uuid(),
-  customer: z.object({ name: textField(2, 120), email: emailField, phone: textField(7, 40) }),
+  customer: z.object({ name: lineField(2, 120), email: emailField, phone: lineField(7, 40) }),
   acceptTerms: z.literal(true),
   paymentToken: z.string().min(1).max(1000),
   /** The buying page's id for this attempt, a random UUID, sent again unchanged only when no answer came. */

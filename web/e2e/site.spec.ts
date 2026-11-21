@@ -225,6 +225,24 @@ test("a visitor's message reaches the owner, who can reply straight to the visit
   expect(request.body).toContain("x".repeat(3600));
 });
 
+test("the booking screen can be used from the keyboard", async ({ page }) => {
+  await page.goto("/book");
+  const paris = onScreen(page.locator("label.studio-option", { hasText: "Studio Paris" }));
+  const box = paris.getByRole("checkbox");
+  // A studio's checkbox is not drawn itself: its card shows where the keyboard is, and Space chooses it.
+  await page.keyboard.press("Tab");
+  await box.focus();
+  await expect(box).toBeFocused();
+  await expect(paris.locator(".studio-option-card")).toHaveCSS("outline-style", "solid");
+  await page.keyboard.press("Space");
+  await expect(box).toBeChecked();
+  // "Next" goes away with its step. The focus moves to the new step's heading, so that Tab goes on from there, not
+  // from the top of the page again, and a screen reader says where the customer is now.
+  await page.getByRole("button", { name: /^Next/ }).focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: "Select date & duration" })).toBeFocused();
+});
+
 test("books two studios together, starting from the studios", async ({ page }) => {
   await page.goto("/book");
   await shot(page, "03-book-start");
