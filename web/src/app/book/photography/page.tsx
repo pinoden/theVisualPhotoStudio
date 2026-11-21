@@ -4,13 +4,16 @@ import { Suspense } from "react";
 import { BookingFlow } from "@/components/BookingFlow";
 import { telHref } from "@/lib/site/frame";
 import { getCatalog } from "@/server/cached";
-import { siteFrame } from "@/server/site";
+import { shareMetadata, siteFrame } from "@/server/site";
 
-export const metadata: Metadata = {
-  title: "Book a Photographer",
-  description:
-    "Book a professional photoshoot with the in-house photographer of The Visuals Photo Studio. Studio rental is included.",
-};
+const TITLE = "Book a Photographer";
+const DESCRIPTION =
+  "Book a professional photoshoot with the in-house photographer of The Visuals Photo Studio. Studio rental is included.";
+
+/** The page's own address for search engines, and its own title and description when a link to it is shared. */
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: TITLE, description: DESCRIPTION, ...(await shareMetadata({ title: TITLE, description: DESCRIPTION, path: "/book/photography" })) };
+}
 
 /**
  * The photography booking flow: a session with the in-house photographer, in

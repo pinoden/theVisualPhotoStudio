@@ -121,6 +121,14 @@ test("public pages show the studios and the live price list", async ({ page }) =
   await shot(page, "02a-photography");
   await page.getByRole("link", { name: "Book a Photographer" }).click();
   await expect(page.getByRole("heading", { name: "Book a Photographer" })).toBeVisible();
+  // The booking screens have an address of their own for search engines too, and say what they are when shared.
+  await expect(page.locator('link[rel="canonical"]')).toHaveAttribute("href", /\/book\/photography$/);
+  await expect(page.locator('meta[property="og:title"]')).toHaveAttribute("content", "Book a Photographer");
+  // One address, whichever studio a link chose.
+  await page.goto("/book?studio=paris");
+  await expect(page.getByRole("heading", { name: "Reserve Your Studio" })).toBeVisible();
+  await expect(page.locator('link[rel="canonical"]')).toHaveAttribute("href", /\/book$/);
+  await expect(page.locator('meta[property="og:title"]')).toHaveAttribute("content", "Book a Studio");
 });
 
 test("guest information answers with the current rules and prices", async ({ page }) => {
