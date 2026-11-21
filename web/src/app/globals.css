@@ -745,7 +745,9 @@ details.faq-item[open] .faq-icon { transform: rotate(45deg); }
   position: relative;
   cursor: pointer;
 }
-.studio-option input[type=checkbox] {
+/* The card is the control, so its box is not drawn: the checkbox of a rental, and the radio button of a photography
+   session, which stood as a bare circle above each card until 2026-11-21. */
+.studio-option input {
   position: absolute;
   opacity: 0;
   width: 0; height: 0;

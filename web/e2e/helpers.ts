@@ -97,6 +97,32 @@ export function watchBrowser(page: Page, report: (problem: string) => void, { wh
 }
 
 /**
+ * Wait until the page has asked the server for nothing for a moment, as a person does without thinking between one
+ * "Save" and the next. A production build prefetches the pages a screen links to each time that screen is drawn
+ * again, so a second save pressed a tenth of a second after the first lands while the public pages are being drawn
+ * for those prefetches. One drawn before the second save is written can be kept after it, with the old values, for
+ * about a minute ("Known gaps" in ProjectLibrary.md; `webkit-production` failed on it twice on 2026-11-21). A test
+ * that saves twice and then reads a public page calls this between the two. The development server prefetches
+ * nothing, and this returns after `quietMs`.
+ */
+export async function requestsSettled(page: Page, quietMs = 500): Promise<void> {
+  let last = Date.now();
+  const seen = () => {
+    last = Date.now();
+  };
+  page.on("request", seen);
+  page.on("requestfinished", seen);
+  page.on("requestfailed", seen);
+  try {
+    await expect.poll(() => Date.now() - last >= quietMs, { timeout: 15_000, intervals: [100] }).toBe(true);
+  } finally {
+    page.off("request", seen);
+    page.off("requestfinished", seen);
+    page.off("requestfailed", seen);
+  }
+}
+
+/**
  * Follow a link to a page drawn when it is asked for, and wait for all of it,
  * as a person waits for a page to load. A production build shows such a page
  * as soon as its first part has come, and its address changes at once, while

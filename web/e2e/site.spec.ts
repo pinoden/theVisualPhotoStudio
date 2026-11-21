@@ -13,6 +13,7 @@ import {
   next,
   onScreen,
   pickStudio,
+  requestsSettled,
   shot,
   signIn,
   todayInStudio,
@@ -1080,6 +1081,8 @@ test("the owner changes an add-on's price and a studio's guest number, and custo
   await onScreen(page.locator("#addon-pet-fee-price")).fill("45");
   await page.getByRole("button", { name: "Save Pet fee" }).click();
   await expect(byText(page, "Add-on saved.")).toBeVisible();
+  // The next save is not pressed while this one's screen is still fetching the pages it links to (`requestsSettled`).
+  await requestsSettled(page);
 
   // A description of several paragraphs, at the box's limit of 2,000 characters, is saved and keeps its paragraphs.
   const opening = "A vintage Parisian apartment.\n\nNatural light all day.\n\n";
@@ -1488,8 +1491,12 @@ test("a client without a photographer books a session, and the photographer cann
   await callout.getByRole("link", { name: "Book a Photographer" }).click();
   await expect(page.getByRole("heading", { name: "Book a Photographer" })).toBeVisible();
 
-  // A session in Studio Blanche: its length, its price and what it includes.
+  // A session in Studio Blanche: its length, its price and what it includes. The card is the control: no bare radio
+  // button is drawn beside it, and the card says which studio is chosen.
+  const blancheCard = onScreen(page.locator("label.studio-option", { hasText: "Studio Blanche" }));
+  await expect(blancheCard.getByRole("radio")).toHaveCSS("opacity", "0");
   await pickStudio(page, "Studio Blanche");
+  await expect(blancheCard.getByRole("radio")).toBeChecked();
   await next(page);
   await byLabel(page, "Date").fill(PHOTO_DAY);
   const oneHour = page.getByRole("button", { name: /1 hour · \$375/ });
