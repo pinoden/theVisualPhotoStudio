@@ -43,6 +43,13 @@ export function BookingSummary({ booking }: { booking: BookingView }) {
             : "Charged to card";
   /** Paid beyond what it costs now, after a move to a day that costs less (follow-up 5): the studio refunds it. */
   const creditLeft = paidStatus ? booking.creditLeftCents : 0;
+  /**
+   * Money given back, for whatever reason (the owners' payment summary of 2026-11-20): what was paid, what was refunded,
+   * and what that leaves, apart from a credit not yet refunded, which keeps its own row.
+   */
+  const refunded = booking.receivedCents > 0 ? booking.refundedCents : 0;
+  const refundedLabel =
+    booking.refundsWaitingCents <= 0 ? "Refunded" : booking.refundsWaitingCents >= refunded ? "Refund on its way" : "Refunded (part on its way)";
   return (
     <div className="price-summary">
       <div className="price-row">
@@ -117,18 +124,31 @@ export function BookingSummary({ booking }: { booking: BookingView }) {
         </div>
       ))}
       {/* A booking paid in parts (made in the admin, or one whose card was never charged): what was received, then what is owed. */}
-      {paidStatus && booking.receivedCents - booking.creditReturnedCents > 0 && booking.dueCents > 0 && (
+      {refunded === 0 && paidStatus && booking.receivedCents - booking.creditReturnedCents > 0 && booking.dueCents > 0 && (
         <div className="price-row">
           <span>{byCard > 0 || throughAcuity > 0 ? "Paid so far" : "Paid at the studio so far"}</span>
           {/* Toward its price: what was given back of a payment beyond it does not count (follow-up 5). */}
           <span>{formatCents(booking.receivedCents - booking.creditReturnedCents)}</span>
         </div>
       )}
-      {creditLeft > 0 && (
+      {refunded === 0 && creditLeft > 0 && (
         <div className="price-row">
           <span>{paidHow}</span>
           <span>{formatCents(booking.totalCents + booking.chargesCents + creditLeft)}</span>
         </div>
+      )}
+      {/* Something was given back: what was paid, then what was refunded. The last row says what that leaves. */}
+      {refunded > 0 && (
+        <>
+          <div className="price-row">
+            <span>{paidHow}</span>
+            <span>{formatCents(booking.receivedCents)}</span>
+          </div>
+          <div className="price-row price-discount">
+            <span>{refundedLabel}</span>
+            <span>{formatCents(-refunded)}</span>
+          </div>
+        </>
       )}
       <div className="price-row total">
         <span>
@@ -136,17 +156,25 @@ export function BookingSummary({ booking }: { booking: BookingView }) {
               holds it, it is not charged yet: taking it did not go through, and is tried again. */}
           {creditLeft > 0
             ? "To be refunded"
-            : !paidStatus || booking.totalCents + booking.chargesCents === 0
-              ? "Total"
-              : booking.dueCents > 0
-                ? booking.madeByAdmin
-                  ? "To pay at the studio"
-                  : "To pay"
-                : paidHow}
+            : paidStatus && booking.dueCents > 0 && booking.totalCents + booking.chargesCents > 0
+              ? booking.madeByAdmin
+                ? "To pay at the studio"
+                : "To pay"
+              : refunded > 0
+                ? "Paid, less refunds"
+                : !paidStatus || booking.totalCents + booking.chargesCents === 0
+                  ? "Total"
+                  : paidHow}
         </span>
         <span>
           {formatCents(
-            creditLeft > 0 ? creditLeft : paidStatus && booking.dueCents > 0 ? booking.dueCents : booking.totalCents + booking.chargesCents,
+            creditLeft > 0
+              ? creditLeft
+              : paidStatus && booking.dueCents > 0 && booking.totalCents + booking.chargesCents > 0
+                ? booking.dueCents
+                : refunded > 0
+                  ? booking.receivedCents - refunded
+                  : booking.totalCents + booking.chargesCents,
           )}
         </span>
       </div>

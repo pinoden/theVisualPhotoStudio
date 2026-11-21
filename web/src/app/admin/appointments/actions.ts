@@ -286,15 +286,25 @@ export async function closePayLinkByHandAction(formData: FormData): Promise<void
     withMessage(
       page,
       "notice",
-      result.outcome === "was_paid"
-        ? result.late
-          ? result.late.made
-            ? "The card processor answered: the client had paid through the link. The booking had ended, so the payment is refunded to the card in full, and the client is told."
-            : "The card processor answered: the client had paid through the link. The booking had ended, so the payment is due back to the card in full; the refund has not gone through yet, and is tried again by itself."
-          : "The card processor answered: the client had paid through the link. The payment is recorded, and nothing was closed."
-        : "The payment link was closed. The site no longer asks about it.",
+      `${
+        result.outcome === "was_paid"
+          ? result.late
+            ? result.late.made
+              ? "The card processor answered: the client had paid through the link. The booking had ended, so the payment is refunded to the card in full, and the client is told."
+              : "The card processor answered: the client had paid through the link. The booking had ended, so the payment is due back to the card in full; the refund has not gone through yet, and is tried again by itself."
+            : "The card processor answered: the client had paid through the link. The payment is recorded, and nothing was closed."
+          : "The payment link was closed. The site no longer asks about it."
+      }${finishedText(result.finished)}`,
     ),
   );
+}
+
+/** Said when what the client asked for waited for the link and is done now (`finishWaitingOf` in pay-links.ts). */
+function finishedText(finished: "cancel" | "reschedule" | undefined): string {
+  if (!finished) return "";
+  return finished === "cancel"
+    ? " The cancellation the client asked for, which waited for this, is done under the booking's terms as they stood then, and the client is emailed."
+    : " The release for a reschedule code the client asked for, which waited for this, is done under the booking's terms as they stood then, and the client is emailed their code.";
 }
 
 /** Ask the card processor now whether the link was paid. */
@@ -309,15 +319,17 @@ export async function checkPayLinkAction(formData: FormData): Promise<void> {
     withMessage(
       page,
       "notice",
-      result.status === "paid"
-        ? result.late
-          ? result.late.made
-            ? "The client's payment through the link was recorded after the booking ended: it is refunded to the card in full, and the client is told."
-            : "The client's payment through the link was recorded after the booking ended. It is due back to the card in full, and the refund has not gone through yet: it is tried again by itself, and the client is told."
-          : "The client has paid through the link. The payment is recorded."
-        : result.status === "cancelled"
-          ? "The link was cancelled at the card processor."
-          : "The link has not been paid yet.",
+      `${
+        result.status === "paid"
+          ? result.late
+            ? result.late.made
+              ? "The client's payment through the link was recorded after the booking ended: it is refunded to the card in full, and the client is told."
+              : "The client's payment through the link was recorded after the booking ended. It is due back to the card in full, and the refund has not gone through yet: it is tried again by itself, and the client is told."
+            : "The client has paid through the link. The payment is recorded."
+          : result.status === "cancelled"
+            ? "The link was cancelled at the card processor."
+            : "The link has not been paid yet."
+      }${finishedText(result.finished)}`,
     ),
   );
 }

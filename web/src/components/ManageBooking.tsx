@@ -18,18 +18,23 @@ export interface ManageChoice {
  * Cancel and reschedule buttons for one booking. Each asks for confirmation
  * and says beforehand exactly what will happen to the customer's money.
  * `choices` is null once the booking is no longer active; the component stays
- * mounted so the result of the action remains on screen.
+ * mounted so the result of the action remains on screen. While a cancellation
+ * or release the client asked for waits for the card processor (`waiting`),
+ * it says so in their place, with a button that asks again.
  */
 export function ManageBooking({
   bookingRef,
   token,
   choices,
+  waiting = null,
   keepInPlace = false,
 }: {
   bookingRef: string;
   /** The secret from the customer's link. Omitted for a signed-in customer. */
   token?: string;
   choices: { cancel: ManageChoice; reschedule: ManageChoice; request?: ManageChoice } | null;
+  /** What the client asked for that waits (`endRequestText` in manage.ts): `choices` is then null. */
+  waiting?: { kind: "cancel" | "reschedule"; text: string } | null;
   /**
    * In a list, the page is not re-rendered after the action: the booking's
    * card would move away and take the result message with it.
@@ -49,7 +54,11 @@ export function ManageBooking({
         ? cancelState
         : requestState.status === "requested"
           ? requestState
-          : null;
+          : cancelState.status === "waiting"
+            ? cancelState
+            : moveState.status === "waiting"
+              ? moveState
+              : null;
   const error =
     cancelState.status === "error"
       ? cancelState.message
@@ -79,6 +88,34 @@ export function ManageBooking({
     );
   }
 
+  const hidden = (
+    <>
+      <input type="hidden" name="ref" value={bookingRef} />
+      {token && <input type="hidden" name="token" value={token} />}
+      {keepInPlace && <input type="hidden" name="keepInPlace" value="1" />}
+    </>
+  );
+
+  // What the client asked for waits for the card processor: said in place of the choices, with a way to ask again.
+  if (waiting) {
+    return (
+      <div className="notice" role="status">
+        {error && (
+          <div className="flash flash-error" role="alert">
+            {error}
+          </div>
+        )}
+        <p style={{ marginTop: 0 }}>{waiting.text}</p>
+        <form action={waiting.kind === "cancel" ? cancelAction : moveAction} style={{ marginBottom: 0 }}>
+          {hidden}
+          <button type="submit" className="btn btn-outline btn-small" disabled={busy}>
+            {busy ? "Checking…" : "Try again now"}
+          </button>
+        </form>
+      </div>
+    );
+  }
+
   // Nothing left to choose (the booking ended meanwhile): what the last press was told still shows.
   if (!choices) {
     return error ? (
@@ -87,14 +124,6 @@ export function ManageBooking({
       </div>
     ) : null;
   }
-
-  const hidden = (
-    <>
-      <input type="hidden" name="ref" value={bookingRef} />
-      {token && <input type="hidden" name="token" value={token} />}
-      {keepInPlace && <input type="hidden" name="keepInPlace" value="1" />}
-    </>
-  );
 
   return (
     <div className="manage-booking">

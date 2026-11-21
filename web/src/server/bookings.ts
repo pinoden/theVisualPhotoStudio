@@ -24,7 +24,15 @@ import { bookingConfirmationEmail, queueEmail } from "./email";
 import { BY_CUSTOMER, recordEvent } from "./history";
 import { releaseHolds } from "./holds";
 import { giveBackReserved, takeReserved } from "./reserved";
-import { activeChargesByBooking, creditLeftCentsByBooking, creditReturnedCentsByBooking, heldCentsByBooking, owedCentsByBooking, receivedCentsByBooking } from "./money";
+import {
+  activeChargesByBooking,
+  creditLeftCentsByBooking,
+  creditReturnedCentsByBooking,
+  heldCentsByBooking,
+  owedCentsByBooking,
+  receivedCentsByBooking,
+  refundedCentsByBooking,
+} from "./money";
 import { emailField, hashToken, lineField, textField } from "./input-fields";
 import { giveBackUnmadeMinutes, takeBookingMinutes } from "./membership-minutes";
 import { findUsableMembership, isMembershipCode, type UsableMembership } from "./memberships";
@@ -727,6 +735,13 @@ export interface BookingView {
   /** What was given back of what it was paid beyond its price (follow-up 5): `receivedCents` less this was paid toward it. */
   creditReturnedCents: number;
   /**
+   * Everything given back of what it received, to the card or by hand, whatever for (a cancellation, goodwill, credit):
+   * made, on its way, or owed (`refundedCentsByBooking` in money.ts). `refundsWaitingCents` is the part that has not
+   * reached the client yet. The payment summary the owners asked for on 2026-11-20 shows them.
+   */
+  refundedCents: number;
+  refundsWaitingCents: number;
+  /**
    * What is still to pay (`owedCents` in money.ts): until it is paid for a
    * booking made in the admin; for one made online, only once the amount its
    * card held lapsed before it was taken. Nothing for a booking that ended.
@@ -740,6 +755,11 @@ export interface BookingView {
    */
   creditLeftCents: number;
   rescheduledCount: number;
+  /**
+   * A cancellation, or a release for a reschedule code, the client asked for that waits until the site knows whether the
+   * booking's payment link was paid (`waitToEnd` in manage.ts); `at` is when they asked. Null otherwise.
+   */
+  endRequest: { kind: "cancel" | "reschedule"; at: string } | null;
 }
 
 type BookingRow = typeof bookings.$inferSelect;
@@ -749,7 +769,7 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[], now: Date =
   if (rows.length === 0) return [];
   const ids = rows.map((r) => r.id);
   const codeIds = rows.map((r) => r.promoCodeId).filter((id): id is string => id !== null);
-  const [holdRows, addonRows, codeRows, received, atStudio, throughAcuity, owed, held, charged, creditLeft, creditReturned] = await together(db, [
+  const [holdRows, addonRows, codeRows, received, atStudio, throughAcuity, owed, held, charged, creditLeft, creditReturned, refunded] = await together(db, [
     () => db
       .select({ bookingId: studioHolds.bookingId, name: studios.name, priceCents: studioHolds.priceCents, sort: studios.sortOrder })
       .from(studioHolds)
@@ -770,6 +790,7 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[], now: Date =
     () => activeChargesByBooking(db, ids),
     () => creditLeftCentsByBooking(db, rows),
     () => creditReturnedCentsByBooking(db, ids),
+    () => refundedCentsByBooking(db, ids),
   ]);
   return rows.map((booking) => ({
     id: booking.id,
@@ -807,10 +828,13 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[], now: Date =
     receivedAtStudioCents: atStudio.get(booking.id) ?? 0,
     receivedThroughAcuityCents: throughAcuity.get(booking.id) ?? 0,
     creditReturnedCents: creditReturned.get(booking.id) ?? 0,
+    refundedCents: refunded.get(booking.id)?.cents ?? 0,
+    refundsWaitingCents: refunded.get(booking.id)?.waitingCents ?? 0,
     dueCents: owed.get(booking.id) ?? 0,
     heldCents: held.get(booking.id) ?? 0,
     creditLeftCents: creditLeft.get(booking.id) ?? 0,
     rescheduledCount: booking.rescheduledCount,
+    endRequest: booking.endRequest && booking.endRequestedAt ? { kind: booking.endRequest, at: booking.endRequestedAt.toISOString() } : null,
   }));
 }
 

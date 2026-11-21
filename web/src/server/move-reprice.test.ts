@@ -1,8 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
+import { BookingSummary } from "@/components/BookingSummary";
 import { bookings, priceRules, promoCodes, specialDates, studioHolds } from "@/db/schema";
 import { cardReceiptOf, createAdminBooking, getAppointment, moveBooking, moveOptions } from "./appointments";
 import type { AuthUser } from "./auth";
@@ -230,6 +233,31 @@ describe("money given back, and the price changing again (the tester's findings 
     // And moved back, what it was paid beyond the price is the client's: the gift does not use it up.
     expectOk(await moveBooking(world.db, owner, ref, to(FAR, h(12)), NOW));
     expect(await paymentCard(ref)).toMatchObject({ totalCents: 17600, dueCents: 0, creditLeftCents: 0 });
+  });
+
+  // The owners' payment summary of 2026-11-20: what was paid, what was refunded, what that leaves, and a credit or a
+  // balance apart from them, on the booking's own page and the client's account.
+  it("shows the client what was paid, refunded and left, after a goodwill refund and moves both ways", async () => {
+    const { ref } = expectOk(await world.book({ date: SATURDAY })); // $190, charged to the card
+    const summary = async () => {
+      const [view] = await toBookingViews(world.db, [await rowOf(ref)], NOW);
+      return renderToStaticMarkup(createElement(BookingSummary, { booking: view }));
+    };
+    const last = (label: string, amount: string) => `<div class="price-row total"><span>${label}</span><span>${amount}</span></div>`;
+    expectOk(await ownerRefund(world.db, ref, { amountCents: 2000, reason: "Goodwill" }, world.manageDeps()));
+    expect(await summary()).toContain("<span>Charged to card</span><span>$190</span></div>");
+    expect(await summary()).toContain('<span>Refunded</span><span>-$20</span>');
+    expect(await summary()).toContain(last("Paid, less refunds", "$170"));
+    // Moved to a weekday: $14 was paid beyond the new price. It is the client's, apart from the gift.
+    expectOk(await moveBooking(world.db, owner, ref, to(THURSDAY), NOW));
+    expect(await summary()).toContain(last("To be refunded", "$14"));
+    // Refunded to the card, it is given back first, and nothing is left to refund.
+    expectOk(await ownerRefund(world.db, ref, { amountCents: 1400, reason: "" }, world.manageDeps()));
+    expect(await summary()).toContain('<span>Refunded</span><span>-$34</span>');
+    expect(await summary()).toContain(last("Paid, less refunds", "$156"));
+    // Moved back to the Saturday: the rise is due again, not the gift.
+    expectOk(await moveBooking(world.db, owner, ref, to(SATURDAY, h(12)), NOW));
+    expect(await summary()).toContain(last("To pay", "$14"));
   });
 
   it("says nothing of a new price when a free hour still pays all of it, and keeps the new prices", async () => {

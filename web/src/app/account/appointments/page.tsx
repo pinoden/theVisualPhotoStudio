@@ -9,7 +9,7 @@ import { getDb } from "@/db/client";
 import { count } from "@/lib/words";
 import { customerStatus, filterPast, loadAppointments, parsePastFilter, PAST_STATUSES, studiosOf, type AccountBooking } from "@/server/account";
 import { isUpcomingVisit } from "@/server/bookings";
-import { getManageChoices } from "@/server/manage";
+import { endRequestText, getManageChoices } from "@/server/manage";
 import { noticePaidLinksOf } from "@/server/pay-links";
 import { finishAfterResponse, payLinkDeps } from "@/server/runtime";
 import { requireUser } from "@/server/session";
@@ -70,9 +70,15 @@ async function Appointments({ searchParams }: Pick<PageProps<"/account/appointme
   const { upcoming, past } = await loadAppointments(db, user.email, now);
   const tab = query.tab === "past" ? "past" : "upcoming";
 
+  // A cancellation or release the client asked for that waits for the card processor is said in place of its choices.
+  const waiting = upcoming.map((booking) =>
+    booking.endRequest ? { kind: booking.endRequest.kind, text: endRequestText({ kind: booking.endRequest.kind, at: new Date(booking.endRequest.at) }) } : null,
+  );
   const choices =
     tab === "upcoming"
-      ? await Promise.all(upcoming.map((booking) => getManageChoices(db, booking.ref, { kind: "customer", email: user.email }, now)))
+      ? await Promise.all(
+          upcoming.map((booking, index) => (waiting[index] ? null : getManageChoices(db, booking.ref, { kind: "customer", email: user.email }, now))),
+        )
       : [];
   // How to get into the building: for the holder of a confirmed booking that has not ended.
   const access = tab === "upcoming" && upcoming.some((booking) => isUpcomingVisit(booking, now)) ? await loadAccessInstructions(db) : "";
@@ -126,7 +132,7 @@ async function Appointments({ searchParams }: Pick<PageProps<"/account/appointme
                   {access}
                 </div>
               )}
-              <ManageBooking bookingRef={booking.ref} choices={choices[index]} keepInPlace />
+              <ManageBooking bookingRef={booking.ref} choices={choices[index]} waiting={waiting[index]} keepInPlace />
             </div>
           ))}
         </>

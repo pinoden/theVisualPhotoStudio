@@ -37,7 +37,10 @@ const PAID_ONLINE: BookingView = {
   heldCents: 0,
   creditLeftCents: 0,
   creditReturnedCents: 0,
+  refundedCents: 0,
+  refundsWaitingCents: 0,
   rescheduledCount: 0,
+  endRequest: null,
 };
 
 /** The summary's last row, as its two sides read. */
@@ -92,5 +95,35 @@ describe("a booking's summary", () => {
     expect(lastRow({ ...moved, receivedAtStudioCents: 17600 })).toEqual(["To be refunded", "$8"]);
     // Once it ended, it shows what it cost: a cancellation dealt with the money.
     expect(lastRow({ ...moved, status: "cancelled" })).toEqual(["Total", "$168"]);
+  });
+
+  // The owners' decision of 2026-11-20: the original payment, what was refunded, what was paid in the end, and any
+  // balance due or credit left, the credit apart from what was refunded.
+  it("says what was paid, what was refunded and what that leaves, once money was given back", () => {
+    const html = (changes: Partial<BookingView>) => renderToStaticMarkup(<BookingSummary booking={{ ...PAID_ONLINE, ...changes }} />);
+    // A goodwill refund of $50 on a booking that stands.
+    const goodwill = { refundedCents: 5000 };
+    expect(html(goodwill)).toContain('<div class="price-row"><span>Charged to card</span><span>$176</span></div>');
+    expect(html(goodwill)).toContain('<div class="price-row price-discount"><span>Refunded</span><span>-$50</span></div>');
+    expect(lastRow(goodwill)).toEqual(["Paid, less refunds", "$126"]);
+    // A cancellation refunded less its 5% fee, the refund not on the card yet; then made.
+    const cancelled = { status: "cancelled", refundedCents: 16720, refundsWaitingCents: 16720 };
+    expect(html(cancelled)).toContain("<span>Refund on its way</span><span>-$167.20</span>");
+    expect(lastRow(cancelled)).toEqual(["Paid, less refunds", "$8.80"]);
+    expect(html({ ...cancelled, refundsWaitingCents: 0 })).toContain("<span>Refunded</span><span>-$167.20</span>");
+    expect(html({ ...cancelled, refundsWaitingCents: 6720 })).toContain("<span>Refunded (part on its way)</span><span>-$167.20</span>");
+    // Moved to a day that costs $168: $8 of credit left, apart from a $20 goodwill refund already made.
+    const moved = { studios: [{ name: "Studio Blanche", priceCents: 16800 }], studiosSubtotalCents: 16800, totalCents: 16800, creditLeftCents: 800, refundedCents: 2000 };
+    expect(html(moved)).toContain("<span>Refunded</span><span>-$20</span>");
+    expect(lastRow(moved)).toEqual(["To be refunded", "$8"]);
+    // That credit refunded: nothing left to refund.
+    expect(lastRow({ ...moved, creditLeftCents: 0, refundedCents: 2800, creditReturnedCents: 800 })).toEqual(["Paid, less refunds", "$148"]);
+    // Still owing: what is due stays the last row, after what was paid and refunded.
+    const owing = { madeByAdmin: true, receivedCents: 10000, receivedAtStudioCents: 10000, refundedCents: 1000, dueCents: 7600 };
+    expect(html(owing)).toContain("<span>Paid at the studio</span><span>$100</span>");
+    expect(html(owing)).not.toContain("so far");
+    expect(lastRow(owing)).toEqual(["To pay at the studio", "$76"]);
+    // Nothing was paid: no refund rows, whatever the view says.
+    expect(html({ receivedCents: 0, refundedCents: 0, status: "cancelled" })).not.toContain("Refunded");
   });
 });

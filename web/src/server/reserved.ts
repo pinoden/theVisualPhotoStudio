@@ -155,6 +155,7 @@ export async function settleReservedPayments(db: Db, deps: SettleDeps): Promise<
       bookingId: bookings.id,
       bookingStatus: bookings.status,
       startAt: bookings.startAt,
+      endRequestedAt: bookings.endRequestedAt,
     })
     .from(payments)
     .innerJoin(bookings, eq(bookings.id, payments.bookingId))
@@ -174,6 +175,9 @@ export async function settleReservedPayments(db: Db, deps: SettleDeps): Promise<
     }
     const reserved = { ...row, providerPaymentId: row.providerPaymentId };
     if ((STANDING as readonly string[]).includes(row.bookingStatus)) {
+      // Not taken while the client's cancellation or move waits for the card processor (`waitToEnd` in manage.ts): it is
+      // decided on the money as it stood when they asked, and a cancellation gives back what was only reserved.
+      if (row.endRequestedAt) continue;
       if (await takeReserved(db, reserved, deps)) taken++;
       continue;
     }

@@ -5,12 +5,12 @@ import { releaseExpiredHolds } from "./availability";
 import { pruneRateLimits } from "./rate-limit";
 import { durationLabel } from "@/lib/domain/time";
 import { toBookingViews } from "./bookings";
-import { bookingReminderEmail, deliverPendingEmails, queueEmail, reviewRequestEmail, type EmailTransport } from "./email";
+import { bookingReminderEmail, deliverPendingEmails, loyaltyProgressEmail, queueEmail, reviewRequestEmail, type EmailTransport } from "./email";
 import { runMembershipBilling } from "./memberships";
 import { labelOf } from "@/lib/domain/labels";
 import { BY_SYSTEM, recordEvent } from "./history";
-import { sendEarnedFreeHours } from "./loyalty";
-import { checkUnsettledRefunds, retryOpenRefunds, type ManageDeps } from "./manage";
+import { loyaltyStandingOf, sendEarnedFreeHours } from "./loyalty";
+import { checkUnsettledRefunds, finishWaitingEnds, retryOpenRefunds, type ManageDeps } from "./manage";
 import { settleReservedPayments } from "./reserved";
 import { checkOpenPayLinks } from "./pay-links";
 import { emptyOldTrash } from "./pages";
@@ -53,6 +53,8 @@ export interface TaskSummary {
   payLinksPaid: number;
   /** Payment links withdrawn because their booking is no longer active. */
   payLinksClosed: number;
+  /** Cancellations and releases the clients asked for that waited for the card processor, done now that the site knows (`finishWaitingEnds`). */
+  waitingEndsFinished: number;
   /** Memberships' months found paid at the processor, recorded with their minutes (`runMembershipBilling`). */
   membershipMonthsPaid: number;
   /** Members told that a month was not paid, or that their payments stopped. */
@@ -71,7 +73,8 @@ const DAY = 86_400_000;
  * The reminder before a visit (the owner's answer of 2026-11-17: 24 hours before). Each confirmed booking gets one,
  * once, when it starts within `reminderHours`, and only until it starts: a run that comes late still sends it while
  * it can help. A booking made inside those hours gets none, as its confirmation has only just gone; nor one waiting to
- * be moved. How to get in is the text the owners have set now, which may be newer than the confirmation's.
+ * be moved, nor one the client asked to cancel or release that waits for the card processor (`endRequest`). How to get
+ * in is the text the owners have set now, which may be newer than the confirmation's.
  */
 export async function queueReminders(db: Db, now: Date): Promise<number> {
   const { reminderHours } = await loadSettings(db);
@@ -89,6 +92,7 @@ export async function queueReminders(db: Db, now: Date): Promise<number> {
           isNull(bookings.reminderSentAt),
           lte(bookings.createdAt, sql`${bookings.startAt} - make_interval(hours => ${reminderHours})`),
           or(isNull(bookings.label), ne(bookings.label, "reschedule_pending")),
+          isNull(bookings.endRequestedAt),
         ),
       )
       .orderBy(asc(bookings.startAt), asc(bookings.id))
@@ -142,14 +146,17 @@ async function queueReviewRequests(db: Db, now: Date): Promise<number> {
 /**
  * Mark visits that ended a while ago as completed, and send a free hour to
  * each customer whose visits have earned one (see `loyalty.ts`). A visit staff
- * marked as a no-show is not completed, so it counts for nothing.
+ * marked as a no-show is not completed, so it counts for nothing. A visit that
+ * earned a stamp and no free hour gets the email of where the client stands
+ * instead (`loyaltyProgressEmail`), once.
  */
 export async function completeVisits(db: Db, now: Date, baseUrl: string): Promise<{ completed: number; codes: number }> {
   const settings = await loadSettings(db);
   const cutoff = new Date(now.getTime() - settings.loyaltyDelayHours * 3_600_000);
 
   // A booking waiting to be rescheduled is left alone: the client asked to move it, so the visit at the
-  // original time did not happen, and an administrator decides what becomes of it.
+  // original time did not happen, and an administrator decides what becomes of it. So is one the client asked to cancel
+  // or release that waits for the card processor: it ends as they asked once the site knows (`finishWaitingEnds`).
   const done = await db.transaction(async (tx) => {
     const ended = await tx
       .select({ id: bookings.id, status: bookings.status, label: bookings.label })
@@ -159,6 +166,7 @@ export async function completeVisits(db: Db, now: Date, baseUrl: string): Promis
           eq(bookings.status, "confirmed"),
           lte(bookings.endAt, cutoff),
           or(isNull(bookings.label), ne(bookings.label, "reschedule_pending")),
+          isNull(bookings.endRequestedAt),
         ),
       )
       .for("update");
@@ -209,8 +217,32 @@ export async function completeVisits(db: Db, now: Date, baseUrl: string): Promis
   let codes = 0;
   for (const [email, customer] of customers) {
     codes += await db.transaction(async (tx) => {
+      // Claimed first, each visit once: a run beside this one (a retry) finds them claimed, and tells the client nothing twice.
+      const claimed = (
+        await tx
+          .update(bookings)
+          .set({ loyaltyIssuedAt: now })
+          .where(and(inArray(bookings.id, customer.bookingIds), isNull(bookings.loyaltyIssuedAt)))
+          .returning({ id: bookings.id })
+      ).map((row) => row.id);
       const sent = await sendEarnedFreeHours(tx, { email, name: customer.name }, { now, baseUrl, settings });
-      await tx.update(bookings).set({ loyaltyIssuedAt: now }).where(inArray(bookings.id, customer.bookingIds));
+      // A visit of these that earned its day's stamp, with no free hour coming of it: the client is told where they stand
+      // (the owners' decision of 2026-11-20). A free hour sent says it all. One email for the visits of one run.
+      if (sent === 0 && claimed.length > 0) {
+        const standing = await loyaltyStandingOf(tx, email, settings);
+        if (standing.towardsNext > 0 && claimed.some((id) => standing.days.some((day) => day.bookingId === id))) {
+          await queueEmail(
+            tx,
+            loyaltyProgressEmail({
+              to: email,
+              name: customer.name,
+              stamps: standing.towardsNext,
+              visits: settings.loyaltyVisits,
+              bookUrl: `${baseUrl.replace(/\/$/, "")}/book`,
+            }),
+          );
+        }
+      }
       return sent;
     });
   }
@@ -254,6 +286,8 @@ export async function runScheduledTasks(db: Db, deps: TaskDeps): Promise<TaskSum
   const refundRuns = await retryOpenRefunds(db, deps);
   const settling = await checkUnsettledRefunds(db, deps);
   const links = await checkOpenPayLinks(db, deps);
+  // After the links: one just found paid is counted in what the client asked for.
+  const waitingEndsFinished = await finishWaitingEnds(db, deps);
   const billing = await runMembershipBilling(db, deps);
   const mail = await deliverPendingEmails(db, deps.email, deps.now);
   const pagesRemoved = await emptyOldTrash(db, deps.now);
@@ -273,6 +307,7 @@ export async function runScheduledTasks(db: Db, deps: TaskDeps): Promise<TaskSum
     refundsRejected: settling.rejected,
     payLinksPaid: links.paid,
     payLinksClosed: links.closed,
+    waitingEndsFinished,
     membershipMonthsPaid: billing.monthsPaid,
     membershipProblems: billing.problems,
     membershipsCarriedOn: billing.carriedOn,

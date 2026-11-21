@@ -303,15 +303,7 @@ export async function ownerCancelAction(formData: FormData): Promise<void> {
   const atStudio = result.atStudioCents
     ? ` ${formatCents(result.atStudioCents)} of what was paid ${result.handPaidPlace ?? "at the studio"} can be given back: give back what is owed by hand, then record it on the appointment's page.`
     : "";
-  const unseen =
-    result.unseenLink === "foreign"
-      ? " Its payment link was made by another card processor than the one set up now, which the site cannot ask: look the link up there, then close it on the appointment's page."
-      : result.unseenLink === "none"
-        ? " No card processor is set up now, so the site could not ask whether its payment link was paid: look the link up in Square, then close it on the appointment's page."
-        : result.unseenLink === "unseen"
-          ? " The card processor could not say whether its payment link was paid: if it was, that payment is refunded to the card in full once the processor tells the site. Look the link up in Square."
-          : "";
-  done(back, `Booking cancelled. ${refundNote(result.refund, result.refundCents)}${atStudio}${unseen}`);
+  done(back, `Booking cancelled. ${refundNote(result.refund, result.refundCents)}${atStudio}`);
 }
 
 /** The owner refunded a payment by hand in Square after the site could not: the site stops trying, and counts it as made. */

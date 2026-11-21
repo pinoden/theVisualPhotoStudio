@@ -75,6 +75,8 @@ export interface Appointment {
   payments: BookingMoney | null;
   /** The payment link that is open for the booking, if one was emailed and not yet paid. Null when `payments` is. */
   payLink: PayLinkView | null;
+  /** A cancellation or release the client asked for that waits for the card processor (`BookingView.endRequest`). */
+  endRequest: BookingView["endRequest"];
   /**
    * The pet fee on the booking, and whether it can be returned as studio
    * credit now. Null when there is none, and for staff: returning it is the
@@ -153,6 +155,7 @@ export async function getAppointment(db: DbLike, viewer: AuthUser, ref: string, 
     money: may("seePrices") ? view : null,
     payments: seesPayments ? money : null,
     payLink: seesPayments ? await openPayLinkOf(db, booking.id) : null,
+    endRequest: view.endRequest,
     terms: { ...storedTerms(booking, settings), changedSince: termsChangedSince(booking, settings) },
     charges: seesCharges
       ? {
@@ -416,6 +419,7 @@ export async function moveBooking(
   if (found.status !== "confirmed" || now.getTime() >= found.endAt.getTime()) {
     return refuse("not_movable", "Only a booking that is still to come can be moved.");
   }
+  if (found.endRequest) return refuse("not_movable", waitingBlocksMove(found.endRequest));
   if (await hasCharges(db, found.id)) return refuse("not_movable", CHARGES_BLOCK_MOVE);
   if (!isIsoDate(input.date) || !Number.isInteger(input.startMinute) || input.startMinute < 0 || input.startMinute >= 1440) {
     return refuse("invalid_time", "Choose a date and a time.");
@@ -462,6 +466,7 @@ export async function moveBooking(
     return await db.transaction(async (tx): Promise<MoveResult> => {
       const [booking] = await tx.select().from(bookings).where(eq(bookings.id, found.id)).for("update").limit(1);
       if (!booking || booking.status !== "confirmed") return refuse("not_movable", "Only a booking that is still to come can be moved.");
+      if (booking.endRequest) return refuse("not_movable", waitingBlocksMove(booking.endRequest));
       // A charge added since the check above: adding one locks the same row (`addCharge`).
       if (await hasCharges(tx, booking.id)) return refuse("not_movable", CHARGES_BLOCK_MOVE);
       // A day of the other kind prices the booking for that day (follow-up 5): worked out on the locked row.
@@ -557,6 +562,14 @@ export async function moveBooking(
     if (pgErrorCode(error) === PG_EXCLUSION_VIOLATION) return refuse("slot_taken", "That time was just taken. Choose another.");
     throw error;
   }
+}
+
+/**
+ * Why the studio cannot move a booking the client asked to cancel or release while that waits for the card processor
+ * (`waitToEnd` in manage.ts): the client gave the time up, and what they asked for is decided once the site knows.
+ */
+function waitingBlocksMove(request: "cancel" | "reschedule"): string {
+  return `The client has asked to ${request === "cancel" ? "cancel this booking" : "release this booking for a reschedule code"}, and that waits until the site knows whether its payment link was paid, so it cannot be moved meanwhile. See the payment link on this page.`;
 }
 
 /** After `count` moves: whether the client can move the booking again online, and what that costs. */

@@ -1676,7 +1676,16 @@ test("the studio moves a Saturday booking to a weekday, which costs less, and th
   await expect(onScreen(page.locator(".payment-facts")).locator("div", { hasText: "Remaining credit" })).toContainText("None");
   await expect(onScreen(page.locator(".payment-facts")).locator("div", { hasText: "Paid" })).toContainText("$68 after $4 refunded");
   await expect(page.getByRole("heading", { name: "Refund the remaining credit" })).toHaveCount(0);
-  await expect(totalRow(page)).toContainText("Charged to card");
+  // The summary says what was paid, what was refunded and what that leaves (the owners' payment summary of
+  // 2026-11-20), here and on the client's page.
+  for (const where of [null, clientPage]) {
+    if (where) await page.goto(where);
+    await expect(onScreen(page.locator(".price-row", { hasText: "Charged to card" }))).toContainText("$72");
+    await expect(onScreen(page.locator(".price-row", { hasText: "Refunded" }))).toContainText("-$4");
+    await expect(totalRow(page)).toContainText("Paid, less refunds");
+    await expect(totalRow(page)).toContainText("$68");
+  }
+  await page.goto(`/admin/appointments/${ref}`);
 
   // Moved back to the Saturday, it owes again the $4 that was refunded (the tester's finding of 2026-11-18), and the
   // card says why, not that the card was never charged.
