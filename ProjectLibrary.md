@@ -1083,6 +1083,8 @@ Known weaknesses:
   - **Public pages:** the 11 public pages, on a computer and at a phone's size, had no error, no broken picture, nothing wider than the screen and nothing from the accessibility scan.
   - **Three more points for the owners** (in `HANDOFF.md`'s list): the box "The client asked for this move" starts ticked; `/admin` reads "not found" to a manager; a manager sees the price while booking for a client with prices switched off.
   - **Before any of it,** the outbox was checked for anything still to be sent to a real address: nothing was. Every old unsent row has used its five attempts.
+- 2026-11-21: The owner asked for the test's report as a Markdown file and for the pull request. The report is `TEST-REPORT-2026-11-21.md` at the repository's root, the same text as the owner's private doc. PR #24 (`rebuild` into `master`) was opened after the whole browser suite passed locally (63, in Chromium) and CI's four jobs passed on `f0598b0`. It waits for the owner's word to merge.
+- 2026-11-21: The flake of `webkit-production` was looked into, and its cause is still open. Its trace puts React's error 419 on the page being opened, `/admin` as an attendant, which answers "not found" on purpose and arrived slowly that once; not on the page being left. Next.js reports every recoverable error of React's to the browser and calls 419 expected only in its own instant-navigation test mode. On the hosted preview the same visits reported nothing in 48 tries in WebKit and 30 in Chromium. The test's watcher was left strict (`HANDOFF.md`, "Now" 5).
 
 ### Handoff for the next coding session
 
