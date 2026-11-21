@@ -244,6 +244,32 @@ test("the booking screen can be used from the keyboard", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Select date & duration" })).toBeFocused();
 });
 
+test("every page starts with a link that skips the menu", async ({ page, browserName }) => {
+  for (const path of ["/", "/book"]) {
+    await page.goto(path);
+    const skip = page.getByRole("link", { name: "Skip to content" });
+    // Out of sight until the keyboard reaches it.
+    expect((await skip.boundingBox())?.width).toBeLessThanOrEqual(1);
+    if (browserName === "chromium") {
+      // The first stop of Tab. WebKit's Tab passes links by, as Safari's does unless its setting asks otherwise.
+      await page.keyboard.press("Tab");
+      await expect(skip).toBeFocused();
+    } else {
+      await skip.focus();
+    }
+    expect((await skip.boundingBox())?.width).toBeGreaterThan(60);
+    await expect(skip).toBeInViewport();
+    await page.keyboard.press("Enter");
+    await expect(page.locator("main#main")).toBeFocused();
+    if (browserName === "chromium") {
+      // The next stop is in the page, past the menu's.
+      await page.keyboard.press("Tab");
+      expect(await page.evaluate(() => Boolean(document.activeElement?.closest("main#main") && document.activeElement !== document.querySelector("main")))).toBe(true);
+      expect(await page.evaluate(() => Boolean(document.activeElement?.closest("header, nav")))).toBe(false);
+    }
+  }
+});
+
 test("books two studios together, starting from the studios", async ({ page }) => {
   await page.goto("/book");
   await shot(page, "03-book-start");

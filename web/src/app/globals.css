@@ -603,6 +603,32 @@ details.faq-item[open] .faq-icon { transform: rotate(45deg); }
 .contact-card h3 { margin: 0 0 1.5rem; --h3-base: 1.5rem; }
 @media (max-width: 560px) { .contact-card { padding: 1.5rem; } }
 
+/* The link that skips the menu (layout.tsx): out of sight until the keyboard reaches it, then over the page's corner. */
+.skip-link:not(:focus) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.skip-link:focus {
+  position: fixed;
+  top: .75rem;
+  left: .75rem;
+  z-index: 1000;
+  padding: .65rem 1.1rem;
+  border-radius: 4px;
+  background: var(--color-dark);
+  color: var(--color-cream);
+  font-size: .9rem;
+  text-decoration: underline;
+  outline: 2px solid var(--color-rose);
+  outline-offset: 2px;
+}
+/* The page takes the focus from that link, so that Tab goes on inside it; it draws no ring of its own. */
+#main:focus { outline: none; }
+
 /* For a field that people must neither see nor reach: the contact form's trap for programs. */
 .visually-hidden {
   position: absolute;

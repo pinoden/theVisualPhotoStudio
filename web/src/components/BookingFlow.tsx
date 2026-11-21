@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   availabilityGrid,
   combinedStarts,
@@ -97,6 +97,22 @@ function loadPage(url: string): void {
   window.location.assign(url);
 }
 
+/**
+ * The times offered are one stop of the keyboard, as a group of choices is: the keyboard-only booking of 2026-11-21
+ * pressed Tab up to 40 times from a chosen time to "Next". Tab reaches one time (`timeStop`), the arrow keys move to
+ * the next or the one before, as in a group of radio buttons, Home and End to the first and the last, and Enter or
+ * Space chooses, as a click does.
+ */
+function moveAmongTimes(event: KeyboardEvent<HTMLDivElement>): void {
+  const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>("button")];
+  const at = buttons.indexOf(event.target as HTMLButtonElement);
+  if (at < 0) return;
+  const moves: Record<string, number> = { ArrowRight: at + 1, ArrowDown: at + 1, ArrowLeft: at - 1, ArrowUp: at - 1, Home: 0, End: buttons.length - 1 };
+  if (!Object.hasOwn(moves, event.key) || event.altKey || event.ctrlKey || event.metaKey) return;
+  event.preventDefault();
+  buttons[Math.min(Math.max(moves[event.key], 0), buttons.length - 1)].focus();
+}
+
 export function BookingFlow({
   catalog,
   navigate = loadPage,
@@ -127,6 +143,8 @@ export function BookingFlow({
   const date = isIsoDate(dateInput) ? dateInput : "";
   const [durationChoice, setDuration] = useState(0);
   const [start, setStart] = useState<number | null>(null);
+  /** The time the keyboard last reached: the times' one Tab stop (`moveAmongTimes`). */
+  const [timeFocus, setTimeFocus] = useState<number | null>(null);
   /** How many of each add-on: 1 for one ticked, more for one taken in a quantity (an extra guest). */
   const [addonCounts, setAddonCounts] = useState<Record<string, number>>({});
   const [name, setName] = useState("");
@@ -230,6 +248,11 @@ export function BookingFlow({
     }
     return combinedStarts(days as NonNullable<(typeof days)[number]>[], slotOptions);
   }, [availability, slotOptions, studioIds, photography]);
+
+  const offeredTimes = mode === "studio" ? startsForChosenStudios : (grid?.times ?? []);
+  // The times' one Tab stop: the time the keyboard last reached, else the chosen one, else the first.
+  const timeStop =
+    timeFocus !== null && offeredTimes.includes(timeFocus) ? timeFocus : start !== null && offeredTimes.includes(start) ? start : (offeredTimes[0] ?? null);
 
   const freeAtStart = useMemo(
     () => (grid && start !== null ? studiosFreeAt(grid, start) : []),
@@ -401,6 +424,8 @@ export function BookingFlow({
 
   function chooseStart(minute: number) {
     setStart(minute);
+    // The time chosen becomes the times' Tab stop: Safari gives a clicked button no focus of its own.
+    setTimeFocus(minute);
     if (mode === "time") setStudioIds([]);
   }
 
@@ -852,8 +877,8 @@ export function BookingFlow({
           )}
           {!loadingSlots && availability && (
             <>
-              <div className="time-slots">
-                {(mode === "studio" ? startsForChosenStudios : (grid?.times ?? [])).map((minute) => {
+              <div className="time-slots" role="group" aria-label="Start times" onKeyDown={moveAmongTimes}>
+                {offeredTimes.map((minute) => {
                   const freeCount = mode === "time" && grid ? studiosFreeAt(grid, minute).length : 0;
                   return (
                     <button
@@ -861,6 +886,8 @@ export function BookingFlow({
                       key={minute}
                       className={`time-slot-btn${start === minute ? " selected" : ""}`}
                       aria-pressed={start === minute}
+                      tabIndex={minute === timeStop ? 0 : -1}
+                      onFocus={() => setTimeFocus(minute)}
                       onClick={() => chooseStart(minute)}
                     >
                       {minutesToLabel(minute)}
@@ -873,7 +900,7 @@ export function BookingFlow({
                   );
                 })}
               </div>
-              {(mode === "studio" ? startsForChosenStudios.length : (grid?.times.length ?? 0)) === 0 && (
+              {offeredTimes.length === 0 && (
                 <div className="notice" style={{ textAlign: "center" }}>
                   {availability.problem === "past"
                     ? "That date has already passed."
