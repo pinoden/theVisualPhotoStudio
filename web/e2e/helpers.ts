@@ -206,6 +206,9 @@ export async function accessibilityProblems(page: Page, options: { exclude?: str
     .exclude("nextjs-portal");
   for (const selector of options.exclude ?? []) builder = builder.exclude(selector);
   const result = await builder.analyze();
+  // The scan finishes in a blank page of its own, which it then closes. In WebKit a press 1 ms after that did nothing
+  // (the membership test, 2026-11-21, HANDOFF.md "Now" 5), so the page under test is made the active one again first.
+  await page.bringToFront();
   return result.violations.map(
     (violation) =>
       `${violation.id} (${violation.impact}): ${violation.help}. At ${violation.nodes
