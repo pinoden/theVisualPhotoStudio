@@ -111,3 +111,19 @@ export const EMAIL_FIELD = {
   maxLength: 200,
   title: "An email address, for example name@example.com",
 } as const;
+
+/**
+ * A code an owner names in Admin → Codes, once in capitals with no spaces (as checkout reads what a client types,
+ * `normalizeCode` in src/server/promos.ts): 3 to 30 letters, digits and hyphens, starting and ending with a letter
+ * or a digit.
+ */
+export const PROMO_CODE_RULE = /^[A-Z0-9][A-Z0-9-]{1,28}[A-Z0-9]$/;
+
+/** Attributes for that field: the browser refuses what `PROMO_CODE_RULE` would, in either case ("-" escaped for `v`). */
+export const PROMO_CODE_FIELD = {
+  pattern: String.raw`[A-Za-z0-9][A-Za-z0-9\-]{1,28}[A-Za-z0-9]`,
+  maxLength: 30,
+  title: "3 to 30 letters, digits or hyphens, for example SPRING-20",
+  autoCapitalize: "characters",
+  spellCheck: false,
+} as const;

@@ -20,12 +20,13 @@ import { isAdminLevel, type AdminLevel } from "@/lib/abilities";
 import { isAddonKind, type AddonKind } from "@/lib/addon-kinds";
 import type { PromoKind } from "@/lib/domain/pricing";
 import { isIsoDate, type DayType, type IsoDate } from "@/lib/domain/time";
+import { PROMO_CODE_RULE } from "@/lib/parse";
 import { MANUAL_PROVIDER } from "@/lib/payment-methods";
 import { parseStudioFacts, type StudioFacts } from "@/lib/studio-facts";
 import { deleteAllSessions, normalizeEmail } from "./auth";
 import { toBookingViews, type BookingView } from "./bookings";
 import { handPaidByBooking } from "./money";
-import { issuePromo } from "./promos";
+import { issuePromo, looksSiteMade, normalizeCode } from "./promos";
 import { dayBoundsUtc, localToUtc } from "./tz";
 
 /**
@@ -498,11 +499,13 @@ export type CreateCodeResult = { ok: true; code: string } | { ok: false; message
 /**
  * A code the owner hands out: a percent discount, an amount of credit, or a
  * free hour (`value` is then the free minutes, 60), for example for a regular
- * whose visits were made before the site counted them.
+ * whose visits were made before the site counted them. Its text is the one the
+ * owner names (`code`, kept in capitals, as checkout reads what a client
+ * types), or one the site makes up when they leave it empty.
  */
 export async function createManualCode(
   db: DbLike,
-  input: { kind: PromoKind; value: number; email: string | null; validDays: number; maxUses: number; note: string; photographyOnly?: boolean },
+  input: { kind: PromoKind; value: number; email: string | null; validDays: number; maxUses: number; note: string; photographyOnly?: boolean; code?: string },
   now: Date,
 ): Promise<CreateCodeResult> {
   if (input.kind !== "percent" && input.kind !== "amount" && input.kind !== "free_hour") {
@@ -524,7 +527,15 @@ export async function createManualCode(
     email = normalizeEmail(input.email);
     if (!email) return { ok: false, message: "Enter a valid email address, or leave it empty." };
   }
+  const named = normalizeCode(input.code ?? "");
+  if (named !== "" && !PROMO_CODE_RULE.test(named)) {
+    return { ok: false, message: "A code is 3 to 30 letters, digits or hyphens, and starts and ends with a letter or a digit." };
+  }
+  if (looksSiteMade(named)) {
+    return { ok: false, message: "That looks like a code the site makes itself, such as VS-2345-6789. Choose another." };
+  }
   const issued = await issuePromo(db, {
+    ...(named !== "" ? { code: named } : {}),
     kind: input.kind,
     value: input.value,
     source: "manual",
@@ -536,7 +547,9 @@ export async function createManualCode(
     note: input.note.slice(0, 200),
     issuedAt: now,
   });
-  return issued ? { ok: true, code: issued.code } : { ok: false, message: "Could not create the code." };
+  if (issued) return { ok: true, code: issued.code };
+  // Cancelled and expired codes keep their text, so a name used once is taken for good.
+  return { ok: false, message: named !== "" ? `The code ${named} already exists. Choose another.` : "Could not create the code." };
 }
 
 // ── Overview numbers ─────────────────────────────────────────────────────────

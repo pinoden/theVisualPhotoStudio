@@ -49,6 +49,11 @@ function randomCode(prefix: string): string {
   return `${prefix}-${body.slice(0, 4)}-${body.slice(4)}`;
 }
 
+/** Shaped like a code the site makes (`randomCode`): staff tell a reschedule code or a free hour by it, so an owner's own code may not look like one. */
+export function looksSiteMade(code: string): boolean {
+  return new RegExp(`^(?:${Object.values(PREFIX).join("|")})-[A-Z0-9]{4}-[A-Z0-9]{4}$`).test(code);
+}
+
 /** Look a code up for a customer. Does not consume it. */
 export async function findUsablePromo(
   db: DbLike,
@@ -191,6 +196,8 @@ export interface IssuePromoInput {
   note?: string;
   /** When it was issued: the moment of the change that issued it. The database's clock when left out. */
   issuedAt?: Date;
+  /** Its text, when an owner named it (in capitals: `normalizeCode`). Otherwise the site makes one up. */
+  code?: string;
 }
 
 const PREFIX: Record<PromoSource, string> = { loyalty: "THANKS", reschedule: "MOVE", manual: "VS", pet_fee: "PET" };
@@ -210,7 +217,7 @@ export async function issuePromo(tx: DbLike, given: IssuePromoInput): Promise<{ 
     const rows = await tx
       .insert(promoCodes)
       .values({
-        code: randomCode(PREFIX[input.source]),
+        code: input.code ?? randomCode(PREFIX[input.source]),
         kind: input.kind,
         value: input.value,
         issuedCents: input.value,
@@ -228,6 +235,8 @@ export async function issuePromo(tx: DbLike, given: IssuePromoInput): Promise<{ 
       .onConflictDoNothing()
       .returning({ id: promoCodes.id, code: promoCodes.code });
     if (rows[0]) return rows[0];
+    // The code an owner named is taken: there is no other to try.
+    if (input.code !== undefined) return null;
 
     if (input.loyaltySeq != null && email) {
       const numbered = await tx

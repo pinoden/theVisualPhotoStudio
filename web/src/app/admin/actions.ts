@@ -358,7 +358,16 @@ export async function createCodeAction(formData: FormData): Promise<void> {
   }
   const result = await createManualCode(
     await getDb(),
-    { kind, value, email: text(formData, "email") || null, validDays, maxUses, note: text(formData, "note"), photographyOnly: chosen === "photo_percent" },
+    {
+      kind,
+      value,
+      email: text(formData, "email") || null,
+      validDays,
+      maxUses,
+      note: text(formData, "note"),
+      photographyOnly: chosen === "photo_percent",
+      code: text(formData, "code"),
+    },
     new Date(),
   );
   if (!result.ok) failed("/admin/codes", result.message);

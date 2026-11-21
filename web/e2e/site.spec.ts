@@ -1442,14 +1442,15 @@ test("a Studio Manager runs the calendar and looks clients up, and sees no price
 });
 
 test("a client without a photographer books a session, and the photographer cannot be booked twice", async ({ page }) => {
-  // The third and last sign-in code of this address. Create a discount for sessions only.
+  // The third and last sign-in code of this address. Create a discount for sessions only, named by the owner: the
+  // site keeps it in capitals, as it reads what a client types.
   await signIn(page, THIRD_OWNER, "/admin/codes");
   await byLabel(page, "Kind").selectOption({ label: "Percent off a photography session" });
   await byLabel(page, "Percent off (1 to 100)").fill("20");
+  await byLabel(page, "Code (optional)").fill("photo-twenty");
   await page.getByRole("button", { name: "Create", exact: true }).click();
-  const discount = byText(page, /Code created: VS-[0-9A-Z]{4}-[0-9A-Z]{4}/);
-  await expect(discount).toBeVisible();
-  const discountCode = /VS-[0-9A-Z]{4}-[0-9A-Z]{4}/.exec(await discount.innerText())![0];
+  const discountCode = "PHOTO-TWENTY";
+  await expect(byText(page, `Code created: ${discountCode}`)).toBeVisible();
   await expect(page.getByRole("row", { name: new RegExp(discountCode) })).toContainText("Photography sessions");
 
   // The way in is on the studio booking page.
@@ -1472,7 +1473,8 @@ test("a client without a photographer books a session, and the photographer cann
   await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
   await next(page);
   await fillDetails(page, jane);
-  await byLabel(page, "Have a code?").fill(discountCode);
+  // Typed as a client might.
+  await byLabel(page, "Have a code?").fill("Photo-Twenty");
   await page.getByRole("button", { name: "Apply", exact: true }).click();
   await expect(byText(page, `Code ${discountCode} (20% off session)`)).toBeVisible();
   await agreeToPolicies(page);
