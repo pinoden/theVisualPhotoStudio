@@ -2,7 +2,7 @@
 
 November 21, 2026. Prepared for the studio's owners. The same report is a private doc on claude.ai.
 
-Twenty-eight made-up customers hold 35 bookings on the hosted preview, made on November 20 and 21, 2026. Every rule checked held, and no card was needed. 31 bookings stay confirmed on 27 days, from November 22 to May 20, for you to look at as an owner, an employee and a customer. A second round tried two customers at the same moment, the employee side, the public pages and the sign-in limits.
+Thirty-four made-up customers hold 43 bookings on the hosted preview, made on November 20 and 21, 2026. Every rule checked held, and no card was needed. 37 bookings stay confirmed on 30 days, from November 22 to May 20, for you to look at as an owner, an employee and a customer. A second and a third round tried customers at the same moment, the employee side, the public pages and the sign-in limits. The third ran on the new version, after the pull request was merged.
 
 ## How to look at it
 
@@ -11,7 +11,7 @@ Use a separate browser window for each role, so one sign-in does not replace ano
 **As an owner.** Sign in at [the preview](https://the-visual-photo-studio.vercel.app/account) with your owner address, then open the admin.
 
 - **Calendar:** Sunday, November 22 has four bookings in three studios. Saturday, November 28 has all three studios booked together, then Dayglow alone.
-- **Bookings and Customers:** the 28 test people, each with their bookings. Maya Rivera has five visits on five days.
+- **Bookings and Customers:** the 34 test people, each with their bookings. Maya Rivera has five visits on five days.
 - **Codes:** the six TEST codes and one reschedule code.
 
 **As an employee.** Today hello@ is a customer on the preview. An owner makes it staff:
@@ -32,7 +32,7 @@ Two test staff members are on the Staff page already: a manager and an attendant
 
 ## What to decide or fix
 
-The test found eight things for the owners: five on the customer's side and three on the employee's. None of them stopped a booking.
+The test found eleven things for the owners: six on the customer's side, four on the employee's and one for search engines. None of them stopped a booking.
 
 1. **A booking that cost nothing cannot be moved online.** A client who booked with a 100% code or a free hour presses Reschedule and reads: "Nothing was paid for this booking, so there is no credit to move. You can cancel it and book again." Cancelling gives the code back, and "Ask the studio to move it" stays available. This covers loyalty free hours too. Decide whether that is what you want.
 2. **"Getting in" is empty.** Confirmation emails and booking pages give the address, but not how to enter the building. Write it under Admin, Settings, "Getting in". Confirmations include it from then on.
@@ -42,6 +42,9 @@ The test found eight things for the owners: five on the customer's side and thre
 6. **"The client asked for this move" starts ticked.** When staff move a booking, this box is ticked to begin with. Left ticked, the move uses up the client's one free reschedule, and the booking is no longer refunded automatically. Staff have to untick it for a change the studio needs. Decide whether it should start unticked.
 7. **A manager who opens the admin's first page reads "This page could not be found."** That page, the Overview, is the owners'. Managers reach the calendar from a link on their account page instead. Sending them straight to the calendar would be a small change.
 8. **A manager sees the price while booking for a client.** The screen says "$88 … to be paid at the studio", though "See what bookings cost" is switched off for managers. They need the price to tell the client. Decide whether that is right with the switch off.
+9. **A signed-in customer types their details again.** The booking screen starts empty even when the client is signed in. Filling in their name, email and phone would be a small change, if you want it.
+10. **The site promises a refund that nobody is prompted to make.** A manager moved a paid Saturday booking back to a weekday. The client's email said: "You have paid $7 more than that: we will refund it to you." The manager, with prices switched off, saw no payment section, and the history read "(amount not shown)". No notice went to an owner. An owner sees "Remaining credit" only by opening that appointment. Booking VS-64G3XT is left in this state. Decide who should be told.
+11. **Eight pages share one description for search engines.** Each page can have its own, in the page editor's search settings. The two booking pages also give no canonical address, which is a small fix in the code.
 
 ## Test emails
 
@@ -49,14 +52,14 @@ Fifteen test emails reached hello@ before the instruction to stop. None has reac
 
 - **What arrived:** 13 booking confirmations, one cancellation and one reschedule code, between 11:49 and 11:57 PM on November 20. They went to hello+name@thevisualsphotostudio.com, which Gmail delivers to hello@. A search for "Booking confirmed: VS-" finds the confirmations.
 - **Since then:** every test customer has an address like delivered+maya@resend.dev, [Resend's test address](https://resend.com/docs/dashboard/emails/send-test-emails). It takes an email and delivers it to nobody. The 13 bookings already made were moved to it.
-- **Sent to the test address so far:** 22 confirmations, 2 cancellations, one notice of a moved booking, 2 payment confirmations and 7 sign-in codes. That is 34 emails, all accepted.
+- **Sent to the test address so far:** 30 confirmations, 3 cancellations, 3 notices of a moved booking, 3 payment confirmations, one reschedule code and 8 sign-in codes. That is 48 emails, all accepted.
 - **Still to come, to the test address only:** a reminder before each visit, a review request the day after it, and Maya's free-hour code once her fifth visit is over on December 3.
 - **Owners:** no owner received a test email.
 - **One limit:** Resend counts test emails toward the account's sending limit, like any other.
 
 ## The bookings in the calendar
 
-The calendar holds 31 confirmed bookings and 4 cancelled ones, made by 28 people. All times are Eastern Time, and every booking is a test.
+The calendar holds 37 confirmed bookings and 6 cancelled or released ones, made by 34 people. All times are Eastern Time, and every booking is a test.
 
 | When | Studio | Customer | What it shows | Status | Reference |
 | --- | --- | --- | --- | --- | --- |
@@ -92,7 +95,7 @@ The second round added eight bookings.
 
 | When | Studio | Customer | What it shows | Status | Reference |
 | --- | --- | --- | --- | --- | --- |
-| Tue Dec 15, 11:00 AM, 1 hr | Blanche | Ruth Alvarez | Booked by the test manager for a client, then paid at the desk: $50 cash and $38 by card reader | Confirmed | VS-64G3XT |
+| Wed Dec 16, 12:00 PM, 1 hr | Blanche | Ruth Alvarez | Booked by the test manager for a client and paid at the desk. Later moved to a Saturday and back, so $95 is paid for an $88 booking | Confirmed | VS-64G3XT |
 | Thu Dec 17, 10:00 AM, 1 hr | Blanche | Quinn Adler | Notes that hold HTML | Confirmed | VS-V669PM |
 | Fri Dec 18, 2:00 PM, 1 hr | Paris + Dayglow | Nina Petrova | Won against a customer who wanted Paris alone at the same moment | Confirmed | VS-ZTS68E |
 | Sat Dec 19, 11:00 AM, 1 hr | Dayglow | Lucy Ward | Won against a customer who wanted Paris + Dayglow | Confirmed | VS-YE3MTJ |
@@ -100,6 +103,19 @@ The second round added eight bookings.
 | Tue Dec 22, 10:00 AM, 1 hr | Paris | Elena Fischer | A photography session, won against one in Blanche at the same time | Confirmed | VS-DNHVBR |
 | Sun Mar 14, 2027, 8:00 AM, 1 hr | Paris | Dana Whitfield | The morning the clocks go forward | Confirmed | VS-P5TTNP |
 | Thu May 20, 2027, 12:00 PM, 1 hr | Dayglow | Felix Novak | The last day that can be booked | Confirmed | VS-Y6YGT3 |
+
+The third round, on the new version, added eight more.
+
+| When | Studio | Customer | What it shows | Status | Reference |
+| --- | --- | --- | --- | --- | --- |
+| Wed Dec 23, 10:00 AM, 1 hr | Paris | Paula Jensen | Confirm pressed twice: one booking | Confirmed | VS-B488YN |
+| Wed Dec 23, 3:00 PM, 1 hr | Dayglow | Amy Tran | Won among six customers at the same moment | Confirmed | VS-5JKTUT |
+| Wed Dec 23, 3:00 PM, 1 hr | Blanche | Lea Wolf | Won among six customers at the same moment | Confirmed | VS-N82RVB |
+| Mon Dec 28, 2:00 PM, 1.5 hr | Paris | Hugo Laurent | Paid with studio credit, then cancelled: the credit came back | Cancelled | VS-CUXFTP |
+| Tue Dec 29, 9:00 AM, 10 hr | Blanche | Carmen Ortiz | The whole day, the longest booking sold | Confirmed | VS-UT8WST |
+| Tue Jan 5, 2027, 10:00 AM, 2 hr | Paris | Irene Costa | Paid with studio credit, then released for a $136 code | Released | VS-6NTDSJ |
+| Thu Jan 7, 2027, 10:00 AM, 1 hr | Paris | Irene Costa | Paid with half of that code | Confirmed | VS-7VQS9Y |
+| Fri Jan 8, 2027, 10:00 AM, 1 hr | Paris | Irene Costa | Paid with the other half | Confirmed | VS-7EFJ7W |
 
 Blanche is also blocked on December 15 from 2:00 to 4:00 PM, as a test of blocked time.
 
@@ -160,6 +176,23 @@ The second round checked what happens under pressure, what employees can do, and
 | The 11 public pages, on a computer and a phone | Every page answered with no error. All 84 pictures loaded, each with a description. Nothing was wider than the phone. The accessibility scan found nothing. |
 | Links to book one studio | Each opened the booking screen with that studio chosen. |
 
+The third round ran after the pull request was merged, on the version the preview runs now.
+
+| Rule | What the site did |
+| --- | --- |
+| The new version | Vercel deployed it one minute after the merge. All 11 public pages answered. |
+| Confirm pressed twice | One booking, not two. |
+| Twelve customers confirm at once, for two studios | One booking for each studio. Seven read that the time was gone: "no longer available" or "was just taken". Three read "Too many requests. Please wait a moment.", the limit of ten booking requests a minute from one visitor. |
+| Lengths on offer | Blanche up to 10 hours, Dayglow up to 8, Paris up to 5. Studios together offer only the lengths each of them sells, so up to 5 hours. |
+| A whole day | Blanche for 10 hours could start only at 9:00 AM, for $720. |
+| Studio credit after a cancellation | $102 went back onto the credit code, to the cent. |
+| A reschedule code spent in parts | A $136 code paid for two $68 bookings and then held $0. |
+| A manager moves a booking to a dearer day | Saturday made it $95: the page showed $88 paid and $7 still to pay. |
+| A manager moves it back to a cheaper day | The client's email said the total is $88 again and "You have paid $7 more than that: we will refund it to you." |
+| A manager blocks the photographer | With 10:00 AM to 12:00 PM blocked, sessions were offered only from noon. The block was removed afterwards. |
+| A membership's checkout | Showed the plan, its terms and Square's card form. Nothing was typed or paid. |
+| What search engines see | A robots file, a sitemap of 10 pages, a title and a sharing picture on every page, and the business's details on the home page. An address with no page answers 404. The old addresses /guestinfo and /rates-1 redirect to the new pages. |
+
 ## Not tested
 
 Four things were left out, each for a reason.
@@ -177,14 +210,14 @@ Six codes were made for the test. They work only on the preview, until February 
 
 | Code | What it does | Used so far |
 | --- | --- | --- |
-| TEST-FREE | 100% off a studio rental, 100 uses | 21 uses |
+| TEST-FREE | 100% off a studio rental, 100 uses | 25 uses |
 | TEST-PHOTO | 100% off a photography session, 20 uses | 3 uses |
 | TEST-20 | 20% off a studio rental, 20 uses | None |
-| TEST-CREDIT | $5,000 of studio credit, for any booking and its add-ons | $1,086.86 |
+| TEST-CREDIT | $5,000 of studio credit, for any booking and its add-ons | $1,222.86 |
 | TEST-ONCE | 100% off a studio rental, one use | Used |
 | TEST-HOUR-HANNAH | One free hour, for Hannah Kim's address only | Used |
 
-The code names are typed by hand, which the preview's admin cannot do yet. That field reaches the preview with the next merge into the main branch.
+The code names are typed by hand. Since the merge on November 21, the version the preview runs has that field too: Admin, Codes, "Code (optional)". It is an owners' page, so it was not opened during the test.
 
 Nothing here carries over to the real site: at launch it gets a new, empty database of its own. Until then:
 
