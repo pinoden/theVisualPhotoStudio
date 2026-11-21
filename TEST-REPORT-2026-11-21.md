@@ -2,7 +2,7 @@
 
 November 21, 2026. Prepared for the studio's owners. The same report is a private doc on claude.ai.
 
-Thirty-four made-up customers hold 43 bookings on the hosted preview, made on November 20 and 21, 2026. Every rule checked held, and no card was needed. 37 bookings stay confirmed on 30 days, from November 22 to May 20, for you to look at as an owner, an employee and a customer. A second and a third round tried customers at the same moment, the employee side, the public pages and the sign-in limits. The third ran on the new version, after the pull request was merged.
+Thirty-nine made-up customers hold 48 bookings on the hosted preview, made on November 20 and 21, 2026. Every rule checked held, and no card was needed. 42 bookings stay confirmed on 34 days, from November 22 to May 20, for you to look at as an owner, an employee and a customer. A second and a third round tried customers at the same moment, the employee side, the public pages and the sign-in limits. A fourth tried what people do with a browser and a keyboard, phones, other time zones, and the site's defences.
 
 ## How to look at it
 
@@ -11,7 +11,7 @@ Use a separate browser window for each role, so one sign-in does not replace ano
 **As an owner.** Sign in at [the preview](https://the-visual-photo-studio.vercel.app/account) with your owner address, then open the admin.
 
 - **Calendar:** Sunday, November 22 has four bookings in three studios. Saturday, November 28 has all three studios booked together, then Dayglow alone.
-- **Bookings and Customers:** the 34 test people, each with their bookings. Maya Rivera has five visits on five days.
+- **Bookings and Customers:** the 39 test people, each with their bookings. Maya Rivera has five visits on five days.
 - **Codes:** the six TEST codes and one reschedule code.
 
 **As an employee.** Today hello@ is a customer on the preview. An owner makes it staff:
@@ -32,7 +32,7 @@ Two test staff members are on the Staff page already: a manager and an attendant
 
 ## What to decide or fix
 
-The test found eleven things for the owners: six on the customer's side, four on the employee's and one for search engines. None of them stopped a booking.
+The test found thirteen things for the owners: eight on the customer's side, four on the employee's and one for search engines. None of them stopped a booking. The fourth round also found six small faults that needed no decision. They are fixed in the code and listed after the thirteen.
 
 1. **A booking that cost nothing cannot be moved online.** A client who booked with a 100% code or a free hour presses Reschedule and reads: "Nothing was paid for this booking, so there is no credit to move. You can cancel it and book again." Cancelling gives the code back, and "Ask the studio to move it" stays available. This covers loyalty free hours too. Decide whether that is what you want.
 2. **"Getting in" is empty.** Confirmation emails and booking pages give the address, but not how to enter the building. Write it under Admin, Settings, "Getting in". Confirmations include it from then on.
@@ -44,7 +44,22 @@ The test found eleven things for the owners: six on the customer's side, four on
 8. **A manager sees the price while booking for a client.** The screen says "$88 … to be paid at the studio", though "See what bookings cost" is switched off for managers. They need the price to tell the client. Decide whether that is right with the switch off.
 9. **A signed-in customer types their details again.** The booking screen starts empty even when the client is signed in. Filling in their name, email and phone would be a small change, if you want it.
 10. **The site promises a refund that nobody is prompted to make.** A manager moved a paid Saturday booking back to a weekday. The client's email said: "You have paid $7 more than that: we will refund it to you." The manager, with prices switched off, saw no payment section, and the history read "(amount not shown)". No notice went to an owner. An owner sees "Remaining credit" only by opening that appointment. Booking VS-64G3XT is left in this state. Decide who should be told.
-11. **Eight pages share one description for search engines.** Each page can have its own, in the page editor's search settings. The two booking pages also give no canonical address, which is a small fix in the code.
+11. **Eight pages share one description for search engines.** Each page can have its own, in the page editor's search settings.
+12. **The browser's Back button leaves the booking.** On the second step, Back went to the home page, not to the first step. A refresh starts the booking again with nothing kept, and closing the tab asks no question. The screen's own "← Back" button works. Decide whether the browser's Back button should go one step back.
+13. **The phone number field takes any words.** It accepts anything from 7 to 40 characters, such as "no phone". Decide whether it should need digits.
+
+Six faults from the fourth round are fixed in the code. They reach the preview with the next merge.
+
+- **The booking pages' address for search engines.** `/book` and `/book/photography` now give a canonical address, and a shared link to either shows that page's own title.
+- **Choosing a studio with the keyboard.** The three studio choices showed no sign of which one the keyboard was on. The card now gets a dark outline.
+- **Moving between steps with the keyboard.** After "Next", the keyboard's place was lost: the next press of Tab started from the top of the page, and a screen reader said nothing. The focus now moves to the new step's heading.
+- **Enter in the code field.** It did nothing. It now applies the code, as "Apply" does.
+- **A name or phone number with line breaks.** Typed that way, a name could start paragraphs of its own in the emails that greet the client. Both are now kept on one line.
+- **Links on an employee's account page.** "Studio calendar" and "Day sheet", beside "Signed in as", differed from the words around them by colour alone. They are now underlined.
+
+Two more for a later change, neither urgent: a keyboard user presses Tab up to 40 times to get from a chosen time to "Next", and no page has a "skip to the content" link.
+
+One measurement for a change you already asked for on November 20, the slightly darker tan: gold text on cream has a contrast of 2.1 to 1, and white on the gold buttons 2.2 to 1. Accessibility guidelines ask for 4.5 to 1 at these sizes. That work has not started.
 
 ## Test emails
 
@@ -52,14 +67,14 @@ Fifteen test emails reached hello@ before the instruction to stop. None has reac
 
 - **What arrived:** 13 booking confirmations, one cancellation and one reschedule code, between 11:49 and 11:57 PM on November 20. They went to hello+name@thevisualsphotostudio.com, which Gmail delivers to hello@. A search for "Booking confirmed: VS-" finds the confirmations.
 - **Since then:** every test customer has an address like delivered+maya@resend.dev, [Resend's test address](https://resend.com/docs/dashboard/emails/send-test-emails). It takes an email and delivers it to nobody. The 13 bookings already made were moved to it.
-- **Sent to the test address so far:** 30 confirmations, 3 cancellations, 3 notices of a moved booking, 3 payment confirmations, one reschedule code and 8 sign-in codes. That is 48 emails, all accepted.
+- **Sent to the test address so far:** 35 confirmations, 3 cancellations, 3 notices of a moved booking, 3 payment confirmations, one reschedule code and 9 sign-in codes. That is 54 emails, all accepted. A script read all of them for stray words, broken links and leftover code, and found nothing.
 - **Still to come, to the test address only:** a reminder before each visit, a review request the day after it, and Maya's free-hour code once her fifth visit is over on December 3.
 - **Owners:** no owner received a test email.
 - **One limit:** Resend counts test emails toward the account's sending limit, like any other.
 
 ## The bookings in the calendar
 
-The calendar holds 37 confirmed bookings and 6 cancelled or released ones, made by 34 people. All times are Eastern Time, and every booking is a test.
+The calendar holds 42 confirmed bookings and 6 cancelled or released ones, made by 39 people. All times are Eastern Time, and every booking is a test.
 
 | When | Studio | Customer | What it shows | Status | Reference |
 | --- | --- | --- | --- | --- | --- |
@@ -116,6 +131,16 @@ The third round, on the new version, added eight more.
 | Tue Jan 5, 2027, 10:00 AM, 2 hr | Paris | Irene Costa | Paid with studio credit, then released for a $136 code | Released | VS-6NTDSJ |
 | Thu Jan 7, 2027, 10:00 AM, 1 hr | Paris | Irene Costa | Paid with half of that code | Confirmed | VS-7VQS9Y |
 | Fri Jan 8, 2027, 10:00 AM, 1 hr | Paris | Irene Costa | Paid with the other half | Confirmed | VS-7EFJ7W |
+
+The fourth round added five.
+
+| When | Studio | Customer | What it shows | Status | Reference |
+| --- | --- | --- | --- | --- | --- |
+| Tue Jan 12, 2027, 11:00 AM, 1 hr | Paris | Kira Bolt | Booked with the keyboard alone, never the mouse | Confirmed | VS-7CMJKX |
+| Wed Jan 13, 2027, 10:00 AM, 1 hr | Paris | Owen Blake | The answer to "Confirm booking" was lost on the way back. Pressing again found the booking | Confirmed | VS-PU9F2X |
+| Thu Jan 14, 2027, 11:00 AM, 1 hr | Blanche | Tara Quinn | The connection dropped at the code and again at "Confirm booking" | Confirmed | VS-9SWWYB |
+| Fri Jan 15, 2027, 2:00 PM, 1 hr | Dayglow | Uma Reyes | Open in two tabs, confirmed in both: one booking | Confirmed | VS-7EH6EQ |
+| Fri Jan 15, 2027, 3:00 PM, 1 hr | Blanche | Vera Stone | Open in two tabs: the second tab was told the time had gone | Confirmed | VS-WCXZ8Z |
 
 Blanche is also blocked on December 15 from 2:00 to 4:00 PM, as a test of blocked time.
 
@@ -193,6 +218,27 @@ The third round ran after the pull request was merged, on the version the previe
 | A membership's checkout | Showed the plan, its terms and Square's card form. Nothing was typed or paid. |
 | What search engines see | A robots file, a sitemap of 10 pages, a title and a sharing picture on every page, and the business's details on the home page. An address with no page answers 404. The old addresses /guestinfo and /rates-1 redirect to the new pages. |
 
+The fourth round tried what people do with a browser, a keyboard and a phone, and what a stranger can get out of the site.
+
+| What was tried | What the site did |
+| --- | --- |
+| A booking with the keyboard alone | Booked with Tab, Space, Enter and typing. Three gaps on the way are fixed in the code, as listed above. |
+| Six time zones and four languages | A computer set to Hawaii, California, New York, Germany, Japan or the far side of the date line saw the same days, times, booking pages, calendar and day sheet. The first day on offer was November 22 for each, though it was still November 20 in Hawaii. |
+| The answer to "Confirm booking" is lost | The page said it could not tell whether the booking went through, and to press again. Pressing again opened the booking: one booking, one email. |
+| No connection | Each step said so in words: "Could not load availability. Please try again." and "Could not check the code. Please try again." Nothing was booked until the connection came back, and then once. |
+| The browser's Back button after booking | A new, empty booking screen. Nothing could be sent twice. |
+| The same booking in two tabs | The first tab booked. The second read "That time is no longer available. Please choose another.", returned to the times with that one gone, and kept the name, email, phone and code. |
+| An employee's pages on a phone | The manager's ten pages and the attendant's five fit an iPhone and an Android phone. Wide tables scroll inside their own box. |
+| The narrowest phone, 320 points wide | The nine public pages, the booking steps and two booking pages fit. |
+| A customer's account on a phone | The four pages fit, and the accessibility scan found nothing. |
+| Who can open what | Signed out, every private page led to the sign-in form. A booking without its key read "Booking not found", the same for a reference that exists and one that does not. A signed-in customer read "This page could not be found." on every employee page and on another customer's receipt. |
+| A sign-in link that asks to continue on another website | Landed on the account page. |
+| Requests wrong in one way each | 9 for availability, 15 for a price and 30 for a booking: a past date, a time when the studio is closed, a total of $0 claimed by the browser, a made-up card token. None was booked, and each got a message, never an error of the site's own. |
+| Text made to look like an attack | Tried on the site's own request check, off line. An email address with a second address or a line break is refused. A script or a database command typed as a name is stored and shown as plain text. |
+| Files and headers | Private files such as `/.env` are not served. Browsers are told to use HTTPS only, and not to show the site inside another website. The daily task's address refuses a caller without its password. Another website cannot send a booking from a visitor's browser. |
+| Private pages and search engines | The admin, account, employee, booking and payment pages are closed in the robots file and marked "noindex". |
+| Vercel's own firewall | After about 45 probing requests in under a minute, some of them for private files, Vercel showed its "Security Checkpoint" page to everything coming from the test computer, a real browser included. About ten minutes later it let the computer back in by itself. |
+
 ## Not tested
 
 Four things were left out, each for a reason.
@@ -202,7 +248,7 @@ Four things were left out, each for a reason.
 - **The owners' own pages.** Prices, codes, settings, the website editor, refunds and the list of bookings need an owner's sign-in, and that code goes to an owner's inbox. A manager's and an attendant's pages were tested in the second round.
 - **A real phone and real Safari.** The phone booking used a phone-sized browser window, and the Safari booking used Safari's engine on a computer.
 
-What happens after a visit will show by itself from November 22: visits marked completed, stamps counted, and review requests sent to the test address. The preview runs these tasks once a day, at 7:00 AM Eastern.
+What happens after a visit will show by itself from November 22: visits marked completed, stamps counted, and review requests sent to the test address. The preview runs these tasks once a day, between 7:00 and 8:00 AM Eastern, the most its free plan allows. So a reminder there goes out on the morning of the visit, not 24 hours before. The paid plan runs them every five minutes.
 
 ## Test codes and clean-up
 
@@ -210,7 +256,7 @@ Six codes were made for the test. They work only on the preview, until February 
 
 | Code | What it does | Used so far |
 | --- | --- | --- |
-| TEST-FREE | 100% off a studio rental, 100 uses | 25 uses |
+| TEST-FREE | 100% off a studio rental, 100 uses | 30 uses |
 | TEST-PHOTO | 100% off a photography session, 20 uses | 3 uses |
 | TEST-20 | 20% off a studio rental, 20 uses | None |
 | TEST-CREDIT | $5,000 of studio credit, for any booking and its add-ons | $1,222.86 |
