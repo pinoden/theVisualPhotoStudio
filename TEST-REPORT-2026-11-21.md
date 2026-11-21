@@ -32,7 +32,7 @@ Two test staff members are on the Staff page already: a manager and an attendant
 
 ## What to decide or fix
 
-The test found thirteen things for the owners: eight on the customer's side, four on the employee's and one for search engines. None of them stopped a booking. The fourth round also found six small faults that needed no decision. They are fixed in the code and listed after the thirteen.
+The test found fourteen things for the owners: eight on the customer's side, four on the employee's and two for search engines. None of them stopped a booking. The fourth round also found seven small faults that needed no decision. They are fixed in the code and listed after the fourteen.
 
 1. **A booking that cost nothing cannot be moved online.** A client who booked with a 100% code or a free hour presses Reschedule and reads: "Nothing was paid for this booking, so there is no credit to move. You can cancel it and book again." Cancelling gives the code back, and "Ask the studio to move it" stays available. This covers loyalty free hours too. Decide whether that is what you want.
 2. **"Getting in" is empty.** Confirmation emails and booking pages give the address, but not how to enter the building. Write it under Admin, Settings, "Getting in". Confirmations include it from then on.
@@ -47,14 +47,16 @@ The test found thirteen things for the owners: eight on the customer's side, fou
 11. **Eight pages share one description for search engines.** Each page can have its own, in the page editor's search settings.
 12. **The browser's Back button leaves the booking.** On the second step, Back went to the home page, not to the first step. A refresh starts the booking again with nothing kept, and closing the tab asks no question. The screen's own "← Back" button works. Decide whether the browser's Back button should go one step back.
 13. **The phone number field takes any words.** It accepts anything from 7 to 40 characters, such as "no phone". Decide whether it should need digits.
+14. **Twelve addresses of your current site lead nowhere on the new one.** Your current site lists 18 pages for search engines. On the preview two keep their address (the home page and `/contact`), four are sent on to their new page (`/guestinfo`, `/rates-1`, `/services-2-1` and `/studio-memberships`), and twelve answer "page not found". After the switch, a link to one of those from Google, Instagram or an old email would reach that message. Six have an obvious new home: `/appointments` (the booking page), `/blanche-1`, `/dayglow-1` and `/paris` (the studios page), `/membership` (the memberships page) and `/home-1` (the home page). Six have no page on the new site yet: `/christmas-2026-dayglow`, `/christmas-2026-paris`, `/styled-setups`, `/events`, `/store` and `/privacy-policy`. Decide where each should lead. You add one under Admin, Website, Pages, "Old addresses".
 
-Six faults from the fourth round are fixed in the code. They reach the preview with the next merge.
+Seven faults from the fourth round are fixed in the code. They reach the preview with the next merge.
 
 - **The booking pages' address for search engines.** `/book` and `/book/photography` now give a canonical address, and a shared link to either shows that page's own title.
 - **Choosing a studio with the keyboard.** The three studio choices showed no sign of which one the keyboard was on. The card now gets a dark outline.
 - **Moving between steps with the keyboard.** After "Next", the keyboard's place was lost: the next press of Tab started from the top of the page, and a screen reader said nothing. The focus now moves to the new step's heading.
 - **Enter in the code field.** It did nothing. It now applies the code, as "Apply" does.
 - **A name or phone number with line breaks.** Typed that way, a name could start paragraphs of its own in the emails that greet the client. Both are now kept on one line.
+- **Studio choices on the photography booking page.** A bare round button stood above each studio's card. It is hidden now: the card itself is the button, as on the rental page.
 - **Links on an employee's account page.** "Studio calendar" and "Day sheet", beside "Signed in as", differed from the words around them by colour alone. They are now underlined.
 
 Two more for a later change, neither urgent: a keyboard user presses Tab up to 40 times to get from a chosen time to "Next", and no page has a "skip to the content" link.
@@ -237,6 +239,7 @@ The fourth round tried what people do with a browser, a keyboard and a phone, an
 | Text made to look like an attack | Tried on the site's own request check, off line. An email address with a second address or a line break is refused. A script or a database command typed as a name is stored and shown as plain text. |
 | Files and headers | Private files such as `/.env` are not served. Browsers are told to use HTTPS only, and not to show the site inside another website. The daily task's address refuses a caller without its password. Another website cannot send a booking from a visitor's browser. |
 | Private pages and search engines | The admin, account, employee, booking and payment pages are closed in the robots file and marked "noindex". |
+| The current site's 18 page addresses | Two are the same on the preview, four are sent on to their new page, and twelve answer "page not found" (point 14). |
 | Vercel's own firewall | After about 45 probing requests in under a minute, some of them for private files, Vercel showed its "Security Checkpoint" page to everything coming from the test computer, a real browser included. About ten minutes later it let the computer back in by itself. |
 
 ## Not tested
