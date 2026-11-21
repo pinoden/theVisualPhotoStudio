@@ -1,6 +1,6 @@
 import { expect, test, type Browser, type Locator, type Page } from "@playwright/test";
 import sharp from "sharp";
-import { accessibilityProblems, byLabel, byText, onScreen, shot, signIn, watchBrowser } from "./helpers";
+import { accessibilityProblems, byLabel, byText, isNotFoundPage, isPermanentRedirect, onScreen, shot, signIn, watchBrowser } from "./helpers";
 
 /**
  * The website's editor (the owner's requirements 21, 25, 26 and 27, and the
@@ -717,7 +717,7 @@ test("the owner makes a page from blocks, previews it, and visitors see it at it
 
   // Not on the website yet.
   const guest = await visitor(browser);
-  expect((await guest.goto("/gift-cards"))?.status()).toBe(404);
+  expect(await isNotFoundPage(await guest.goto("/gift-cards")), "a page not published yet").toBe(true);
 
   // The preview shows the draft, on the website itself, to the owner alone.
   const opened = page.waitForEvent("popup");
@@ -743,11 +743,12 @@ test("the owner makes a page from blocks, previews it, and visitors see it at it
   await shot(guest, "49-website-made-page");
   // Search engines are told about it, and an address that is no page answers "not found".
   expect(await (await guest.request.get("/sitemap.xml")).text()).toContain("/gift-cards</loc>");
-  expect((await guest.request.get("/no-such-page")).status()).toBe(404);
+  expect(await isNotFoundPage(await guest.request.get("/no-such-page")), "an address that is no page").toBe(true);
   // An old address of the live site leads to its page here.
   const old = await guest.request.get("/guestinfo", { maxRedirects: 0 });
-  expect(old.status()).toBe(308);
-  expect(old.headers()["location"]).toBe("/faq");
+  expect(await isPermanentRedirect(old, "/faq"), "an old address of the live site").toBe(true);
+  await guest.goto("/guestinfo");
+  await guest.waitForURL(/\/faq$/);
   await guest.context().close();
 });
 
@@ -786,8 +787,7 @@ test("a page shows a picture shaped differently on a phone, and its address can 
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(byText(page, "Saved. The page's address is /gift-vouchers.")).toBeVisible();
   const moved = await guest.request.get("/gift-cards", { maxRedirects: 0 });
-  expect(moved.status()).toBe(308);
-  expect(moved.headers()["location"]).toBe("/gift-vouchers");
+  expect(await isPermanentRedirect(moved, "/gift-vouchers"), "a page's old address").toBe(true);
   await guest.goto("/gift-cards");
   await guest.waitForURL(/\/gift-vouchers$/);
   await expect(guest.getByRole("heading", { name: "Gift cards for every occasion", level: 1 })).toBeVisible();
@@ -797,14 +797,14 @@ test("a page shows a picture shaped differently on a phone, and its address can 
   await page.getByRole("button", { name: "Copy Gift Cards" }).click();
   await expect(byText(page, "Copied. The copy is a draft, at an address of its own.")).toBeVisible();
   await expect(page.locator(".page-editor-where")).toContainText("/gift-vouchers-copy · Draft: not on the website");
-  expect((await guest.request.get("/gift-vouchers-copy")).status()).toBe(404);
+  expect(await isNotFoundPage(await guest.request.get("/gift-vouchers-copy")), "a copy, a draft").toBe(true);
 
   // Taken off the website, then deleted and brought back: a draft again, with everything on it.
   await page.goto("/admin/website/pages");
   await page.getByRole("link", { name: "Edit Gift Cards" }).click();
   await page.getByRole("button", { name: "Take Gift Cards off the website" }).click();
   await expect(byText(page, "Taken off the website. It is kept here as a draft.")).toBeVisible();
-  expect((await guest.request.get("/gift-vouchers")).status()).toBe(404);
+  expect(await isNotFoundPage(await guest.request.get("/gift-vouchers")), "a page taken off the website").toBe(true);
   await page.locator("summary", { hasText: "Delete this page" }).click();
   await page.getByRole("button", { name: "Yes, delete Gift Cards" }).click();
   await expect(byText(page, "The page is in the trash, below. It can be brought back for 30 days.")).toBeVisible();
@@ -994,7 +994,7 @@ test("a page that would be wider than a phone is not published, and is once it f
   await expect(byText(page, /At 320px: .*"BOOK A STUDIO" reaches \d+px/i)).toBeVisible();
   await shot(page, "53-admin-page-phone-check");
   const guest = await visitor(browser);
-  expect((await guest.goto(path))?.status()).toBe(404);
+  expect(await isNotFoundPage(await guest.goto(path)), "a page its phone check kept off the website").toBe(true);
 
   // Stacked on a phone, it fits, and is published.
   await canvas.locator(".blk-columns").click({ position: { x: 5, y: 5 } });

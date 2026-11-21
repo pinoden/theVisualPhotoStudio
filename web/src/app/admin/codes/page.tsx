@@ -4,7 +4,7 @@ import { Suspense } from "react";
 import { getDb } from "@/db/client";
 import { formatCents } from "@/lib/domain/pricing";
 import { durationLabel } from "@/lib/domain/time";
-import { EMAIL_FIELD } from "@/lib/parse";
+import { EMAIL_FIELD, PROMO_CODE_FIELD } from "@/lib/parse";
 import { listCodes } from "@/server/admin";
 import { isBookingRef } from "@/server/bookings";
 import { requireOwner } from "@/server/session";
@@ -45,6 +45,12 @@ async function Codes({ searchParams }: Pick<PageProps<"/admin/codes">, "searchPa
         <h3>Create a code</h3>
         <form action={createCodeAction} className="admin-form-row" style={{ marginBottom: 0 }}>
           <CodeKindAndValue />
+          <div className="form-group">
+            <label className="form-label" htmlFor="code-text">
+              Code (optional)
+            </label>
+            <input id="code-text" name="code" className="form-control" placeholder="Made up by the site" {...PROMO_CODE_FIELD} />
+          </div>
           <div className="form-group">
             <label className="form-label" htmlFor="code-email">
               Only for email (optional)

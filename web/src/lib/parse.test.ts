@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { normalizeEmail } from "@/server/auth";
 import { CHARGE_MAX_CENTS } from "@/server/charges";
+import { normalizeCode } from "@/server/promos";
 import { MONEY_SETTING_RANGES } from "@/server/settings";
 import {
   centsToInput,
@@ -16,6 +17,8 @@ import {
   intInRange,
   POSITIVE_DOLLARS_PATTERN,
   PRICE_PATTERN,
+  PROMO_CODE_FIELD,
+  PROMO_CODE_RULE,
 } from "./parse";
 
 describe("money typed into a form", () => {
@@ -130,6 +133,19 @@ describe("an email address typed into a form", () => {
       expect(normalizeEmail(address) !== null, address).toBe(taken);
     }
     expect(addresses.filter(booking)).toEqual(["jane@example.com", "Jane.Smith+studio@example.co.uk", "o'brien@example.ie", "a_b-c@sub-domain.example.com", "x@y.io"]);
+  });
+});
+
+describe("a code an owner names", () => {
+  // The pattern the field gives the browser, read as a browser reads it, and the server's rule once the code is in
+  // capitals. Spaces are left out: the server drops them, while the browser refuses them.
+  const field = (text: string) => new RegExp(`^(?:${PROMO_CODE_FIELD.pattern})$`, "v").test(text);
+  const server = (text: string) => PROMO_CODE_RULE.test(normalizeCode(text));
+  const codes = ["SPRING-20", "spring-20", "VIP", "A1B", "x".repeat(30), "AB", "x".repeat(31), "-SPRING", "SPRING-", "SPRING_20", "SPRÍNG", "20%OFF"];
+
+  it("is taken or refused alike by the browser and the server", () => {
+    for (const code of codes) expect(field(code), code).toBe(server(code));
+    expect(codes.filter(server)).toEqual(["SPRING-20", "spring-20", "VIP", "A1B", "x".repeat(30)]);
   });
 });
 

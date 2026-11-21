@@ -304,6 +304,25 @@ describe("codes handed out by the owner", () => {
     expect(await world.book({ promoCode: created.code })).toMatchObject({ ok: false, message: "That code is not valid." });
   });
 
+  it("takes a code the owner names, kept in capitals as a client's typing is read, and only once", async () => {
+    const base = { kind: "percent" as const, value: 15, email: null, validDays: 30, maxUses: 2, note: "" };
+    expect(expectOk(await createManualCode(world.db, { ...base, code: " spring-20 " }, NOW)).code).toBe("SPRING-20");
+    // A client types it in any case.
+    expect(expectOk(await world.book({ promoCode: "Spring-20" })).totalCents).toBe(14960);
+    // Taken, in any case.
+    expect(await createManualCode(world.db, { ...base, code: "Spring-20" }, NOW)).toEqual({
+      ok: false,
+      message: "The code SPRING-20 already exists. Choose another.",
+    });
+    // Too short or too long, other characters, a hyphen at an end, or the shape of the site's own codes.
+    for (const code of ["AB", "A".repeat(31), "SPRING_20", "20%OFF", "-SPRING", "SPRING-", "MOVE-ABCD-EFGH", "vs-2345-6789"]) {
+      expect((await createManualCode(world.db, { ...base, code }, NOW)).ok, code).toBe(false);
+    }
+    // Left empty, the site makes one up.
+    expect(expectOk(await createManualCode(world.db, { ...base, code: "" }, NOW)).code).toMatch(/^VS-[0-9A-Z]{4}-[0-9A-Z]{4}$/);
+    expect(await listCodes(world.db)).toHaveLength(2);
+  });
+
   it("validates what the owner types", async () => {
     const base = { kind: "percent" as const, value: 10, email: null, validDays: 30, maxUses: 1, note: "" };
     expect((await createManualCode(world.db, { ...base, value: 101 }, NOW)).ok).toBe(false);

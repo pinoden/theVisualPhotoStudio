@@ -1,6 +1,7 @@
-import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, notLike, or, sql } from "drizzle-orm";
 import { bookings, loyaltyLedger, promoCodes } from "@/db/schema";
 import type { DbLike } from "@/db/client";
+import { ACUITY_HISTORY_SOURCE } from "@/lib/acuity";
 import { loyaltyStanding, type LoyaltyStanding } from "@/lib/domain/loyalty";
 import { freeHourEmail, queueEmail } from "./email";
 import { issuePromo } from "./promos";
@@ -49,7 +50,9 @@ async function stampAdjustmentOf(db: DbLike, email: string, since: Date | null =
  * email address. Only completed visits count, so a cancelled booking or a
  * no-show adds nothing, and photography sessions do not count (the rule is in
  * the domain function). After loyalty was switched off and on again, only
- * visits that began since then count, and only the changes made since.
+ * visits that began since then count, and only the changes made since. A past
+ * visit brought in from Acuity's history counts for nothing until the owners
+ * say otherwise (question 51 in ProjectLibrary.md): it is shown, not counted.
  */
 export async function loyaltyStandingOf(
   db: DbLike,
@@ -62,7 +65,14 @@ export async function loyaltyStandingOf(
     .select({ id: bookings.id, startAt: bookings.startAt, codeKind: promoCodes.kind, photographerId: bookings.photographerId })
     .from(bookings)
     .leftJoin(promoCodes, eq(promoCodes.id, bookings.promoCodeId))
-    .where(and(eq(bookings.customerEmail, address), eq(bookings.status, "completed"), since ? gte(bookings.startAt, since) : undefined));
+    .where(
+      and(
+        eq(bookings.customerEmail, address),
+        eq(bookings.status, "completed"),
+        since ? gte(bookings.startAt, since) : undefined,
+        or(isNull(bookings.importedFrom), notLike(bookings.importedFrom, `${ACUITY_HISTORY_SOURCE}:%`)),
+      ),
+    );
   return loyaltyStanding(
     rows.map((row) => ({
       bookingId: row.id,

@@ -39,6 +39,7 @@ function appointment(changes: Partial<AcuityAppointment> = {}): AcuityAppointmen
     end: { date: FAR, minute: h(12) },
     name: "Ana Lima",
     email: "Ana@Client.test",
+    otherEmails: [],
     phone: "(407) 555-0100",
     type: "Studio Blanche Booking (2  hr)",
     calendar: "Blanche",
@@ -49,6 +50,7 @@ function appointment(changes: Partial<AcuityAppointment> = {}): AcuityAppointmen
     notes: "A dog comes too",
     scheduled: "November 1, 2026 9:15am",
     canceled: false,
+    label: "",
     ...changes,
   };
 }
@@ -179,6 +181,22 @@ describe("importing Acuity's appointments still to come", () => {
         'Imported from Acuity: appointment 1002, "Blanche + Paris (2 hr)" at $245, booked there November 1, 2026 9:15am; $50 paid online there, $195 to pay at the studio. No email was sent.',
       ],
     ]);
+    expect(await world.emails()).toEqual([]);
+  });
+
+  it("books an appointment under the client's own address, the first Acuity has, and names in its history those Acuity also emailed", async () => {
+    // Acuity's Email field held more than one address in 7 of the 189 rows of the owners' export of 2026-11-20.
+    const report = await importAcuityAppointments(world.db, [appointment({ otherEmails: ["Bo@Client.test", "ana@client.test", "not-an-address", "cy@client.test", "bo@client.test"] })], options());
+    expect(report.refused).toEqual([]);
+    const booking = await bookingOf("1001");
+    expect(booking.customerEmail).toBe("ana@client.test");
+    const history = (await getAppointment(world.db, owner, booking.ref, NOW))!.history;
+    expect(history.map((line) => line.note)).toEqual([
+      'Imported from Acuity: appointment 1001, "Studio Blanche Booking (2  hr)" at $176, booked there November 1, 2026 9:15am; $176 paid online there. Acuity also emailed bo@client.test, cy@client.test about it. No email was sent.',
+    ]);
+    // Only the client finds it in their account; nobody is emailed.
+    expect((await listBookingsForEmail(world.db, "ana@client.test")).map((view) => view.ref)).toEqual([booking.ref]);
+    expect(await listBookingsForEmail(world.db, "bo@client.test")).toEqual([]);
     expect(await world.emails()).toEqual([]);
   });
 

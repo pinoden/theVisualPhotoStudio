@@ -9,3 +9,7 @@
 
 # The old website's photos and their manifest, for scripts/import-old-site-photos.ts: their file names hold clients' names.
 /old-site-photos/
+
+# Exports from Acuity or Square, for the imports (HANDOFF.md, steps 5 and 7), hold clients' details. They belong outside
+# the project; this keeps one saved here by mistake out of the repository, which is public.
+*.csv

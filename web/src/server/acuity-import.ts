@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { and, asc, eq, or, sql } from "drizzle-orm";
 import { bookings, payments, photographerHolds, photographers, studioHolds, studios } from "@/db/schema";
 import { pgErrorCode, PG_EXCLUSION_VIOLATION, PG_UNIQUE_VIOLATION, type Db, type DbLike, type Tx } from "@/db/client";
-import { studiosOfAppointment, type AcuityAppointment } from "@/lib/acuity";
+import { ACUITY_HISTORY_SOURCE, ACUITY_SOURCE, studiosOfAppointment, type AcuityAppointment } from "@/lib/acuity";
 import { studioCombinationError } from "@/lib/catalog-view";
 import { findPrice, formatCents } from "@/lib/domain/pricing";
 import { minutesToLabel } from "@/lib/domain/time";
@@ -44,7 +44,10 @@ import { localToUtc } from "./tz";
  * by a booking, by time blocked in the admin, or by an appointment of the same
  * export once the site's clean-up gap is added, is not imported, and the
  * report says what takes it; so is one the site cannot represent. A cancelled
- * or past appointment is left out.
+ * or past appointment is left out. A client who gave Acuity more than one
+ * email address has the booking under the first, their own; its history names
+ * the others, which Acuity copied its emails to and the site does not
+ * (question 50 in ProjectLibrary.md).
  *
  * Everything happens in one transaction, which a rehearsal (`write: false`)
  * throws away at the end: it finds exactly what writing would, clashes
@@ -91,8 +94,6 @@ export interface ImportReport {
 
 /** Thrown at the end of a rehearsal, to throw its transaction away. */
 class Rehearsal extends Error {}
-
-const ACUITY_SOURCE = "acuity";
 
 /** Import the appointments that are still to come. */
 export async function importAcuityAppointments(db: Db, appointments: readonly AcuityAppointment[], options: ImportOptions): Promise<ImportReport> {
@@ -151,7 +152,12 @@ async function importOne(tx: Tx, appointment: AcuityAppointment, { catalog, phot
     return;
   }
   const importedFrom = `${ACUITY_SOURCE}:${appointment.id}`;
-  const [before] = await tx.select({ ref: bookings.ref }).from(bookings).where(eq(bookings.importedFrom, importedFrom)).limit(1);
+  // Brought in by this import or by the history's (src/server/acuity-history.ts): an appointment is imported once.
+  const [before] = await tx
+    .select({ ref: bookings.ref })
+    .from(bookings)
+    .where(or(eq(bookings.importedFrom, importedFrom), eq(bookings.importedFrom, `${ACUITY_HISTORY_SOURCE}:${appointment.id}`)))
+    .limit(1);
   if (before) {
     report.already.push({ ...line, ref: before.ref });
     return;
@@ -169,6 +175,16 @@ async function importOne(tx: Tx, appointment: AcuityAppointment, { catalog, phot
   if (booked.photography && !photographerId) return refuse("it is a session with the photographer, and the site has no photographer to hold");
   const email = emailField.safeParse(appointment.email);
   if (!email.success) return refuse(appointment.email === "" ? "it has no email address" : "its email address does not look like one");
+  // The addresses Acuity copied its emails to besides the client's own: the booking's history names them for the studio,
+  // and the site emails only the client (question 50 in ProjectLibrary.md).
+  const copied = [
+    ...new Set(
+      appointment.otherEmails.flatMap((other) => {
+        const address = emailField.safeParse(other);
+        return address.success && address.data !== email.data ? [address.data] : [];
+      }),
+    ),
+  ];
   const name = formText(appointment.name).slice(0, 120);
   if (name === "") return refuse("it has no client name");
   if (appointment.paidOnlineCents > appointment.priceCents) {
@@ -283,7 +299,7 @@ async function importOne(tx: Tx, appointment: AcuityAppointment, { catalog, phot
           at: options.now,
           note: `Imported from Acuity: appointment ${appointment.id}, "${appointment.type}" at ${formatCents(appointment.priceCents)}${
             appointment.scheduled ? `, booked there ${appointment.scheduled}` : ""
-          }${money.length > 0 ? `; ${money.join(", ")}` : ""}. No email was sent.`,
+          }${money.length > 0 ? `; ${money.join(", ")}` : ""}.${copied.length > 0 ? ` Acuity also emailed ${copied.join(", ")} about it.` : ""} No email was sent.`,
         });
       });
       report.imported.push({ ...line, ref });

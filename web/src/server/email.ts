@@ -4,6 +4,7 @@ import type { DbLike } from "@/db/client";
 import { afterFee } from "@/lib/domain/policy";
 import { durationLabel, longDateLabel } from "@/lib/domain/time";
 import { EMAIL_TEMPLATES, firstNameOf, renderEmail, type TemplateKey } from "@/lib/email-templates";
+import { mayUseTestTools } from "./browser-test-server";
 import { ownersWording } from "./email-templates";
 import { formatInstant } from "./tz";
 import { loadBusiness } from "./website";
@@ -147,12 +148,13 @@ type Env = Record<string, string | undefined>;
 /**
  * Which transport delivers mail.
  *  - RESEND_API_KEY and EMAIL_FROM set -> Resend.
- *  - Otherwise outside production     -> the server log.
+ *  - Otherwise outside production     -> the server log. So too on the browser tests' own production server
+ *                                        (`mayUseTestTools`).
  *  - Otherwise (production)            -> none: mail stays queued until configured.
  */
 export function resolveEmailTransport(env: Env = process.env): EmailTransport | null {
   if (env.RESEND_API_KEY && env.EMAIL_FROM) return resendTransport({ apiKey: env.RESEND_API_KEY, from: env.EMAIL_FROM });
-  if (env.NODE_ENV !== "production") return logTransport;
+  if (mayUseTestTools(env)) return logTransport;
   return null;
 }
 

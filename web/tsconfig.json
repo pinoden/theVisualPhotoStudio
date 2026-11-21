@@ -34,6 +34,8 @@
     ".next-e2e-tester/dev/types/**/*.ts",
     ".next-e2e-webkit/types/**/*.ts",
     ".next-e2e-webkit/dev/types/**/*.ts",
+    ".next-e2e-prod/types/**/*.ts",
+    ".next-e2e-prod/dev/types/**/*.ts",
     "**/*.mts"
   ],
   "exclude": ["node_modules"]

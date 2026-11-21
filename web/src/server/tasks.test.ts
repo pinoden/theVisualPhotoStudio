@@ -142,6 +142,10 @@ describe("email delivery", () => {
     expect(resolveEmailTransport({ NODE_ENV: "development" })?.name).toBe("log");
     expect(resolveEmailTransport({ NODE_ENV: "production" })).toBeNull();
     expect(resolveEmailTransport({ RESEND_API_KEY: "k", NODE_ENV: "production" })).toBeNull(); // sender address missing
+    // The browser tests' own server for a production build reads its emails from the outbox, as development does.
+    const testServer = { NODE_ENV: "production", BROWSER_TEST_SERVER: "1", ALLOW_PGLITE_IN_PRODUCTION: "1", PAYMENTS_MODE: "mock" };
+    expect(resolveEmailTransport(testServer)?.name).toBe("log");
+    expect(resolveEmailTransport({ ...testServer, DATABASE_URL: "postgres://db.example/site" })).toBeNull();
   });
 });
 

@@ -8,6 +8,7 @@ import {
   confirmAndGetRef,
   dateAhead,
   fillDetails,
+  followLink,
   latestEmail,
   next,
   onScreen,
@@ -85,8 +86,8 @@ test("public pages show the studios and the live price list", async ({ page }) =
   expect(business).toMatchObject({ "@type": "LocalBusiness", name: "The Visuals Photo Studio", telephone: "(407) 663-6109" });
   expect(business.address).toMatchObject({ addressLocality: "Winter Park", addressRegion: "FL", postalCode: "32792" });
   await expect(page.locator('meta[property="og:title"]')).toHaveAttribute("content", "The Visuals Photo Studio | Winter Park, FL");
-  // The website's own address, made whole with SITE_URL.
-  await expect(page.locator('link[rel="canonical"]')).toHaveAttribute("href", /^http:\/\/localhost:\d+\/?$/);
+  // The website's own address, made whole with SITE_URL (https against a production build, E2E_BUILD=1).
+  await expect(page.locator('link[rel="canonical"]')).toHaveAttribute("href", /^https?:\/\/localhost:\d+\/?$/);
 
   await page.goto("/rates");
   await expect(page.getByRole("heading", { name: "Studio Rates" })).toBeVisible();
@@ -1353,7 +1354,7 @@ test("the owners look a customer up, see what they paid, and correct their stamp
   // From an appointment, the client's name leads to this page.
   await onScreen(page.locator("#appointments")).getByRole("link").first().click();
   await expect(page.getByRole("heading", { name: "Jane Smith", level: 1 })).toBeVisible();
-  await onScreen(page.locator(".detail-list")).getByRole("link", { name: "Jane Smith" }).click();
+  await followLink(page, onScreen(page.locator(".detail-list")).getByRole("link", { name: "Jane Smith" }));
   await expect(page).toHaveURL(new RegExp(`/admin/customers/${encodeURIComponent(jane.email).replace(/[.]/g, "\\.")}`));
 
   // Loyalty switched off and on again starts every client's stamps over, and the free hours they hold stay valid
@@ -1441,14 +1442,15 @@ test("a Studio Manager runs the calendar and looks clients up, and sees no price
 });
 
 test("a client without a photographer books a session, and the photographer cannot be booked twice", async ({ page }) => {
-  // The third and last sign-in code of this address. Create a discount for sessions only.
+  // The third and last sign-in code of this address. Create a discount for sessions only, named by the owner: the
+  // site keeps it in capitals, as it reads what a client types.
   await signIn(page, THIRD_OWNER, "/admin/codes");
   await byLabel(page, "Kind").selectOption({ label: "Percent off a photography session" });
   await byLabel(page, "Percent off (1 to 100)").fill("20");
+  await byLabel(page, "Code (optional)").fill("photo-twenty");
   await page.getByRole("button", { name: "Create", exact: true }).click();
-  const discount = byText(page, /Code created: VS-[0-9A-Z]{4}-[0-9A-Z]{4}/);
-  await expect(discount).toBeVisible();
-  const discountCode = /VS-[0-9A-Z]{4}-[0-9A-Z]{4}/.exec(await discount.innerText())![0];
+  const discountCode = "PHOTO-TWENTY";
+  await expect(byText(page, `Code created: ${discountCode}`)).toBeVisible();
   await expect(page.getByRole("row", { name: new RegExp(discountCode) })).toContainText("Photography sessions");
 
   // The way in is on the studio booking page.
@@ -1471,7 +1473,8 @@ test("a client without a photographer books a session, and the photographer cann
   await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
   await next(page);
   await fillDetails(page, jane);
-  await byLabel(page, "Have a code?").fill(discountCode);
+  // Typed as a client might.
+  await byLabel(page, "Have a code?").fill("Photo-Twenty");
   await page.getByRole("button", { name: "Apply", exact: true }).click();
   await expect(byText(page, `Code ${discountCode} (20% off session)`)).toBeVisible();
   await agreeToPolicies(page);

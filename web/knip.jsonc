@@ -1,8 +1,9 @@
-// knip finds files, exports and packages nothing uses: `npx knip@5.88.1` from web/ (see "Commands" in ProjectLibrary.md).
+// knip finds files, exports and packages nothing uses: `npm run knip` from web/, and in CI's `checks` job.
 {
   "$schema": "https://unpkg.com/knip@5/schema.json",
-  // The scripts run by hand (`npx tsx scripts/...`) and the Neon CLI's own configuration.
-  "entry": ["scripts/*.ts", "neon.ts"],
+  // The scripts run by hand (`npx tsx scripts/...`), the Neon CLI's own configuration, and the browser tests' server
+  // for a production build, which playwright.config.ts starts by its file name.
+  "entry": ["scripts/*.ts", "neon.ts", "e2e/https-server.mjs"],
   // A type exported beside the function that returns it, and used there, is that function's to name.
   "ignoreExportsUsedInFile": { "interface": true, "type": true },
   // Installed by `neon init` with @neon/config (HANDOFF.md, "Neon staging"); no code imports it.

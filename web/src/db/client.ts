@@ -1,5 +1,5 @@
 import path from "node:path";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import type { SQL } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import * as schema from "./schema";
@@ -17,12 +17,13 @@ export type DbLike = Db | Tx;
 
 const MIGRATIONS_DIR = path.join(process.cwd(), "drizzle");
 
-async function openPglite(dataDir?: string): Promise<{ db: Db; close: () => Promise<void> }> {
+/** PGlite in `dataDir`, or in memory; in memory it can start as a copy of a database (`loadDataDir`, a tarball). */
+async function openPglite(dataDir?: string, loadDataDir?: Blob): Promise<{ db: Db; close: () => Promise<void> }> {
   const { PGlite } = await import("@electric-sql/pglite");
   const { btree_gist } = await import("@electric-sql/pglite/contrib/btree_gist");
   const { drizzle } = await import("drizzle-orm/pglite");
   const { migrate } = await import("drizzle-orm/pglite/migrator");
-  const client = new PGlite({ dataDir, extensions: { btree_gist } });
+  const client = new PGlite({ dataDir, loadDataDir, extensions: { btree_gist } });
   const db = drizzle(client, { schema });
   await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
   return { db: db as unknown as Db, close: () => client.close() };
@@ -120,9 +121,15 @@ async function openAppDb(): Promise<Db> {
   // The pages the website was built with, into a database that never had them (src/server/pages.ts).
   const { ensureBuiltInPages } = await import("../server/pages");
   if (process.env.NEXT_PHASE === "phase-production-build") {
-    // `next build` without a database server: prerender pages from the
-    // starting catalog held in memory. Build workers run in parallel and
-    // PGlite's data directory can only be opened by one process.
+    // `next build` without a database server: prerender pages from a database
+    // held in memory. Build workers run in parallel and PGlite's data
+    // directory can only be opened by one process. It is the starting catalog,
+    // or a copy of the database the browser tests' server will open
+    // (PGLITE_BUILD_SNAPSHOT, scripts/e2e-database.ts), as a host's build reads
+    // the site's own: the pages it prerenders then hold the ids that server
+    // answers with.
+    const snapshot = process.env.PGLITE_BUILD_SNAPSHOT;
+    if (snapshot) return (await openPglite(undefined, new Blob([readFileSync(snapshot)]))).db;
     const { db } = await openPglite(undefined);
     await seed(db);
     await ensureBuiltInPages(db, new Date());

@@ -7,16 +7,24 @@
  *
  *   npx tsx scripts/import-acuity.ts <export.csv> [--as owner@address] [--money live|test] [--remind] [--write]
  *
+ * With --history it brings in the past visits of the export instead (step 7,
+ * src/server/acuity-history.ts): read-only bookings that hold no time, count
+ * for no loyalty stamp and send nothing, so that clients' accounts and the
+ * admin show the visits made before this site. The two imports never bring in
+ * one appointment twice, so both can run on the same export.
+ *
  * Without --write it is a rehearsal: everything is worked out against the
  * database, the report is printed, and nothing is written. Read the report,
  * then run it again with --write. A second run imports only what is new.
  *
  * The export: in Acuity, Reports → Import/Export, the dates from today on,
- * cancelled appointments not included, then Export appointments (a CSV
- * file). Leave the cancelled ones out: a file that lists them without a
- * column saying so would import them as booked. Keep the file out of this
- * repository: it holds clients' details. The report names appointments by Acuity's id, their row in the
- * file, their time and type, never a client.
+ * then Export appointments (a CSV file). Acuity's export has a Canceled
+ * column (the owners' of 2026-11-20 did), which the import reads: the
+ * cancelled appointments it lists are left out. A file without that column
+ * must not list them, or they would be imported as booked. Keep the file out
+ * of this repository: it holds clients' details. The report names
+ * appointments by Acuity's id, their row in the file, their time and type,
+ * never a client.
  *
  * Which database: DATABASE_URL when it is set (staging, production), otherwise
  * the local one in web/.data/<PGLITE_DATA_NAME or pglite>, which no running
@@ -32,6 +40,7 @@ import { readFileSync } from "node:fs";
 import { getDb } from "../src/db/client";
 import { readAcuityExport } from "../src/lib/acuity";
 import { formatCents } from "../src/lib/domain/pricing";
+import { importAcuityHistory } from "../src/server/acuity-history";
 import { importAcuityAppointments, type ReportLine } from "../src/server/acuity-import";
 import { resolvePayments } from "../src/server/payments";
 import { moneyKindOf, type MoneyKind } from "../src/server/test-mode";
@@ -45,7 +54,7 @@ async function main() {
   const args = process.argv.slice(2);
   const valueOf = (flag: string) => (args.includes(flag) ? args[args.indexOf(flag) + 1] : undefined);
   const file = args.find((arg, index) => !arg.startsWith("--") && !["--as", "--money"].includes(args[index - 1] ?? ""));
-  if (!file) stop("Name the export: npx tsx scripts/import-acuity.ts <export.csv> [--as owner@address] [--money live|test] [--remind] [--write]");
+  if (!file) stop("Name the export: npx tsx scripts/import-acuity.ts <export.csv> [--history] [--as owner@address] [--money live|test] [--remind] [--write]");
 
   const owners = (process.env.OWNER_EMAILS ?? "").split(",").map((email) => email.trim().toLowerCase()).filter(Boolean);
   const as = (valueOf("--as") ?? owners[0])?.trim().toLowerCase();
@@ -78,6 +87,31 @@ async function main() {
     `${write ? "Importing into" : "Rehearsal against"} ${where}, as ${as}, as ${moneyKind} money${write ? "" : ": nothing is written"}. ${reading.appointments.length} appointment(s) read from the file.`,
   );
   const db = await getDb();
+  const named = (line: ReportLine) => `row ${line.row}, appointment ${line.id}, ${line.when}, "${line.type}"`;
+  /** A reason as a sentence: a question keeps its own mark. */
+  const sentence = (reason: string) => (/[.?!]$/.test(reason) ? reason : `${reason}.`);
+  const unreadable = () => {
+    if (reading.unreadable.length === 0) return;
+    console.log(`  Rows that could not be read: ${reading.unreadable.length}.`);
+    for (const row of reading.unreadable) console.log(`    row ${row.row}${row.id ? `, appointment ${row.id}` : ""}: ${row.problem}.`);
+  };
+
+  if (args.includes("--history")) {
+    const history = await importAcuityHistory(db, reading.appointments, { now: new Date(), actor: as, moneyKind, write });
+    console.log(
+      `  ${write ? "Imported" : "Would import"}: ${history.imported} past visit(s), ${history.noShows} of them no-shows. They hold no time, count for no loyalty stamp, and send nothing.`,
+    );
+    if (history.already > 0) console.log(`  Imported before, left as they are: ${history.already}.`);
+    console.log(`  Not over yet (the import without --history takes them): ${history.notOver}. Cancelled in Acuity: ${history.cancelled}.`);
+    if (history.setAside.length > 0) {
+      console.log(`  NOT imported: ${history.setAside.length}. Each needs a person.`);
+      for (const line of history.setAside) console.log(`    ${named(line)}: ${sentence(line.reason)}`);
+    }
+    unreadable();
+    if (!write && history.imported > 0) console.log("Nothing was written. Run it again with --write to import.");
+    process.exit(history.setAside.length > 0 || reading.unreadable.length > 0 ? 1 : 0);
+  }
+
   const report = await importAcuityAppointments(db, reading.appointments, {
     now: new Date(),
     actor: as,
@@ -86,7 +120,6 @@ async function main() {
     remind: args.includes("--remind"),
   });
 
-  const named = (line: ReportLine) => `row ${line.row}, appointment ${line.id}, ${line.when}, "${line.type}"`;
   console.log(`  ${write ? "Imported" : "Would import"}: ${report.imported.length}.`);
   for (const line of report.imported) console.log(`    ${named(line)}: ${line.ref}`);
   if (report.imported.length > 0) {
@@ -97,12 +130,9 @@ async function main() {
   console.log(`  Over already: ${report.past}. Cancelled in Acuity: ${report.cancelled}.`);
   if (report.refused.length > 0) {
     console.log(`  NOT imported: ${report.refused.length}. Each needs a person: in Acuity, or entered in the admin by hand.`);
-    for (const line of report.refused) console.log(`    ${named(line)}: ${line.reason}.`);
+    for (const line of report.refused) console.log(`    ${named(line)}: ${sentence(line.reason)}`);
   }
-  if (reading.unreadable.length > 0) {
-    console.log(`  Rows that could not be read: ${reading.unreadable.length}.`);
-    for (const row of reading.unreadable) console.log(`    row ${row.row}${row.id ? `, appointment ${row.id}` : ""}: ${row.problem}.`);
-  }
+  unreadable();
   if (!write && report.imported.length > 0) console.log("Nothing was written. Run it again with --write to import.");
   process.exit(report.refused.length > 0 || reading.unreadable.length > 0 ? 1 : 0);
 }
