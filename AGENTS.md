@@ -98,7 +98,8 @@ Branch protection on `master` requires all four jobs to pass before a pull reque
 - **Text on the public pages belongs to the owners.** Change the starting text in `built-in-pages.ts`, and replace only the original sentence in stored pages, with a migration.
 - **Do not decide business rules.** When an answer from the owners is missing, build nothing on a guess without recording it under "Rules built on the builder's reading" in `ProjectLibrary.md`, and put the question in `HANDOFF.md`.
 - **Never print or commit keys.** Square's sandbox keys are in `web/.env.square-sandbox`. Production keys are typed into the host by the owner, never into a message or a file here.
-- **Do not start a deployment, run a production migration or send real email.** None of that is set up, and each needs the owner's word.
+- **Do not start a deployment or run a production migration.** Each needs the owner's word.
+- **The hosted preview sends real email** (through Resend, to any address, since 2026-11-20). A test customer there gets Resend's test address, `delivered+<name>@resend.dev`, which reaches no inbox. Never an address at the studio's domain: `hello+<name>@` lands in the studio's inbox, as 15 test emails did on 2026-11-20. Never an owner's address, and never a made-up one, which bounces. A step that notifies an owner (the contact form, a client's request to move a booking) needs the owner's word.
 
 ## An independent test pass
 
