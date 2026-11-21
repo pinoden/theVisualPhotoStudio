@@ -1,7 +1,7 @@
 # The checks every change must pass before it can be merged into master.
-# Branch protection on master requires "checks", "browser" and "webkit" to pass ("webkit", the browser suite in
-# Safari's engine, since 2026-11-20, after five runs in a row passed). "webkit-production", the same suite against a
-# production build, runs beside them and is not required yet. No job retries a failed test (AGENTS.md).
+# Branch protection on master requires all four jobs below to pass. "webkit" (the browser suite in Safari's engine) and
+# "webkit-production" (the same suite against a production build) became required on 2026-11-20, each after five
+# runs in a row passed. No job retries a failed test (AGENTS.md).
 # The site needs no secrets for these: it uses its embedded database and the pretend card processor.
 # The repository is public, so GitHub's standard runners cost nothing here.
 
