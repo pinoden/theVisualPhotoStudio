@@ -293,7 +293,7 @@ async function pictureFile(name: string, width: number, height: number, colour: 
 /** True once the picture has arrived and the browser could draw it. */
 const drawn = (image: Locator) => expect.poll(() => image.evaluate((element: HTMLImageElement) => element.complete && element.naturalWidth > 0)).toBe(true);
 
-test("the owner adds pictures, describes them, puts them on a studio, replaces one in place, and cannot delete one that is shown", async ({ page, browser }) => {
+test("the owner adds pictures, describes them, puts them on a studio, replaces one in place, cannot delete one that is shown, and keeps collections for the seasons", async ({ page, browser }) => {
   await signIn(page, PICTURES_OWNER, "/admin/website/media");
   await expect(page.getByRole("heading", { name: "Pictures", level: 1 })).toBeVisible();
   await expect(byText(page, "No pictures yet. Add the first with the button above.")).toBeVisible();
@@ -418,6 +418,54 @@ test("the owner adds pictures, describes them, puts them on a studio, replaces o
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(byText(page, "Saved.")).toBeVisible();
   await expect(byText(page, /Shown from Dec 1, 2020 to Dec 26, 2020: not showing now\./)).toBeVisible();
+
+  // Another occasion (the owners' brief of 2026-11-20: Christmas, Valentine's Day and others), dated around today on
+  // the studio's clock, so it shows now. Then renamed, described and given no dates, so it shows all year; then deleted,
+  // and its picture stays in the library.
+  const studioDay = (days: number) => new Date(Date.now() + days * 86_400_000).toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+  await page.goto("/admin/website/media/collections");
+  await byLabel(page, "Name of a new collection").fill("Valentine's Day");
+  await page.getByRole("button", { name: "Make the collection" }).click();
+  await expect(page.getByRole("heading", { name: "Valentine's Day", level: 1 })).toBeVisible();
+  await page.getByRole("button", { name: "Add pictures from the library" }).click();
+  await chooser.getByRole("button", { name: /white cyclorama wall/ }).click();
+  await chooser.getByRole("button", { name: "Use this picture" }).click();
+  await expect(byText(page, "Added.")).toBeVisible();
+  await byLabel(page, "First day it shows").fill(studioDay(-2));
+  await byLabel(page, "Last day it shows").fill(studioDay(2));
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(byText(page, "Saved.")).toBeVisible();
+  await expect(byText(page, /^Leave both empty to show it all year\. Shown from .+: showing now\.$/)).toBeVisible();
+  await byLabel(page, "Name").fill("Valentine's Day sets");
+  await byLabel(page, "A few words about it").fill("Hearts and roses, for February");
+  // Emptied as a person does, a part at a time. In WebKit, fill("") on a date field that had a value leaves it failing
+  // the form's own check, with no message, so the form sends nothing ("Conventions and gotchas" in ProjectLibrary.md).
+  for (const label of ["First day it shows", "Last day it shows"]) {
+    await byLabel(page, label).click();
+    for (let part = 0; part < 3; part++) await page.keyboard.press("ArrowLeft");
+    for (let part = 0; part < 3; part++) {
+      await page.keyboard.press("Backspace");
+      await page.keyboard.press("ArrowRight");
+    }
+    await expect(byLabel(page, label)).toHaveValue("");
+  }
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Valentine's Day sets", level: 1 })).toBeVisible();
+  await expect(byText(page, "Leave both empty to show it all year. Shown all year.")).toBeVisible();
+  await expect(byLabel(page, "A few words about it")).toHaveValue("Hearts and roses, for February");
+  await page.goto("/admin/website/media/collections");
+  const collections = onScreen(page.locator(".media-card"));
+  await expect(collections).toHaveCount(2);
+  await expect(collections.filter({ hasText: "Valentine's Day sets" })).toContainText("1 picture. Shown all year.");
+  await expect(collections.filter({ hasText: "Christmas sets" })).toContainText("1 picture. Shown from Dec 1, 2020 to Dec 26, 2020: not showing now.");
+  await page.getByRole("link", { name: "Open Valentine's Day sets" }).click();
+  await expect(page.getByRole("heading", { name: "Valentine's Day sets", level: 1 })).toBeVisible();
+  await page.locator("summary", { hasText: "Delete this collection" }).click();
+  await page.getByRole("button", { name: "Yes, delete the collection" }).click();
+  await expect(byText(page, "The collection was deleted. Its pictures are still in the library.")).toBeVisible();
+  await expect(collections).toHaveCount(1);
+  await expect(collections).toContainText("Christmas sets");
+
   await page.goto("/admin/website");
   await expect(onScreen(page.locator(".website-cards"))).toContainText("2 pictures. 1 collection.");
   await guest.context().close();
