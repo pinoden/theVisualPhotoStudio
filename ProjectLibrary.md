@@ -233,8 +233,8 @@ This numbered list tracks the questions left open from 2026-11-16 and the questi
 2. **Web address.** (was 2) Which domain the new site takes over from Squarespace, and who manages its DNS.
 3. **Email.** (was 3) Which service sends the site's email (confirmations, sign-in codes, notices). Resend is built in; it needs an address on the studio's domain to send from, and two DNS records. Until then nothing can be emailed in production, sign-in codes included.
 4. **Real card payments.** (was 4) When to switch Square from test mode to the live keys. The keys are typed into the host's settings by the owner, never sent in a message. The builder's suggestion: one real booking on the live site, refunded, before it opens.
-5. **Privacy policy.** (was 6) Needed before accounts hold receipts. Does the studio have one to reuse, or should the builder draft one for a lawyer to check?
-6. **Sales tax.** (was 7) Do the prices include sales tax, and should receipts show a tax line, at what rate? A question for the accountant. Receipts show no tax line until then.
+5. **Privacy policy.** (was 6) Answered 2026-11-20. Draft the policy for lawyer review before publication.
+6. **Sales tax.** (was 7) Answered in part 2026-11-20. Prices exclude tax. Show it separately at checkout and on receipts. The 6.5% rate is provisional until the accountant confirms the rate and treatment.
 
 **Raised by the answers of 2026-11-17**
 
@@ -243,7 +243,7 @@ This numbered list tracks the questions left open from 2026-11-16 and the questi
 9. **Memberships — answered 2026-11-17 and 2026-11-18.** See follow-up 3 under "Katya's answers to the 16 follow-up questions". Four points remain: questions 41 to 44 below.
 10. **Unused pet fees — answered and built.** See follow-up 4 under "Katya's answers to the 16 follow-up questions".
 11. **A booking the studio moves or changes — answered 2026-11-17, built 2026-11-18.** See follow-up 5 under "Katya's answers to the 16 follow-up questions", and question 47 below for how it was built.
-12. **"One reschedule is complimentary" — answered and built.** See follow-up 6 under "Katya's answers to the 16 follow-up questions".
+12. **"One reschedule is complimentary".** Follow-up 6 set $20 for later moves. The 2026-11-20 answer limits customers to one self-service move. See "Owner decisions of 2026-11-20" for the remaining fee question.
 13. **The review request after a visit — answered and built.** See follow-up 7 under "Katya's answers to the 16 follow-up questions".
 14. **Blanche and Dayglow together — answered and built.** See follow-up 8 under "Katya's answers to the 16 follow-up questions".
 15. **Loyalty starting over — answered and built.** See follow-up 9 under "Katya's answers to the 16 follow-up questions".
@@ -284,17 +284,17 @@ This numbered list tracks the questions left open from 2026-11-16 and the questi
     - (g) **Codes.** A package, gift certificate or subscription code used in Acuity is named in the payment's note. What is left on it stays in Acuity: carrying members over is next step 6.
     - **Confirmed 2026-11-20:** the owner said yes to all of them as built, (c) and (d) included: the site's terms apply rather than Acuity's, and the review request and the loyalty stamp do not wait for Acuity to close.
 50. **An Acuity appointment with more than one email address.** (new, 2026-11-20, from the owners' real export, where 7 of 189 rows had one) Acuity's Email field holds the client's own address, then any others the client asked Acuity to copy its emails to, separated by commas. Built so: the booking belongs to the first address, which finds it in the client's account and gets the site's emails about it (the review request after the visit, and the reminder with `--remind`); the booking's history names the others, which the site never emails. Before, the import refused such an appointment as having no valid address.
-23. **A payment link Square cannot answer about.** (was 45) When Square cannot say, at the moment a booking is cancelled or moved, whether its payment link was paid, the booking is cancelled or moved all the same, and a payment through the link that turns out to have been made is refunded in full, whatever the cancellation terms (built 2026-11-17). Or should the terms apply to it?
+23. **A payment link Square cannot answer about.** (was 45) Answered 2026-11-20. Verify with Square before cancelling or refunding. An unconfirmed status goes to manual review. A verified payment follows the booking's saved cancellation terms. This supersedes the current automatic full-refund fallback for an unanswered status. Inspect the move path that shares this logic.
 
 **Choices about features** (built as described until answered):
 
 24. **Signing in.** (was 19) Emailed codes only (built). Add passwords? Google sign-in now, later or never?
 25. **Earlier history.** (was 21) Import past appointments and payments from Acuity and Square into the customers' accounts, or start from the launch?
-26. **Apple Wallet loyalty.** (was 22) What is the system, who runs it, and should the site send stamps to it, read them from it, or neither?
+26. **Apple Wallet loyalty.** (was 22) Answered 2026-11-20. The built-in program replaces Apple Wallet once the replacement is verified. Add a progress email when a completed visit earns a stamp.
 27. **Customer accounts.** (was 23) May customers change their own email address? Should two accounts of one person be merged? Should the site log who opened a customer's page?
-28. **Newsletter.** (was 25) Keep a sign-up form? Squarespace's saves nothing today. Which service, if any?
+28. **Newsletter.** (was 25) Answered in part 2026-11-20. Add a signup section. The service and submission destination are deferred.
 29. **Studios.** (was 28) Should an owner be able to rename a studio, or add or remove one, in the admin?
-30. **The accent colour.** (was 32) The tan is too light for links and behind white button words by the accessibility guidelines. Darken it a little, or keep it?
+30. **The accent colour.** (was 32) Answered 2026-11-20. Darken the tan slightly and verify contrast for links and buttons.
 
 **Testing and the code:**
 
@@ -303,8 +303,22 @@ This numbered list tracks the questions left open from 2026-11-16 and the questi
 
 **Ideas from another studio's website** (Mint Room Miami, read 2026-11-16; see "Ideas from another studio's website"):
 
-33. **A waiver.** (was 36) Should guests sign a liability waiver before the visit, online with the booking? Who writes its text?
+33. **Agreements and waivers.** (was 36) Answered in part 2026-11-20. Owners manage versioned agreements by appointment type. Require electronic acceptance or signature at checkout. Approved text, assignment and signature details remain open.
 34. **Membership by yearly spend.** (was 40) The owner asked how it differs from the loyalty program. Loyalty here counts visits: every fifth day a client comes earns a free hour, whatever they spend, so it rewards coming often. A yearly-spend tier counts money: once a client's bookings in a year pass a set amount, every later booking that year is a percentage off by itself (Mint Room: 10% or 20%, at two amounts), so it rewards spending much, also in a few long bookings. Memberships, now decided, are a third thing: minutes paid for in advance, each month. The three can run side by side, or the yearly tier can be left out. Wanted? If so: the amounts, the percentages, and whether a year is the calendar year or the last twelve months.
+
+### Owner decisions of 2026-11-20
+
+These decisions follow the tests and Acuity-export rehearsal documented in the decision log. [HANDOFF.md](HANDOFF.md#november-20-implementation-brief) carries the implementation and verification checklist.
+
+- **Manual membership cutover.** Transfer existing members manually, including balance and billing reconciliation. The owners declined an automated member migration. Upcoming appointment and read-only history imports are separate work.
+- **Privacy and tax.** Draft the privacy policy for a lawyer before publication. Prices exclude sales tax. Show a separate line at checkout and on receipts, provisionally at 6.5%, pending accountant confirmation of rate and treatment.
+- **Payment summaries and Square uncertainty.** Show original payment, refunded amount, final amount paid, and any outstanding balance or remaining credit. The admin also needs payment status and the original Square transaction. For payment-link cancellations and refunds, check status in Square first. On an unknown status flag for manual review. On a verified payment use the cancellation policy saved when the client booked. This replaces Question 23's automatic full-refund fallback.
+- **Rescheduling.** One complimentary move if requested at least 24 hours ahead, with one self-service move per customer appointment. Administrators may move it more than once. Additional reschedules are $20. Whether the fee applies to studio-initiated moves remains open.
+- **Design and content.** Match the live site's overall look across home, studio pages, Christmas galleries, Styled Setups and reviews, preserving the palette, typography and spacing. Darken the tan slightly for accessible buttons and links. Manage seasonal photo and decor collections in Admin. Add a newsletter signup section and choose its delivery service later.
+- **Loyalty.** Replace Apple Wallet once the built-in program is verified. Customers see stamps, available rewards and redeemed codes. Email their progress when a completed visit earns a stamp. Skip yearly-spend memberships.
+- **Agreements.** Owners create and edit booking agreements, policies and waivers and assign them to appointment types. Require electronic acceptance or signature at checkout. Retain the exact accepted version and timestamp, visible to the studio and customer. Confirm approved text and the required form of signature.
+- **Preview owner access.** The Vercel Preview environment should use the same authorized owner email list as Production.
+- **Booking calendar.** Show a mobile-friendly full-month calendar after selecting studio or bundle and duration. Refresh dates and slots as bookings change. Show available start times in 15-minute steps after a date is selected, with all room and photographer conflicts and buffers enforced. Photography requires 14 full days' notice. Add-ons and guest count follow time selection, then use the existing checkout. Confirm whether to retain the earlier date-first flow.
 
 ### Answers of 2026-11-17 to the list of 2026-11-16
 
@@ -471,7 +485,7 @@ Sent by the owner on 2026-11-15, after the second set was built. Recorded as req
         - *Google sign-in.* Not built. Proposed: an optional later addition that only proves the same email address.
         - *Appointments before the new site.* This site has no history from before its launch. Earlier appointments and payments are in Acuity Scheduling and Square, which the live site uses. Proposed: import them from exports of those two, attach them to an account only once the owner of that email has signed in with a code, and take amounts from Square's payment records, never from current prices. Needs the owner's go-ahead and a privacy policy first.
         - *PDF receipts.* The site makes no PDFs. Proposed: generate them on the server from the payment records; the library is chosen when building.
-        - *Taxes.* The site has no tax line: prices are final amounts. Proposed: the accountant states whether prices include tax, at what rate, and the format of an annual summary, before any receipt shows tax. No rate goes into the code without that.
+        - *Taxes.* The site currently has no tax line. On 2026-11-20 the owner requested tax-exclusive prices and a separate line at checkout and on receipts, using 6.5% provisionally. Confirm the live rate and taxable amounts with the accountant. See the [November 20 decisions](#owner-decisions-of-2026-11-20).
         - *Unpaid invoices.* Decided (answer 14, 2026-11-15): a "mark as paid" record for bookings the owner makes, and a payment link sent to the client through Square. Both are built (2026-11-15): a booking made in the admin shows what it still owes, the client can be emailed a link to pay it by card, and each payment taken at the studio is a record with its amount, how it was paid, who recorded it and when. So such a booking is an unpaid invoice until it is paid, and its payment records are what a receipt will be made from.
         - *"Request" a reschedule or cancellation.* Today both happen at once, within policy. Proposed: a request from the portal sets Reschedule Pending (requirement 10), which keeps the slot until staff choose a new time; the instant reschedule code stays beside it.
     - **Open:** passwords as well as codes, or codes only; Google sign-in now, later or never; import earlier history or start from launch; the tax rule; instant reschedule, request, or both (decided 2026-11-17: both, question 20); receipts as one PDF each, one file per year, or both.
@@ -698,7 +712,7 @@ All of these are data or settings, not code, unless noted.
 - **Food and drinks** — **Decided (2026-11-17), question 30: not allowed inside the studios,** as the live guest information says. Built 2026-11-17: the policies and the guest information page say so, in their starting content (`built-in-pages.ts`) and, through migration `0035_refund_window_and_food`, in a database that still had "not permitted on furniture".
 - **Pet fee on a refund** — **Decided and built:** the fee becomes studio credit when an eligible cancellation or manual return applies. See follow-up 4 for the owner's manual workflow.
 - **Names of the lights** — **Decided (2026-11-17), question 31: "Amaran 150, Godox and Neewer",** as the new page says. The live page lists them as "Amaram 150, Godos, and Neewer".
-- **Sales tax on receipts** — **Open (requirement 16).** The site has no tax line. The accountant's rule is needed before receipts show tax.
+- **Sales tax on receipts** — **Awaiting implementation and accountant confirmation (requirement 16).** The owner requested tax-exclusive prices and a separate line at checkout and on receipts, with 6.5% provisional. See the November 20 decisions.
 - **Apple Wallet loyalty system** — **Open (requirement 17).** Its name, its operator and whether it has an interface are not known.
 
 ### Known gaps in what is built
@@ -1025,6 +1039,8 @@ Known weaknesses:
 - 2026-11-20: Asked whether `webkit-production` should become required as `webkit` had, after five passing runs in a row, the owner said yes. It passed five runs in a row, all 63 tests each time: on `b5f230e`, on `9fdabfc`, and three more times on `9fdabfc`, started by hand (7.5, 9.7, 9.8, 7.8 and 7.9 min), with no warning but the booking pages' cache misses. `browser` and `webkit` passed each of those runs too. Since then `master`'s branch protection requires all four jobs. The rest of the protection is as it was.
 - 2026-11-20: The owners' Acuity export arrived: 189 appointments, from 2026-11-20 to 2027-01-17. It had been saved at the project's root, which Git did not ignore; it was moved out at once, and `.gitignore` now leaves out every `*.csv`. It was read without printing anything of a client, and deleted afterwards, as the owner allowed. Every column the import needs was there, with the cancelled flag and the time zone; every row was read, and every type named its studios ("Importing Acuity's appointments still to come" under Architecture). Two changes to the reader: seven rows had more than one address in Email, which the import had refused as no address, and now the first is the client's while the booking's history names the others (question 50); and a row whose Timezone is not the studio's is set aside (none was). It was rehearsed against a new local database with the site's catalog, not against staging, so that no client's details reached the shared preview's database, even inside the transaction a rehearsal throws away. 170 would be imported (two of them with money still to pay at the studio); 6 were over, 10 cancelled in Acuity, and 3 refused for a person: two paid more online than their price, after being moved to shorter bookings in Acuity, and one starts inside the site's 15-minute clean-up gap after another Acuity appointment in Studio Paris. The rehearsal's database was deleted afterwards.
 - 2026-11-20: The owner turned on two-factor sign-in at GitHub, Vercel and Resend; Square's and the owners' inboxes' are still to do. Resend's domain had been pending for two days because none of its three records (DKIM at `resend._domainkey`, MX and SPF at `send`) were in the domain's DNS, which Squarespace serves (its nameservers run on NS1). Gmail's MX records and a DMARC record were there. Resend looks for the records for 72 hours after a domain is added, then marks it failed, and its verification can be started again.
+
+- 2026-11-20: The owner provided the [November 20 decisions](#owner-decisions-of-2026-11-20) after the Acuity export rehearsal. The handoff records the updated checkout and rescheduling rules, Square manual-review policy, manual membership transfer, and the calendar, tax, privacy, agreement and design work still due.
 
 ### Handoff for the next coding session
 

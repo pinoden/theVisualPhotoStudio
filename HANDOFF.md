@@ -3,6 +3,7 @@
 - **Project:** The Visuals Photo Studio
 - **Updated:** 2026-11-20
 - **Branch:** `rebuild`
+- **Start here:** [November 20 implementation brief](#november-20-implementation-brief) and [remaining owner questions](#remaining-questions-and-owner-actions).
 
 ## Current state
 
@@ -10,7 +11,7 @@
 - **`master`** is at PR #23 (`d6000ca`, 2026-11-20): the day's Safari test fixes and tidy-ups (below), live on the hosted preview. Before it came PR #22 (the overnight pass), PR #21 (the Acuity import and Square's buyer verification), PR #20 (the home page's slideshow) and PR #19 (the old website's look). `rebuild` is ahead by Dependabot's #10, #11 and #14, CI's new checks (see "GitHub"), the browser suite against a production build with its one change to the site, the Acuity import's changes for the owners' real export (both below), and these notes. They go to `master` with the next pull request, on the owner's word.
 - **Scheduled tasks on the preview** run once a day (`web/vercel.json`, at 12:00 UTC), the most the Hobby plan allows. Between runs `/api/health` answers 503 and the admin overview says the tasks are late: expected until Vercel Pro, where they run every five minutes (step 10). Emails go out right after whatever queued them; reminders, free hours, review requests, refund retries and membership months wait for the daily run.
 - **Email:** Resend's domain `thevisualsphotostudio.com` is not verified yet: on 2026-11-20 none of its three records were in the domain's DNS ("Now" 1). Until it is, `EMAIL_FROM` is Resend's test sender (`onboarding@resend.dev`), which delivers only to the Resend account's own address. Once Resend shows the domain verified, set `EMAIL_FROM` to `The Visuals Photo Studio <bookings@thevisualsphotostudio.com>` and redeploy.
-- **The owners' answers are all built:** questions 40, 41 and 48 (2026-11-18), and question 49 (2026-11-20), which confirmed the Acuity import as built (see "Owner decisions"). Migrations run from `0000` to `0050`, and staging has them all: `0050` (the overnight pass's four lookup indexes, nothing else) was applied there just before PR #22 merged.
+- **Earlier owner decisions are built:** questions 40, 41 and 48 (2026-11-18) and question 49 (2026-11-20, Acuity import as built). The separate November 20 decisions below are the next implementation brief. Migrations run from `0000` to `0050`, and staging has them all: `0050` (the overnight pass's four lookup indexes, nothing else) was applied there just before PR #22 merged.
 - **Importing Acuity's appointments still to come (step 5, 2026-11-19, on `master` since PR #21):**
   - **What it is:** `scripts/import-acuity.ts` turns each upcoming appointment of an Acuity export into a booking that holds its studios and the photographer. A booking keeps Acuity's price and what was paid there. Nothing is charged and no email is sent.
   - **Rehearsal first:** without `--write`, the script writes nothing and prints what it would do. A second run adds only what is new.
@@ -124,22 +125,24 @@ Not yet covered by an independent tester pass: the fourth pass's fixes, question
 1. **Verify the Resend domain** (owner). The domain's DNS is Squarespace's (its nameservers run on NS1): add Resend's three records there (Domains → the domain → DNS → Custom records), exactly as Resend's domain page lists them: a TXT record at `resend._domainkey` (the DKIM key), and an MX and a TXT record at `send`. Leave Gmail's MX records and the DMARC record as they are. None of the three was there on 2026-11-20. Resend marks a domain failed 72 hours after it was added (2026-11-18); once the records are in, start its verification again in Resend. Then switch `EMAIL_FROM` as above and redeploy.
 2. **A tester pass** over the fourth pass's fixes, questions 40 and 41, the photo import, the security fixes, the old website's look and the home page's slideshow (both on the hosted preview), the Acuity import with its changes for the real export, Square's buyer verification, the overnight pass's fixes and the day's tidy-ups, and the hosted preview on a real phone and in Safari on a Mac (the page editor's drag included).
 3. **Sign in once on the hosted preview with a new code** (sign out first), to see the limit on tries counted there. Until the Resend domain is verified, only the Resend account's own address receives a code. Resend refuses every other address, the other owners' included, with a 403 that the site records in `email_outbox.error`, while the page still shows the code screen.
-4. **Vercel Preview environment:** its `OWNER_EMAILS` still holds the first list; set it as Production's if branch previews are used.
+4. **Vercel Preview owner access.** Approved on 2026-11-20. Set Preview `OWNER_EMAILS` to the same authorized addresses as Production. Verify the setting is scoped to Preview and check owner sign-in after Resend delivery is available. Keep the addresses out of Git and the handoff.
 
-### Before cutover (tools not built yet)
+### Before cutover
+
+Use the [November 20 implementation brief](#november-20-implementation-brief). Prioritize the Square cancellation fix before live payments. Draft the tax and legal changes while their review is pending, then deliver the calendar and content work in separately testable changes.
 
 5. **Import upcoming appointments from Acuity.** Built (2026-11-19), with its readings confirmed by the owner (2026-11-20): `scripts/import-acuity.ts`. Read an Acuity export into bookings that hold their rooms and photographer like any other booking, with nothing charged and no email sent. Refuse and list any that clash. Each row is matched by Acuity's ID, so a second run of the same export adds nothing. The owners' export was read and rehearsed on 2026-11-20 (see "Current state"). Still to do:
    - **The owners:** settle in Acuity the three appointments the rehearsal refused, and say "OK" to question 50 (several email addresses), or otherwise.
    - **Then:** rehearse the real import with `--write` on a restricted database, never the shared preview's: a Neon branch of staging, deleted afterwards (item 9).
    - **At cutover:** close online booking in Acuity and take a final export (Reports → Import/Export, dates from today on, then Export appointments). It lists cancelled ones in its Canceled column, which the import reads. Save it outside the project folder, never in it, since it holds clients' details (a `*.csv` in the project is ignored by Git, in case). Run it with `--money live` on the production database.
-6. **Carry over active members.** The site's memberships are billed by Square subscriptions that the site creates. A member billed today by Acuity or Squarespace cannot be moved onto one. Two ways, for the owners to choose: the member joins again on the site with their card, and the old subscription is cancelled; or the site imports the member's balance as a membership without billing, which the old provider keeps billing until it is cancelled.
+6. **Transfer active members manually.** The owner declined automation. Prepare a private checklist for each member covering their plan, unused minutes, paid-through date, next renewal and billing provider. Confirm how to continue billing for that member before changing the old subscription or starting a new one. Reconcile minutes and verify that each renewal is billed by one provider.
 7. **Import past records, read-only.** Past Acuity appointments and Square payments, for the client pages and loyalty stamps, matched by provider and ID.
 
 ### Rehearsal and cutover
 
 8. **Production database:** its own Neon project (never the staging one, which holds test-mode bookings), migrated with `npm run db:migrate`, and the photos imported again or copied from staging.
-9. **Rehearse the imports** (items 5 to 7), and reconcile counts, credits and member balances with the owners.
-10. **Cut over** with the owner's word: Vercel Pro with the scheduled tasks every five minutes (`web/vercel.json`), the domain pointed at Vercel, live Square keys last.
+9. **Rehearse the appointment and history imports** (items 5 and 7), and walk through the manual member checklist (item 6). Reconcile appointment counts, credits, member balances and billing transitions with the owners.
+10. **Cut over** with the owner's word after the accountant and legal reviews and the Square cancellation checks. Use Vercel Pro for scheduled tasks every five minutes (`web/vercel.json`), point the domain to Vercel, and enable live Square keys last.
 
 ## Launch plan
 
@@ -185,7 +188,7 @@ The early site audit also found membership prices that differed between the webs
 
 ## Owner decisions
 
-### Confirmed (2026-11-20 and before)
+### Earlier decisions
 
 - Question 49 (the Acuity import, 2026-11-20): as built. Acuity's price stands, weekends included. What was paid in Acuity counts as paid; a refund of it is made in Square or Acuity and recorded by hand. The site's terms of the day apply. The site sends no reminder while Acuity sends its own, and the review request and the loyalty stamp follow the site's rules. The site's 15-minute clean-up gap stands, so an appointment Acuity put closer after another is listed for the owners. Add-ons stay inside Acuity's price, and what is left on a code stays in Acuity until step 6.
 - Vercel and Neon are acceptable. Keep the existing domain. Sign-in starts with emailed codes; Google sign-in may come later.
@@ -199,14 +202,49 @@ The early site audit also found membership prices that differed between the webs
 - Design, navigation and page edits need Publish. Prices, opening hours and booking rules take effect immediately. Deleted pages stay in the trash for 30 days.
 - YouTube, Vimeo and Instagram are the video sources. Owners rename, add and remove studios without a deployment, and edit the email wording in the admin.
 
-### Open decisions
+### November 20 implementation brief
 
-| Area | Decision needed |
+Status is pending unless existing behavior is called out. Start with the Square cancellation change. Then verify the calendar and payment summary in the sandbox, and prepare the tax and legal work for review. The durable record is in the [Project Library](ProjectLibrary.md#owner-decisions-of-2026-11-20).
+
+#### Booking calendar
+
+- Use the monthly grid as the date picker. The requested flow is **studio or allowed bundle → duration → available date → available start time → add-ons and extra guests → checkout**. Use the existing checkout. Retention of the earlier date-first search is an open question.
+- Show a full month with previous and next navigation. Distinguish selectable dates from unavailable dates. For photography, gray out dates with no valid start at least 14 full days ahead, and omit any starts inside that window on the first eligible day.
+- After date selection, show available start times as tappable buttons on 15-minute increments. Reuse the existing availability and booking checks for the full duration, buffers, active bookings, all rooms in the bundle and the shared photographer. Refresh availability while the calendar is open and recheck at checkout. Keep the grid and time buttons usable on phones.
+- Verify a concurrent Paris-only and Paris + Dayglow booking, continued availability of Blanche, photographer conflicts, cancellations reopening slots, and the 14-day boundary. Include mobile and WebKit production coverage.
+
+#### Square payment links, refunds and rescheduling
+
+- **Payment links (supersedes Question 23).** Verify link payment status directly in Square before processing a cancellation or refund. If Square cannot confirm it, leave the cancellation unresolved and flag the booking for manual review. Preserve the reservation until cancellation can be safely completed. After verification, apply the booking's saved cancellation terms. Review shared move and link-reconciliation code for the old full-refund behavior. Test paid, unpaid and unknown outcomes, including a delayed result and retry without a duplicate refund. Start in `src/server/manage.ts` and `src/server/pay-links.ts`.
+- **Payment summary.** Show the original payment, refunded amount, final amount paid, and any balance due or remaining credit. Admin also needs payment status and the original Square transaction link. Reuse the existing verified Square receipt link while investigating a supported direct transaction link. Keep refunded money distinct from unissued credit. Test a partial goodwill refund and a move that leaves a balance or a credit.
+- **Rescheduling.** One complimentary move requested at least 24 hours ahead. The client can move an appointment themselves once. Staff can make subsequent moves and each additional reschedule costs $20. The existing flow allows later paid self-service moves, so change that path and clarify customer-facing text. Preserve existing restrictions on when a booking can be moved. Confirm whether the fee applies to a move initiated by the studio itself; the owner note about administrator moves ends mid-sentence.
+
+#### Tax, privacy and signed agreements
+
+- **Sales tax.** Prices exclude tax. Show tax as its own line at checkout and on receipts, using 6.5% provisionally. Implement the calculation in the server pricing flow and use the saved tax amounts for receipt display. Keep the provisional rate configurable and preserve existing booking totals. The accountant must confirm the live rate and how it applies to rentals, photography, add-ons, discounts, credits and refunds before activation on live payments.
+- **Privacy policy.** Draft from the site's actual data flows and providers. Hand the draft to the owner for legal review before publication.
+- **Agreements and waivers.** Add owner-managed agreements, policies and liability waivers, assigned by appointment type. Check on the server that the client accepted or signed every applicable version before checkout completes. Save the acceptance or signature against the booking with the exact text or an immutable version and a timestamp. Show it in Admin and the customer's own account. Test that an edited agreement leaves the prior accepted version intact. Obtain approved text and confirm whether a checkbox or a typed signature is required before publishing or enforcing it.
+
+#### Site design, loyalty and content
+
+- **Old site design.** Preserve the overall design of the homepage and studio pages, Christmas galleries, Styled Setups, home-page reviews, brand colors, fonts and spacing. Reuse the imported photos and existing page-editor blocks. Verify the remaining pages against the old site and review on mobile. Keep the planned January 2, 2027 end date for the homepage Christmas section.
+- **Accessible tan.** Darken the accent slightly while keeping it close to the brand color. Check links and button states against their actual backgrounds, including hover and focus.
+- **Loyalty.** Use the built-in program in place of Apple Wallet once the new flow is verified. Keep stamps, available rewards and redemption status visible in the client account. Add an automated progress email only after a completed appointment earns a stamp, such as "You're at 3 of 5 stamps toward a free studio hour." Respect existing earning rules and send only once per award, including task retries.
+- **Seasonal collections.** Use the existing admin collection tools for photos and decor setups grouped by season or occasion. Verify that owners can create, edit and remove collections for Christmas, Valentine's Day and other occasions. Keep the existing optional date controls.
+- **Newsletter.** Add a signup section. Provider selection is deferred, so activate submissions when the provider and destination are agreed.
+- **Yearly-spend memberships.** The owner declined this for now.
+
+### Remaining questions and owner actions
+
+Return a single consolidated list to the owner after reconciling older questions with the answers above.
+
+| Area | Decision or action still needed |
 | --- | --- |
-| The old website's look | Whether to add more of the old site: a page for each studio with its Christmas photos, its Styled Setups page, the reviews on its home page ("What Our Customers Say"), and its colours, fonts and spacing (left as they are). The Christmas section comes off the home page after January 2, 2027. |
-| Acuity import | Question 50: an appointment whose Email field holds several addresses is booked under the first, the client's own; the others are named in its history and get no email from the site. "OK", or say otherwise. And the three appointments the rehearsal refused, settled in Acuity |
-| Members at cutover | Each current member joins again on the site, or is carried over as a balance while the old provider keeps billing until it is cancelled (next step 6) |
-| Launch | Approve the cutover after the hosted preview and the import rehearsal. DNS ownership, the transactional email provider and sender address, the privacy policy and sales tax |
-| Price summary after a goodwill refund | Its line still reads "Paid by card and at the studio" with the original amount. Keep it, or say what was refunded |
-| Policies | How the free reschedule and the fee for later reschedules are described together |
-| Integrations and content | Apple Wallet loyalty scope, the newsletter provider and signup, and what a seasonal collection should include |
+| Acuity import | Question 50: confirm using the first email as the booking owner and recording the other addresses in booking history. Resolve the three appointments the rehearsal refused in Acuity. |
+| Manual member transfer | Confirm each member's carried balance and next billing arrangement with the owner. The manual approach is settled. |
+| Rescheduling | Does the $20 fee apply when the studio initiates a later move? |
+| Booking calendar | Does the new studio-first calendar replace the earlier date-first option, or should that option remain available? |
+| Tax | Accountant confirms the 6.5% provisional rate and taxable amounts and treatment before live charging. |
+| Privacy, agreements and waivers | Lawyer reviews the privacy draft. Obtain approved agreement/waiver text, required signature method and the applicable appointment types. |
+| Newsletter | Choose the email service and signup destination before enabling submissions. |
+| Launch | Complete DNS and Resend verification, pass the preview and rehearsals, and obtain cutover approval. |
