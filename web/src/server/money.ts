@@ -187,6 +187,26 @@ export async function creditReturnedCentsByBooking(db: DbLike, bookingIds: strin
 }
 
 /**
+ * For several bookings at once: what was given back of what each was paid, to the card or by hand (the refunds that
+ * count: made, on their way, or owed), and the part of it that has not reached the client yet (on its way, or failed and
+ * tried again). A booking with none is not in the map. The payment summary the owners asked for on 2026-11-20 shows both.
+ */
+export async function refundedCentsByBooking(db: DbLike, bookingIds: string[]): Promise<Map<string, { cents: number; waitingCents: number }>> {
+  if (bookingIds.length === 0) return new Map();
+  const rows = await db
+    .select({
+      bookingId: payments.bookingId,
+      total: sql<number>`coalesce(sum(${refunds.amountCents}), 0)::int`,
+      waiting: sql<number>`coalesce(sum(${refunds.amountCents}) filter (where ${refunds.status} <> 'succeeded'), 0)::int`,
+    })
+    .from(refunds)
+    .innerJoin(payments, eq(payments.id, refunds.paymentId))
+    .where(and(inArray(payments.bookingId, bookingIds), eq(payments.status, "succeeded"), inArray(refunds.status, [...REFUNDS_THAT_COUNT])))
+    .groupBy(payments.bookingId);
+  return new Map(rows.map((row) => [row.bookingId, { cents: row.total, waitingCents: row.waiting }]));
+}
+
+/**
  * For several bookings at once: what each was paid toward its price: every payment that succeeded, less what was given
  * back of what it was paid beyond its price (`creditReturnedCentsByBooking`). Another refund (goodwill, by hand or to
  * the card) is the studio's to give and does not count: it never makes a booking owe (the tester's finding of
