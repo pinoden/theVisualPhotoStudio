@@ -729,6 +729,26 @@ export function freeHourEmail(input: {
   );
 }
 
+/**
+ * A completed visit earned a stamp, and no free hour came of it yet: where the client stands (the owners' decision of
+ * 2026-11-20, "You're at 3 of 5 stamps toward a free studio hour"). Sent once for each visit (`completeVisits` in tasks.ts).
+ */
+export function loyaltyProgressEmail(input: {
+  to: string;
+  name: string;
+  /** The stamps toward the next free hour, this visit's among them. */
+  stamps: number;
+  /** How many visits earn a free hour. */
+  visits: number;
+  bookUrl: string;
+}): QueuedEmail {
+  return written(
+    "loyalty_progress",
+    { to: input.to, kind: "loyalty_progress" },
+    { name: input.name, stamps: String(input.stamps), visits: String(input.visits), book_link: input.bookUrl },
+  );
+}
+
 export function ownerRefundNotice(input: {
   to: string;
   ref: string;

@@ -5,11 +5,11 @@ import { releaseExpiredHolds } from "./availability";
 import { pruneRateLimits } from "./rate-limit";
 import { durationLabel } from "@/lib/domain/time";
 import { toBookingViews } from "./bookings";
-import { bookingReminderEmail, deliverPendingEmails, queueEmail, reviewRequestEmail, type EmailTransport } from "./email";
+import { bookingReminderEmail, deliverPendingEmails, loyaltyProgressEmail, queueEmail, reviewRequestEmail, type EmailTransport } from "./email";
 import { runMembershipBilling } from "./memberships";
 import { labelOf } from "@/lib/domain/labels";
 import { BY_SYSTEM, recordEvent } from "./history";
-import { sendEarnedFreeHours } from "./loyalty";
+import { loyaltyStandingOf, sendEarnedFreeHours } from "./loyalty";
 import { checkUnsettledRefunds, finishWaitingEnds, retryOpenRefunds, type ManageDeps } from "./manage";
 import { settleReservedPayments } from "./reserved";
 import { checkOpenPayLinks } from "./pay-links";
@@ -146,7 +146,9 @@ async function queueReviewRequests(db: Db, now: Date): Promise<number> {
 /**
  * Mark visits that ended a while ago as completed, and send a free hour to
  * each customer whose visits have earned one (see `loyalty.ts`). A visit staff
- * marked as a no-show is not completed, so it counts for nothing.
+ * marked as a no-show is not completed, so it counts for nothing. A visit that
+ * earned a stamp and no free hour gets the email of where the client stands
+ * instead (`loyaltyProgressEmail`), once.
  */
 export async function completeVisits(db: Db, now: Date, baseUrl: string): Promise<{ completed: number; codes: number }> {
   const settings = await loadSettings(db);
@@ -215,8 +217,32 @@ export async function completeVisits(db: Db, now: Date, baseUrl: string): Promis
   let codes = 0;
   for (const [email, customer] of customers) {
     codes += await db.transaction(async (tx) => {
+      // Claimed first, each visit once: a run beside this one (a retry) finds them claimed, and tells the client nothing twice.
+      const claimed = (
+        await tx
+          .update(bookings)
+          .set({ loyaltyIssuedAt: now })
+          .where(and(inArray(bookings.id, customer.bookingIds), isNull(bookings.loyaltyIssuedAt)))
+          .returning({ id: bookings.id })
+      ).map((row) => row.id);
       const sent = await sendEarnedFreeHours(tx, { email, name: customer.name }, { now, baseUrl, settings });
-      await tx.update(bookings).set({ loyaltyIssuedAt: now }).where(inArray(bookings.id, customer.bookingIds));
+      // A visit of these that earned its day's stamp, with no free hour coming of it: the client is told where they stand
+      // (the owners' decision of 2026-11-20). A free hour sent says it all. One email for the visits of one run.
+      if (sent === 0 && claimed.length > 0) {
+        const standing = await loyaltyStandingOf(tx, email, settings);
+        if (standing.towardsNext > 0 && claimed.some((id) => standing.days.some((day) => day.bookingId === id))) {
+          await queueEmail(
+            tx,
+            loyaltyProgressEmail({
+              to: email,
+              name: customer.name,
+              stamps: standing.towardsNext,
+              visits: settings.loyaltyVisits,
+              bookUrl: `${baseUrl.replace(/\/$/, "")}/book`,
+            }),
+          );
+        }
+      }
       return sent;
     });
   }

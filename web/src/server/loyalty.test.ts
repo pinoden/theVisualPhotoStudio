@@ -191,6 +191,49 @@ describe("earning a free hour", () => {
 
 });
 
+// The owners' decision of 2026-11-20: "You're at 3 of 5 stamps toward a free studio hour", once a completed visit earns a
+// stamp, sent once for each, however often the scheduled task runs.
+describe("telling the client where they stand", () => {
+  const progress = () => world.emails("loyalty_progress");
+
+  it("emails each stamp that does not complete a free hour, once, and the free hour in place of the fifth", async () => {
+    expect(await visitOn(DAYS.slice(0, 4))).toEqual([0, 0, 0, 0]);
+    expect((await progress()).map((mail) => mail.subject)).toEqual([
+      "You're at 1 of 5 stamps",
+      "You're at 2 of 5 stamps",
+      "You're at 3 of 5 stamps",
+      "You're at 4 of 5 stamps",
+    ]);
+    const third = (await progress())[2];
+    expect(third.toEmail).toBe(JANE);
+    expect(third.body).toContain("Your visit earned a stamp: you're at 3 of 5 stamps toward a free studio hour.");
+    expect(third.body).toContain(`${BASE_URL}/book`);
+    // The task run again, as a retry would: nothing more.
+    await completeVisits(world.db, hoursAfter(evening(DAYS[3]), 5), BASE_URL);
+    expect(await progress()).toHaveLength(4);
+    // The fifth day sends the free hour, and no stamp email beside it; then the count starts again.
+    expect(await visitOn([DAYS[4]])).toEqual([1]);
+    expect(await progress()).toHaveLength(4);
+    expect(await world.emails("loyalty_code")).toHaveLength(1);
+    await visitOn([DAYS[5]]);
+    expect((await progress()).at(-1)!.subject).toBe("You're at 1 of 5 stamps");
+  });
+
+  it("sends nothing for a visit that earns no stamp, as a second booking on a day that has one", async () => {
+    await visitOn([DAYS[0]]);
+    expect(await progress()).toHaveLength(1);
+    expectOk(await world.book({ date: DAYS[0], startMinute: h(14) }));
+    expect(await completeVisits(world.db, hoursAfter(evening(DAYS[0]), 1), BASE_URL)).toEqual({ completed: 1, codes: 0 });
+    expect(await progress()).toHaveLength(1);
+  });
+
+  it("sends nothing while loyalty is switched off", async () => {
+    await switchLoyalty(world.db, false, NOW);
+    await visitOn([DAYS[0], DAYS[1]]);
+    expect(await progress()).toEqual([]);
+  });
+});
+
 describe("loyalty switched off and on again (the owner's answer of 2026-11-17)", () => {
   const standing = async () => loyaltyStandingOf(world.db, JANE, await loadSettings(world.db));
   /** An hour after that evening's task, so before the next day's visit. */
