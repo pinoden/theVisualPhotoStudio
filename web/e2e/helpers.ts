@@ -54,6 +54,16 @@ const frameworkNoise = (text: string) =>
 const CUT_OFF = "Load failed";
 
 /**
+ * A part of the site's own code that the page was still loading when it was left: WebKit cancels the download ("Load
+ * request cancelled" in the trace), and the loader reports "Failed to load chunk /_next/static/chunks/… from module …"
+ * as an error of the page, while the next page is on its way. Seen in CI's `webkit` on 2026-11-21: the page editor,
+ * made a moment before, was still loading its text editor's code (prosemirror-view) when the test opened `/admin`, and
+ * brought about again on 2026-11-22 in one run of three. Chromium says nothing then. Like `CUT_OFF`, it is left out
+ * only while the page is being left.
+ */
+const cutOffChunk = (message: string) => /^(ChunkLoadError: )?Failed to load chunk \/_next\/static\/chunks\/\S+ from module /.test(message);
+
+/**
  * WebKit's words for a fetch that a page started and then left before all of
  * its answer had come in: "Fetch API cannot load <address> due to access
  * control checks." (Playwright's WebKit cuts the message at the address's first
@@ -71,8 +81,9 @@ const cutOffPageData = (message: string) => /^\/?\/?localhost:\d+\/\S*[?&]_rsc=\
  * errors of its scripts, and errors in its console (unless `consoleErrors` is
  * false). Left out: the development build's own (`frameworkNoise`), requests
  * the console says failed (pages that answer "not found" on purpose log one,
- * and the tests check what the page shows), and a request cut off by leaving
- * the page for another (`CUT_OFF`, `cutOffPageData`). `where` follows "script
+ * and the tests check what the page shows), and a request or a part of the
+ * site's code cut off by leaving the page for another (`CUT_OFF`,
+ * `cutOffChunk`, `cutOffPageData`). `where` follows "script
  * error" in a report: " on an iPad".
  */
 export function watchBrowser(page: Page, report: (problem: string) => void, { where = "", consoleErrors = true } = {}) {
@@ -85,7 +96,7 @@ export function watchBrowser(page: Page, report: (problem: string) => void, { wh
     if (frame === page.mainFrame()) leaving = false;
   });
   page.on("pageerror", (error) => {
-    if (frameworkNoise(error.message) || cutOffPageData(error.message) || (leaving && error.message === CUT_OFF)) return;
+    if (frameworkNoise(error.message) || cutOffPageData(error.message) || (leaving && (error.message === CUT_OFF || cutOffChunk(error.message)))) return;
     report(`script error${where}: ${error.message}`);
   });
   if (!consoleErrors) return;
