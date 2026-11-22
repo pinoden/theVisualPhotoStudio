@@ -679,7 +679,7 @@ test("a customer cannot open the staff or owner areas", async ({ page }) => {
   }
   // Signed out, the same pages ask to sign in instead of showing anything.
   await page.goto("/account");
-  await expect(byText(page, bob.email)).toBeVisible();
+  await expect(onScreen(page.locator(".account-who"))).toContainText(bob.email);
   await page.getByRole("button", { name: "Sign out" }).click();
   await page.waitForURL((url) => url.pathname === "/");
   // Signing out loads a new document: nothing of the pages just visited stays behind, not even hidden.
@@ -1737,4 +1737,28 @@ test("the studio moves a Saturday booking to a weekday, which costs less, and th
   await expect(onScreen(page.locator(".payment-facts")).locator("div", { hasText: "Outstanding balance" })).toContainText("$4");
   await expect(byText(page, /That is what its price went up by after it was paid, when it was moved to a day that costs more\. Collect it at the studio/)).toBeVisible();
   expect((await latestEmail(page, "booking_moved", wes.email)).body).toContain("Still to pay: $4, at the studio or with a payment link we email you.");
+});
+
+test("a client changes their account's email address with a code sent to the new one", async ({ page }) => {
+  // Question 27: a client may change their own address. An address that already holds someone's bookings is refused.
+  const before = "ruth.old@example.com";
+  const after = "ruth.new@example.com";
+  await signIn(page, before);
+  const card = onScreen(page.locator("#email-address"));
+  await expect(card).toContainText(`Your bookings, receipts, stamps and codes are kept under ${before}`);
+  await byLabel(card, "New email address").fill(jane.email);
+  await card.getByRole("button", { name: "Email a code to the new address" }).click();
+  await expect(card.getByRole("alert")).toContainText("We already have bookings or codes under that address.");
+
+  await byLabel(card, "New email address").fill(after);
+  await card.getByRole("button", { name: "Email a code to the new address" }).click();
+  await expect(card).toContainText(`We sent a 6-digit code to ${after}.`);
+  const mail = await latestEmail(page, "email_change_code", after);
+  const code = /: (\d{6})$/.exec(mail.subject)?.[1];
+  expect(code, mail.subject).toBeTruthy();
+  await byLabel(card, `6-digit code sent to ${after}`).fill(code!);
+  await card.getByRole("button", { name: "Change my email address" }).click();
+  await expect(card.getByRole("status")).toContainText(`Your email address is now ${after}.`);
+  await expect(onScreen(page.locator(".account-who"))).toContainText(`Signed in as ${after}`);
+  expect((await latestEmail(page, "email_changed", before)).body).toContain(`was changed from ${before} to ${after}`);
 });

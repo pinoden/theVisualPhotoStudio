@@ -3,6 +3,7 @@ import Link from "next/link";
 import { connection } from "next/server";
 import { Suspense } from "react";
 import { AccountFrame } from "@/components/AccountFrame";
+import { ChangeEmailForm } from "@/components/ChangeEmailForm";
 import { CopyCode } from "@/components/CopyCode";
 import { StampCard } from "@/components/StampCard";
 import { getDb } from "@/db/client";
@@ -10,6 +11,7 @@ import { formatCents } from "@/lib/domain/pricing";
 import { durationLabel } from "@/lib/domain/time";
 import { count } from "@/lib/words";
 import { customerStatus, loadAppointments } from "@/server/account";
+import { pendingEmailChange } from "@/server/email-change";
 import { getCatalog } from "@/server/cached";
 import { loyaltyStandingOf } from "@/server/loyalty";
 import { listCodesForEmail } from "@/server/promos";
@@ -48,12 +50,13 @@ async function Overview() {
   const user = await requireUser("/account");
   const db = await getDb();
   const now = new Date();
-  const [{ upcoming }, settings, rewards, codes, catalog] = await Promise.all([
+  const [{ upcoming }, settings, rewards, codes, catalog, waiting] = await Promise.all([
     loadAppointments(db, user.email, now),
     loadSettings(db),
     listRewards(db, user.email, now),
     listCodesForEmail(db, user.email, now),
     getCatalog(),
+    user.role === "customer" ? pendingEmailChange(db, user, now) : null,
   ]);
   const standing = settings.loyaltyEnabled ? await loyaltyStandingOf(db, user.email, settings) : null;
   const next = upcoming[0] ?? null;
@@ -152,6 +155,17 @@ async function Overview() {
             </Link>
           </p>
         </div>
+
+        {user.role === "customer" && (
+          <div className="admin-card account-card" id="email-address">
+            <h3>Your email address</h3>
+            <p>
+              Your bookings, receipts, stamps and codes are kept under <strong>{user.email}</strong>, and our emails go
+              there. To use another address, we first email a code to it.
+            </p>
+            <ChangeEmailForm waiting={waiting} />
+          </div>
+        )}
       </div>
 
       <div className="account-book">

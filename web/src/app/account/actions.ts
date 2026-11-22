@@ -1,13 +1,15 @@
 "use server";
 
+import { refresh } from "next/cache";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getDb } from "@/db/client";
 import { requestLoginCode, verifyLoginCode } from "@/server/auth";
+import { confirmEmailChange, requestEmailChange } from "@/server/email-change";
 import { mayUseTestTools } from "@/server/browser-test-server";
 import { clientAddress, limitRate } from "@/server/rate-limit";
 import { flushEmailsSoon } from "@/server/runtime";
-import { openSession, ownerEmails, safeNextPath } from "@/server/session";
+import { getCurrentUser, openSession, ownerEmails, safeNextPath } from "@/server/session";
 
 export interface SignInState {
   step: "email" | "code";
@@ -73,6 +75,66 @@ export async function signInAction(previous: SignInState, formData: FormData): P
     }
     await openSession(result.sessionToken, result.expiresAt);
     redirect(safeNextPath(formData.get("next")));
+  }
+
+  return previous;
+}
+
+export interface EmailChangeState {
+  step: "email" | "code" | "done";
+  /** The new address: typed, waiting for its code, or the account's now. */
+  email: string;
+  error: string;
+  notice: string;
+}
+
+const CHANGE_REFUSED: Record<string, string> = {
+  invalid_email: "Please enter a valid email address.",
+  same: "That is the address your account has already.",
+  in_use:
+    "We already have bookings or codes under that address. To bring the two together, please contact us: we can join them for you.",
+  not_customer: "The studio's team cannot change their address here. Please ask an owner.",
+  member:
+    "Your membership is billed under your current address. To change it, please contact us, and we will change it with the card processor too.",
+  too_many: "Too many codes were asked for. Please wait 15 minutes and try again.",
+  invalid: "That code is not right, or it has expired.",
+  too_many_tries: "Too many wrong codes. Please ask for a new code.",
+};
+
+/**
+ * A client changes their account's email address (question 27): first a code to the new address, then the code back.
+ * Limited per network like signing in.
+ */
+export async function changeEmailAction(previous: EmailChangeState, formData: FormData): Promise<EmailChangeState> {
+  const user = await getCurrentUser();
+  if (!user) return { ...previous, error: "Please sign in again.", notice: "" };
+  const intent = formData.get("intent");
+  if (intent === "restart") return { step: "email", email: "", error: "", notice: "" };
+  const db = await getDb();
+  const now = new Date();
+  const address = clientAddress(await headers());
+  if (!(await limitRate(db, { key: `email-change:${address}`, max: perAddress, windowMs: SIGN_IN_WINDOW_MS }, now)).allowed) {
+    return { ...previous, notice: "", error: TOO_MANY_HERE };
+  }
+
+  if (intent === "request") {
+    const typed = String(formData.get("email") ?? "").trim().slice(0, 200);
+    const result = await requestEmailChange(db, user, formData.get("email"), now);
+    if (!result.ok) return { step: "email", email: typed, notice: "", error: CHANGE_REFUSED[result.code] };
+    flushEmailsSoon();
+    return { step: "code", email: result.email, error: "", notice: `We sent a 6-digit code to ${result.email}. Enter it here to make the change.` };
+  }
+
+  if (intent === "confirm") {
+    const result = await confirmEmailChange(db, user, formData.get("code"), now);
+    if (!result.ok) {
+      const back = result.code === "in_use" || result.code === "member" || result.code === "not_customer";
+      return { step: back ? "email" : "code", email: previous.email, notice: "", error: CHANGE_REFUSED[result.code] };
+    }
+    flushEmailsSoon();
+    // The page around the form shows the account's address: drawn again with the new one.
+    refresh();
+    return { step: "done", email: result.email, error: "", notice: `Your email address is now ${result.email}. Your bookings, receipts, stamps and codes are under it, and our emails go there.` };
   }
 
   return previous;

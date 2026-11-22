@@ -11,6 +11,7 @@ import { count } from "@/lib/words";
 import { customerStatus, type AccountBooking } from "@/server/account";
 import { getCustomer } from "@/server/customers";
 import { listCustomerViews, type CustomerView } from "@/server/customer-views";
+import { earlierAddresses } from "@/server/email-change";
 import { money } from "@/server/receipt-pdf";
 import { RECEIPT_STATUS_TEXT, yearsOf, yearStatement } from "@/server/receipts";
 import { MAX_STAMPS_AT_ONCE, REASON_MAX, REASON_MIN, REWARD_STATUS_TEXT } from "@/server/rewards";
@@ -109,6 +110,7 @@ async function Customer({ params, searchParams }: Pick<PageProps<"/admin/custome
   // The access log is the owners' own: a manager who opens the page is in it, and does not read it.
   const log = viewer.role === "owner" ? await listCustomerViews(db, customer.email) : null;
   const settings = await loadSettings(db);
+  const formerly = await earlierAddresses(db, customer.email);
   const known = customer.upcoming.length + customer.past.length > 0 || customer.hasAccount || customer.rewards.length > 0 || customer.stampChanges.length > 0;
 
   return (
@@ -130,6 +132,14 @@ async function Customer({ params, searchParams }: Pick<PageProps<"/admin/custome
               <dt>Phone</dt>
               <dd>
                 <a href={`tel:${customer.phone}`}>{customer.phone}</a>
+              </dd>
+            </>
+          )}
+          {formerly.length > 0 && (
+            <>
+              <dt>Earlier address</dt>
+              <dd>
+                {formerly.map((entry) => `${entry.email} (changed by the customer on ${formatInstant(new Date(entry.changedAt))})`).join("; ")}
               </dd>
             </>
           )}

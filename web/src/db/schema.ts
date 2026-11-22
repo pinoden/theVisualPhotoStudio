@@ -133,6 +133,31 @@ export const customerViews = pgTable(
   (t) => [index("customer_views_customer_idx").on(t.customerEmail, t.viewedAt), index("customer_views_viewed_idx").on(t.viewedAt)],
 );
 
+/**
+ * A client's change of their own email address (question 27, answered 2026-11-18: "customers may change their own
+ * email address"). A code is emailed to the new address, and only a hash of it is kept, as for signing in. Once the
+ * code is given, every record kept under the old address moves to the new one (src/server/email-change.ts), and the row
+ * stays as the record of the change: from what, to what, when.
+ */
+export const emailChanges = pgTable(
+  "email_changes",
+  {
+    id: id(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    oldEmail: text("old_email").notNull(),
+    newEmail: text("new_email").notNull(),
+    codeHash: text("code_hash").notNull(),
+    expiresAt: ts("expires_at").notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    /** When the code was given and the records moved. */
+    consumedAt: ts("consumed_at"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("email_changes_user_idx").on(t.userId, t.createdAt), index("email_changes_new_idx").on(t.newEmail)],
+);
+
 /** Dates a staff member is allowed to see. Staff see nothing outside these. */
 export const staffShifts = pgTable(
   "staff_shifts",
