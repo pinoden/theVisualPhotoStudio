@@ -1187,6 +1187,7 @@ Known weaknesses:
 - 2026-11-21: Questions 56 to 59 confirmed: the owner answered "Ok" to the report that asked for "an OK, or changes, on questions 56 to 59" (retention's scope, the access log covering the customer's page and receipts only, a member's change of address made by the studio by hand, and the studios renamed and taken off as built). Read as that OK; the merge of two accounts and adding a studio still wait for their answers.
 - 2026-11-21: Merging two accounts of one person put off by the owner ("Merging accounts is not an issue rn"), asked what its four questions should be: how the stamps join, which membership stays, which address and name stay, and whether only an owner merges. Nothing is built for it; a client whose new address holds records is told to contact the studio (question 58 (d)).
 - 2026-11-21: The rule that Blanche and Dayglow are booked together only with Paris stays, also once a fourth studio is added: the owner, asked under "Adding a studio" whether it changes, answered "Yes on blanche and dayglow", then, asked which was meant, "Keep the rule". Still to answer before a studio can be added: the discount and the guest limit for four studios together, and whether a new studio waits off the site until its prices and hours are set.
+- 2026-11-21: A new studio waits off the site until its prices and hours are set, the builder's proposal under "Adding a studio": the owner answered "Agreed". Still to answer: the discount and the guest limit for four studios booked together.
 
 ### Handoff for the next coding session
 
