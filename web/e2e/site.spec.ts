@@ -1416,6 +1416,8 @@ test("the owners look a customer up, see what they paid, and correct their stamp
   // (the owner's answer of 2026-11-17). The fee for a further reschedule is on the same page, in dollars.
   await page.goto("/admin/settings");
   await expect(byLabel(page, "Fee for each further reschedule ($)")).toHaveValue("20");
+  // How long the copies of emails and the sign-in records are kept (the owner's answer of 2026-11-21).
+  await expect(byLabel(page, "Keep email copies and sign-in records for (years)")).toHaveValue("5");
   const loyaltySwitch = page.getByRole("checkbox", { name: /Email a free hour to customers/ });
   await expect(loyaltySwitch).toBeChecked();
   await loyaltySwitch.uncheck();

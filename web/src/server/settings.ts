@@ -125,6 +125,13 @@ export interface Settings {
   managerEditsPages: boolean;
   /** Whether managers can publish changes to the website and restore an earlier version. */
   managerPublishesWebsite: boolean;
+
+  // ── Records ──
+  /**
+   * Years the site keeps the copies of the emails it sent, the sign-in codes it gave and the sign-ins that have
+   * ended (the owner's answer of 2026-11-21: 5). Older ones are deleted by the scheduled task (src/server/retention.ts).
+   */
+  retentionYears: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -176,6 +183,8 @@ export const DEFAULT_SETTINGS: Settings = {
   managerEditsDesign: false,
   managerEditsPages: false,
   managerPublishesWebsite: false,
+
+  retentionYears: 5, // the owner's answer of 2026-11-21
 };
 
 const int = ([min, max]: readonly [number, number]) => (v: unknown) =>
@@ -205,6 +214,7 @@ export const NUMBER_SETTING_RANGES = {
   loyaltyVisits: [1, 100],
   loyaltyValidDays: [1, 730],
   loyaltyDelayHours: [0, 24 * 14],
+  retentionYears: [1, 20],
 } as const satisfies Partial<Record<keyof Settings, readonly [number, number]>>;
 
 export type NumberSettingKey = keyof typeof NUMBER_SETTING_RANGES;
@@ -274,6 +284,7 @@ const VALIDATORS: { [K in Exclude<keyof Settings, "multiStudioPercent">]: (v: un
   managerEditsDesign: bool,
   managerEditsPages: bool,
   managerPublishesWebsite: bool,
+  retentionYears: int(NUMBER_SETTING_RANGES.retentionYears),
 };
 
 export type SettingKey = keyof Settings;
