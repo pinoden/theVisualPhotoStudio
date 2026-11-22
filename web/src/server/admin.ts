@@ -564,9 +564,17 @@ export async function countUpcoming(db: DbLike, now: Date): Promise<number> {
 
 // ── Studios and add-ons ──────────────────────────────────────────────────────
 
+/** The longest name a studio can have. */
+export const STUDIO_NAME_MAX = 60;
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export interface StudioDetails {
+  /**
+   * Its name, as every page, email and receipt shows it (question 29, answered 2026-11-18: the owners rename a studio
+   * without a deployment). Left out, it stays as it is. Its address on the site (`slug`) stays, so links keep working.
+   */
+  name?: string;
   tagline: string;
   description: string;
   /** Guests included in the price. Shown to customers; not enforced. */
@@ -585,6 +593,8 @@ export interface StudioDetails {
  * made from then on: existing bookings keep the time already held for them.
  */
 export async function saveStudioDetails(db: DbLike, studioId: string, input: StudioDetails): Promise<boolean> {
+  const name = input.name?.replace(/\s+/g, " ").trim();
+  if (name !== undefined && (name.length < 1 || name.length > STUDIO_NAME_MAX)) return false;
   const tagline = input.tagline.trim();
   const description = input.description.trim();
   if (!UUID.test(studioId) || tagline.length > 200 || description.length > 2000) return false;
@@ -593,11 +603,21 @@ export async function saveStudioDetails(db: DbLike, studioId: string, input: Stu
   if (input.extraGuests !== undefined && (!Number.isInteger(input.extraGuests) || input.extraGuests < 0 || input.extraGuests > 100)) return false;
   const [current] = await db.select({ facts: studios.facts }).from(studios).where(eq(studios.id, studioId)).limit(1);
   if (!current) return false;
+  if (name !== undefined) {
+    // Two studios of one name could not be told apart on the booking screen or in the calendar.
+    const [taken] = await db
+      .select({ id: studios.id })
+      .from(studios)
+      .where(and(sql`lower(${studios.name}) = ${name.toLowerCase()}`, ne(studios.id, studioId)))
+      .limit(1);
+    if (taken) return false;
+  }
   // The floor plan stays as it was: it is chosen on its own.
   const facts = input.facts ? parseStudioFacts({ ...input.facts, floorPlan: parseStudioFacts(current.facts).floorPlan }) : parseStudioFacts(current.facts);
   const updated = await db
     .update(studios)
     .set({
+      ...(name !== undefined ? { name } : {}),
       tagline,
       description,
       includedGuests: input.includedGuests,
@@ -608,6 +628,33 @@ export async function saveStudioDetails(db: DbLike, studioId: string, input: Stu
     .where(eq(studios.id, studioId))
     .returning({ id: studios.id });
   return updated.length === 1;
+}
+
+export type StudioActiveResult = { ok: true } | { ok: false; code: "unknown" } | { ok: false; code: "booked"; bookings: number };
+
+/**
+ * Take a studio off the site, or put it back (question 29, answered 2026-11-18: the owners remove a studio without a
+ * deployment). Off the site, it is offered nowhere: not on the booking screen, in the calendar's new bookings, the
+ * website's studio blocks or the prices; its past bookings, receipts and history keep it. It is not deleted, so it can
+ * come back as it was. While a booking still to come holds it, it stays: those are moved or cancelled first.
+ */
+export async function setStudioActive(db: DbLike, studioId: string, active: boolean, now: Date): Promise<StudioActiveResult> {
+  if (!UUID.test(studioId)) return { ok: false, code: "unknown" };
+  if (!active) {
+    const [{ n }] = await db
+      .select({ n: sql<number>`count(distinct ${studioHolds.bookingId})::int` })
+      .from(studioHolds)
+      .innerJoin(bookings, eq(bookings.id, studioHolds.bookingId))
+      .where(and(eq(studioHolds.studioId, studioId), eq(studioHolds.active, true), sql`upper(${studioHolds.occupied}) > ${now}`, inArray(bookings.status, ["confirmed", "pending_payment"])));
+    if (n > 0) return { ok: false, code: "booked", bookings: n };
+  }
+  const updated = await db.update(studios).set({ active }).where(eq(studios.id, studioId)).returning({ id: studios.id });
+  return updated.length === 1 ? { ok: true } : { ok: false, code: "unknown" };
+}
+
+/** The studios taken off the site, for the owners to put back. */
+export async function listInactiveStudios(db: DbLike): Promise<{ id: string; name: string; slug: string }[]> {
+  return db.select({ id: studios.id, name: studios.name, slug: studios.slug }).from(studios).where(eq(studios.active, false)).orderBy(asc(studios.sortOrder), asc(studios.name));
 }
 
 export interface AddonInput {

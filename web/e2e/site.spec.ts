@@ -1118,6 +1118,11 @@ test("the owner changes an add-on's price and a studio's guest number, and custo
   await page.getByRole("button", { name: "Save Studio Paris" }).click();
   await expect(byText(page, "Studio saved.")).toBeVisible();
   await shot(page, "19-admin-studios");
+  // Its name is the owners' to change (question 29); and a studio a booking still to come holds stays on the site.
+  await expect(onScreen(page.locator("#studio-paris-name"))).toHaveValue("Studio Paris");
+  await page.getByRole("button", { name: "Take Studio Paris off the site" }).click();
+  await expect(byText(page, /Not taken off: \d+ bookings? still to come holds? it\. Move or cancel (it|them) first/)).toBeVisible();
+  await expect(page.locator("#studios-off")).toHaveCount(0);
   await page.goto("/studios");
   await expect(page.locator("p", { hasText: "A vintage Parisian apartment." })).toHaveCSS("white-space", "pre-line");
 

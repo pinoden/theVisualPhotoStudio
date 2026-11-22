@@ -6,7 +6,7 @@ import { ChoosePictures } from "@/components/media/PictureChooser";
 import { getDb } from "@/db/client";
 import { ADDON_KINDS } from "@/lib/addon-kinds";
 import { centsToInput, PRICE_FIELD } from "@/lib/parse";
-import { listAddons, type AdminAddon } from "@/server/admin";
+import { listAddons, listInactiveStudios, STUDIO_NAME_MAX, type AdminAddon } from "@/server/admin";
 import { loadCatalog, type CatalogStudio } from "@/server/catalog";
 import { requireOwner } from "@/server/session";
 import { STUDIO_PHOTO_LIMIT } from "@/server/studio-photos";
@@ -20,6 +20,7 @@ import {
   removeStudioPhotoAction,
   saveAddonAction,
   saveStudioDetailsAction,
+  setStudioActiveAction,
   setStudioFloorPlanAction,
   stopOfferingAddonAction,
 } from "../actions";
@@ -192,7 +193,7 @@ async function StudiosAndAddons({ searchParams }: Pick<PageProps<"/admin/studios
   await connection();
   await requireOwner("/admin/studios");
   const db = await getDb();
-  const [catalog, addons] = await Promise.all([loadCatalog(db), listAddons(db)]);
+  const [catalog, addons, inactive] = await Promise.all([loadCatalog(db), listAddons(db), listInactiveStudios(db)]);
 
   return (
     <AdminFrame active="/admin/studios" title="Studios & add-ons" query={await searchParams}>
@@ -201,6 +202,24 @@ async function StudiosAndAddons({ searchParams }: Pick<PageProps<"/admin/studios
           <form action={saveStudioDetailsAction}>
             <h3>{studio.name}</h3>
             <input type="hidden" name="studioId" value={studio.id} />
+            <div className="form-group">
+              <label className="form-label" htmlFor={`studio-${studio.slug}-name`}>
+                Name
+              </label>
+              <input
+                id={`studio-${studio.slug}-name`}
+                name="name"
+                className="form-control"
+                maxLength={STUDIO_NAME_MAX}
+                defaultValue={studio.name}
+                required
+              />
+              <div style={HELP}>
+                Shown on the booking screen, in the calendar, in emails and on receipts, past ones included. Links to
+                the studio keep working. The website&apos;s pages name it in their own words too: change those under
+                Website → Pages.
+              </div>
+            </div>
             <div className="form-group">
               <label className="form-label" htmlFor={`studio-${studio.slug}-tagline`}>
                 Tagline
@@ -330,8 +349,43 @@ async function StudiosAndAddons({ searchParams }: Pick<PageProps<"/admin/studios
           </form>
           <StudioPhotos studio={studio} />
           <StudioFloorPlan studio={studio} />
+          <form action={setStudioActiveAction} className="studio-off">
+            <input type="hidden" name="studioId" value={studio.id} />
+            <input type="hidden" name="active" value="false" />
+            <h4 className="editor-subtitle">Take {studio.name} off the site</h4>
+            <p style={HELP}>
+              It is then offered nowhere: not on the booking screen, in new bookings, in the website&apos;s studio blocks
+              or in the prices. Its past bookings and receipts keep it, nothing is deleted, and it can be put back below.
+              While a booking still to come holds it, it stays.
+            </p>
+            <button type="submit" className="btn btn-outline btn-small">
+              Take {studio.name} off the site
+            </button>
+          </form>
         </div>
       ))}
+
+      {inactive.length > 0 && (
+        <div className="admin-card" id="studios-off">
+          <h3>Taken off the site</h3>
+          <ul className="receipt-list">
+            {inactive.map((studio) => (
+              <li key={studio.id}>
+                <div className="receipt-row-main">
+                  <strong>{studio.name}</strong>
+                </div>
+                <form action={setStudioActiveAction}>
+                  <input type="hidden" name="studioId" value={studio.id} />
+                  <input type="hidden" name="active" value="true" />
+                  <button type="submit" className="btn btn-outline btn-small">
+                    Put {studio.name} back on the site
+                  </button>
+                </form>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="admin-card">
         <h3>Add-ons</h3>

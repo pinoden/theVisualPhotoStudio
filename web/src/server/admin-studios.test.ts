@@ -1,8 +1,10 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { addons, bookingAddons } from "@/db/schema";
-import { listAddons, saveAddon, saveStudioDetails, setAddonActive, type AdminAddon } from "./admin";
+import { listAddons, listInactiveStudios, saveAddon, saveStudioDetails, setAddonActive, setStudioActive, type AdminAddon } from "./admin";
+import { bookings } from "@/db/schema";
+import { eq } from "drizzle-orm";
 import { loadCatalog } from "./catalog";
-import { createTestWorld, expectOk, FAR, h, type TestWorld } from "./testing";
+import { createTestWorld, daysAfter, expectOk, FAR, h, NEAR, NOW, type TestWorld } from "./testing";
 
 let world: TestWorld;
 beforeAll(async () => {
@@ -18,6 +20,21 @@ describe("what the owner can change about a studio", () => {
   it("is what customers read and what the catalog carries", async () => {
     expect(await saveStudioDetails(world.db, world.ids.paris, { ...DETAILS, tagline: "  A line  " })).toBe(true);
     expect(await paris()).toMatchObject(DETAILS);
+  });
+
+  it("includes its name, which keeps its address on the site and cannot be another studio's (question 29)", async () => {
+    expect(await saveStudioDetails(world.db, world.ids.paris, { ...DETAILS, name: "  Studio   Lumière " })).toBe(true);
+    expect(await paris()).toMatchObject({ name: "Studio Lumière", slug: "paris" });
+    const booked = expectOk(await world.book({ studioIds: [world.ids.paris] }));
+    expect((await world.emails("booking_confirmation")).at(-1)!.body).toContain("Studio Lumière");
+    expect(booked.ref).toBeTruthy();
+    const blancheName = (await loadCatalog(world.db)).studios.find((studio) => studio.slug === "blanche")!.name;
+    for (const name of [blancheName.toUpperCase(), "", "   ", "x".repeat(61)]) {
+      expect(await saveStudioDetails(world.db, world.ids.paris, { ...DETAILS, name })).toBe(false);
+    }
+    // Without a name, it stays as it is.
+    expect(await saveStudioDetails(world.db, world.ids.paris, DETAILS)).toBe(true);
+    expect((await paris()).name).toBe("Studio Lumière");
   });
 
   it("is refused, changing nothing, when a number is out of range, a text is too long or the studio is unknown", async () => {
@@ -154,5 +171,27 @@ describe("what the owner can change about add-ons", () => {
     expect(await setAddonActive(world.db, pet.id, true)).toBe(true);
     expect(await offered()).toContain("pet-fee");
     expect(await setAddonActive(world.db, "not-an-add-on", false)).toBe(false);
+  });
+});
+
+describe("a studio taken off the site and put back (question 29)", () => {
+  it("is offered nowhere while off, keeps its past, and stays while a booking still to come holds it", async () => {
+    const booked = expectOk(await world.book({ studioIds: [world.ids.paris] }));
+    expect(await setStudioActive(world.db, world.ids.paris, false, NOW)).toEqual({ ok: false, code: "booked", bookings: 1 });
+    expect((await paris())).toBeTruthy();
+
+    // Once the visit is over, it can go.
+    const later = daysAfter(new Date(`${NEAR}T12:00:00Z`), 2);
+    expect(await setStudioActive(world.db, world.ids.paris, false, later)).toEqual({ ok: true });
+    expect((await loadCatalog(world.db)).studios.map((studio) => studio.slug)).not.toContain("paris");
+    expect(await listInactiveStudios(world.db)).toEqual([expect.objectContaining({ id: world.ids.paris, slug: "paris" })]);
+    expect(await world.book({ studioIds: [world.ids.paris], date: FAR })).toMatchObject({ ok: false });
+    // Its booking is still there, as it was.
+    expect((await world.db.select().from(bookings).where(eq(bookings.ref, booked.ref)))[0].status).toBe("confirmed");
+
+    expect(await setStudioActive(world.db, world.ids.paris, true, later)).toEqual({ ok: true });
+    expect((await loadCatalog(world.db)).studios.map((studio) => studio.slug)).toContain("paris");
+    expect(await listInactiveStudios(world.db)).toEqual([]);
+    expect(await setStudioActive(world.db, "not-a-studio", false, NOW)).toEqual({ ok: false, code: "unknown" });
   });
 });

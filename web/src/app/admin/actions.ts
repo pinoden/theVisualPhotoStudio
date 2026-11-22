@@ -4,6 +4,7 @@ import { updateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import { getDb } from "@/db/client";
 import { isAddonKind } from "@/lib/addon-kinds";
+import { count } from "@/lib/words";
 import { dollarsToCents, formText, hhmmToMinutes, intInRange } from "@/lib/parse";
 import { ADMIN_LEVELS, ATTENDANT_SWITCH_KEYS, isAdminLevel, MANAGER_SWITCH_KEYS } from "@/lib/abilities";
 import { formatCents } from "@/lib/domain/pricing";
@@ -18,6 +19,8 @@ import {
   saveAddon,
   savePrice,
   saveStudioDetails,
+  setStudioActive,
+  STUDIO_NAME_MAX,
   saveStudioHours,
   setAddonActive,
   setShift,
@@ -432,6 +435,7 @@ export async function saveStudioDetailsAction(formData: FormData): Promise<void>
     failed("/admin/studios", "Not saved: guests included must be 1 to 100, extra guests 0 to 100, and clean-up time 0 to 240 minutes.");
   }
   const saved = await saveStudioDetails(await getDb(), text(formData, "studioId"), {
+    name: text(formData, "name"),
     tagline: text(formData, "tagline"),
     description: text(formData, "description"),
     includedGuests,
@@ -445,9 +449,34 @@ export async function saveStudioDetailsAction(formData: FormData): Promise<void>
       included: includedList(formText(formData.get("included"))),
     },
   });
-  if (!saved) failed("/admin/studios", "Not saved: the tagline or the description is too long.");
+  if (!saved) {
+    failed(
+      "/admin/studios",
+      `Not saved: the name must be 1 to ${STUDIO_NAME_MAX} characters and not another studio's, and the tagline and the description not too long.`,
+    );
+  }
   updateTag(CATALOG_TAG);
   done("/admin/studios", "Studio saved.");
+}
+
+/** Take a studio off the site, or put it back (question 29). */
+export async function setStudioActiveAction(formData: FormData): Promise<void> {
+  await requireOwner("/admin/studios");
+  const active = text(formData, "active") === "true";
+  const result = await setStudioActive(await getDb(), text(formData, "studioId"), active, new Date());
+  if (!result.ok) {
+    failed(
+      "/admin/studios",
+      result.code === "booked"
+        ? `Not taken off: ${count(result.bookings, "booking")} still to come ${result.bookings === 1 ? "holds" : "hold"} it. Move or cancel ${result.bookings === 1 ? "it" : "them"} first (Bookings).`
+        : "That studio could not be found.",
+    );
+  }
+  updateTag(CATALOG_TAG);
+  done(
+    "/admin/studios",
+    active ? "Studio put back on the site. Customers can book it again." : "Studio taken off the site. Its past bookings and receipts keep it, and it can be put back here.",
+  );
 }
 
 /** Choose a studio's floor plan: the first of `mediaIds`, as the chooser sends them. */
