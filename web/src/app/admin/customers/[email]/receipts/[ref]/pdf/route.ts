@@ -1,5 +1,6 @@
 import { getDb } from "@/db/client";
 import { normalizeEmail } from "@/server/auth";
+import { recordCustomerView } from "@/server/customer-views";
 import { receiptPdf } from "@/server/receipt-pdf";
 import { getReceipt } from "@/server/receipts";
 import { getCurrentUser } from "@/server/session";
@@ -26,6 +27,8 @@ export async function GET(_request: Request, context: RouteContext<"/admin/custo
   const db = await getDb();
   const receipt = await getReceipt(db, email, ref);
   if (!receipt) return new Response("Not found", { status: 404 });
+  // The access log (question 27): who downloaded this customer's receipt.
+  await recordCustomerView(db, user, email, "receipt", receipt.ref, new Date());
   return new Response(Buffer.from(await receiptPdf(receipt, await loadBusiness(db))), {
     headers: {
       "Content-Type": "application/pdf",

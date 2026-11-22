@@ -35,6 +35,12 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
         <style id="site-design" dangerouslySetInnerHTML={{ __html: designCss(design, fonts) }} />
       </head>
       <body>
+        {/* The first stop of the keyboard on every page: past the menu, to the page itself (globals.css shows it only
+            while it has the focus). The main element takes the focus, so the next Tab goes on from there in every
+            browser. */}
+        <a href="#main" className="skip-link">
+          Skip to content
+        </a>
         <SiteNav
           logo={frame.logo}
           logoPicture={logo}
@@ -43,7 +49,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           bookButton={frame.bookButton}
           menuPosition={frame.header.menuPosition}
         />
-        <main className="page-content">
+        <main id="main" className="page-content" tabIndex={-1}>
           {announcement && (
             // The bar reads the address of the page, which a page with a changing address only knows when it is asked for.
             <Suspense fallback={null}>

@@ -66,3 +66,4 @@ export async function restoreRewardAction(formData: FormData): Promise<void> {
   if (!result.ok) redirect(withMessage(page, "error", result.message));
   redirect(withMessage(page, "notice", `Reward ${result.code} given back. It can be used again, until the date it always had.`));
 }
+

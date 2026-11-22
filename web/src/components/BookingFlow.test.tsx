@@ -493,6 +493,42 @@ describe("studio-first flow", () => {
     expect(posted).toHaveLength(0);
   });
 
+  it("makes the times one stop of the keyboard, moved through with the arrow keys", async () => {
+    render(<BookingFlow catalog={catalog} navigate={nav.push} />);
+    await user.click(studioBox("Studio Paris"));
+    await next();
+    pickDate(WED);
+    await pickDuration("1 hr");
+    await next();
+    const group = await screen.findByRole("group", { name: "Start times" });
+    const times = within(group).getAllByRole("button");
+    const stops = () => times.filter((button) => button.tabIndex === 0);
+    expect(times.length).toBeGreaterThan(3);
+    // From the step's heading, which has the focus, Tab reaches the first time, and no other.
+    expect(stops()).toEqual([times[0]]);
+    await user.tab();
+    expect(document.activeElement).toBe(times[0]);
+    await user.keyboard("{ArrowRight}{ArrowRight}");
+    expect(document.activeElement).toBe(times[2]);
+    expect(stops()).toEqual([times[2]]);
+    await user.keyboard("{ArrowUp}");
+    expect(document.activeElement).toBe(times[1]);
+    await user.keyboard("{End}{ArrowDown}");
+    expect(document.activeElement).toBe(times[times.length - 1]);
+    await user.keyboard("{Home}{ArrowLeft}");
+    expect(document.activeElement).toBe(times[0]);
+    // Moving chooses nothing; Enter does, as a click does.
+    expect(times.some((button) => button.getAttribute("aria-pressed") === "true")).toBe(false);
+    await user.keyboard("{ArrowDown}{Enter}");
+    expect(times[1].getAttribute("aria-pressed")).toBe("true");
+    // The next Tab leaves the times at once.
+    await user.tab();
+    expect(times).not.toContain(document.activeElement);
+    // A time chosen with the pointer becomes the stop.
+    await user.click(times[3]);
+    expect(stops()).toEqual([times[3]]);
+  });
+
   it("sends the same attempt again after no answer at all, so a booking that was made is found", async () => {
     render(<BookingFlow catalog={catalog} navigate={nav.push} />);
     await user.click(studioBox("Studio Paris"));

@@ -3,6 +3,7 @@ import { bookings, payments } from "@/db/schema";
 import type { Db } from "@/db/client";
 import { releaseExpiredHolds } from "./availability";
 import { pruneRateLimits } from "./rate-limit";
+import { deleteOldRecords } from "./retention";
 import { durationLabel } from "@/lib/domain/time";
 import { toBookingViews } from "./bookings";
 import { bookingReminderEmail, deliverPendingEmails, loyaltyProgressEmail, queueEmail, reviewRequestEmail, type EmailTransport } from "./email";
@@ -65,6 +66,8 @@ export interface TaskSummary {
   emailsFailed: number;
   /** Pages removed for good from the trash, after the days a deleted page is kept. */
   pagesRemoved: number;
+  /** Email copies, sign-in codes, ended sign-ins and access-log lines deleted for being older than `retentionYears`. */
+  oldRecordsDeleted: number;
 }
 
 const DAY = 86_400_000;
@@ -292,6 +295,7 @@ export async function runScheduledTasks(db: Db, deps: TaskDeps): Promise<TaskSum
   const mail = await deliverPendingEmails(db, deps.email, deps.now);
   const pagesRemoved = await emptyOldTrash(db, deps.now);
   await pruneRateLimits(db, deps.now);
+  const old = await deleteOldRecords(db, deps.now, (await loadSettings(db)).retentionYears);
   return {
     holdsReleased,
     paymentsFlagged,
@@ -314,5 +318,6 @@ export async function runScheduledTasks(db: Db, deps: TaskDeps): Promise<TaskSum
     emailsSent: mail.sent,
     emailsFailed: mail.failed,
     pagesRemoved,
+    oldRecordsDeleted: old.emails + old.loginCodes + old.sessions + old.customerViews,
   };
 }

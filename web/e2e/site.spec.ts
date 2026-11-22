@@ -244,6 +244,32 @@ test("the booking screen can be used from the keyboard", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Select date & duration" })).toBeFocused();
 });
 
+test("every page starts with a link that skips the menu", async ({ page, browserName }) => {
+  for (const path of ["/", "/book"]) {
+    await page.goto(path);
+    const skip = page.getByRole("link", { name: "Skip to content" });
+    // Out of sight until the keyboard reaches it.
+    expect((await skip.boundingBox())?.width).toBeLessThanOrEqual(1);
+    if (browserName === "chromium") {
+      // The first stop of Tab. WebKit's Tab passes links by, as Safari's does unless its setting asks otherwise.
+      await page.keyboard.press("Tab");
+      await expect(skip).toBeFocused();
+    } else {
+      await skip.focus();
+    }
+    expect((await skip.boundingBox())?.width).toBeGreaterThan(60);
+    await expect(skip).toBeInViewport();
+    await page.keyboard.press("Enter");
+    await expect(page.locator("main#main")).toBeFocused();
+    if (browserName === "chromium") {
+      // The next stop is in the page, past the menu's.
+      await page.keyboard.press("Tab");
+      expect(await page.evaluate(() => Boolean(document.activeElement?.closest("main#main") && document.activeElement !== document.querySelector("main")))).toBe(true);
+      expect(await page.evaluate(() => Boolean(document.activeElement?.closest("header, nav")))).toBe(false);
+    }
+  }
+});
+
 test("books two studios together, starting from the studios", async ({ page }) => {
   await page.goto("/book");
   await shot(page, "03-book-start");
@@ -653,7 +679,7 @@ test("a customer cannot open the staff or owner areas", async ({ page }) => {
   }
   // Signed out, the same pages ask to sign in instead of showing anything.
   await page.goto("/account");
-  await expect(byText(page, bob.email)).toBeVisible();
+  await expect(onScreen(page.locator(".account-who"))).toContainText(bob.email);
   await page.getByRole("button", { name: "Sign out" }).click();
   await page.waitForURL((url) => url.pathname === "/");
   // Signing out loads a new document: nothing of the pages just visited stays behind, not even hidden.
@@ -1092,6 +1118,11 @@ test("the owner changes an add-on's price and a studio's guest number, and custo
   await page.getByRole("button", { name: "Save Studio Paris" }).click();
   await expect(byText(page, "Studio saved.")).toBeVisible();
   await shot(page, "19-admin-studios");
+  // Its name is the owners' to change (question 29); and a studio a booking still to come holds stays on the site.
+  await expect(onScreen(page.locator("#studio-paris-name"))).toHaveValue("Studio Paris");
+  await page.getByRole("button", { name: "Take Studio Paris off the site" }).click();
+  await expect(byText(page, /Not taken off: \d+ bookings? still to come holds? it\. Move or cancel (it|them) first/)).toBeVisible();
+  await expect(page.locator("#studios-off")).toHaveCount(0);
   await page.goto("/studios");
   await expect(page.locator("p", { hasText: "A vintage Parisian apartment." })).toHaveCSS("white-space", "pre-line");
 
@@ -1390,6 +1421,8 @@ test("the owners look a customer up, see what they paid, and correct their stamp
   // (the owner's answer of 2026-11-17). The fee for a further reschedule is on the same page, in dollars.
   await page.goto("/admin/settings");
   await expect(byLabel(page, "Fee for each further reschedule ($)")).toHaveValue("20");
+  // How long the copies of emails and the sign-in records are kept (the owner's answer of 2026-11-21).
+  await expect(byLabel(page, "Keep email copies and sign-in records for (years)")).toHaveValue("5");
   const loyaltySwitch = page.getByRole("checkbox", { name: /Email a free hour to customers/ });
   await expect(loyaltySwitch).toBeChecked();
   await loyaltySwitch.uncheck();
@@ -1413,6 +1446,14 @@ test("the owners look a customer up, see what they paid, and correct their stamp
   await expect(loyalty).toContainText("Five visits on the old booking system (Before loyalty started again: not counted.)");
   await expect(rewards.locator("li.reward")).toHaveCount(4);
   await expect(rewards.locator("li.reward", { hasText: /THANKS-/ })).toContainText("Available");
+
+  // Who opened her records, for the owners (question 27): this page, once however often it was opened since, and the
+  // file of the year downloaded above.
+  const log = onScreen(page.locator("#access-log"));
+  await expect(log).toContainText("Only owners see this list.");
+  await expect(log.locator("li", { hasText: `opened the receipts of ${year}.` })).toHaveCount(1);
+  await expect(log.locator("li", { hasText: "opened this page." })).toHaveCount(1);
+  await expect(log.locator("li").first()).toContainText("(Owner");
 });
 
 test("a Studio Manager runs the calendar and looks clients up, and sees no prices until the owners say so", async ({ page }) => {
@@ -1453,6 +1494,8 @@ test("a Studio Manager runs the calendar and looks clients up, and sees no price
   await expect(page.locator("#payments")).toHaveCount(0);
   expect(await onScreen(page.locator(".admin-main")).innerText()).not.toContain("$");
   await expect(page.getByRole("button", { name: "Change stamps" })).toHaveCount(0); // not switched on for managers
+  // Her visit is in the access log; the log itself is the owners'.
+  await expect(page.locator("#access-log")).toHaveCount(0);
 
   // She can block time in a studio, and cannot touch opening hours.
   await page.getByRole("link", { name: "Hours & blocks" }).click();
@@ -1699,4 +1742,28 @@ test("the studio moves a Saturday booking to a weekday, which costs less, and th
   await expect(onScreen(page.locator(".payment-facts")).locator("div", { hasText: "Outstanding balance" })).toContainText("$4");
   await expect(byText(page, /That is what its price went up by after it was paid, when it was moved to a day that costs more\. Collect it at the studio/)).toBeVisible();
   expect((await latestEmail(page, "booking_moved", wes.email)).body).toContain("Still to pay: $4, at the studio or with a payment link we email you.");
+});
+
+test("a client changes their account's email address with a code sent to the new one", async ({ page }) => {
+  // Question 27: a client may change their own address. An address that already holds someone's bookings is refused.
+  const before = "ruth.old@example.com";
+  const after = "ruth.new@example.com";
+  await signIn(page, before);
+  const card = onScreen(page.locator("#email-address"));
+  await expect(card).toContainText(`Your bookings, receipts, stamps and codes are kept under ${before}`);
+  await byLabel(card, "New email address").fill(jane.email);
+  await card.getByRole("button", { name: "Email a code to the new address" }).click();
+  await expect(card.getByRole("alert")).toContainText("We already have bookings or codes under that address.");
+
+  await byLabel(card, "New email address").fill(after);
+  await card.getByRole("button", { name: "Email a code to the new address" }).click();
+  await expect(card).toContainText(`We sent a 6-digit code to ${after}.`);
+  const mail = await latestEmail(page, "email_change_code", after);
+  const code = /: (\d{6})$/.exec(mail.subject)?.[1];
+  expect(code, mail.subject).toBeTruthy();
+  await byLabel(card, `6-digit code sent to ${after}`).fill(code!);
+  await card.getByRole("button", { name: "Change my email address" }).click();
+  await expect(card.getByRole("status")).toContainText(`Your email address is now ${after}.`);
+  await expect(onScreen(page.locator(".account-who"))).toContainText(`Signed in as ${after}`);
+  expect((await latestEmail(page, "email_changed", before)).body).toContain(`was changed from ${before} to ${after}`);
 });

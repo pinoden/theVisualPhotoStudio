@@ -110,6 +110,54 @@ export const sessions = pgTable("sessions", {
   createdAt: createdAt(),
 });
 
+/**
+ * Who opened a customer's page or one of their receipts, and when: the access log the owner asked for on 2026-11-18
+ * (question 27). The viewer is kept by address, name and role as they were, so that a line still reads right after a
+ * staff member leaves. Shown to the owners on the customer's page; older lines go with the retention period
+ * (src/server/customer-views.ts, src/server/retention.ts).
+ */
+export const customerViews = pgTable(
+  "customer_views",
+  {
+    id: id(),
+    /** The customer, by the address their records are kept under. */
+    customerEmail: text("customer_email").notNull(),
+    viewerEmail: text("viewer_email").notNull(),
+    viewerName: text("viewer_name").notNull().default(""),
+    viewerRole: text("viewer_role").notNull(),
+    /** What was opened: `page`, a `receipt` (its booking's ref in `detail`) or a `year` of receipts (the year in `detail`). */
+    what: text("what").notNull(),
+    detail: text("detail").notNull().default(""),
+    viewedAt: ts("viewed_at").notNull(),
+  },
+  (t) => [index("customer_views_customer_idx").on(t.customerEmail, t.viewedAt), index("customer_views_viewed_idx").on(t.viewedAt)],
+);
+
+/**
+ * A client's change of their own email address (question 27, answered 2026-11-18: "customers may change their own
+ * email address"). A code is emailed to the new address, and only a hash of it is kept, as for signing in. Once the
+ * code is given, every record kept under the old address moves to the new one (src/server/email-change.ts), and the row
+ * stays as the record of the change: from what, to what, when.
+ */
+export const emailChanges = pgTable(
+  "email_changes",
+  {
+    id: id(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    oldEmail: text("old_email").notNull(),
+    newEmail: text("new_email").notNull(),
+    codeHash: text("code_hash").notNull(),
+    expiresAt: ts("expires_at").notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    /** When the code was given and the records moved. */
+    consumedAt: ts("consumed_at"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("email_changes_user_idx").on(t.userId, t.createdAt), index("email_changes_new_idx").on(t.newEmail)],
+);
+
 /** Dates a staff member is allowed to see. Staff see nothing outside these. */
 export const staffShifts = pgTable(
   "staff_shifts",

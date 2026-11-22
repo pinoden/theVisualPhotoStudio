@@ -233,6 +233,16 @@ export function loginCodeEmail(to: string, code: string, minutes: number): Queue
   return written("login_code", { to, kind: "login_code" }, { code, minutes: String(minutes) });
 }
 
+/** The code that confirms a client's new email address, to that address. */
+export function emailChangeCodeEmail(input: { to: string; name: string; code: string; minutes: number }): QueuedEmail {
+  return written("email_change_code", { to: input.to, kind: "email_change_code" }, { name: input.name, code: input.code, new_email: input.to, minutes: String(input.minutes) });
+}
+
+/** To the old address, once a client's email address was changed. */
+export function emailChangedEmail(input: { to: string; name: string; newEmail: string }): QueuedEmail {
+  return written("email_changed", { to: input.to, kind: "email_changed" }, { name: input.name, old_email: input.to, new_email: input.newEmail });
+}
+
 export function bookingConfirmationEmail(input: {
   to: string;
   name: string;
