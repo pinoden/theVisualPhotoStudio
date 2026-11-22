@@ -10,6 +10,7 @@ import { durationLabel, longDateLabel } from "@/lib/domain/time";
 import { count } from "@/lib/words";
 import { customerStatus, type AccountBooking } from "@/server/account";
 import { getCustomer } from "@/server/customers";
+import { listCustomerViews, type CustomerView } from "@/server/customer-views";
 import { money } from "@/server/receipt-pdf";
 import { RECEIPT_STATUS_TEXT, yearsOf, yearStatement } from "@/server/receipts";
 import { MAX_STAMPS_AT_ONCE, REASON_MAX, REASON_MIN, REWARD_STATUS_TEXT } from "@/server/rewards";
@@ -18,6 +19,7 @@ import { loadSettings } from "@/server/settings";
 import { formatDay, formatInstant, formatRange } from "@/server/tz";
 import { AdminFrame, AdminLoading } from "../../frame";
 import { adjustStampsAction, cancelRewardAction, restoreRewardAction } from "../actions";
+import { RecordView } from "./RecordView";
 
 export const metadata: Metadata = { title: "Customer", robots: { index: false } };
 
@@ -104,10 +106,14 @@ async function Customer({ params, searchParams }: Pick<PageProps<"/admin/custome
   const query = await searchParams;
   const base = `/admin/customers/${encodeURIComponent(customer.email)}`;
   const years = yearsOf(customer.receipts);
+  // The access log is the owners' own: a manager who opens the page is in it, and does not read it.
+  const log = viewer.role === "owner" ? await listCustomerViews(db, customer.email) : null;
+  const settings = await loadSettings(db);
   const known = customer.upcoming.length + customer.past.length > 0 || customer.hasAccount || customer.rewards.length > 0 || customer.stampChanges.length > 0;
 
   return (
-    <AdminFrame active="/admin/customers" title={customer.name || customer.email} query={query} viewer={viewer} settings={await loadSettings(db)}>
+    <AdminFrame active="/admin/customers" title={customer.name || customer.email} query={query} viewer={viewer} settings={settings}>
+      <RecordView email={customer.email} />
       <p>
         <Link href="/admin/customers">← All customers</Link>
       </p>
@@ -427,6 +433,49 @@ async function Customer({ params, searchParams }: Pick<PageProps<"/admin/custome
         })}
       </div>
       )}
+
+      {log && <AccessLog views={log.views} total={log.total} years={settings.retentionYears} />}
     </AdminFrame>
+  );
+}
+
+const VIEW_TEXT: Record<CustomerView["what"], (detail: string) => string> = {
+  page: () => "this page",
+  receipt: (ref) => `the receipt of ${ref}`,
+  year: (year) => `the receipts of ${year}`,
+};
+
+const ROLE_TEXT: Record<string, string> = { owner: "Owner", manager: "Studio Manager", staff: "Studio Attendant" };
+
+/** Who opened this customer's page and receipts, newest first (question 27). For the owners only. */
+function AccessLog({ views, total, years }: { views: CustomerView[]; total: number; years: number }) {
+  return (
+    <div className="admin-card" id="access-log">
+      <h3>Who opened this customer&apos;s records</h3>
+      <p style={{ fontSize: ".85rem" }}>
+        Each time a member of the studio opens this page or downloads one of the customer&apos;s receipts. The same thing
+        opened again within a few minutes counts once. Kept for {count(years, "year")} (Settings, Records). Only owners
+        see this list.
+      </p>
+      {views.length === 0 ? (
+        <p style={{ marginBottom: 0 }}>Nobody had opened them before this visit, which shows here from the next one.</p>
+      ) : (
+        <>
+          <ul className="access-log">
+            {views.map((view, index) => (
+              <li key={index}>
+                {formatInstant(new Date(view.viewedAt))}: {view.viewerName || view.viewerEmail} ({ROLE_TEXT[view.viewerRole] ?? view.viewerRole}
+                {view.viewerName && `, ${view.viewerEmail}`}) opened {VIEW_TEXT[view.what](view.detail)}.
+              </li>
+            ))}
+          </ul>
+          {total > views.length && (
+            <p style={{ fontSize: ".85rem", marginBottom: 0 }}>
+              The newest {views.length} of {total}.
+            </p>
+          )}
+        </>
+      )}
+    </div>
   );
 }

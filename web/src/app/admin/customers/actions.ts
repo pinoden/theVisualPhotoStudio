@@ -7,7 +7,10 @@ import { formText, intInRange } from "@/lib/parse";
 import { normalizeEmail } from "@/server/auth";
 import { adjustStamps, cancelReward, MAX_STAMPS_AT_ONCE, restoreReward } from "@/server/rewards";
 import { flushEmailsSoon, siteUrl } from "@/server/runtime";
-import { requireManager } from "@/server/session";
+import { getCurrentUser, requireManager } from "@/server/session";
+import { recordCustomerView } from "@/server/customer-views";
+import { loadSettings } from "@/server/settings";
+import { can } from "@/lib/abilities";
 
 /**
  * What is corrected on a customer's page: stamps, and the status of a reward.
@@ -65,4 +68,17 @@ export async function restoreRewardAction(formData: FormData): Promise<void> {
   const result = await restoreReward(await getDb(), owner, formText(formData.get("codeId")), formText(formData.get("reason")), new Date());
   if (!result.ok) redirect(withMessage(page, "error", result.message));
   redirect(withMessage(page, "notice", `Reward ${result.code} given back. It can be used again, until the date it always had.`));
+}
+
+/**
+ * The access log (question 27): the customer's page was shown to the person signed in. Called from the page once it
+ * is on screen (`RecordView`), not while it is drawn on the server, since a link's prefetch can draw a page nobody
+ * opens. Writes nothing for someone who may not see customers.
+ */
+export async function recordCustomerViewAction(email: unknown): Promise<void> {
+  const viewer = await getCurrentUser();
+  if (!viewer || typeof email !== "string") return;
+  const db = await getDb();
+  if (!can(viewer, "seeCustomers", await loadSettings(db))) return;
+  await recordCustomerView(db, viewer, email, "page", "", new Date());
 }

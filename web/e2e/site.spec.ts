@@ -1441,6 +1441,14 @@ test("the owners look a customer up, see what they paid, and correct their stamp
   await expect(loyalty).toContainText("Five visits on the old booking system (Before loyalty started again: not counted.)");
   await expect(rewards.locator("li.reward")).toHaveCount(4);
   await expect(rewards.locator("li.reward", { hasText: /THANKS-/ })).toContainText("Available");
+
+  // Who opened her records, for the owners (question 27): this page, once however often it was opened since, and the
+  // file of the year downloaded above.
+  const log = onScreen(page.locator("#access-log"));
+  await expect(log).toContainText("Only owners see this list.");
+  await expect(log.locator("li", { hasText: `opened the receipts of ${year}.` })).toHaveCount(1);
+  await expect(log.locator("li", { hasText: "opened this page." })).toHaveCount(1);
+  await expect(log.locator("li").first()).toContainText("(Owner");
 });
 
 test("a Studio Manager runs the calendar and looks clients up, and sees no prices until the owners say so", async ({ page }) => {
@@ -1481,6 +1489,8 @@ test("a Studio Manager runs the calendar and looks clients up, and sees no price
   await expect(page.locator("#payments")).toHaveCount(0);
   expect(await onScreen(page.locator(".admin-main")).innerText()).not.toContain("$");
   await expect(page.getByRole("button", { name: "Change stamps" })).toHaveCount(0); // not switched on for managers
+  // Her visit is in the access log; the log itself is the owners'.
+  await expect(page.locator("#access-log")).toHaveCount(0);
 
   // She can block time in a studio, and cannot touch opening hours.
   await page.getByRole("link", { name: "Hours & blocks" }).click();

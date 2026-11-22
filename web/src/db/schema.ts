@@ -110,6 +110,29 @@ export const sessions = pgTable("sessions", {
   createdAt: createdAt(),
 });
 
+/**
+ * Who opened a customer's page or one of their receipts, and when: the access log the owner asked for on 2026-11-18
+ * (question 27). The viewer is kept by address, name and role as they were, so that a line still reads right after a
+ * staff member leaves. Shown to the owners on the customer's page; older lines go with the retention period
+ * (src/server/customer-views.ts, src/server/retention.ts).
+ */
+export const customerViews = pgTable(
+  "customer_views",
+  {
+    id: id(),
+    /** The customer, by the address their records are kept under. */
+    customerEmail: text("customer_email").notNull(),
+    viewerEmail: text("viewer_email").notNull(),
+    viewerName: text("viewer_name").notNull().default(""),
+    viewerRole: text("viewer_role").notNull(),
+    /** What was opened: `page`, a `receipt` (its booking's ref in `detail`) or a `year` of receipts (the year in `detail`). */
+    what: text("what").notNull(),
+    detail: text("detail").notNull().default(""),
+    viewedAt: ts("viewed_at").notNull(),
+  },
+  (t) => [index("customer_views_customer_idx").on(t.customerEmail, t.viewedAt), index("customer_views_viewed_idx").on(t.viewedAt)],
+);
+
 /** Dates a staff member is allowed to see. Staff see nothing outside these. */
 export const staffShifts = pgTable(
   "staff_shifts",

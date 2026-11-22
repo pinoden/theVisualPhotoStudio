@@ -66,7 +66,7 @@ export interface TaskSummary {
   emailsFailed: number;
   /** Pages removed for good from the trash, after the days a deleted page is kept. */
   pagesRemoved: number;
-  /** Email copies, sign-in codes and ended sign-ins deleted for being older than `retentionYears`. */
+  /** Email copies, sign-in codes, ended sign-ins and access-log lines deleted for being older than `retentionYears`. */
   oldRecordsDeleted: number;
 }
 
@@ -318,6 +318,6 @@ export async function runScheduledTasks(db: Db, deps: TaskDeps): Promise<TaskSum
     emailsSent: mail.sent,
     emailsFailed: mail.failed,
     pagesRemoved,
-    oldRecordsDeleted: old.emails + old.loginCodes + old.sessions,
+    oldRecordsDeleted: old.emails + old.loginCodes + old.sessions + old.customerViews,
   };
 }

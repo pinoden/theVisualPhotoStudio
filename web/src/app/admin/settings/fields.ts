@@ -67,7 +67,7 @@ export const SETTING_GROUPS: { title: string; fields: SettingField[] }[] = [
       {
         key: "retentionYears",
         label: "Keep email copies and sign-in records for (years)",
-        help: "Copies of the emails the site sent, its sign-in codes and ended sign-ins. Older ones are deleted once a day. Bookings, payments and clients are kept.",
+        help: "Copies of the emails the site sent, its sign-in codes, ended sign-ins and the log of who opened a customer's page. Older ones are deleted once a day. Bookings, payments and clients are kept.",
       },
     ],
   },

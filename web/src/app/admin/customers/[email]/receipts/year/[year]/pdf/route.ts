@@ -1,5 +1,6 @@
 import { getDb } from "@/db/client";
 import { normalizeEmail } from "@/server/auth";
+import { recordCustomerView } from "@/server/customer-views";
 import { yearPdf } from "@/server/receipt-pdf";
 import { loadReceipts, yearStatement } from "@/server/receipts";
 import { getCurrentUser } from "@/server/session";
@@ -27,6 +28,8 @@ export async function GET(_request: Request, context: RouteContext<"/admin/custo
   const { receipts } = await loadReceipts(db, email);
   const statement = yearStatement(receipts, Number(year));
   if (statement.transactions.length === 0) return new Response("Not found", { status: 404 });
+  // The access log (question 27): who downloaded this customer's receipts of a year.
+  await recordCustomerView(db, user, email, "year", year, new Date());
   const file = await yearPdf(statement, { name: statement.receipts[0]?.customerName ?? "", email }, await loadBusiness(db));
   return new Response(Buffer.from(file), {
     headers: {

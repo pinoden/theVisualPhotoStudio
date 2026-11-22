@@ -129,7 +129,8 @@ export interface Settings {
   // ── Records ──
   /**
    * Years the site keeps the copies of the emails it sent, the sign-in codes it gave and the sign-ins that have
-   * ended (the owner's answer of 2026-11-21: 5). Older ones are deleted by the scheduled task (src/server/retention.ts).
+   * ended (the owner's answer of 2026-11-21: 5), and the log of who opened a customer's page with them. Older ones
+   * are deleted by the scheduled task (src/server/retention.ts).
    */
   retentionYears: number;
 }
