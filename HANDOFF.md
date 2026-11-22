@@ -143,7 +143,7 @@ Not yet covered by an independent tester pass: renaming a studio and taking one 
 
 ### Now
 
-0. **Question 23, the payment summary and loyalty's progress email are on `master` and live** (PR #26, `8409b01`, 2026-11-21; see "Current state"), three items of the November 20 brief. On `rebuild` since, for the next pull request, with no migration:
+0. **PR #27 is open** (2026-11-21, on the owner's "pr"): `rebuild` into `master`, waiting for its checks and then the owner's word to merge. **It has migrations `0052` and `0053`:** apply them to staging once its checks pass and just before the merge (below). Question 23, the payment summary and loyalty's progress email are on `master` and live (PR #26, `8409b01`; see "Current state"). PR #27 brings what came on `rebuild` since:
    - every page's first keyboard stop is a link that skips the menu, and the booking screen's times are one stop, moved through with the arrow keys (the fourth round's two keyboard gaps);
    - the seasonal collections check (one browser test extended, no change to the site);
    - a remedy for the membership test's flake in WebKit (item 5), in the accessibility scan's helper;
