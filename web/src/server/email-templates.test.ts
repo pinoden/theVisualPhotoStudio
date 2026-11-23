@@ -159,6 +159,7 @@ describe("every email to a client", () => {
       emails.bookingReminderEmail({ ...visit, dueCents: 0, atStudio: false }),
       emails.reviewRequestEmail({ email: "a@x.test", name: "Jane", ref: "VS-1" }),
       emails.bookingMovedEmail({ to: "a@x.test", name: "Jane", ref: "VS-1", studios: "Paris", was: "A", now: "B", duration: "1 hour" }),
+      emails.bookingChangedEmail({ to: "a@x.test", name: "Jane", ref: "VS-1", studios: "Paris", when: "W", duration: "2 hours", addons: "None", before: "Paris, 1 hour", priceNote: "Its total is now $136 instead of $68." }),
       emails.moveRequestReceivedEmail({ to: "a@x.test", name: "Jane", ref: "VS-1", when: "W", message: "M" }),
       emails.rescheduleCodeEmail({ to: "a@x.test", name: "Jane", ref: "VS-1", code: "C", valueCents: 100, expires: "E", bookUrl: "U" }),
       emails.cancellationEmail({ to: "a@x.test", name: "Jane", ref: "VS-1", when: "W", lines: [] }),

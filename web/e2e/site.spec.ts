@@ -917,6 +917,21 @@ test("the calendar shows a day, a week and a month, one studio or all, and a boo
   await expect(page.getByRole("row", { name: /Confirmed → Rescheduled/ })).toContainText("Moved from");
   expect((await latestEmail(page, "booking_moved", bob.email)).body).toContain("New time: ");
   await shot(page, "17f-appointment-moved");
+  // "Edit" led the owner to the form that changes it (item 5; "Editing price is for owner only", 2026-11-23): an extra
+  // guest costs more, the rest is to pay, the client is emailed; taken away again, the booking is as it was.
+  await expect(page).toHaveURL(/#change$/);
+  const change = page.getByRole("form", { name: "Change the booking" });
+  await byLabel(change, "Extra guest ($5 each)").fill("1");
+  await change.getByRole("button", { name: "Save the change" }).click();
+  await expect(byText(page, /^Booking changed: \$\d+ instead of \$\d+\. Still to pay: \$5\. Record it, or email a payment link, under Payment\. The client has been emailed\.$/)).toBeVisible();
+  const changedMail = await latestEmail(page, "booking_changed", bob.email);
+  expect(changedMail.body).toContain("Add-ons and extra guests: Extra guest");
+  expect(changedMail.body).toContain("Still to pay: $5, at the studio or with a payment link we email you.");
+  expect(await accessibilityProblems(page), "the appointment's page, its booking changed").toEqual([]);
+  await expect(page.getByRole("row", { name: /Changed from Studio Blanche, 1 hour to Studio Blanche, 1 hour, Extra guest/ })).toBeVisible();
+  await byLabel(page.getByRole("form", { name: "Change the booking" }), "Extra guest ($5 each)").fill("0");
+  await page.getByRole("form", { name: "Change the booking" }).getByRole("button", { name: "Save the change" }).click();
+  await expect(byText(page, /^Booking changed: \$\d+ instead of \$\d+\. The client has been emailed\.$/)).toBeVisible();
 
   // A booking made for a client, from the calendar, with their dog: no card, and the price is paid at the studio.
   await page.goto(`/admin/calendar?view=day&date=${NEAR}`);

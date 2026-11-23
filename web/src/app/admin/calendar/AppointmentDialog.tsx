@@ -73,7 +73,7 @@ export function AppointmentDialog({
               Book Another Appointment
             </Link>
           )}
-          <Link href={page} className="btn btn-outline btn-small">
+          <Link href={appointment.may.changePayments ? `${page}#change` : page} className="btn btn-outline btn-small">
             Edit
           </Link>
           {appointment.may.move && !move && (

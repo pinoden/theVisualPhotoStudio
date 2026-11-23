@@ -16,6 +16,7 @@ import { centsToInput, CHARGE_FIELD, MONEY_FIELD } from "@/lib/parse";
 import { PAYMENT_METHODS } from "@/lib/payment-methods";
 import { hoursInWords } from "@/lib/words";
 import { getAppointment, moveOptions } from "@/server/appointments";
+import { editOptions } from "@/server/edit-booking";
 import { CHARGE_NOTE_MAX, OVERTIME_MAX_MINUTES, overtimeBlocks, overtimeCents } from "@/server/charges";
 import { BY_CUSTOMER, BY_SYSTEM } from "@/server/history";
 import { resolvePayments } from "@/server/payments";
@@ -25,6 +26,7 @@ import { moneyKindOf, payLinkPossible } from "@/server/test-mode";
 import { formatInstant, formatRange, localDateOf } from "@/server/tz";
 import { ownerRefundAction } from "../../actions";
 import { AdminFrame, AdminLoading } from "../../frame";
+import { ChangeBooking } from "../ChangeBooking";
 import { MoveToNewTime } from "../MoveToNewTime";
 import {
   addChargeAction,
@@ -74,6 +76,8 @@ async function AppointmentDetails({
   // "Move to a new time" works in two steps: choose the date, then one of the times that are free on it.
   const moveDate = appointment.may.move && !appointment.moveBlocked && typeof query.move === "string" && isIsoDate(query.move) ? query.move : null;
   const moveTimes = moveDate ? await moveOptions(db, viewer, ref, moveDate, now) : null;
+  // An owner changes its studios, length, guests and add-ons (question 75); a booking that cannot be changed says why.
+  const changing = await editOptions(db, viewer, ref, now);
 
   // Its studio's or bundle's colour, as on the calendar (the owner's admin brief of 2026-11-22, item 2). Studio names are unique.
   const allStudios = await db.select({ id: studiosTable.id, slug: studiosTable.slug, name: studiosTable.name, color: studiosTable.color }).from(studiosTable);
@@ -272,6 +276,13 @@ async function AppointmentDetails({
             today={localDateOf(now)}
             idPrefix="move"
           />
+        </div>
+      )}
+
+      {changing && (
+        <div className="admin-card" id="change">
+          <h3>Change the booking</h3>
+          {changing.editable ? <ChangeBooking bookingRef={appointment.ref} options={changing} /> : <p style={{ margin: 0 }}>{changing.why}</p>}
         </div>
       )}
 

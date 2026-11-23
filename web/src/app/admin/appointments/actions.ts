@@ -8,6 +8,7 @@ import { isIsoDate } from "@/lib/domain/time";
 import { dollarsToCents, formText, intInRange } from "@/lib/parse";
 import { createAdminBooking, moveBooking, setLabel } from "@/server/appointments";
 import { addCharge, OVERTIME_MAX_MINUTES, voidCharge, type AddChargeInput } from "@/server/charges";
+import { editBooking } from "@/server/edit-booking";
 import { cancelPayLink, checkBookingPayLink, closePayLinkByHand, sendPayLink } from "@/server/pay-links";
 import { resolvePayments } from "@/server/payments";
 import { givePetFeeCredit } from "@/server/pet-fee";
@@ -86,6 +87,37 @@ export async function moveBookingAction(formData: FormData): Promise<void> {
   flushEmailsSoon();
   const moved = fromCalendar ? calendarAt(fromCalendar, { date, move: null, notice: null, error: null }) : page;
   redirect(withMessage(moved, "notice", `Moved to ${formatInstant(result.startAt)}. The client has been emailed.`));
+}
+
+/**
+ * An owner changes a booking's studios, length, guests and add-ons (question 75): priced again, the client emailed. What
+ * it owes then, or was paid beyond its new price, is said, and settled under Payment.
+ */
+export async function editBookingAction(formData: FormData): Promise<void> {
+  const ref = formText(formData.get("ref"));
+  const page = /^VS-[0-9A-Z]{6}$/.test(ref) ? `/admin/appointments/${ref}` : "/admin/calendar";
+  const viewer = await requireOwner(page);
+  const durationMinutes = intInRange(formText(formData.get("duration")), 15, 1440);
+  if (durationMinutes === null) redirect(withMessage(`${page}`, "error", "Choose a length.") + "#change");
+  const addons: { addonId: string; quantity: number }[] = [];
+  for (const [name, value] of formData.entries()) {
+    if (!name.startsWith("addon:") || typeof value !== "string") continue;
+    const quantity = intInRange(value, 0, 1000);
+    if (quantity === null) redirect(withMessage(page, "error", "Enter how many of each add-on, 0 for none.") + "#change");
+    if (quantity > 0) addons.push({ addonId: name.slice("addon:".length), quantity });
+  }
+  const studioIds = formData.getAll("studio").filter((value): value is string => typeof value === "string");
+  const result = await editBooking(await getDb(), viewer, ref, { studioIds, durationMinutes: durationMinutes!, addons }, new Date());
+  if (!result.ok) redirect(withMessage(page, "error", result.message) + "#change");
+  flushEmailsSoon();
+  const words = [
+    result.nowCents === result.wasCents ? "Booking changed: its price is the same." : `Booking changed: ${formatCents(result.nowCents)} instead of ${formatCents(result.wasCents)}.`,
+    ...(result.codeBack ? [`${formatCents(result.codeBack.cents)} went back on the code ${result.codeBack.code}.`] : []),
+    ...(result.owedCents > 0 ? [`Still to pay: ${formatCents(result.owedCents)}. Record it, or email a payment link, under Payment.`] : []),
+    ...(result.creditLeftCents > 0 ? [`Paid ${formatCents(result.creditLeftCents)} more than its new price: refund it under Payment.`] : []),
+    "The client has been emailed.",
+  ];
+  redirect(withMessage(page, "notice", words.join(" ")));
 }
 
 /** Make a booking for a client from the admin. Nothing is charged online. */

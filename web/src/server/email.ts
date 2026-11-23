@@ -432,6 +432,35 @@ export function bookingMovedEmail(input: {
   );
 }
 
+/** An owner changed a booking's studios, length, guests or add-ons (question 75): what it holds now, and its new price. */
+export function bookingChangedEmail(input: {
+  to: string;
+  name: string;
+  ref: string;
+  studios: string;
+  when: string;
+  duration: string;
+  addons: string;
+  /** What it held before. */
+  before: string;
+  priceNote: string;
+}): QueuedEmail {
+  return written(
+    "booking_changed",
+    { to: input.to, kind: "booking_changed" },
+    {
+      name: input.name,
+      reference: input.ref,
+      studios: input.studios,
+      when: input.when,
+      duration: input.duration,
+      addons: input.addons,
+      before: input.before,
+      price_note: input.priceNote,
+    },
+  );
+}
+
 /**
  * Where a card refund stands: `sent` when the processor accepted it, `not_yet`
  * when it has not gone through: it failed, and is tried again, or it waits for
