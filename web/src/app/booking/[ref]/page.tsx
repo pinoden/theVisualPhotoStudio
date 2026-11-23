@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { connection } from "next/server";
 import { Suspense } from "react";
+import { AcceptedList } from "@/components/AcceptedTerms";
 import { BookingSummary } from "@/components/BookingSummary";
 import { ManageBooking } from "@/components/ManageBooking";
 import { getDb } from "@/db/client";
@@ -97,6 +98,13 @@ async function BookingDetails({ params, searchParams }: Pick<PageProps<"/booking
       </div>
 
       <BookingSummary booking={booking} />
+
+      {booking.accepted.length > 0 && (
+        <section className="accepted-terms" aria-labelledby="accepted-title">
+          <h3 id="accepted-title">What you agreed to</h3>
+          <AcceptedList accepted={booking.accepted} hrefOf={(id) => `/booking/${booking.ref}/accepted/${id}?t=${encodeURIComponent(token)}`} />
+        </section>
+      )}
 
       {booking.label === "reschedule_pending" && (
         <div className="notice" role="status">

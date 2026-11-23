@@ -3,10 +3,11 @@ import { connection } from "next/server";
 import { Suspense } from "react";
 import { getDb } from "@/db/client";
 import { centsToInput, FEE_FIELD } from "@/lib/parse";
+import { ownerNotifyEmail } from "@/server/runtime";
 import { requireOwner } from "@/server/session";
-import { ACCESS_INSTRUCTIONS_MAX, loadAccessInstructions, loadSettings, NUMBER_SETTING_RANGES } from "@/server/settings";
+import { ACCESS_INSTRUCTIONS_MAX, loadAccessInstructions, loadContactInbox, loadSettings, NUMBER_SETTING_RANGES } from "@/server/settings";
 import { formatInstant } from "@/server/tz";
-import { saveAccessInstructionsAction, saveSettingsAction } from "../actions";
+import { saveAccessInstructionsAction, saveContactInboxAction, saveSettingsAction } from "../actions";
 import { AdminFrame, AdminLoading } from "../frame";
 import { SETTING_GROUPS } from "./fields";
 
@@ -24,10 +25,26 @@ async function SettingsForm({ searchParams }: Pick<PageProps<"/admin/settings">,
   await connection();
   await requireOwner("/admin/settings");
   const db = await getDb();
-  const [settings, access] = await Promise.all([loadSettings(db), loadAccessInstructions(db)]);
+  const [settings, access, inbox] = await Promise.all([loadSettings(db), loadAccessInstructions(db), loadContactInbox(db)]);
+  const notices = ownerNotifyEmail();
 
   return (
     <AdminFrame active="/admin/settings" title="Settings" query={await searchParams}>
+      <form action={saveContactInboxAction} className="admin-card" id="contact-inbox">
+        <h3>Messages from the contact form</h3>
+        <label className="form-label" htmlFor="contactInbox">
+          Send them to
+        </label>
+        <input id="contactInbox" name="contactInbox" type="email" className="form-control" maxLength={200} defaultValue={inbox} autoComplete="off" />
+        <div style={{ fontSize: ".78rem", margin: ".25rem 0 1rem" }}>
+          The inbox that gets what visitors write on the Contact page, such as hello@. A reply goes straight to the
+          visitor. {inbox ? `Now: ${inbox}.` : notices ? `Empty, so they go where the site's notices go: ${notices}.` : "Empty, and no address for the site's notices is set: messages cannot be sent."}
+        </div>
+        <button type="submit" className="btn btn-dark btn-small">
+          Save the address
+        </button>
+      </form>
+
       <form action={saveAccessInstructionsAction} className="admin-card">
         <h3>Getting in</h3>
         <label className="form-label" htmlFor="accessInstructions">

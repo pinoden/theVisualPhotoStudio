@@ -3,6 +3,7 @@ import Link from "next/link";
 import { connection } from "next/server";
 import { Suspense } from "react";
 import { AccountFrame } from "@/components/AccountFrame";
+import { AcceptedList } from "@/components/AcceptedTerms";
 import { BookingSummary } from "@/components/BookingSummary";
 import { ManageBooking } from "@/components/ManageBooking";
 import { getDb } from "@/db/client";
@@ -42,6 +43,17 @@ function Status({ booking }: { booking: AccountBooking }) {
 }
 
 /** What the studio did to the booking's time: the booking keeps its reference and its record. */
+/** The policies and agreements accepted at checkout, each to read again (the November 20 brief). */
+function Agreed({ booking }: { booking: AccountBooking }) {
+  if (booking.accepted.length === 0) return null;
+  return (
+    <div className="accepted-terms">
+      <strong>What you agreed to</strong>
+      <AcceptedList accepted={booking.accepted} hrefOf={(id) => `/account/appointments/${booking.ref}/accepted/${id}`} />
+    </div>
+  );
+}
+
 function Moves({ booking }: { booking: AccountBooking }) {
   if (booking.moves.length === 0) return null;
   return (
@@ -119,6 +131,7 @@ async function Appointments({ searchParams }: Pick<PageProps<"/account/appointme
               </h3>
               <BookingSummary booking={booking} />
               <Moves booking={booking} />
+              <Agreed booking={booking} />
               {booking.label === "reschedule_pending" && (
                 <div className="notice" role="status">
                   We have your request to move this booking. Your time is still held for you, and we will confirm the
@@ -210,6 +223,7 @@ async function Appointments({ searchParams }: Pick<PageProps<"/account/appointme
                   <p className="appointment-ref">Reference {booking.ref}</p>
                   <BookingSummary booking={booking} />
                   <Moves booking={booking} />
+                  <Agreed booking={booking} />
                 </div>
               </details>
             );

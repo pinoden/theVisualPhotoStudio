@@ -41,6 +41,7 @@ const PAID_ONLINE: BookingView = {
   refundsWaitingCents: 0,
   rescheduledCount: 0,
   endRequest: null,
+  accepted: [],
 };
 
 /** The summary's last row, as its two sides read. */

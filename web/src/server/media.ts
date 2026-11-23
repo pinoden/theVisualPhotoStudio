@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import sharp from "sharp";
 import { hasVisibleText } from "@/lib/visible-text";
-import { media, mediaCollectionItems, mediaCollections, siteDocuments, studioPhotos, studios } from "@/db/schema";
+import { addons, media, mediaCollectionItems, mediaCollections, siteDocuments, studioPhotos, studios } from "@/db/schema";
 import { together, type Db, type DbLike } from "@/db/client";
 import { can } from "@/lib/abilities";
 import type { AuthUser } from "./auth";
@@ -74,8 +74,8 @@ export interface MediaItem extends Picture {
 }
 
 export interface MediaUse {
-  where: "page" | "frame" | "studio" | "collection";
-  /** What it is called there: the page's name, the studio's, the collection's. */
+  where: "page" | "frame" | "studio" | "collection" | "add-on";
+  /** What it is called there: the page's name, the studio's, the collection's, the add-on's. */
   name: string;
 }
 
@@ -266,6 +266,9 @@ export async function mediaUses(db: DbLike, ids: string[]): Promise<Map<string, 
     .where(inArray(sql`${studios.facts}->>'floorPlan'`, ids));
   for (const row of plans) uses.get(row.plan)?.push({ where: "studio", name: row.name });
   for (const row of ofCollections) uses.get(row.mediaId)?.push({ where: "collection", name: row.name });
+  // A prop's picture (Props & Resources).
+  const ofAddons = await db.select({ mediaId: addons.mediaId, name: addons.name }).from(addons).where(inArray(addons.mediaId, ids));
+  for (const row of ofAddons) if (row.mediaId) uses.get(row.mediaId)?.push({ where: "add-on", name: row.name });
   for (const document of documents) {
     for (const id of ids) {
       if (!document.text.includes(id)) continue;

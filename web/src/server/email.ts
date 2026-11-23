@@ -243,6 +243,15 @@ export function emailChangedEmail(input: { to: string; name: string; newEmail: s
   return written("email_changed", { to: input.to, kind: "email_changed" }, { name: input.name, old_email: input.to, new_email: input.newEmail });
 }
 
+/** A time has opened up for a client on the waitlist (src/server/waitlist.ts). */
+export function waitlistOpeningEmail(input: { to: string; name: string; studios: string; duration: string; day: string; timeRange: string; link: string }): QueuedEmail {
+  return written(
+    "waitlist_opening",
+    { to: input.to, kind: "waitlist_opening" },
+    { name: input.name, studios: input.studios, duration: input.duration, day: input.day, time_range: input.timeRange, link: input.link },
+  );
+}
+
 export function bookingConfirmationEmail(input: {
   to: string;
   name: string;

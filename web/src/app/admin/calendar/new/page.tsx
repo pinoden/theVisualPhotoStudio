@@ -47,6 +47,13 @@ async function NewBooking({ searchParams }: Pick<PageProps<"/admin/calendar/new"
   const studios = catalog.studios.filter((studio) => asked.includes(studio.id));
   const studioIds = studios.map((studio) => studio.id);
   const date = typeof query.date === "string" && isIsoDate(query.date) ? query.date : today;
+  // A client's details, from "Book Another Appointment" on an appointment (the owner's admin brief of 2026-11-22, item
+  // 5): they fill the client's fields, and are carried through the choice of studio, date and length.
+  const given = (key: "clientName" | "clientEmail" | "clientPhone", max: number) => {
+    const value = query[key];
+    return typeof value === "string" ? value.trim().slice(0, max) : "";
+  };
+  const client = { name: given("clientName", 120), email: given("clientEmail", 200), phone: given("clientPhone", 40) };
   const dayType = dayTypeFor(catalog, date);
 
   // The lengths on sale: for the chosen studios on that kind of day, or every length while nothing is chosen.
@@ -92,6 +99,14 @@ async function NewBooking({ searchParams }: Pick<PageProps<"/admin/calendar/new"
 
       <form method="get" className="admin-card">
         <h3>1. What and when</h3>
+        {client.name && (
+          <p className="notice">
+            Another appointment for {client.name}: their details are filled in below.
+            <input type="hidden" name="clientName" value={client.name} />
+            <input type="hidden" name="clientEmail" value={client.email} />
+            <input type="hidden" name="clientPhone" value={client.phone} />
+          </p>
+        )}
         <fieldset className="admin-fieldset">
           <legend className="form-label">Studio</legend>
           {catalog.studios.map((studio) => (
@@ -173,19 +188,19 @@ async function NewBooking({ searchParams }: Pick<PageProps<"/admin/calendar/new"
                   <label className="form-label" htmlFor="new-name">
                     Client&rsquo;s name
                   </label>
-                  <input id="new-name" name="name" className="form-control" minLength={2} maxLength={120} autoComplete="off" required />
+                  <input id="new-name" name="name" className="form-control" minLength={2} maxLength={120} autoComplete="off" defaultValue={client.name} required />
                 </div>
                 <div className="form-group" style={{ flex: "1 1 12rem" }}>
                   <label className="form-label" htmlFor="new-email">
                     Client&rsquo;s email
                   </label>
-                  <input id="new-email" name="email" className="form-control" {...EMAIL_FIELD} autoComplete="off" required />
+                  <input id="new-email" name="email" className="form-control" {...EMAIL_FIELD} autoComplete="off" defaultValue={client.email} required />
                 </div>
                 <div className="form-group" style={{ flex: "1 1 10rem" }}>
                   <label className="form-label" htmlFor="new-phone">
                     Client&rsquo;s phone
                   </label>
-                  <input id="new-phone" name="phone" type="tel" className="form-control" minLength={7} maxLength={40} autoComplete="off" required />
+                  <input id="new-phone" name="phone" type="tel" className="form-control" minLength={7} maxLength={40} autoComplete="off" defaultValue={client.phone} required />
                 </div>
               </div>
               <div className="form-group">

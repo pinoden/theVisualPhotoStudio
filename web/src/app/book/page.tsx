@@ -2,7 +2,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
 import { BookingFlow } from "@/components/BookingFlow";
+import { CodeBalanceCheck } from "@/components/CodeBalanceCheck";
 import { getCatalog } from "@/server/cached";
+import { checkoutPolicies } from "./checkout-policies";
 import { shareMetadata } from "@/server/site";
 
 const TITLE = "Book a Studio";
@@ -17,7 +19,7 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default async function BookPage() {
-  const catalog = await getCatalog();
+  const [catalog, policies] = await Promise.all([getCatalog(), checkoutPolicies()]);
   return (
     <>
       <div className="page-banner site-page">
@@ -45,6 +47,7 @@ export default async function BookPage() {
           After-hours bookings are available by request. Use the <Link href="/contact">contact form</Link> and choose
           &ldquo;After-hours booking&rdquo;.
         </p>
+        <CodeBalanceCheck />
         {/* The flow reads ?studio= from the URL, so it renders on the client. */}
         <Suspense
           fallback={
@@ -53,7 +56,7 @@ export default async function BookPage() {
             </div>
           }
         >
-          <BookingFlow catalog={catalog} />
+          <BookingFlow catalog={catalog} policies={policies} />
         </Suspense>
       </section>
     </>

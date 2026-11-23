@@ -1,8 +1,8 @@
 "use client";
 
-import Link from "next/link";
+import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
-import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { type KeyboardEvent, type UIEvent, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   availabilityGrid,
   combinedStarts,
@@ -10,7 +10,9 @@ import {
   studiosFreeAt,
   type SlotOptions,
 } from "@/lib/domain/availability";
-import { extraGuestsFor, multiStudioOffer, studioCombinationError } from "@/lib/catalog-view";
+import { extraGuestsFor, multiStudioSaving, studioCombinationError } from "@/lib/catalog-view";
+import { MonthCalendar } from "./MonthCalendar";
+import { WaitlistJoin } from "./WaitlistJoin";
 import {
   bookableDurations,
   findPrice,
@@ -33,22 +35,24 @@ import {
 import { EMAIL_FIELD, EMAIL_RULE } from "@/lib/parse";
 import { count, hoursInWords } from "@/lib/words";
 import type { DayAvailability } from "@/server/availability";
+import { agreementKey, policiesKey, type QuestionKind } from "@/lib/booking-form-keys";
 import type { Catalog } from "@/server/catalog";
 import { buyerVerification, useCardForm } from "./square-card";
 
 type Mode = "studio" | "time";
-type Step = "studios" | "when" | "time" | "details" | "pay";
+type Step = "studios" | "when" | "time" | "details" | "policies" | "pay";
 
 /** The two booking paths are the same steps in a different order. */
 const ORDER: Record<Mode, Step[]> = {
-  studio: ["studios", "when", "time", "details", "pay"],
-  time: ["when", "time", "studios", "details", "pay"],
+  studio: ["studios", "when", "time", "details", "policies", "pay"],
+  time: ["when", "time", "studios", "details", "policies", "pay"],
 };
 const STEP_LABEL: Record<Step, string> = {
   studios: "Studios",
   when: "Date",
   time: "Time",
   details: "Details",
+  policies: "Policies",
   pay: "Payment",
 };
 
@@ -113,12 +117,44 @@ function moveAmongTimes(event: KeyboardEvent<HTMLDivElement>): void {
   buttons[Math.min(Math.max(moves[event.key], 0), buttons.length - 1)].focus();
 }
 
+/** A question of the intake form, as the booking page asks it (`/api/checkout-forms`). */
+interface FormQuestion {
+  id: string;
+  label: string;
+  help: string;
+  kind: QuestionKind;
+  options: string[];
+  required: boolean;
+}
+
+/** An agreement beside the studio policies, as published (`/api/checkout-forms`). */
+interface FormAgreement {
+  versionId: string;
+  number: number;
+  title: string;
+  body: string;
+}
+
+/** The studio policies a client reads and accepts at checkout: the website's Policies page as published, and its version. */
+export interface CheckoutPolicies {
+  versionId: string;
+  title: string;
+  /** The page's headings and text as HTML (`pageTextHtml`), cleaned as the page's own. */
+  html: string;
+}
+
 export function BookingFlow({
   catalog,
   navigate = loadPage,
   photography = false,
+  policies = null,
 }: {
   catalog: Catalog;
+  /**
+   * The studio policies of the policies step (the owner's brief of 2026-11-22, item 6), drawn by the booking page from
+   * the website's Policies page. Null when the site has none published: the step then shows only the agreements.
+   */
+  policies?: CheckoutPolicies | null;
   navigate?: (url: string) => void;
   /**
    * The photography flow: a session with the in-house photographer in one
@@ -132,16 +168,21 @@ export function BookingFlow({
 
   const [mode, setMode] = useState<Mode>("studio");
   const [stepIndex, setStepIndex] = useState(0);
+  // A link can choose the studios, the day and the length: `?studio=paris,dayglow&date=…&duration=120`, as the
+  // waitlist's email does (src/server/waitlist.ts).
   const [studioIds, setStudioIds] = useState<string[]>(() => {
-    const slug = searchParams.get("studio");
-    const match = catalog.studios.find((s) => s.slug === slug);
-    return match ? [match.id] : [];
+    const slugs = (searchParams.get("studio") ?? "").split(",");
+    const chosen = catalog.studios.filter((s) => slugs.includes(s.slug)).map((s) => s.id);
+    return photography ? chosen.slice(0, 1) : chosen;
   });
   /** What the date field holds. While a date is typed it passes through values such as 0002-12-28. */
-  const [dateInput, setDateInput] = useState("");
+  const [dateInput, setDateInput] = useState(() => {
+    const linked = searchParams.get("date") ?? "";
+    return isIsoDate(linked) ? linked : "";
+  });
   /** The date chosen: what the field holds, once that is a real date. */
   const date = isIsoDate(dateInput) ? dateInput : "";
-  const [durationChoice, setDuration] = useState(0);
+  const [durationChoice, setDuration] = useState(() => Number(searchParams.get("duration")) || 0);
   const [start, setStart] = useState<number | null>(null);
   /** The time the keyboard last reached: the times' one Tab stop (`moveAmongTimes`). */
   const [timeFocus, setTimeFocus] = useState<number | null>(null);
@@ -152,6 +193,15 @@ export function BookingFlow({
   const [phone, setPhone] = useState("");
   const [notes, setNotes] = useState("");
   const [terms, setTerms] = useState(false);
+  /** The questions and agreements of the policies step, for the booking they were read for (`key`). */
+  const [forms, setForms] = useState<{ key: string; questions: FormQuestion[]; agreements: FormAgreement[] } | null>(null);
+  /** The client's answers to the intake questions, by question. */
+  const [answers, setAnswers] = useState<Record<string, string | boolean>>({});
+  /** Whether the client has scrolled to the end of the policies: the agreement can be ticked only then. */
+  const [readToEnd, setReadToEnd] = useState(false);
+  const policiesBox = useRef<HTMLDivElement>(null);
+  /** How many of each prop are free at the chosen time (the owner's admin brief of 2026-11-22, item 10), for `key`. */
+  const [propsFreeNow, setPropsFreeNow] = useState<{ key: string; free: Record<string, number>; away: string[] } | null>(null);
   const [codeInput, setCodeInput] = useState("");
   const [applied, setApplied] = useState<AppliedCode | null>(null);
   const [codeError, setCodeError] = useState("");
@@ -159,6 +209,12 @@ export function BookingFlow({
 
   const today = useSyncExternalStore(subscribeNever, browserToday, serverToday);
   const [availability, setAvailability] = useState<DayAvailability | null>(null);
+  /** The month the calendar shows, once the client has moved it; until then, the chosen date's or the first open one's. */
+  const [shownMonth, setShownMonth] = useState("");
+  /** Which days of a month the chosen length fits on, for the studios chosen (`key`): from `/api/availability/month`. */
+  const [monthDays, setMonthDays] = useState<{ key: string; days: Record<string, boolean> } | null>(null);
+  /** The latest month asked for: an answer to an earlier question is not shown over it. */
+  const monthRequest = useRef(0);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -189,6 +245,12 @@ export function BookingFlow({
   const leadHours = noticeHours(settings, photography);
   /** The first date that can have a free time at all: whole days of notice from today. */
   const firstDate = today ? addDays(today, Math.floor(leadHours / 24)) : "";
+  // The month calendar (the owner's brief of 2026-11-22, item 3): from the first month with a day that can be booked to
+  // the month bookings open up to.
+  const firstMonth = firstDate.slice(0, 7);
+  const lastMonth = today ? addDays(today, settings.maxAdvanceDays).slice(0, 7) : "";
+  const month = shownMonth || (date ? date.slice(0, 7) : firstMonth);
+  const monthKeyOf = (forMonth: string, minutes: number) => `${forMonth}|${studioIds.join(",")}|${minutes}|${photography ? 1 : 0}`;
 
   // ── What can be chosen ─────────────────────────────────────────────────────
   /** The session packages of the chosen studio, shortest first. Only in the photography flow. */
@@ -202,13 +264,19 @@ export function BookingFlow({
 
   const durations = useMemo(() => {
     if (photography) return packages.map((p) => p.durationMinutes);
-    if (mode === "studio") return bookableDurations(studioIds, dayType, rules);
+    if (mode === "studio") {
+      // The length is chosen before the day: every length the studios are priced for on some kind of day. Once a day is
+      // chosen, those of its kind of day, which the month calendar only offers days for.
+      if (date) return bookableDurations(studioIds, dayType, rules);
+      return [...new Set([...bookableDurations(studioIds, "weekday", rules), ...bookableDurations(studioIds, "weekend", rules)])].sort((a, b) => a - b);
+    }
     const all = new Set(rules.filter((r) => r.dayType === dayType).map((r) => r.durationMinutes));
     return [...all].sort((a, b) => a - b);
-  }, [photography, packages, mode, studioIds, dayType, rules]);
+  }, [photography, packages, mode, studioIds, date, dayType, rules]);
 
   /** A chosen duration stops counting once the current selection no longer offers it. */
   const duration = durations.includes(durationChoice) ? durationChoice : 0;
+  const shownDays = monthDays && monthDays.key === monthKeyOf(month, duration) ? monthDays.days : null;
   const session = photography ? (packages.find((p) => p.durationMinutes === duration) ?? null) : null;
 
   const slotOptions: SlotOptions | null = useMemo(
@@ -250,6 +318,16 @@ export function BookingFlow({
   }, [availability, slotOptions, studioIds, photography]);
 
   const offeredTimes = mode === "studio" ? startsForChosenStudios : (grid?.times ?? []);
+  // Join the waitlist (the owner's brief of 2026-11-22, item 4): in the studio-first flow, for a day that can be booked,
+  // inside the hours every chosen studio is open.
+  const waitlistHours = (() => {
+    if (mode !== "studio" || !availability || availability.problem || duration <= 0 || studioIds.length === 0) return null;
+    const days = studioIds.map((id) => availability.days.find((day) => day.studioId === id));
+    if (days.some((day) => !day || day.openMinute === null || day.closeMinute === null)) return null;
+    const open = Math.max(...days.map((day) => day!.openMinute!));
+    const close = Math.min(...days.map((day) => day!.closeMinute!));
+    return close - open >= duration ? { open, close } : null;
+  })();
   // The times' one Tab stop: the time the keyboard last reached, else the chosen one, else the first.
   const timeStop =
     timeFocus !== null && offeredTimes.includes(timeFocus) ? timeFocus : start !== null && offeredTimes.includes(start) ? start : (offeredTimes[0] ?? null);
@@ -263,8 +341,17 @@ export function BookingFlow({
   // Extra guests these studios can take: each studio's own, and the owners' limit for studios booked together.
   const guestsAllowed = extraGuestsFor(catalog, studioIds);
   /** The most of an add-on this booking can take. */
-  const mostOf = (addon: (typeof catalog.addons)[number]) => (addon.kind === "people" ? Math.min(addon.maxQuantity, guestsAllowed) : addon.maxQuantity);
-  const studioOffer = multiStudioOffer(catalog);
+  /** The time the props' free counts were read for. */
+  const propsKey = `${date}|${start}|${duration}`;
+  /** How many of a prop are free at the chosen time; undefined for an add-on with no limit, or before they are read. */
+  const freeOf = (addonId: string) => (propsFreeNow && propsFreeNow.key === propsKey ? propsFreeNow.free[addonId] : undefined);
+  /** Whether a prop is away on the chosen day (marked unavailable for a while in Props & Resources). */
+  const awayOf = (addonId: string) => propsFreeNow !== null && propsFreeNow.key === propsKey && propsFreeNow.away.includes(addonId);
+  /** Why a prop cannot be taken, or fewer of it, at the chosen time. */
+  const takenText = (addonId: string) => (awayOf(addonId) ? "Not available on this day." : "Already reserved at this time.");
+  const mostOf = (addon: (typeof catalog.addons)[number]) =>
+    Math.min(addon.kind === "people" ? Math.min(addon.maxQuantity, guestsAllowed) : addon.maxQuantity, freeOf(addon.id) ?? Number.POSITIVE_INFINITY);
+  const studioOffer = multiStudioSaving(catalog);
   const combinationError = studioCombinationError(catalog.studios, studioIds);
 
   // A code is tied to an email address, so it stops applying if the address changes.
@@ -370,6 +457,62 @@ export function BookingFlow({
     }
   }
 
+  /** Read which days of a month a booking of the chosen studios fits on, for `minutes`. */
+  async function fetchMonth(forMonth: string, minutes: number) {
+    if (mode !== "studio" || !forMonth || minutes <= 0 || studioIds.length === 0) return;
+    const request = ++monthRequest.current;
+    const key = monthKeyOf(forMonth, minutes);
+    try {
+      const response = await fetch(
+        `/api/availability/month?month=${forMonth}&studios=${studioIds.join(",")}&duration=${minutes}${photography ? "&photography=1" : ""}`,
+        { cache: "no-store" },
+      );
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; days?: Record<string, boolean> };
+      if (request === monthRequest.current) setMonthDays({ key, days: response.ok && data.ok && data.days ? data.days : {} });
+    } catch {
+      if (request === monthRequest.current) setMonthDays({ key, days: {} });
+    }
+  }
+
+  /** The booking the policies step's questions and agreements were read for. */
+  const formsKey = `${studioIds.join(",")}|${date}|${photography ? 1 : 0}`;
+
+  /** Read how many of each prop are free at the chosen time (`/api/props-free`). The booking checks again. */
+  async function fetchPropsFree() {
+    if (!date || start === null || duration <= 0) return;
+    const key = propsKey;
+    try {
+      const response = await fetch(`/api/props-free?date=${date}&start=${start}&duration=${duration}`, { cache: "no-store" });
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; free?: Record<string, number>; away?: string[] };
+      if (response.ok && data.ok) setPropsFreeNow({ key, free: data.free ?? {}, away: data.away ?? [] });
+    } catch {
+      // Without the counts the add-ons are offered as usual, and the booking says if a prop is taken.
+    }
+  }
+
+  /** Read the questions and agreements a booking of these studios on this day meets (`/api/checkout-forms`). */
+  async function fetchForms() {
+    const key = formsKey;
+    try {
+      const response = await fetch(`/api/checkout-forms?studios=${studioIds.join(",")}&date=${date}${photography ? "&photography=1" : ""}`, { cache: "no-store" });
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; questions?: FormQuestion[]; agreements?: FormAgreement[] };
+      if (!response.ok || !data.ok) throw new Error();
+      setForms({ key, questions: data.questions ?? [], agreements: data.agreements ?? [] });
+    } catch {
+      setError("Could not load the studio's booking form. Please try again.");
+    }
+  }
+
+  /** Whether the policies box is read to its end, or so short that there is nothing to scroll. */
+  function noticeEnd(box: HTMLDivElement | null) {
+    if (box && box.scrollTop + box.clientHeight >= box.scrollHeight - 4) setReadToEnd(true);
+  }
+
+  function showMonth(next: string) {
+    setShownMonth(next);
+    void fetchMonth(next, duration);
+  }
+
   // ── Navigation ─────────────────────────────────────────────────────────────
   function go(index: number, options: { refetch?: boolean } = {}) {
     requestIdRef.current = null;
@@ -381,6 +524,12 @@ export function BookingFlow({
     if ((target === "time" || target === "studios") && date && (options.refetch || availability?.date !== date)) {
       void fetchAvailability(date);
     }
+    // The month calendar is read fresh on each arrival too: bookings change while the client looks.
+    if (target === "when" && duration > 0) void fetchMonth(month, duration);
+    // The props free at the chosen time are read on each arrival at the details, where the add-ons are.
+    if (target === "details") void fetchPropsFree();
+    // The booking form and agreements are read again for each booking they are shown for.
+    if (target === "policies" && (options.refetch || forms?.key !== formsKey)) void fetchForms();
     topRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" });
   }
 
@@ -411,6 +560,11 @@ export function BookingFlow({
 
   function chooseDate(value: string) {
     setDateInput(value);
+    // A date typed in another month moves the calendar there.
+    if (isIsoDate(value) && value.slice(0, 7) !== month) {
+      setShownMonth(value.slice(0, 7));
+      void fetchMonth(value.slice(0, 7), duration);
+    }
     setStart(null);
     setAvailability(null);
     if (mode === "time") setStudioIds([]);
@@ -419,6 +573,7 @@ export function BookingFlow({
   function chooseDuration(minutes: number) {
     setDuration(minutes);
     setStart(null);
+    void fetchMonth(month, minutes);
     if (mode === "time") setStudioIds([]);
   }
 
@@ -444,8 +599,15 @@ export function BookingFlow({
         // The booking's own rule (src/lib/parse.ts): an address taken here is never refused at "Confirm & pay".
         if (!EMAIL_RULE.test(email.trim())) return "Please enter a valid email address.";
         if (phone.trim().length < 7) return "Please enter your phone number.";
+        return "";
+      case "policies": {
+        if (!forms || forms.key !== formsKey) return "The studio's booking form is still loading.";
+        const missing = forms.questions.find((question) => question.required && (question.kind === "checkbox" ? answers[question.id] !== true : !String(answers[question.id] ?? "").trim()));
+        if (missing) return `Please answer: ${missing.label}`;
+        if (!readToEnd) return "Please read the policies to the end.";
         if (!terms) return "Please agree to the studio policies to continue.";
         return "";
+      }
       default:
         return "";
     }
@@ -490,6 +652,9 @@ export function BookingFlow({
           promoCode: member ? member.code : promo && !price.promoMisfit ? promo.code : undefined,
           photography,
           acceptTerms: true,
+          // The versions read on the policies step, and the answers given there (the owner's brief of 2026-11-22, item 6).
+          accepted: [...(policies ? [policiesKey(policies.versionId)] : []), ...(forms?.agreements ?? []).map((agreement) => agreementKey(agreement.versionId))],
+          answers: Object.fromEntries(Object.entries(answers).filter(([id]) => forms?.questions.some((question) => question.id === id))),
           paymentToken,
           expectedTotalCents: price.totalCents,
           requestId: (requestIdRef.current ??= newRequestId()),
@@ -525,6 +690,15 @@ export function BookingFlow({
       if (data.code === "invalid_code") {
         setApplied(null);
         go(steps.indexOf("details"));
+      }
+      // A prop chosen was taken by another booking at that time: back to the add-ons, with what is free now.
+      if (data.code === "prop_taken") go(steps.indexOf("details"));
+      // The policies or an agreement were published again meanwhile: the page shows them as they are now, read again.
+      if (data.code === "policies_changed") {
+        router.refresh();
+        setTerms(false);
+        setReadToEnd(false);
+        go(steps.indexOf("policies"), { refetch: true });
       }
       setError(
         data.code === "invalid_price"
@@ -653,6 +827,69 @@ export function BookingFlow({
     return following ? `Next: ${STEP_LABEL[following]}` : undefined;
   };
 
+  // The date step's two choices, which the studio-first flow shows length first (the owner's brief of 2026-11-22: Select
+  // Studio, then Duration, then Date & Time) and the time-first flow date first.
+  const dateField = (
+    <div className="form-group">
+      <label className="form-label" htmlFor="booking-date">
+        Date
+      </label>
+      <input
+        id="booking-date"
+        type="date"
+        className="form-control"
+        value={dateInput}
+        min={firstDate || undefined}
+        max={today ? addDays(today, settings.maxAdvanceDays) : undefined}
+        onChange={(event) => chooseDate(event.target.value)}
+      />
+    </div>
+  );
+  const lengthChoice = photography ? (
+    <div className="form-group">
+      <span className="form-label">Session</span>
+      <div className="package-list">
+        {packages.map((pack) => (
+          <button
+            type="button"
+            key={pack.id}
+            className={`package-btn${duration === pack.durationMinutes ? " selected" : ""}`}
+            aria-pressed={duration === pack.durationMinutes}
+            onClick={() => chooseDuration(pack.durationMinutes)}
+          >
+            <strong>
+              {durationLabel(pack.durationMinutes)} · {formatCents(pack.priceCents)}
+            </strong>
+            <span>Studio included. {pack.includes}.</span>
+          </button>
+        ))}
+        {packages.length === 0 && <p style={{ fontSize: ".85rem" }}>No sessions are offered in this studio.</p>}
+      </div>
+      <p style={{ fontSize: ".8rem", margin: ".75rem 0 0" }}>
+        Every session is shot on a professional camera by our in-house photographer. Your edited images are delivered
+        within 7 to 14 days.
+      </p>
+    </div>
+  ) : (
+    <div className="form-group">
+      <span className="form-label">Duration</span>
+      <div className="duration-grid">
+        {durations.map((minutes) => (
+          <button
+            type="button"
+            key={minutes}
+            className={`duration-btn${duration === minutes ? " selected" : ""}`}
+            aria-pressed={duration === minutes}
+            onClick={() => chooseDuration(minutes)}
+          >
+            {durationLabel(minutes).replace(" hours", " hr").replace(" hour", " hr").replace(/ minutes?/, " min")}
+          </button>
+        ))}
+        {durations.length === 0 && <p style={{ fontSize: ".85rem" }}>No durations are offered for this selection.</p>}
+      </div>
+    </div>
+  );
+
   return (
     <div className="wizard-container" ref={topRef} style={{ scrollMarginTop: 90 }}>
       {!photography && (
@@ -753,11 +990,7 @@ export function BookingFlow({
               );
             })}
           </div>
-          {!photography && (
-            <p style={{ fontSize: ".85rem" }}>
-              Paris is included in every bundle. {studioOffer && `${studioOffer}.`}
-            </p>
-          )}
+          {!photography && studioOffer && <p style={{ fontSize: ".85rem" }}>{studioOffer}.</p>}
           {actions(nextLabelFor("studios"))}
         </div>
       )}
@@ -772,67 +1005,28 @@ export function BookingFlow({
               ? `${photography ? "Sessions" : "Bookings"} open ${hoursInWords(leadHours)} to ${count(settings.maxAdvanceDays, "day")} ahead.`
               : `Bookings open up to ${count(settings.maxAdvanceDays, "day")} ahead.`}
           </p>
-          <div className="form-grid">
-            <div className="form-group">
-              <label className="form-label" htmlFor="booking-date">
-                Date
-              </label>
-              <input
-                id="booking-date"
-                type="date"
-                className="form-control"
-                value={dateInput}
-                min={firstDate || undefined}
-                max={today ? addDays(today, settings.maxAdvanceDays) : undefined}
-                onChange={(event) => chooseDate(event.target.value)}
-              />
+          {mode === "studio" ? (
+            <div className="when-studio">
+              {lengthChoice}
+              <div className="form-group">
+                <span className="form-label">Day</span>
+                {duration > 0 && month ? (
+                  <MonthCalendar month={month} firstMonth={firstMonth} lastMonth={lastMonth} days={shownDays} selected={date} onMonth={showMonth} onChoose={chooseDate} />
+                ) : (
+                  <p className="month-cal-wait">Choose {photography ? "a session" : "a duration"} to see the days it fits on.</p>
+                )}
+              </div>
+              <div className="month-cal-typed">
+                <p>Or type the date:</p>
+                {dateField}
+              </div>
             </div>
-            {photography && (
-              <div className="form-group">
-                <span className="form-label">Session</span>
-                <div className="package-list">
-                  {packages.map((pack) => (
-                    <button
-                      type="button"
-                      key={pack.id}
-                      className={`package-btn${duration === pack.durationMinutes ? " selected" : ""}`}
-                      aria-pressed={duration === pack.durationMinutes}
-                      onClick={() => chooseDuration(pack.durationMinutes)}
-                    >
-                      <strong>
-                        {durationLabel(pack.durationMinutes)} · {formatCents(pack.priceCents)}
-                      </strong>
-                      <span>Studio included. {pack.includes}.</span>
-                    </button>
-                  ))}
-                  {packages.length === 0 && <p style={{ fontSize: ".85rem" }}>No sessions are offered in this studio.</p>}
-                </div>
-                <p style={{ fontSize: ".8rem", margin: ".75rem 0 0" }}>
-                  Every session is shot on a professional camera by our in-house photographer. Your edited images are
-                  delivered within 7 to 14 days.
-                </p>
-              </div>
-            )}
-            {!photography && (
-              <div className="form-group">
-                <span className="form-label">Duration</span>
-                <div className="duration-grid">
-                  {durations.map((minutes) => (
-                    <button
-                      type="button"
-                      key={minutes}
-                      className={`duration-btn${duration === minutes ? " selected" : ""}`}
-                      aria-pressed={duration === minutes}
-                      onClick={() => chooseDuration(minutes)}
-                    >
-                      {durationLabel(minutes).replace(" hours", " hr").replace(" hour", " hr").replace(/ minutes?/, " min")}
-                    </button>
-                  ))}
-                  {durations.length === 0 && <p style={{ fontSize: ".85rem" }}>No durations are offered for this selection.</p>}
-                </div>
-              </div>
-            )}
-          </div>
+          ) : (
+            <div className="form-grid">
+              {dateField}
+              {lengthChoice}
+            </div>
+          )}
           {mode === "studio" && price && (
             <div className="price-summary">
               {price.studioLines.map((line) => (
@@ -914,6 +1108,19 @@ export function BookingFlow({
                 </div>
               )}
             </>
+          )}
+          {/* Outside the times, which are read again while it stays: it keeps what it says when they reload. */}
+          {waitlistHours && (
+            <WaitlistJoin
+              key={`${studioIds.join(",")}|${date}|${duration}`}
+              studioIds={studioIds}
+              photography={photography}
+              durationMinutes={duration}
+              date={date}
+              openMinute={waitlistHours.open}
+              closeMinute={waitlistHours.close}
+              onFreeNow={() => void fetchAvailability(date)}
+            />
           )}
           {actions(nextLabelFor("time"))}
         </div>
@@ -1000,6 +1207,7 @@ export function BookingFlow({
                         </option>
                       ))}
                     </select>
+                    {addon.picture && <AddonPicture picture={addon.picture} />}
                     <span className="addon-text">
                       <span className="addon-head">
                         <label htmlFor={`addon-${addon.id}`}>
@@ -1009,7 +1217,11 @@ export function BookingFlow({
                       </span>
                       {addon.description && <span className="addon-description">{addon.description}</span>}
                       <span className="addon-description" id={`addon-${addon.id}-limit`}>
-                        {addon.kind !== "people"
+                        {freeOf(addon.id) !== undefined && freeOf(addon.id)! < addon.maxQuantity
+                          ? freeOf(addon.id) === 0
+                            ? takenText(addon.id)
+                            : `Up to ${freeOf(addon.id)}: the others are reserved at this time.`
+                          : addon.kind !== "people"
                           ? `Up to ${addon.maxQuantity}.`
                           : guestsAllowed > 0
                             ? `Up to ${count(guestsAllowed, "extra guest")} with ${studioIds.length > 1 ? "these studios" : "this studio"}.`
@@ -1023,9 +1235,11 @@ export function BookingFlow({
                 <label className="addon-row" key={addon.id}>
                   <input
                     type="checkbox"
-                    checked={(addonCounts[addon.id] ?? 0) > 0}
+                    checked={Math.min(addonCounts[addon.id] ?? 0, mostOf(addon)) > 0}
+                    disabled={mostOf(addon) === 0}
                     onChange={(event) => setAddonCounts((current) => ({ ...current, [addon.id]: event.target.checked ? 1 : 0 }))}
                   />
+                  {addon.picture && <AddonPicture picture={addon.picture} />}
                   {/* The name and its price on one line, which puts the price under the name when both do not fit; the description below. */}
                   <span className="addon-text">
                     <span className="addon-head">
@@ -1033,6 +1247,7 @@ export function BookingFlow({
                       <span className="addon-price">{formatCents(addon.priceCents)}</span>
                     </span>
                     {addon.description && <span className="addon-description">{addon.description}</span>}
+                    {freeOf(addon.id) === 0 && <span className="addon-description addon-taken">{takenText(addon.id)}</span>}
                   </span>
                 </label>
                 ),
@@ -1097,26 +1312,78 @@ export function BookingFlow({
           </div>
 
           {summary}
-
-          <label className="addon-row" style={{ borderBottom: "none" }}>
-            <input
-              type="checkbox"
-              checked={terms}
-              onChange={(event) => {
-                setTerms(event.target.checked);
-                setError(""); // the usual reason an error is showing on this step
-              }}
-            />
-            <span>
-              I have read and agree to the{" "}
-              <Link href="/policies" target="_blank">
-                studio policies
-              </Link>
-              , including the cancellation and rescheduling rules. I will check the date and time in my confirmation
-              email; the studio is open by appointment only.
-            </span>
-          </label>
           {actions(nextLabelFor("details"))}
+        </div>
+      )}
+
+      {/* ── Policies and the booking form (the owner's brief of 2026-11-22, item 6) ── */}
+      {step === "policies" && (
+        <div className="wizard-panel active">
+          <h3 tabIndex={-1} style={{ fontSize: "1.6rem", marginBottom: ".5rem" }}>
+            Policies &amp; booking form
+          </h3>
+          {!forms || forms.key !== formsKey ? (
+            <div style={{ textAlign: "center", padding: "2rem" }}>
+              <div className="spinner" />
+            </div>
+          ) : (
+            <>
+              {forms.questions.length > 0 && (
+                <fieldset className="intake-form">
+                  <legend>A few questions</legend>
+                  {forms.questions.map((question) => (
+                    <IntakeField
+                      key={question.id}
+                      question={question}
+                      value={answers[question.id]}
+                      onChange={(value) => {
+                        setAnswers((current) => ({ ...current, [question.id]: value }));
+                        setError("");
+                      }}
+                    />
+                  ))}
+                </fieldset>
+              )}
+              <p className="text-muted" style={{ marginBottom: ".5rem" }}>
+                Please read the studio policies and booking terms to the end.
+              </p>
+              <div
+                className="policies-box"
+                ref={(box) => {
+                  policiesBox.current = box;
+                  noticeEnd(box);
+                }}
+                onScroll={(event: UIEvent<HTMLDivElement>) => noticeEnd(event.currentTarget)}
+                tabIndex={0}
+                role="region"
+                aria-label="Studio policies and booking terms"
+              >
+                {policies && <div className="rich-text" dangerouslySetInnerHTML={{ __html: policies.html }} />}
+                {forms.agreements.map((agreement) => (
+                  <section key={agreement.versionId} className="policies-agreement">
+                    <h4>{agreement.title}</h4>
+                    {agreement.body.split(/\n{2,}/).map((paragraph, index) => (
+                      <p key={index}>{paragraph}</p>
+                    ))}
+                  </section>
+                ))}
+              </div>
+              <label className={`policies-agree${readToEnd ? "" : " policies-agree-locked"}`}>
+                <input
+                  type="checkbox"
+                  checked={terms}
+                  disabled={!readToEnd}
+                  onChange={(event) => {
+                    setTerms(event.target.checked);
+                    setError(""); // the usual reason an error is showing on this step
+                  }}
+                />
+                <span>I have read and agree to The Visuals Photo Studio&rsquo;s policies and booking terms.</span>
+              </label>
+              {!readToEnd && <p className="policies-hint">Scroll to the end of the policies to agree.</p>}
+            </>
+          )}
+          {actions(nextLabelFor("policies"))}
         </div>
       )}
 
@@ -1182,4 +1449,65 @@ export function BookingFlow({
       )}
     </div>
   );
+}
+
+/** One question of the intake form, as its kind asks it. */
+function IntakeField({ question, value, onChange }: { question: FormQuestion; value: string | boolean | undefined; onChange: (value: string | boolean) => void }) {
+  const id = `intake-${question.id}`;
+  const label = (
+    <>
+      {question.label}
+      {question.required && " *"}
+    </>
+  );
+  const help = question.help ? <span className="intake-help">{question.help}</span> : null;
+  if (question.kind === "checkbox") {
+    return (
+      <label className="intake-check">
+        <input type="checkbox" checked={value === true} onChange={(event) => onChange(event.target.checked)} />
+        <span>
+          {label}
+          {help}
+        </span>
+      </label>
+    );
+  }
+  if (question.kind === "choice") {
+    return (
+      <fieldset className="intake-choice">
+        <legend>{label}</legend>
+        {help}
+        {question.options.map((option) => (
+          <label key={option} className="intake-option">
+            <input type="radio" name={id} value={option} checked={value === option} onChange={() => onChange(option)} /> {option}
+          </label>
+        ))}
+      </fieldset>
+    );
+  }
+  return (
+    <div className="form-group">
+      <label className="form-label" htmlFor={id}>
+        {label}
+      </label>
+      {help}
+      {question.kind === "dropdown" ? (
+        <select id={id} className="form-control" value={typeof value === "string" ? value : ""} onChange={(event) => onChange(event.target.value)}>
+          <option value="">Choose…</option>
+          {question.options.map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <textarea id={id} className="form-control" rows={2} maxLength={1000} value={typeof value === "string" ? value : ""} onChange={(event) => onChange(event.target.value)} />
+      )}
+    </div>
+  );
+}
+
+/** An add-on's picture beside its name (Props & Resources), small: the name and price stay the row's first words. */
+function AddonPicture({ picture }: { picture: NonNullable<Catalog["addons"][number]["picture"]> }) {
+  return <Image className="addon-picture" src={picture.url} width={picture.width} height={picture.height} alt={picture.alt} sizes="64px" />;
 }

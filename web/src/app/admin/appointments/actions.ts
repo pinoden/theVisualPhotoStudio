@@ -50,14 +50,28 @@ export async function setLabelAction(formData: FormData): Promise<void> {
   redirect(withMessage(back, "error", why));
 }
 
-/** Move a booking to a new time. `moveBooking` checks the viewer, the booking and the new time itself. */
+/** The calendar at `back` (an address `backTo` let through), on another day or with other fields: for the pop-up's move. */
+function calendarAt(back: string, fields: Record<string, string | null>): string {
+  const query = new URLSearchParams(back.slice(back.indexOf("?") + 1));
+  for (const [name, value] of Object.entries(fields)) {
+    if (value === null) query.delete(name);
+    else query.set(name, value);
+  }
+  return `/admin/calendar?${query}`;
+}
+
+/**
+ * Move a booking to a new time. `moveBooking` checks the viewer, the booking and the new time itself. From the
+ * calendar's pop-up (`back` a calendar address), it comes back to the calendar on the new day, the appointment open.
+ */
 export async function moveBookingAction(formData: FormData): Promise<void> {
   const ref = formText(formData.get("ref"));
+  const fromCalendar = backTo(formData, ref).startsWith("/admin/calendar?") ? backTo(formData, ref) : null;
   const page = /^VS-[0-9A-Z]{6}$/.test(ref) ? `/admin/appointments/${ref}` : "/admin/calendar";
-  const viewer = await requireStaff(page);
+  const viewer = await requireStaff(fromCalendar ?? page);
   const date = formText(formData.get("date"));
   // After a refusal the form comes back on the date that was being tried.
-  const retry = isIsoDate(date) ? `${page}?move=${date}` : page;
+  const retry = !isIsoDate(date) ? (fromCalendar ?? page) : fromCalendar ? calendarAt(fromCalendar, { move: date }) : `${page}?move=${date}`;
   const startMinute = intInRange(formText(formData.get("startMinute")), 0, 1439);
   if (startMinute === null) redirect(withMessage(retry, "error", "Choose a start time."));
 
@@ -70,7 +84,8 @@ export async function moveBookingAction(formData: FormData): Promise<void> {
   );
   if (!result.ok) redirect(withMessage(retry, "error", result.message));
   flushEmailsSoon();
-  redirect(withMessage(page, "notice", `Moved to ${formatInstant(result.startAt)}. The client has been emailed.`));
+  const moved = fromCalendar ? calendarAt(fromCalendar, { date, move: null, notice: null, error: null }) : page;
+  redirect(withMessage(moved, "notice", `Moved to ${formatInstant(result.startAt)}. The client has been emailed.`));
 }
 
 /** Make a booking for a client from the admin. Nothing is charged online. */

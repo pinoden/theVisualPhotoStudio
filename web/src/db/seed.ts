@@ -69,7 +69,7 @@ const SESSION_INCLUDES: Record<number, string> = {
 const STUDIOS = [
   {
     slug: "blanche",
-    color: "#4f7cac",
+    color: "#3b8f55",
     name: "Studio Blanche",
     tagline: "A modern, all-white space with sleek design.",
     description:
@@ -86,7 +86,7 @@ const STUDIOS = [
   },
   {
     slug: "dayglow",
-    color: "#c9851a",
+    color: "#2f6fc2",
     name: "Studio Dayglow",
     tagline: "A natural, boho-style studio with warm vibes.",
     description:
@@ -102,7 +102,7 @@ const STUDIOS = [
   },
   {
     slug: "paris",
-    color: "#b4517b",
+    color: "#7a4fc2",
     name: "Studio Paris",
     tagline: "A romantic space with vintage charm.",
     description:

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_SETTINGS } from "@/server/settings";
-import { multiStudioOffer } from "./catalog-view";
+import { multiStudioOffer, multiStudioSaving } from "./catalog-view";
 import { multiStudioPercentFor } from "./domain/pricing";
 
 const offer = (table: Record<number, number>) =>
@@ -40,5 +40,33 @@ describe("the sentence about booking several studios", () => {
         expect(covered, `${JSON.stringify(table)} with ${studios} studios`).toBe(percent > 0);
       }
     }
+  });
+});
+
+describe("the booking page's sentence about several studios (the owner's words of 2026-11-22)", () => {
+  const studios = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `s${i}` })) as never;
+  const saving = (table: Record<number, number>, n = 3) =>
+    multiStudioSaving({ settings: { ...DEFAULT_SETTINGS, multiStudioPercent: table }, studios: studios(n) });
+
+  it("says the numbers of studios in words, up to the studios the site has", () => {
+    expect(saving({ 2: 20, 3: 22 })).toBe("Save 20% when booking two studios and 22% when booking three studios");
+    expect(saving({ 2: 20, 3: 20 })).toBe("Save 20% when booking two or three studios");
+    expect(saving({ 2: 0, 3: 22 })).toBe("Save 22% when booking three studios");
+    expect(saving({ 2: 20, 3: 22 }, 4)).toBe("Save 20% when booking two studios and 22% when booking three or four studios");
+    expect(saving({ 2: 10, 3: 15, 4: 20 }, 5)).toBe(
+      "Save 10% when booking two studios, 15% when booking three studios and 20% when booking four or five studios",
+    );
+  });
+
+  it("promises no more than is charged, and says nothing when nothing is saved", () => {
+    expect(saving({ 2: 15, 3: 0 })).toBe("Save 15% when booking two studios");
+    expect(saving({})).toBe("");
+    expect(saving({ 2: 20, 3: 22 }, 1)).toBe("");
+  });
+
+  it("follows the default discount", () => {
+    expect(multiStudioSaving({ settings: DEFAULT_SETTINGS, studios: studios(3) })).toBe(
+      "Save 20% when booking two studios and 22% when booking three studios",
+    );
   });
 });

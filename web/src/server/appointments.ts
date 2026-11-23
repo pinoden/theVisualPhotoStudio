@@ -1,5 +1,7 @@
+import { formsOfBooking, type BookingForms } from "./booking-forms";
+import { propsProblem } from "./props";
 import { and, eq, sql } from "drizzle-orm";
-import { bookings, payments, photographerHolds, studioHolds } from "@/db/schema";
+import { bookingAddons, bookings, payments, photographerHolds, studioHolds } from "@/db/schema";
 import { PG_EXCLUSION_VIOLATION, pgErrorCode, type Db, type DbLike } from "@/db/client";
 import { combinedStarts, isStartFree } from "@/lib/domain/availability";
 import {
@@ -57,6 +59,10 @@ export interface Appointment {
   durationMinutes: number;
   studios: string[];
   customerName: string;
+  /** When the client ticked the studio policies, booking online; null for a booking the studio made (`termsAcceptedAt`). */
+  termsAcceptedAt: string | null;
+  /** What the client answered and accepted at checkout (src/server/booking-forms.ts). */
+  forms: BookingForms;
   /** Set on a photography session: what it includes. */
   photography: { includes: string } | null;
   /** Null unless the viewer may see contact details. */
@@ -147,6 +153,8 @@ export async function getAppointment(db: DbLike, viewer: AuthUser, ref: string, 
     durationMinutes: booking.durationMinutes,
     studios: view.studios.map((studio) => studio.name),
     customerName: booking.customerName,
+    termsAcceptedAt: booking.termsAcceptedAt ? booking.termsAcceptedAt.toISOString() : null,
+    forms: await formsOfBooking(db, booking.id),
     photography: view.photography,
     customerPhone: may("seeContact") ? booking.customerPhone : null,
     customerEmail: may("seeContact") ? booking.customerEmail : null,
@@ -469,6 +477,10 @@ export async function moveBooking(
       if (booking.endRequest) return refuse("not_movable", waitingBlocksMove(booking.endRequest));
       // A charge added since the check above: adding one locks the same row (`addCharge`).
       if (await hasCharges(tx, booking.id)) return refuse("not_movable", CHARGES_BLOCK_MOVE);
+      // Its props must be free at the new time too (src/server/props.ts): their rows are locked until the move is written.
+      const props = await tx.select({ addonId: bookingAddons.addonId, quantity: bookingAddons.quantity }).from(bookingAddons).where(eq(bookingAddons.bookingId, booking.id));
+      const propProblem = await propsProblem(tx, props, startAt, endAt, booking.id);
+      if (propProblem) return refuse("slot_taken", propProblem);
       // A day of the other kind prices the booking for that day (follow-up 5): worked out on the locked row.
       const price = await priceOnNewDay(tx, booking, input.date, catalog);
       if (price.kind === "refused") return refuse("no_price", price.message);

@@ -6,6 +6,7 @@ import {
   DEFAULT_FRAME,
   FRAME_LIMITS,
   isInternalHref,
+  menuLabel,
   parseFrame,
   parseHref,
   telHref,
@@ -25,10 +26,27 @@ describe("the frame the site was built with", () => {
   });
 
   it("has the menu and the footer the designer made", () => {
-    expect(DEFAULT_FRAME.menu.map((item) => item.label)).toEqual(["Our Studios", "Rates", "Info", "Contact", "My Bookings"]);
+    expect(DEFAULT_FRAME.menu.map((item) => item.label)).toEqual(["Our Studios", "Rates", "Info", "Contact", "Log In"]);
     expect(DEFAULT_FRAME.menu[2].children.map((link) => link.href)).toEqual(["/faq", "/services", "/policies", "/rates"]);
     expect(DEFAULT_FRAME.footer.columns.map((column) => column.title)).toEqual(["Studios", "Info"]);
     expect(copyrightLine(DEFAULT_FRAME)).toBe("© The Visuals Photo Studio. All rights reserved.");
+  });
+});
+
+describe("the menu's Log In (the owner's brief of 2026-11-22)", () => {
+  const logIn = DEFAULT_FRAME.menu.find((item) => item.href === "/account")!;
+
+  it("says Log In to a visitor and My Account once they are signed in", () => {
+    expect(logIn.label).toBe("Log In");
+    expect(menuLabel(logIn, false)).toBe("Log In");
+    expect(menuLabel(logIn, true)).toBe("My Account");
+    expect(menuLabel({ label: " log in ", href: "/account" }, true)).toBe("My Account");
+  });
+
+  it("keeps the owners' own words, and every other link, as they are", () => {
+    expect(menuLabel({ label: "Your bookings", href: "/account" }, true)).toBe("Your bookings");
+    expect(menuLabel({ label: "Log In", href: "/contact" }, true)).toBe("Log In");
+    expect(menuLabel({ label: "Contact", href: "/contact" }, true)).toBe("Contact");
   });
 });
 

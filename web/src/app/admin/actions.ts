@@ -5,16 +5,16 @@ import { redirect } from "next/navigation";
 import { getDb } from "@/db/client";
 import { isAddonKind } from "@/lib/addon-kinds";
 import { count } from "@/lib/words";
+import { createBlocks, removeBlocks, updateBlocks, type BlockPlan } from "@/server/blocked-time";
+import { loadCatalog } from "@/server/catalog";
 import { dollarsToCents, formText, hhmmToMinutes, intInRange } from "@/lib/parse";
 import { ADMIN_LEVELS, ATTENDANT_SWITCH_KEYS, isAdminLevel, MANAGER_SWITCH_KEYS } from "@/lib/abilities";
 import { formatCents } from "@/lib/domain/pricing";
 import { durationLabel } from "@/lib/domain/time";
 import {
   addStaff,
-  createBlock,
   createManualCode,
   PRICE_MAX_CENTS,
-  removeBlock,
   removeStaff,
   saveAddon,
   savePrice,
@@ -42,6 +42,7 @@ import {
   MONEY_SETTING_RANGES,
   NUMBER_SETTING_RANGES,
   saveAccessInstructions,
+  saveContactInbox,
   saveSetting,
   switchLoyalty,
   type MoneySettingKey,
@@ -256,26 +257,52 @@ export async function saveHoursAction(formData: FormData): Promise<void> {
   done("/admin/hours", "Opening hours saved.");
 }
 
-export async function createBlockAction(formData: FormData): Promise<void> {
-  await requireAbility("blockTime", "/admin/hours");
-  const startMinute = hhmmToMinutes(text(formData, "start"));
-  const endMinute = hhmmToMinutes(text(formData, "end"));
-  if (startMinute === null || endMinute === null) failed("/admin/hours", "Enter a start and an end time.");
-  const result = await createBlock(await getDb(), {
-    studioIds: formData.getAll("studio").filter((v): v is string => typeof v === "string"),
-    date: text(formData, "date"),
-    startMinute,
-    endMinute,
+/** A plan of blocked time from the form of Availability & Blocked Time (src/server/blocked-time.ts). */
+async function blockPlanFrom(formData: FormData): Promise<BlockPlan> {
+  // "Select All Studios": every studio offered, whichever boxes are ticked.
+  const all = formData.get("allStudios") === "1";
+  const studioIds = all
+    ? (await loadCatalog(await getDb())).studios.map((studio) => studio.id)
+    : formData.getAll("studio").filter((value): value is string => typeof value === "string");
+  const wholeDay = formData.get("wholeDay") === "1";
+  return {
+    studioIds,
+    from: text(formData, "from"),
+    to: text(formData, "to"),
+    wholeDay,
+    startMinute: wholeDay ? 0 : (hhmmToMinutes(text(formData, "start")) ?? -1),
+    endMinute: wholeDay ? 0 : (hhmmToMinutes(text(formData, "end")) ?? -1),
+    weekdays: formData.getAll("weekday").map((value) => Number(value)),
+    reason: text(formData, "reason"),
     note: text(formData, "note"),
-  });
-  if (!result.ok) failed("/admin/hours", result.message);
-  done("/admin/hours", "Time blocked.");
+  };
 }
 
-export async function removeBlockAction(formData: FormData): Promise<void> {
-  await requireAbility("blockTime", "/admin/hours");
-  await removeBlock(await getDb(), text(formData, "blockId"));
-  done("/admin/hours", "Block removed.");
+const availabilityBack = (month: string) => `/admin/availability${/^\d{4}-\d{2}$/.test(month) ? `?month=${month}` : ""}`;
+
+export async function createBlocksAction(formData: FormData): Promise<void> {
+  await requireAbility("blockTime", "/admin/availability");
+  const plan = await blockPlanFrom(formData);
+  const back = availabilityBack(plan.from.slice(0, 7));
+  const result = await createBlocks(await getDb(), plan, new Date());
+  if (!result.ok) failed(back, result.message);
+  done(back, `Blocked: ${count(result.days, "day")}. Clients can no longer book that time.`);
+}
+
+export async function updateBlocksAction(formData: FormData): Promise<void> {
+  await requireAbility("blockTime", "/admin/availability");
+  const plan = await blockPlanFrom(formData);
+  const key = text(formData, "key");
+  const back = availabilityBack(plan.from.slice(0, 7));
+  const result = await updateBlocks(await getDb(), key, plan, new Date());
+  if (!result.ok) failed(`${back}${back.includes("?") ? "&" : "?"}edit=${encodeURIComponent(key)}`, result.message);
+  done(back, `Changed: ${count(result.days, "day")} blocked.`);
+}
+
+export async function removeBlocksAction(formData: FormData): Promise<void> {
+  await requireAbility("blockTime", "/admin/availability");
+  const removed = await removeBlocks(await getDb(), text(formData, "key"));
+  done(availabilityBack(text(formData, "month")), removed > 0 ? `Removed: ${count(removed, "day")} no longer blocked.` : "That block was already removed.");
 }
 
 // ── Bookings ─────────────────────────────────────────────────────────────────
@@ -407,6 +434,16 @@ export async function saveSettingsAction(formData: FormData): Promise<void> {
     failed("/admin/settings", `Not saved: ${rejected.join("; ")}. Everything else was saved.`);
   }
   done("/admin/settings", "Settings saved.");
+}
+
+export async function saveContactInboxAction(formData: FormData): Promise<void> {
+  await requireOwner("/admin/settings");
+  const inbox = text(formData, "contactInbox");
+  if (!(await saveContactInbox(await getDb(), inbox))) failed("/admin/settings", "Not saved: that is not an email address.");
+  done(
+    "/admin/settings",
+    inbox.trim() === "" ? "Saved. Messages from the contact form go where the site's notices go." : `Saved. Messages from the contact form now go to ${inbox.trim().toLowerCase()}.`,
+  );
 }
 
 export async function saveAccessInstructionsAction(formData: FormData): Promise<void> {
@@ -543,6 +580,8 @@ export async function saveAddonAction(formData: FormData): Promise<void> {
     priceCents,
     kind,
     studioId: text(formData, "studioId") || null,
+    // A prop (the owner's admin brief of 2026-11-22, item 10): how many there are. Empty is no limit.
+    stock: text(formData, "stock") === "" ? null : Number(text(formData, "stock")),
   });
   if (!result.ok) failed("/admin/studios", result.message);
   updateTag(CATALOG_TAG);

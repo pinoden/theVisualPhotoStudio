@@ -166,6 +166,18 @@ export async function loadPublishedPage(db: DbLike, slug: string, now: Date): Pr
   return row?.published != null ? shown(db, row, parsePage(row.published), now) : null;
 }
 
+/**
+ * One published version of a page, from its history, as it reads with today's live values: the Policies page a
+ * booking accepted before its words were kept with the booking (src/server/booking-forms.ts). Null when it is gone.
+ */
+export async function loadPageVersion(db: DbLike, versionId: string, now: Date): Promise<ShownPage | null> {
+  if (!/^[0-9a-f-]{36}$/i.test(versionId)) return null;
+  const [version] = await db.select().from(siteVersions).where(eq(siteVersions.id, versionId)).limit(1);
+  if (!version) return null;
+  const [row] = await db.select().from(siteDocuments).where(eq(siteDocuments.id, version.documentId)).limit(1);
+  return row ? shown(db, row, parsePage(version.content), now) : null;
+}
+
 /** The page at an address as a preview shows it: its draft when it has one, otherwise what is published. */
 export async function loadPagePreview(db: DbLike, slug: string, now: Date): Promise<ShownPage | null> {
   const row = await rowBySlug(db, slug);

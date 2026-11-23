@@ -54,6 +54,16 @@ const frameworkNoise = (text: string) =>
 const CUT_OFF = "Load failed";
 
 /**
+ * A part of the site's own code that the page was still loading when it was left: WebKit cancels the download ("Load
+ * request cancelled" in the trace), and the loader reports "Failed to load chunk /_next/static/chunks/… from module …"
+ * as an error of the page, while the next page is on its way. Seen in CI's `webkit` on 2026-11-21: the page editor,
+ * made a moment before, was still loading its text editor's code (prosemirror-view) when the test opened `/admin`, and
+ * brought about again on 2026-11-22 in one run of three. Chromium says nothing then. Like `CUT_OFF`, it is left out
+ * only while the page is being left.
+ */
+const cutOffChunk = (message: string) => /^(ChunkLoadError: )?Failed to load chunk \/_next\/static\/chunks\/\S+ from module /.test(message);
+
+/**
  * WebKit's words for a fetch that a page started and then left before all of
  * its answer had come in: "Fetch API cannot load <address> due to access
  * control checks." (Playwright's WebKit cuts the message at the address's first
@@ -71,8 +81,9 @@ const cutOffPageData = (message: string) => /^\/?\/?localhost:\d+\/\S*[?&]_rsc=\
  * errors of its scripts, and errors in its console (unless `consoleErrors` is
  * false). Left out: the development build's own (`frameworkNoise`), requests
  * the console says failed (pages that answer "not found" on purpose log one,
- * and the tests check what the page shows), and a request cut off by leaving
- * the page for another (`CUT_OFF`, `cutOffPageData`). `where` follows "script
+ * and the tests check what the page shows), and a request or a part of the
+ * site's code cut off by leaving the page for another (`CUT_OFF`,
+ * `cutOffChunk`, `cutOffPageData`). `where` follows "script
  * error" in a report: " on an iPad".
  */
 export function watchBrowser(page: Page, report: (problem: string) => void, { where = "", consoleErrors = true } = {}) {
@@ -85,7 +96,7 @@ export function watchBrowser(page: Page, report: (problem: string) => void, { wh
     if (frame === page.mainFrame()) leaving = false;
   });
   page.on("pageerror", (error) => {
-    if (frameworkNoise(error.message) || cutOffPageData(error.message) || (leaving && error.message === CUT_OFF)) return;
+    if (frameworkNoise(error.message) || cutOffPageData(error.message) || (leaving && (error.message === CUT_OFF || cutOffChunk(error.message)))) return;
     report(`script error${where}: ${error.message}`);
   });
   if (!consoleErrors) return;
@@ -274,12 +285,37 @@ export const pickStudio = (page: Page, name: string) => onScreen(page.locator("l
 export const totalRow = (scope: Scope) => onScreen(scope.locator(".price-row.total"));
 
 export async function fillDetails(page: Page, customer: { name: string; email: string; phone: string }): Promise<void> {
-  await byLabel(page, "Full name *").fill(customer.name);
-  await byLabel(page, "Email address *").fill(customer.email);
-  await byLabel(page, "Phone number *").fill(customer.phone);
+  const fields = [
+    ["Full name *", customer.name],
+    ["Email address *", customer.email],
+    ["Phone number *", customer.phone],
+  ] as const;
+  // In WebKit a fill made as the details step opens has twice ended with its field empty, with no error, while the
+  // props' counts arrived (`/api/props-free`) and drew the step again ("Conventions and gotchas" in ProjectLibrary.md).
+  // So each value is checked once all are in, and a field that lost its value is filled again.
+  await expect(async () => {
+    for (const [label, value] of fields) {
+      const field = byLabel(page, label);
+      if ((await field.inputValue()) !== value) await field.fill(value);
+    }
+    for (const [label, value] of fields) await expect(byLabel(page, label)).toHaveValue(value, { timeout: 1_000 });
+  }).toPass({ timeout: 15_000 });
 }
 
-export const agreeToPolicies = (page: Page) => page.getByRole("checkbox", { name: /I have read and agree/ }).check();
+/**
+ * The policies step (the owner's brief of 2026-11-22, item 6): on to it from the details when not there yet, the
+ * policies read to their end (the agreement cannot be ticked before), and agreed to.
+ */
+export async function agreeToPolicies(page: Page): Promise<void> {
+  const step = page.getByRole("heading", { name: "Policies & booking form" });
+  if (!(await step.isVisible())) await next(page);
+  await expect(step).toBeVisible();
+  const box = page.getByRole("region", { name: "Studio policies and booking terms" });
+  await box.evaluate((element) => element.scrollTo(0, element.scrollHeight));
+  const agree = page.getByRole("checkbox", { name: /I have read and agree/ });
+  await expect(agree).toBeEnabled();
+  await agree.check();
+}
 
 /** Finish checkout and land on the booking page. Returns the booking reference. */
 export async function confirmAndGetRef(page: Page, buttonName: RegExp | string): Promise<string> {

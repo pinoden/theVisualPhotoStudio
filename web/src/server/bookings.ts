@@ -48,6 +48,8 @@ import {
   type UsablePromo,
 } from "./promos";
 import { loadAccessInstructions } from "./settings";
+import { acceptancesOf, checkForms, recordForms, type AcceptedItem, type CheckedForms } from "./booking-forms";
+import { propsProblem } from "./props";
 import { termsAtBooking } from "./terms";
 import { moneyKindNow, moneyKindOf, moneyKindOfCode, OTHER_MONEY_CODE } from "./test-mode";
 import { formatInstant, localToUtc } from "./tz";
@@ -78,6 +80,13 @@ export const bookingInput = z.object({
    */
   photography: z.boolean().default(false),
   acceptTerms: z.literal(true),
+  /**
+   * The versions of the studio policies and agreements the client was shown and accepted at checkout (the owner's
+   * brief of 2026-11-22, items 6 and 7): `policiesKey` and `agreementKey` in src/server/booking-forms.ts.
+   */
+  accepted: z.array(z.string().max(100)).max(50).default([]),
+  /** The client's answers to the intake questions, by the question's id: words, or true for a tick box. */
+  answers: z.record(z.string().max(60), z.union([z.string().max(2000), z.boolean()])).default({}),
   paymentToken: z.string().min(1).max(1000).optional(),
   /** The total the customer was shown. A mismatch stops the booking before any charge. */
   expectedTotalCents: z.number().int().nonnegative().optional(),
@@ -103,7 +112,11 @@ export type BookingErrorCode =
   | "payments_unavailable"
   | "payment_failed"
   | "in_progress"
-  | "attempt_over";
+  | "attempt_over"
+  /** The policies or an agreement were published again while the client was booking: they read them again. */
+  | "policies_changed"
+  /** A prop chosen is held by overlapping bookings as many times as there are. */
+  | "prop_taken";
 
 export type CreateBookingResult =
   | { ok: true; ref: string; manageToken: string; totalCents: number }
@@ -162,6 +175,8 @@ function firstIssue(error: z.ZodError): string {
 class PromoGone extends Error {}
 /** A membership's minutes were spent by another booking between the price and the hold. */
 class MinutesGone extends Error {}
+/** A prop of the booking is held by overlapping bookings as many times as there are (src/server/props.ts). */
+class PropTaken extends Error {}
 
 type ParsedInput = z.output<typeof bookingInput>;
 
@@ -358,6 +373,15 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
     return fail(400, "not_bookable_date", text);
   }
 
+  // What the client accepted and answered at checkout, checked before anything is charged. A booking the studio makes
+  // for a client is not: the client has not read the policies there.
+  let forms: CheckedForms | null = null;
+  if (!deps.madeBy) {
+    const checked = await checkForms(db, { studioIds: input.studioIds, photography: Boolean(session), date: input.date }, { accepted: input.accepted, answers: input.answers }, now);
+    if (!checked.ok) return fail(checked.problem.code === "policies_changed" ? 409 : 422, checked.problem.code === "policies_changed" ? "policies_changed" : "invalid_input", checked.problem.message);
+    forms = checked.forms;
+  }
+
   // The kind of money this booking is (src/server/test-mode.ts): the card processor's, and for a booking it does not
   // charge (one made in the admin), that of the processor set up now.
   const moneyKind = await moneyKindNow(db, deps.processor !== undefined ? deps.processor : (deps.payments?.name ?? null));
@@ -465,6 +489,9 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
     ref = newRef();
     try {
       bookingId = await db.transaction(async (tx) => {
+        // Props first, their rows locked until this booking is written: two bookings at once never take the last one.
+        const propProblem = await propsProblem(tx, price.addonLines.map((line) => ({ addonId: line.addonId, quantity: line.quantity })), startAt, endAt);
+        if (propProblem) throw new PropTaken(propProblem);
         if (spendsCode && !(await redeemPromo(tx, promo!, price.promoDiscountCents, now))) throw new PromoGone();
 
         const [row] = await tx
@@ -510,6 +537,7 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
         if (spendsMinutes && !(await takeBookingMinutes(tx, { membershipId: member!.id, bookingId: row.id, minutes: price.membershipMinutes, ref }))) {
           throw new MinutesGone();
         }
+        if (forms) await recordForms(tx, row.id, forms, now);
 
         // Always take studios in the same order, so two multi-studio bookings
         // that overlap can never wait on each other in a cycle.
@@ -554,6 +582,7 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
       if (error instanceof PromoGone) {
         return fail(409, "invalid_code", "That code was just used. Please remove it and try again.");
       }
+      if (error instanceof PropTaken) return fail(409, "prop_taken", error.message);
       if (error instanceof MinutesGone) {
         return fail(409, "invalid_code", "The hours left on your membership changed meanwhile. Please apply the code again to see the price.");
       }
@@ -760,6 +789,8 @@ export interface BookingView {
    * booking's payment link was paid (`waitToEnd` in manage.ts); `at` is when they asked. Null otherwise.
    */
   endRequest: { kind: "cancel" | "reschedule"; at: string } | null;
+  /** The policies and agreements the client accepted at checkout, each to be read again (src/server/booking-forms.ts). */
+  accepted: AcceptedItem[];
 }
 
 type BookingRow = typeof bookings.$inferSelect;
@@ -769,7 +800,7 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[], now: Date =
   if (rows.length === 0) return [];
   const ids = rows.map((r) => r.id);
   const codeIds = rows.map((r) => r.promoCodeId).filter((id): id is string => id !== null);
-  const [holdRows, addonRows, codeRows, received, atStudio, throughAcuity, owed, held, charged, creditLeft, creditReturned, refunded] = await together(db, [
+  const [holdRows, addonRows, codeRows, received, atStudio, throughAcuity, owed, held, charged, creditLeft, creditReturned, refunded, accepted] = await together(db, [
     () => db
       .select({ bookingId: studioHolds.bookingId, name: studios.name, priceCents: studioHolds.priceCents, sort: studios.sortOrder })
       .from(studioHolds)
@@ -791,6 +822,7 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[], now: Date =
     () => creditLeftCentsByBooking(db, rows),
     () => creditReturnedCentsByBooking(db, ids),
     () => refundedCentsByBooking(db, ids),
+    () => acceptancesOf(db, ids),
   ]);
   return rows.map((booking) => ({
     id: booking.id,
@@ -835,6 +867,7 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[], now: Date =
     creditLeftCents: creditLeft.get(booking.id) ?? 0,
     rescheduledCount: booking.rescheduledCount,
     endRequest: booking.endRequest && booking.endRequestedAt ? { kind: booking.endRequest, at: booking.endRequestedAt.toISOString() } : null,
+    accepted: accepted.get(booking.id) ?? [],
   }));
 }
 

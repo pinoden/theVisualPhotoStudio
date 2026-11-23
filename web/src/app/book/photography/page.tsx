@@ -2,8 +2,10 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
 import { BookingFlow } from "@/components/BookingFlow";
+import { CodeBalanceCheck } from "@/components/CodeBalanceCheck";
 import { telHref } from "@/lib/site/frame";
 import { getCatalog } from "@/server/cached";
+import { checkoutPolicies } from "../checkout-policies";
 import { shareMetadata, siteFrame } from "@/server/site";
 
 const TITLE = "Book a Photographer";
@@ -23,7 +25,7 @@ export async function generateMetadata(): Promise<Metadata> {
  * are free.
  */
 export default async function BookPhotographyPage() {
-  const [catalog, { frame }] = await Promise.all([getCatalog(), siteFrame()]);
+  const [catalog, { frame }, policies] = await Promise.all([getCatalog(), siteFrame(), checkoutPolicies()]);
   const { business } = frame;
   return (
     <>
@@ -48,6 +50,7 @@ export default async function BookPhotographyPage() {
             <p className="photographer-back">
               Have your own photographer? <Link href="/book">Rent a studio</Link>.
             </p>
+            <CodeBalanceCheck />
             <Suspense
               fallback={
                 <div className="wizard-container" style={{ textAlign: "center" }}>
@@ -55,7 +58,7 @@ export default async function BookPhotographyPage() {
                 </div>
               }
             >
-              <BookingFlow catalog={catalog} photography />
+              <BookingFlow catalog={catalog} photography policies={policies} />
             </Suspense>
           </>
         )}

@@ -3,6 +3,7 @@ import { getDb, type DbLike } from "@/db/client";
 import type { Design } from "@/lib/site/design";
 import type { CustomFont } from "@/lib/site/fonts";
 import { announcementShows, type SiteFrame } from "@/lib/site/frame";
+import { currentPolicies, type PoliciesVersion } from "./booking-forms";
 import { loadCatalog, type Catalog } from "./catalog";
 import { loadCustomFonts } from "./fonts";
 import { loadPictures, type Picture } from "./media";
@@ -88,6 +89,21 @@ export async function getPublishedPage(slug: string): Promise<ShownPage | null> 
   cacheTag(WEBSITE_TAG, CATALOG_TAG);
   cacheLife("minutes");
   return loadPublishedPage(await getDb(), slug, new Date());
+}
+
+/**
+ * The Policies page as published, with its version, for the booking pages' policies step (the owner's brief of
+ * 2026-11-22, item 6): both from one read, cached together, so that the version a client accepts is the one they
+ * read. Null when the site has no published Policies page.
+ */
+export async function getCheckoutPolicies(): Promise<{ page: ShownPage; version: PoliciesVersion } | null> {
+  "use cache";
+  cacheTag(WEBSITE_TAG, CATALOG_TAG);
+  cacheLife("minutes");
+  const db = await getDb();
+  const version = await currentPolicies(db);
+  const page = version ? await loadPublishedPage(db, version.slug, new Date()) : null;
+  return version && page ? { page, version } : null;
 }
 
 /** Where an old address leads now, if anywhere. */

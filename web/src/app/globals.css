@@ -685,6 +685,113 @@ details.faq-item[open] .faq-icon { transform: rotate(45deg); }
 }
 .booking-request-note a { text-decoration: underline; text-underline-offset: 3px; }
 
+/* The booking page's month calendar (the owner's brief of 2026-11-22): the length first, then the whole month, larger,
+   in the original website's tans. Only the days the length fits on can be pressed; the rest are muted. */
+.when-studio { display: grid; gap: .5rem 2rem; }
+@media (min-width: 900px) { .when-studio { grid-template-columns: minmax(14rem, 1fr) minmax(0, 1.6fr); align-items: start; } .month-cal-typed { grid-column: 2; } }
+.month-cal { padding: 1rem; border: 1px solid var(--color-border); background: var(--color-ivory); }
+.month-cal-head { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin-bottom: .5rem; }
+.month-cal-title { margin: 0; color: var(--color-dark); font-family: var(--font-serif); font-size: 1.6rem; font-weight: 400; }
+.month-cal-nav {
+  width: 2.75rem;
+  height: 2.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: 50%;
+  background: #fff;
+  color: var(--color-dark);
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.month-cal-nav:hover:not(:disabled) { border-color: var(--color-rose-dark); }
+.month-cal-nav:disabled { opacity: .35; cursor: default; }
+.month-cal-grid { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: .25rem; }
+.month-cal-grid th { padding-bottom: .25rem; color: var(--color-muted); font-size: .8rem; font-weight: 400; letter-spacing: .06em; text-transform: uppercase; }
+.month-cal-grid abbr { text-decoration: none; }
+.month-cal-grid td { padding: 0; text-align: center; }
+.month-cal-day {
+  width: 100%;
+  height: 2.75rem;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: var(--color-rose-light);
+  color: var(--color-dark);
+  font-family: var(--font-sans);
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.month-cal-day:hover:not(:disabled), .month-cal-day:focus-visible { background: var(--color-rose); color: var(--on-accent); }
+.month-cal-day[aria-pressed="true"] { background: var(--color-dark); color: #fff; }
+.month-cal-day:disabled { background: transparent; color: #b5aaa1; font-weight: 400; cursor: default; }
+@media (min-width: 600px) { .month-cal-day { height: 3.25rem; font-size: 1.05rem; } }
+.month-cal-note { min-height: 3.4em; margin: .5rem 0 0; font-size: .85rem; }
+.month-cal[aria-busy="true"] .month-cal-grid { opacity: .55; }
+.month-cal-wait { margin: 0; padding: 1rem; border: 1px dashed var(--color-border); font-size: .9rem; }
+.month-cal-typed p { margin: 0 0 .25rem; font-size: .85rem; }
+.month-cal-typed .form-group { max-width: 16rem; }
+
+/* Join the waitlist, under the booking page's times. */
+.waitlist-join { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--color-border); }
+.waitlist-join h4 { margin: 0 0 .35rem; }
+.waitlist-note { font-size: .85rem; }
+
+/* A prop all reserved at the chosen time (the owner's admin brief of 2026-11-22, item 10). */
+.addon-taken { color: #8b2020; }
+
+/* The policies step of the booking pages: the intake questions, the policies in a box read to its end, the agreement. */
+.intake-form { margin: 0 0 1.25rem; padding: 0; border: 0; }
+.intake-form > legend { margin-bottom: .5rem; color: var(--color-dark); font-family: var(--font-serif); font-size: 1.2rem; }
+.intake-check, .intake-option { display: flex; gap: .55rem; align-items: flex-start; min-height: 2.5rem; margin-bottom: .5rem; font-size: .95rem; }
+.intake-check input, .intake-option input { margin-top: .3rem; }
+.intake-choice { margin: 0 0 1rem; padding: 0; border: 0; }
+.intake-choice legend { margin-bottom: .35rem; color: var(--color-dark); font-size: .9rem; font-weight: 700; }
+.intake-help { display: block; color: var(--color-muted); font-size: .82rem; }
+.policies-box {
+  max-height: 22rem;
+  overflow-y: auto;
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--color-border);
+  background: #fff;
+  font-size: .9rem;
+}
+.policies-box:focus-visible { outline: 2px solid var(--color-dark); outline-offset: 2px; }
+.policies-box .site-page { background: transparent; }
+.policies-box h2 { font-size: 1.2rem; margin: 1rem 0 .4rem; }
+.policies-box h4 { font-size: 1.05rem; margin: 1rem 0 .4rem; }
+.policies-box .blk-section, .policies-box section { padding: 0 !important; background: transparent !important; }
+.policies-agree { display: flex; gap: .6rem; align-items: flex-start; min-height: 2.5rem; margin: 1rem 0 .25rem; color: var(--color-dark); font-weight: 700; }
+.policies-agree input { margin-top: .3rem; width: 1.15rem; height: 1.15rem; }
+.policies-agree-locked { color: var(--color-muted); font-weight: 400; }
+.policies-hint { margin: 0 0 .75rem; color: var(--color-muted); font-size: .85rem; }
+/* What a client accepted, listed on their booking and read again (src/components/AcceptedTerms.tsx). */
+.accepted-list { margin: .25rem 0 0; padding-left: 1.1rem; font-size: .9rem; }
+.accepted-list li { margin: .2rem 0; }
+.accepted-when { color: var(--color-muted); font-size: .9rem; }
+.accepted-words h3 { font-size: 1.15rem; margin: 1.25rem 0 .4rem; }
+
+/* "Check Code Balance" on the booking pages: a button, and under it a small form and what the code is worth. */
+.code-balance { max-width: 780px; margin: 1rem auto 0; }
+.code-balance-toggle { padding: .55rem 1.25rem; }
+.code-balance-panel {
+  margin-top: .75rem;
+  padding: 1.25rem;
+  background: var(--color-ivory);
+  border: 1px solid var(--color-border);
+}
+.code-balance-row { display: flex; gap: .5rem; flex-wrap: wrap; }
+.code-balance-row .form-control { flex: 1 1 14rem; min-width: 0; text-transform: uppercase; }
+.code-balance-note { font-size: .8rem; margin: .5rem 0 0; }
+.code-balance-result { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--color-border); color: var(--color-dark); }
+.code-balance-result p { margin: 0 0 .35rem; }
+.code-balance-code { overflow-wrap: anywhere; }
+.code-balance-status { font-size: .8rem; letter-spacing: .08em; text-transform: uppercase; }
+.code-balance-usable .code-balance-status { color: #2d6a2d; }
+.code-balance-used .code-balance-status, .code-balance-expired .code-balance-status { color: #8b2020; }
+.code-balance-remaining { font-family: var(--font-serif); font-size: 1.6rem; }
+.code-balance-restrictions { margin: .5rem 0 0; padding-left: 1.1rem; font-size: .85rem; color: var(--color-muted); }
+
 .wizard-container {
   max-width: 820px;
   margin: 0 auto;
@@ -1280,6 +1387,12 @@ button { font-family: inherit; }
 .addon-quantity .addon-count { flex: 0 0 auto; width: 4.75rem; margin-top: 0; }
 .addon-quantity label { cursor: pointer; }
 .addon-price { margin-left: auto; white-space: nowrap; color: var(--color-dark); }
+/* A prop's picture (Props & Resources): a small square beside its name, the picture cropped to fit. */
+.addon-picture { flex: 0 0 auto; width: 56px; height: 56px; object-fit: cover; border-radius: 3px; background: var(--color-ivory); }
+/* Props & Resources: a prop's picture with its button, and the days it is away. */
+.prop-picture { display: flex; flex-wrap: wrap; gap: 1rem; align-items: flex-end; margin-bottom: .75rem; }
+.prop-picture img { width: 160px; height: auto; border-radius: 3px; }
+.prop-away { margin: .5rem 0 1.25rem; }
 
 .notice {
   padding: .875rem 1.25rem;
@@ -1595,6 +1708,108 @@ button { font-family: inherit; }
 .cal-head .cal-studio { display: inline-flex; align-items: center; justify-content: center; gap: .35rem; }
 .cal-head .today { text-decoration: underline; text-underline-offset: .25rem; }
 .cal-axis, .cal-col { position: relative; height: calc(var(--len) * var(--ppm)); }
+/* The day's appointments, over the studios' columns (right of the hours), so that a bundle can cross from one to the next. */
+.cal-body { position: relative; }
+.cal-lanes { position: absolute; top: 0; bottom: 0; left: 3.25rem; right: 0; pointer-events: none; }
+.cal-lanes > * { pointer-events: auto; }
+.cal-count { margin: 0 0 0 .5rem; font-size: .85rem; color: var(--color-muted); }
+.cal-head-count { font-weight: 400; color: var(--color-muted); }
+.cal-zoom a { min-width: 3rem; justify-content: center; }
+.cal-key { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem 1rem; }
+.cal-key .cal-studio { display: inline-flex; align-items: center; gap: .35rem; }
+/* An appointment's page, in its studio's or bundle's colour, as on the calendar. */
+.appt-look { border-left: 4px solid var(--studio); }
+.appt-look .cal-swatch { display: inline-block; vertical-align: middle; }
+/* Availability & Blocked Time: the form, the month of blocks, and the list. */
+.avail-check { display: inline-flex; align-items: center; gap: .35rem; min-height: 2.5rem; margin-right: 1.1rem; font-size: .9rem; }
+.avail-check .cal-swatch { display: inline-block; }
+.avail-all { font-weight: 700; }
+.avail-hint { margin: -.25rem 0 .75rem; color: var(--color-muted); font-size: .8rem; }
+.avail-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+.avail-month-nav { margin-bottom: .75rem; }
+.avail-month td { height: 6.5rem; }
+.avail-chip {
+  display: block;
+  margin-bottom: 2px;
+  padding: 1px .35rem;
+  border-left: 3px solid #8a7f72;
+  border-radius: 3px;
+  background: repeating-linear-gradient(135deg, #f1ece6 0 6px, #faf7f3 6px 12px);
+  color: var(--color-dark);
+  font-size: .72rem;
+  line-height: 1.45;
+  text-decoration: none;
+  /* One line, cut short where the day is narrow (a phone): the list below says it in full. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.avail-row-actions { display: flex; flex-wrap: wrap; gap: .4rem; }
+
+/* Booking Forms & Agreements */
+.forms-row-actions { display: flex; flex-wrap: wrap; gap: .35rem; }
+.forms-preview { margin-top: 1rem; padding: 1rem 1.25rem; border: 1px dashed var(--color-border); background: var(--color-ivory); }
+.forms-preview-question { margin-bottom: .75rem; }
+
+/* An appointment over the calendar (?open=), which stays behind it: everything about it, the actions at its top. */
+.appt-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 4vh 1rem;
+  background: rgba(44, 36, 32, .45);
+  overflow-y: auto;
+}
+.appt-dialog {
+  position: relative;
+  inset: auto;
+  margin: 0;
+  width: min(46rem, 100%);
+  max-height: 92vh;
+  overflow-y: auto;
+  padding: 0 1.5rem 1.5rem;
+  border: 0;
+  border-left: 6px solid var(--studio);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--color-dark);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .25);
+}
+.appt-dialog-actions {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+  align-items: center;
+  margin: 0 -1.5rem 1rem;
+  padding: .9rem 1.5rem;
+  border-bottom: 1px solid var(--color-border);
+  background: #fff;
+}
+.appt-dialog-close {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  color: var(--color-dark);
+  font-size: 1.6rem;
+  line-height: 1;
+  text-decoration: none;
+}
+.appt-dialog h2 { margin: 0 0 .25rem; font-size: 1.5rem; }
+.appt-dialog h2:focus { outline: none; }
+.appt-dialog h3 { margin: 1.25rem 0 .5rem; font-size: 1.05rem; }
+.appt-dialog-what { margin: 0 0 .5rem; }
+.appt-dialog-what .cal-swatch { display: inline-block; vertical-align: middle; }
+.appt-dialog-notes { margin: 0; white-space: pre-wrap; }
+.appt-dialog-full { margin: 1.25rem 0 0; font-size: .9rem; }
 .cal-axis span {
   position: absolute;
   top: calc(var(--top) * var(--ppm));
@@ -1613,7 +1828,8 @@ button { font-family: inherit; }
   position: absolute;
   top: calc(var(--top) * var(--ppm));
   left: calc(var(--lane) / var(--lanes) * 100% + 1px);
-  width: calc(100% / var(--lanes) - 2px);
+  /* A bundle spans the lanes of its studios, side by side: one appointment over all of them. */
+  width: calc(var(--span, 1) / var(--lanes) * 100% - 2px);
   height: calc(var(--len) * var(--ppm));
   box-sizing: border-box;
   border-radius: 3px;
@@ -1633,6 +1849,7 @@ button { font-family: inherit; }
 .cal-appt-full { font-size: .78rem; }
 .cal-appt-full .cal-appt-in { padding: .3rem .45rem; gap: .15rem; }
 .cal-appt-full .cal-appt-name { font-weight: 700; }
+.cal-appt-name { font-weight: 700; }
 .cal-appt-full .status-badge { align-self: flex-start; }
 /* The buffers: hatched, above and below each appointment, in the studio's colour. */
 .cal-appt::before, .cal-appt::after {

@@ -179,7 +179,8 @@ export const DEFAULT_FRAME: SiteFrame = {
       ],
     },
     { label: "Contact", href: "/contact", children: [] },
-    { label: "My Bookings", href: "/account", children: [] },
+    // "Log In" says "My Account" once the visitor is signed in (`menuLabel` in SiteNav.tsx).
+    { label: "Log In", href: "/account", children: [] },
   ],
   bookButton: { label: "Book Now", style: "dark" },
   footer: {
@@ -298,6 +299,14 @@ const oneOf = <T extends string>(value: unknown, choices: Record<T, string>, fal
   typeof value === "string" && value in choices ? (value as T) : fallback;
 
 /** A complete, valid frame from whatever was stored or sent. See the note at the top of this file. */
+/**
+ * The words of a menu link as the visitor sees them: the owners' "Log In" to the client's pages says "My Account" to a
+ * visitor who is signed in (the owner's brief of 2026-11-22). Any other words of theirs stay as they wrote them.
+ */
+export function menuLabel(link: Pick<SiteLink, "label" | "href">, signedIn: boolean): string {
+  return signedIn && link.href === "/account" && link.label.trim().toLowerCase() === "log in" ? "My Account" : link.label;
+}
+
 export function parseFrame(input: unknown): SiteFrame {
   const raw = isRecord(input) ? input : {};
   const d = DEFAULT_FRAME;

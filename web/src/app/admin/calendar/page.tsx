@@ -4,6 +4,7 @@ import { connection } from "next/server";
 import { Suspense, type CSSProperties } from "react";
 import { StatusBadge } from "@/components/StatusBadge";
 import { getDb } from "@/db/client";
+import { studios as studiosTable } from "@/db/schema";
 import {
   BUFFER_SHOWN_MINUTES,
   CALENDAR_VIEWS,
@@ -17,14 +18,19 @@ import {
   weekLabel,
   type CalendarView,
 } from "@/lib/domain/calendar";
+import { appointmentLook, calendarColumns, hoursText, lanesOf, type AppointmentLook } from "@/lib/domain/appointment-look";
 import { LABEL_TEXT } from "@/lib/domain/labels";
 import { isIsoDate, isoWeekday, longDateLabel, minutesToLabel, type IsoDate } from "@/lib/domain/time";
 import { can } from "@/lib/abilities";
+import { studioCombinationError } from "@/lib/catalog-view";
+import { count } from "@/lib/words";
+import { getAppointment, moveOptions } from "@/server/appointments";
 import { loadCalendar, type CalendarAppointment, type CalendarBlock } from "@/server/calendar";
 import { loadCatalog, type CatalogStudio } from "@/server/catalog";
 import { requireStaff } from "@/server/session";
 import { localDateOf } from "@/server/tz";
 import { AdminFrame, AdminLoading } from "../frame";
+import { AppointmentDialog } from "./AppointmentDialog";
 
 export const metadata: Metadata = { title: "Calendar", robots: { index: false } };
 
@@ -45,10 +51,21 @@ const MONTH_CELL_LIMIT = 4;
 const place = (top: number, length: number, color?: string) =>
   ({ "--top": top, "--len": length, ...(color ? { "--studio": color } : {}) }) as CSSProperties;
 
-/** One appointment in one studio: what a calendar draws. */
+/** One appointment as the calendar draws it: once, a bundle too, in the studios it holds among those shown. */
 interface Entry extends CalendarAppointment {
-  studio: CatalogStudio;
+  held: CatalogStudio[];
+  look: AppointmentLook;
+  /** The calendar as it is, with this appointment open over it. */
+  openHref: string;
 }
+
+/**
+ * How large the time grid is drawn: a minute's height in pixels for each of the zoom buttons (the owner's admin brief
+ * of 2026-11-22, item 9, as in Acuity). It changes no length and no step. 0.5 is the size the calendar had before.
+ */
+const ZOOMS = { "0.25": 0.7, "0.5": 1.15, "0.75": 1.8 } as const;
+type Zoom = keyof typeof ZOOMS;
+const isZoom = (value: unknown): value is Zoom => typeof value === "string" && Object.hasOwn(ZOOMS, value);
 
 /**
  * The admin calendar, for both levels of the admin. Every control is a link
@@ -66,24 +83,69 @@ async function Calendar({ searchParams }: Pick<PageProps<"/admin/calendar">, "se
   const date = typeof query.date === "string" && isIsoDate(query.date) ? query.date : today;
   const catalog = await loadCatalog(db);
   const chosen = catalog.studios.find((studio) => studio.slug === query.studio);
-  const studios = chosen ? [chosen] : catalog.studios;
+  // Paris in the middle, so that every bundle is side by side and drawn as one appointment.
+  const studios = chosen ? [chosen] : calendarColumns(catalog.studios);
+  const zoom: Zoom = isZoom(query.zoom) ? query.zoom : "0.5";
 
   const span = rangeOf(view, date);
   const data = await loadCalendar(db, viewer, catalog, span);
   const visible = new Set(data.days);
 
-  // One entry for each studio an appointment holds, in the studios being shown.
-  const entries: Entry[] = data.appointments.flatMap((appointment) =>
-    studios.filter((studio) => appointment.studioIds.includes(studio.id)).map((studio) => ({ ...appointment, studio })),
-  );
+  const href = (to: { view?: CalendarView; date?: IsoDate; studio?: string | null; zoom?: Zoom; open?: string }) => {
+    const studio = to.studio === undefined ? (chosen?.slug ?? null) : to.studio;
+    const scale = to.zoom ?? zoom;
+    return `/admin/calendar?view=${to.view ?? view}&date=${to.date ?? date}${studio ? `&studio=${studio}` : ""}${scale === "0.5" ? "" : `&zoom=${scale}`}${to.open ? `&open=${encodeURIComponent(to.open)}` : ""}`;
+  };
+  // One entry for each appointment that holds a studio being shown. It keeps its bundle's name and colour when one studio is shown.
+  const entries: Entry[] = data.appointments.flatMap((appointment) => {
+    const held = studios.filter((studio) => appointment.studioIds.includes(studio.id));
+    const all = catalog.studios.filter((studio) => appointment.studioIds.includes(studio.id));
+    return held.length === 0 ? [] : [{ ...appointment, held, look: appointmentLook(all, appointment.photography), openHref: href({ open: appointment.ref }) }];
+  });
   const blocks = data.blocks.filter((block) => studios.some((studio) => studio.id === block.studioId));
 
-  const href = (to: { view?: CalendarView; date?: IsoDate; studio?: string | null }) => {
-    const studio = to.studio === undefined ? (chosen?.slug ?? null) : to.studio;
-    return `/admin/calendar?view=${to.view ?? view}&date=${to.date ?? date}${studio ? `&studio=${studio}` : ""}`;
-  };
-  const title = view === "month" ? monthLabel(date) : view === "week" ? weekLabel(date) : longDateLabel(date);
   const mayBook = can(viewer, "createBookings", catalog.settings);
+
+  // The appointment open over the calendar, if one is (the owner's admin brief of 2026-11-22, item 5): one this viewer
+  // may see. Its colour comes from every studio, a studio taken off the site since included.
+  const openRef = typeof query.open === "string" ? query.open : null;
+  const opened = openRef ? await getAppointment(db, viewer, openRef, new Date()) : null;
+  const openedLook = opened
+    ? appointmentLook(
+        (await db.select({ id: studiosTable.id, slug: studiosTable.slug, name: studiosTable.name, color: studiosTable.color }).from(studiosTable)).filter((studio) =>
+          opened.studios.includes(studio.name),
+        ),
+        opened.photography !== null,
+      )
+    : null;
+  // Rescheduling inside the pop-up (item 5): `&move=<date>` shows the times free on that date, as the appointment's page does.
+  const moving = opened !== null && opened.may.move && typeof query.move === "string";
+  const moveDate = moving && !opened.moveBlocked && typeof query.move === "string" && isIsoDate(query.move) ? query.move : null;
+  const moveTimes = opened && moveDate ? await moveOptions(db, viewer, opened.ref, moveDate, new Date()) : null;
+  const openedHref = opened ? href({ open: opened.ref }) : "";
+  const move = opened && moving
+    ? {
+        date: moveDate,
+        times: moveTimes,
+        dateForm: {
+          action: "/admin/calendar",
+          keep: { view, date, ...(chosen ? { studio: chosen.slug } : {}), ...(zoom === "0.5" ? {} : { zoom }), open: opened.ref },
+        },
+        back: openedHref,
+        closeHref: openedHref,
+      }
+    : null;
+  const bookAnother =
+    opened && mayBook && opened.customerEmail !== null
+      ? `/admin/calendar/new?date=${date}&clientName=${encodeURIComponent(opened.customerName)}&clientEmail=${encodeURIComponent(opened.customerEmail)}&clientPhone=${encodeURIComponent(opened.customerPhone ?? "")}`
+      : null;
+
+  // How many appointments the day, the week or the month holds (the owners' note of 2026-11-22), in the studios shown.
+  const inSpan = entries.filter((entry) => (view === "month" ? entry.date.slice(0, 7) === date.slice(0, 7) : view === "day" ? entry.date === date : true));
+  const spanCount = `${count(inSpan.length, "appointment")} ${view === "day" ? "this day" : view === "week" ? "this week" : "this month"}`;
+  // The bundles of the studios shown, for the key under the grid.
+  const bundles = studios.length < 2 ? [] : bundlesOf(studios);
+  const title = view === "month" ? monthLabel(date) : view === "week" ? weekLabel(date) : longDateLabel(date);
 
   return (
     <AdminFrame active="/admin/calendar" title="Calendar" query={query} viewer={viewer} settings={catalog.settings}>
@@ -99,10 +161,12 @@ async function Calendar({ searchParams }: Pick<PageProps<"/admin/calendar">, "se
             →
           </Link>
           <h2 className="cal-title">{title}</h2>
+          <p className="cal-count">{spanCount}</p>
         </div>
         <form method="get" className="cal-jump">
           <input type="hidden" name="view" value={view} />
           {chosen && <input type="hidden" name="studio" value={chosen.slug} />}
+          {zoom !== "0.5" && <input type="hidden" name="zoom" value={zoom} />}
           <label className="visually-hidden" htmlFor="cal-date">
             Go to date
           </label>
@@ -121,6 +185,15 @@ async function Calendar({ searchParams }: Pick<PageProps<"/admin/calendar">, "se
             </Link>
           ))}
         </nav>
+        {view !== "month" && (
+          <nav className="cal-tabs cal-zoom" aria-label="Zoom">
+            {(Object.keys(ZOOMS) as Zoom[]).map((scale) => (
+              <Link key={scale} href={href({ zoom: scale })} aria-current={scale === zoom ? "true" : undefined}>
+                {scale}
+              </Link>
+            ))}
+          </nav>
+        )}
         <nav className="cal-filter" aria-label="Studio">
           <Link href={href({ studio: null })} aria-current={chosen ? undefined : "true"} className="cal-studio">
             All studios
@@ -151,9 +224,9 @@ async function Calendar({ searchParams }: Pick<PageProps<"/admin/calendar">, "se
 
       {view === "month" && <Month date={date} today={today} entries={entries} visible={visible} dayHref={(day) => href({ view: "day", date: day })} />}
       {view === "week" && (
-        <Week date={date} today={today} entries={entries} blocks={blocks} studios={studios} visible={visible} dayHref={(day) => href({ view: "day", date: day })} />
+        <Week date={date} today={today} entries={entries} blocks={blocks} studios={studios} visible={visible} ppm={ZOOMS[zoom]} dayHref={(day) => href({ view: "day", date: day })} />
       )}
-      {view === "day" && <Day date={date} entries={entries} blocks={blocks} studios={studios} visible={visible.has(date)} />}
+      {view === "day" && <Day date={date} entries={entries} blocks={blocks} studios={studios} visible={visible.has(date)} ppm={ZOOMS[zoom]} />}
 
       {view !== "month" && (
         <p className="cal-legend">
@@ -162,8 +235,41 @@ async function Calendar({ searchParams }: Pick<PageProps<"/admin/calendar">, "se
           <span className="cal-legend-block" aria-hidden="true" /> Time the studio blocked.
         </p>
       )}
+      {opened && openedLook && (
+        <AppointmentDialog
+          appointment={opened}
+          look={openedLook}
+          closeHref={href({})}
+          bookAnotherHref={bookAnother}
+          rescheduleHref={`${openedHref}&move=${localDateOf(new Date(opened.startAt))}`}
+          move={move}
+          today={today}
+        />
+      )}
+      {bundles.length > 0 && (
+        <p className="cal-legend cal-key">
+          {bundles.map((bundle) => (
+            <span key={bundle.name} className="cal-studio" style={{ "--studio": bundle.color } as CSSProperties}>
+              <span className="cal-swatch" aria-hidden="true" />
+              {bundle.name}
+            </span>
+          ))}
+          <span>A photography session is a deeper shade of its studio&rsquo;s or bundle&rsquo;s colour.</span>
+        </p>
+      )}
     </AdminFrame>
   );
+}
+
+/** Every bundle the studios shown can make, with its name and colour. */
+function bundlesOf(studios: CatalogStudio[]): AppointmentLook[] {
+  const found: AppointmentLook[] = [];
+  for (let mask = 1; mask < 1 << studios.length; mask++) {
+    const held = studios.filter((_, index) => mask & (1 << index));
+    if (held.length < 2 || studioCombinationError(studios, held.map((studio) => studio.id)) !== null) continue;
+    found.push(appointmentLook(held, false));
+  }
+  return found.sort((a, b) => a.name.split(" + ").length - b.name.split(" + ").length || a.name.localeCompare(b.name));
 }
 
 // ── Month ────────────────────────────────────────────────────────────────────
@@ -209,7 +315,7 @@ function Month({
                       {Number(day.slice(8))}
                     </Link>
                     {ofDay.slice(0, MONTH_CELL_LIMIT).map((entry) => (
-                      <AppointmentChip key={`${entry.ref}-${entry.studio.id}`} entry={entry} />
+                      <AppointmentChip key={entry.ref} entry={entry} />
                     ))}
                     {more > 0 && (
                       <Link href={dayHref(day)} className="cal-more">
@@ -230,16 +336,20 @@ function Month({
 /** "10a", "12:15p": a time for where there is room for little. The full time is in the title and on the appointment. */
 const shortTime = (minute: number) => minutesToLabel(minute).replace(":00", "").replace(" AM", "a").replace(" PM", "p");
 
+/** "Dayglow · 1.5 hours": the studio or bundle, and the length (the owner's admin brief of 2026-11-22, item 4). */
+const whatAndHowLong = (entry: Entry) => `${entry.look.name} · ${hoursText(entry.endMinute - entry.startMinute)}`;
+
 const describe = (entry: Entry) =>
-  `${minutesToLabel(entry.startMinute)} – ${minutesToLabel(entry.endMinute)}, ${entry.customerName}, ${entry.studio.name}, ${LABEL_TEXT[entry.label]}${entry.photography ? ", photography session" : ""}`;
+  `${minutesToLabel(entry.startMinute)} – ${minutesToLabel(entry.endMinute)}, ${entry.customerName}, ${whatAndHowLong(entry)}, ${LABEL_TEXT[entry.label]}${entry.photography ? ", photography session" : ""}`;
 
 /** An appointment as one line: its time and the client's name, in its studio's colour, with a dot for its status. */
 function AppointmentChip({ entry }: { entry: Entry }) {
   return (
     <Link
-      href={`/admin/appointments/${entry.ref}`}
+      href={entry.openHref}
+      scroll={false}
       className="cal-chip"
-      style={{ "--studio": entry.studio.color } as CSSProperties}
+      style={{ "--studio": entry.look.color } as CSSProperties}
       title={describe(entry)}
       aria-label={describe(entry)}
     >
@@ -288,16 +398,22 @@ function HourAxis({ start, end }: { start: number; end: number }) {
   );
 }
 
-/** An appointment on the grid, with its buffers drawn above and below it. */
-function GridAppointment({ entry, gridStart, lane, lanes, full }: { entry: Entry; gridStart: number; lane: number; lanes: number; full: boolean }) {
+/**
+ * An appointment on the grid, with its buffers drawn above and below it: across `span` lanes from `lane`, so that a
+ * bundle is one appointment over its studios. What it says, as the owner wrote it: the client, the studio or bundle
+ * and the length, and the time and status where there is room.
+ */
+function GridAppointment({ entry, gridStart, lane, span, lanes, full }: { entry: Entry; gridStart: number; lane: number; span: number; lanes: number; full: boolean }) {
   return (
     <Link
-      href={`/admin/appointments/${entry.ref}`}
-      className={`cal-appt${full ? " cal-appt-full" : ""}`}
+      href={entry.openHref}
+      scroll={false}
+      className={`cal-appt${full || span > 1 ? " cal-appt-full" : ""}${entry.look.bundle ? " cal-appt-bundle" : ""}`}
       style={
         {
-          ...place(entry.startMinute - gridStart, entry.endMinute - entry.startMinute, entry.studio.color),
+          ...place(entry.startMinute - gridStart, entry.endMinute - entry.startMinute, entry.look.color),
           "--lane": lane,
+          "--span": span,
           "--lanes": lanes,
         } as CSSProperties
       }
@@ -305,21 +421,24 @@ function GridAppointment({ entry, gridStart, lane, lanes, full }: { entry: Entry
     >
       {/* The inner box clips long text; the buffers are drawn outside it, above and below. */}
       <span className="cal-appt-in">
-        <span className="cal-appt-time">
-          {full ? `${minutesToLabel(entry.startMinute)} – ${minutesToLabel(entry.endMinute)}` : shortTime(entry.startMinute)}
-        </span>
         <span className="cal-appt-name">{entry.customerName}</span>
+        <span className="cal-appt-what">{whatAndHowLong(entry)}</span>
+        <span className="cal-appt-time">
+          {full || span > 1 ? `${minutesToLabel(entry.startMinute)} – ${minutesToLabel(entry.endMinute)}` : shortTime(entry.startMinute)}
+        </span>
         {entry.photography && <span className="cal-tag">Photography</span>}
-        {full ? (
+        {full || span > 1 ? (
           <StatusBadge label={entry.label} />
         ) : (
           <span className={`cal-dot status-${entry.label}`} role="img" aria-label={LABEL_TEXT[entry.label]} />
         )}
-        <span className="visually-hidden">, {entry.studio.name}</span>
       </span>
     </Link>
   );
 }
+
+/** An appointment's places among the lanes: one for each run of studios side by side that it holds. */
+const runsOf = (entry: Entry, studios: CatalogStudio[]) => lanesOf(entry.held.map((studio) => studio.id), studios);
 
 function GridBlock({ block, gridStart, lane, lanes }: { block: CalendarBlock; gridStart: number; lane: number; lanes: number }) {
   return (
@@ -342,6 +461,7 @@ function Week({
   blocks,
   studios,
   visible,
+  ppm,
   dayHref,
 }: {
   date: IsoDate;
@@ -350,19 +470,22 @@ function Week({
   blocks: CalendarBlock[];
   studios: CatalogStudio[];
   visible: Set<IsoDate>;
+  ppm: number;
   dayHref: (day: IsoDate) => string;
 }) {
   const days = weekDays(date);
+  const ofDay = (day: IsoDate) => entries.filter((entry) => entry.date === day);
   const { start, end } = gridHours(days, studios, entries, blocks);
   return (
     <>
       {/* The grid, for screens wide enough for seven days side by side. Each studio has its own lane in a day. */}
-      <div className="cal-grid cal-week" style={{ "--days": 7, "--buffer": BUFFER_SHOWN_MINUTES } as CSSProperties}>
+      <div className="cal-grid cal-week" style={{ "--days": 7, "--buffer": BUFFER_SHOWN_MINUTES, "--ppm": `${ppm}px` } as CSSProperties}>
         <div className="cal-head">
           <span />
           {days.map((day) => (
             <Link key={day} href={dayHref(day)} className={day === today ? "today" : undefined}>
               {shortDayLabel(day)}
+              {visible.has(day) && <span className="cal-head-count"> · {ofDay(day).length}</span>}
             </Link>
           ))}
         </div>
@@ -375,18 +498,19 @@ function Week({
                 .map((block, index) => (
                   <GridBlock key={index} block={block} gridStart={start} lane={studios.findIndex((s) => s.id === block.studioId)} lanes={studios.length} />
                 ))}
-              {entries
-                .filter((entry) => entry.date === day)
-                .map((entry) => (
+              {ofDay(day).flatMap((entry) =>
+                runsOf(entry, studios).map((run) => (
                   <GridAppointment
-                    key={`${entry.ref}-${entry.studio.id}`}
+                    key={`${entry.ref}-${run.lane}`}
                     entry={entry}
                     gridStart={start}
-                    lane={studios.findIndex((s) => s.id === entry.studio.id)}
+                    lane={run.lane}
+                    span={run.span}
                     lanes={studios.length}
                     full={studios.length === 1}
                   />
-                ))}
+                )),
+              )}
             </div>
           ))}
         </div>
@@ -395,26 +519,27 @@ function Week({
       {/* The same week as a list, day by day, for a phone. */}
       <div className="cal-agenda">
         {days.map((day) => {
-          const ofDay = entries.filter((entry) => entry.date === day);
+          const listed = ofDay(day);
           return (
             <section key={day} className={day === today ? "today" : undefined}>
               <h3>
                 <Link href={dayHref(day)}>{longDateLabel(day)}</Link>
+                {visible.has(day) && listed.length > 0 && <span className="cal-head-count"> · {count(listed.length, "appointment")}</span>}
               </h3>
               {!visible.has(day) ? (
                 <p>Not one of your days.</p>
-              ) : ofDay.length === 0 ? (
+              ) : listed.length === 0 ? (
                 <p>No appointments.</p>
               ) : (
                 <ul>
-                  {ofDay.map((entry) => (
-                    <li key={`${entry.ref}-${entry.studio.id}`} style={{ "--studio": entry.studio.color } as CSSProperties}>
-                      <Link href={`/admin/appointments/${entry.ref}`}>
+                  {listed.map((entry) => (
+                    <li key={entry.ref} style={{ "--studio": entry.look.color } as CSSProperties}>
+                      <Link href={entry.openHref} scroll={false}>
                         <span className="cal-agenda-time">
                           {minutesToLabel(entry.startMinute)} – {minutesToLabel(entry.endMinute)}
                         </span>
                         <strong>{entry.customerName}</strong>
-                        <span>{entry.studio.name}</span>
+                        <span>{whatAndHowLong(entry)}</span>
                       </Link>
                       <StatusBadge label={entry.label} />
                     </li>
@@ -437,17 +562,19 @@ function Day({
   blocks,
   studios,
   visible,
+  ppm,
 }: {
   date: IsoDate;
   entries: Entry[];
   blocks: CalendarBlock[];
   studios: CatalogStudio[];
   visible: boolean;
+  ppm: number;
 }) {
   if (!visible) return null;
   const { start, end } = gridHours([date], studios, entries, blocks);
   return (
-    <div className="cal-grid cal-day" style={{ "--days": studios.length, "--buffer": BUFFER_SHOWN_MINUTES } as CSSProperties}>
+    <div className="cal-grid cal-day" style={{ "--days": studios.length, "--buffer": BUFFER_SHOWN_MINUTES, "--ppm": `${ppm}px` } as CSSProperties}>
       <div className="cal-head">
         <span />
         {studios.map((studio) => (
@@ -466,13 +593,16 @@ function Day({
               .map((block, index) => (
                 <GridBlock key={index} block={block} gridStart={start} lane={0} lanes={1} />
               ))}
-            {entries
-              .filter((entry) => entry.studio.id === studio.id)
-              .map((entry) => (
-                <GridAppointment key={entry.ref} entry={entry} gridStart={start} lane={0} lanes={1} full />
-              ))}
           </div>
         ))}
+        {/* The appointments over the studios' columns, so that a bundle is one appointment across its studios. */}
+        <div className="cal-lanes" style={{ "--lanes": studios.length } as CSSProperties}>
+          {entries.flatMap((entry) =>
+            runsOf(entry, studios).map((run) => (
+              <GridAppointment key={`${entry.ref}-${run.lane}`} entry={entry} gridStart={start} lane={run.lane} span={run.span} lanes={studios.length} full />
+            )),
+          )}
+        </div>
       </div>
     </div>
   );

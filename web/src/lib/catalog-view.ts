@@ -43,6 +43,38 @@ export function priceTable(
   }));
 }
 
+const NUMBER_WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"];
+const inWords = (n: number) => NUMBER_WORDS[n] ?? String(n);
+
+/**
+ * The booking page's sentence about booking several studios, in the owner's words of 2026-11-22: "Save 20% when
+ * booking two studios and 22% when booking three studios", with the numbers of studios in words. It counts up to the
+ * number of studios the site offers, so it never speaks of more studios than can be booked, and asks the pricing
+ * function what each number gets, as `multiStudioOffer` does. Empty when no discount is set or the site has one studio.
+ */
+export function multiStudioSaving(catalog: Pick<Catalog, "settings" | "studios">): string {
+  const table = catalog.settings.multiStudioPercent;
+  const runs: { from: number; to: number; percent: number }[] = [];
+  for (let n = 2; n <= catalog.studios.length; n++) {
+    const percent = multiStudioPercentFor(n, table);
+    const last = runs.at(-1);
+    if (last && last.percent === percent) last.to = n;
+    else runs.push({ from: n, to: n, percent });
+  }
+  const parts = runs
+    .filter((run) => run.percent > 0)
+    .map((run) => {
+      const studios =
+        run.from === run.to
+          ? inWords(run.from)
+          : `${inWords(run.from)} ${run.to === run.from + 1 ? "or" : "to"} ${inWords(run.to)}`;
+      return `${run.percent}% when booking ${studios} studios`;
+    });
+  if (parts.length === 0) return "";
+  const listed = parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;
+  return `Save ${listed}`;
+}
+
 /** True when any studio charges a different price on weekends. */
 export function hasWeekendPricing(catalog: Catalog): boolean {
   return catalog.studios.some((s) =>

@@ -6,6 +6,7 @@ import { labelOf, type LabelKey } from "@/lib/domain/labels";
 import { addDays, type IsoDate } from "@/lib/domain/time";
 import type { AuthUser } from "./auth";
 import type { Catalog } from "./catalog";
+import { BLOCK_REASONS, type BlockReason } from "./blocked-time";
 import { loadSettings } from "./settings";
 import { dayBoundsUtc, localDateOf, localMinuteOn, localMinuteOnFloor } from "./tz";
 
@@ -110,10 +111,10 @@ export async function loadCalendar(
   });
 
   // Time the owners blocked. A block is made for one day, so its span is cut to each day it touches.
-  const blockRows = await queryRows<{ studio_id: string; start_at: string | Date; end_at: string | Date; note: string }>(
+  const blockRows = await queryRows<{ studio_id: string; start_at: string | Date; end_at: string | Date; note: string; reason: string }>(
     db,
     sql`
-      select h.studio_id, lower(h.occupied) as start_at, upper(h.occupied) as end_at, b.note
+      select h.studio_id, lower(h.occupied) as start_at, upper(h.occupied) as end_at, b.note, b.reason
       from ${studioHolds} h
       join ${blocks} b on b.id = h.block_id
       where h.active
@@ -126,7 +127,9 @@ export async function loadCalendar(
     for (const date of days) {
       const startMinute = localMinuteOnFloor(new Date(row.start_at), date);
       const endMinute = localMinuteOn(new Date(row.end_at), date);
-      if (endMinute > startMinute) blocked.push({ date, startMinute, endMinute, studioId: row.studio_id, note: row.note });
+      // What the calendar says on it: the note, else the reason ("Holiday Closure"), else "Blocked".
+      const said = row.note || (Object.hasOwn(BLOCK_REASONS, row.reason) ? BLOCK_REASONS[row.reason as BlockReason] : "");
+      if (endMinute > startMinute) blocked.push({ date, startMinute, endMinute, studioId: row.studio_id, note: said });
     }
   }
 

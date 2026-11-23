@@ -294,6 +294,12 @@ export const addons = pgTable("addons", {
   studioId: uuid("studio_id").references(() => studios.id, { onDelete: "cascade" }),
   maxQuantity: integer("max_quantity").notNull().default(1),
   /**
+   * How many of a prop there are (the owner's admin brief of 2026-11-22, item 10: one pair of angel wings). Bookings
+   * whose times overlap can hold at most this many between them; null for an add-on with no such limit (a pet fee).
+   * See src/server/props.ts.
+   */
+  stock: integer("stock"),
+  /**
    * What the add-on is for. The guest information page reads it to say whether
    * larger groups and pets can be booked, so those answers follow what is
    * offered and not what an add-on happens to be called.
@@ -301,7 +307,15 @@ export const addons = pgTable("addons", {
   kind: text("kind", { enum: ["people", "pet", "other"] }).notNull().default("other"),
   sortOrder: integer("sort_order").notNull().default(0),
   active: boolean("active").notNull().default(true),
-});
+  /** Its picture, from the media library (the admin brief of 2026-11-22, item 10: each prop with an image). */
+  mediaId: uuid("media_id").references(() => media.id, { onDelete: "restrict" }),
+  /**
+   * The days, both included, on which a prop cannot be booked (item 10: "mark unavailable for a while"), such as the
+   * angel wings away for repair. Both set or neither. Bookings made before keep it: Props & Resources lists them.
+   */
+  awayFrom: date("away_from", { mode: "string" }),
+  awayTo: date("away_to", { mode: "string" }),
+}, (t) => [check("addons_away", sql`(${t.awayFrom} is null) = (${t.awayTo} is null) and (${t.awayFrom} is null or ${t.awayFrom} <= ${t.awayTo})`)]);
 
 /** Business rules the owner can change. Defaults live in src/server/settings.ts. */
 export const settings = pgTable("settings", {
@@ -523,11 +537,25 @@ export const bookingEvents = pgTable(
 );
 
 /** An owner-made block of time (maintenance, private event). */
-export const blocks = pgTable("blocks", {
-  id: id(),
-  note: text("note").notNull().default(""),
-  createdAt: createdAt(),
-});
+export const blocks = pgTable(
+  "blocks",
+  {
+    id: id(),
+    note: text("note").notNull().default(""),
+    /**
+     * Why the time is blocked (the owner's admin brief of 2026-11-22, item 12): "maintenance", "holiday" (Holiday
+     * Closure), "private_event" or "other"; empty when none was given. See src/server/blocked-time.ts.
+     */
+    reason: text("reason").notNull().default(""),
+    /**
+     * The blocks made together, one for each day of a range or of a weekly repeat: they are listed, changed and removed
+     * as one. Null for a block of one day made alone.
+     */
+    seriesId: uuid("series_id"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("blocks_series_idx").on(t.seriesId)],
+);
 
 /**
  * Every span of time during which a studio is taken, by a booking or a block.
@@ -1156,3 +1184,137 @@ export const siteRedirects = pgTable("site_redirects", {
   toPath: text("to_path").notNull(),
   createdAt: createdAt(),
 });
+
+// ── Booking Forms & Agreements ───────────────────────────────────────────────
+// The owner's brief of 2026-11-22, items 6 and 7: the questions a client answers and the agreements they accept at
+// checkout, which the owners write and change themselves, and the record of both on each booking.
+// See src/server/booking-forms.ts.
+
+/**
+ * A question of the intake form. It is asked of the bookings it applies to: its studios (none listed: every studio),
+ * rentals or photography sessions or both, and a booking's day between `startsOn` and `endsOn` when they are set (a
+ * seasonal question, such as the Christmas decor acknowledgment). A question being written stays off (`active`) until
+ * the owners publish it; the form can be previewed before.
+ */
+export const intakeQuestions = pgTable("intake_questions", {
+  id: id(),
+  label: text("label").notNull(),
+  help: text("help").notNull().default(""),
+  kind: text("kind", { enum: ["text", "checkbox", "dropdown", "choice"] }).notNull(),
+  /** The choices of a dropdown or of multiple choice, in order. */
+  options: jsonb("options").$type<string[]>().notNull().default([]),
+  required: boolean("required").notNull().default(false),
+  active: boolean("active").notNull().default(false),
+  studioIds: jsonb("studio_ids").$type<string[]>().notNull().default([]),
+  forRentals: boolean("for_rentals").notNull().default(true),
+  forPhotography: boolean("for_photography").notNull().default(true),
+  startsOn: date("starts_on", { mode: "string" }),
+  endsOn: date("ends_on", { mode: "string" }),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: createdAt(),
+});
+
+/**
+ * An agreement, policy or waiver beside the studio policies (which are the website's Policies page), applied like a
+ * question. Its text is written as a draft and published as a new version; each booking keeps the version accepted.
+ * An agreement with versions is taken off (`active`), never deleted.
+ */
+export const agreements = pgTable("agreements", {
+  id: id(),
+  title: text("title").notNull(),
+  draft: text("draft").notNull().default(""),
+  active: boolean("active").notNull().default(true),
+  studioIds: jsonb("studio_ids").$type<string[]>().notNull().default([]),
+  forRentals: boolean("for_rentals").notNull().default(true),
+  forPhotography: boolean("for_photography").notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: createdAt(),
+});
+
+/** A published version of an agreement: never changed or removed, so an accepted one can always be read again. */
+export const agreementVersions = pgTable(
+  "agreement_versions",
+  {
+    id: id(),
+    agreementId: uuid("agreement_id")
+      .notNull()
+      .references(() => agreements.id, { onDelete: "restrict" }),
+    number: integer("number").notNull(),
+    title: text("title").notNull(),
+    body: text("body").notNull(),
+    publishedBy: text("published_by").notNull(),
+    publishedAt: ts("published_at").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("agreement_versions_number").on(t.agreementId, t.number)],
+);
+
+/** A client's answer to a question at checkout, with the question's words as asked: it outlives a change or a deletion. */
+export const bookingAnswers = pgTable(
+  "booking_answers",
+  {
+    id: id(),
+    bookingId: uuid("booking_id")
+      .notNull()
+      .references(() => bookings.id, { onDelete: "cascade" }),
+    questionId: uuid("question_id").references(() => intakeQuestions.id, { onDelete: "set null" }),
+    label: text("label").notNull(),
+    answer: text("answer").notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
+  },
+  (t) => [index("booking_answers_booking_idx").on(t.bookingId)],
+);
+
+/**
+ * What a client accepted at checkout, and when: the website's Policies page as published then (`siteVersionId`, its
+ * version `number`), or a version of an agreement. The title is kept as it was.
+ */
+export const bookingAcceptances = pgTable(
+  "booking_acceptances",
+  {
+    id: id(),
+    bookingId: uuid("booking_id")
+      .notNull()
+      .references(() => bookings.id, { onDelete: "cascade" }),
+    kind: text("kind", { enum: ["policies_page", "agreement"] }).notNull(),
+    title: text("title").notNull(),
+    siteVersionId: uuid("site_version_id").references(() => siteVersions.id, { onDelete: "set null" }),
+    agreementVersionId: uuid("agreement_version_id").references(() => agreementVersions.id, { onDelete: "restrict" }),
+    versionNumber: integer("version_number").notNull(),
+    acceptedAt: ts("accepted_at").notNull(),
+    /**
+     * The Policies page's words as the client read them, as HTML (since 2026-11-23): its live values, such as prices,
+     * as they were, and kept when the page's history is not. Null for an agreement, whose versions never change, and
+     * for an acceptance made before.
+     */
+    shownHtml: text("shown_html"),
+  },
+  (t) => [index("booking_acceptances_booking_idx").on(t.bookingId)],
+);
+
+/**
+ * A client waiting for a time (the owner's brief of 2026-11-22, item 4): the studios or the photography session, the
+ * length, the day and the range of time the appointment should lie in. The scheduled task emails the client once,
+ * when a time that fits frees up; nothing is held for them. See src/server/waitlist.ts.
+ */
+export const waitlistEntries = pgTable(
+  "waitlist_entries",
+  {
+    id: id(),
+    studioIds: jsonb("studio_ids").$type<string[]>().notNull(),
+    photography: boolean("photography").notNull().default(false),
+    durationMinutes: integer("duration_minutes").notNull(),
+    day: date("day", { mode: "string" }).notNull(),
+    /** The range of the studio's day the whole appointment should lie in, in minutes from midnight. */
+    fromMinute: integer("from_minute").notNull(),
+    toMinute: integer("to_minute").notNull(),
+    firstName: text("first_name").notNull(),
+    lastName: text("last_name").notNull(),
+    email: text("email").notNull(),
+    createdAt: createdAt(),
+    /** When the client was emailed that a time fits. */
+    notifiedAt: ts("notified_at"),
+    removedAt: ts("removed_at"),
+    removedBy: text("removed_by"),
+  },
+  (t) => [index("waitlist_entries_day_idx").on(t.day), index("waitlist_entries_email_idx").on(t.email)],
+);

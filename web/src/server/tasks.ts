@@ -3,6 +3,8 @@ import { bookings, payments } from "@/db/schema";
 import type { Db } from "@/db/client";
 import { releaseExpiredHolds } from "./availability";
 import { pruneRateLimits } from "./rate-limit";
+import { noticeWaitlist } from "./waitlist";
+import { loadCatalog } from "./catalog";
 import { deleteOldRecords } from "./retention";
 import { durationLabel } from "@/lib/domain/time";
 import { toBookingViews } from "./bookings";
@@ -68,6 +70,8 @@ export interface TaskSummary {
   pagesRemoved: number;
   /** Email copies, sign-in codes, ended sign-ins and access-log lines deleted for being older than `retentionYears`. */
   oldRecordsDeleted: number;
+  /** Clients on the waitlist emailed that a time that fits has opened up (src/server/waitlist.ts). */
+  waitlistEmailed: number;
 }
 
 const DAY = 86_400_000;
@@ -292,6 +296,8 @@ export async function runScheduledTasks(db: Db, deps: TaskDeps): Promise<TaskSum
   // After the links: one just found paid is counted in what the client asked for.
   const waitingEndsFinished = await finishWaitingEnds(db, deps);
   const billing = await runMembershipBilling(db, deps);
+  // Before the emails go out, so that a time freed today reaches the waitlist in this run.
+  const waitlistEmailed = await noticeWaitlist(db, await loadCatalog(db), { now: deps.now, baseUrl: deps.baseUrl });
   const mail = await deliverPendingEmails(db, deps.email, deps.now);
   const pagesRemoved = await emptyOldTrash(db, deps.now);
   await pruneRateLimits(db, deps.now);
@@ -319,5 +325,6 @@ export async function runScheduledTasks(db: Db, deps: TaskDeps): Promise<TaskSum
     emailsFailed: mail.failed,
     pagesRemoved,
     oldRecordsDeleted: old.emails + old.loginCodes + old.sessions + old.customerViews,
+    waitlistEmailed,
   };
 }

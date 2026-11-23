@@ -2,8 +2,10 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
-import { BOOK_PATH, isInternalHref, type SiteFrame, type SiteLink } from "@/lib/site/frame";
+import { usePathname } from "next/navigation";
+import { Suspense, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { hintsSignedIn } from "@/lib/signed-in-hint";
+import { BOOK_PATH, isInternalHref, menuLabel, type SiteFrame, type SiteLink } from "@/lib/site/frame";
 
 /** What the header needs of the frame (src/lib/site/frame.ts). */
 export type SiteNavProps = Pick<SiteFrame, "logo" | "menu" | "bookButton"> & {
@@ -16,15 +18,39 @@ export type SiteNavProps = Pick<SiteFrame, "logo" | "menu" | "bookButton"> & {
 
 /** A link of the menu: a page of this site through the router, anything else as an ordinary link. */
 function MenuLink({ link, onChoose, className }: { link: SiteLink; onChoose: () => void; className?: string }) {
+  // Only the link to the client's pages can change its words. It reads the page's address to know when to look at the
+  // cookie again, and a component that does may wait for the address on a page drawn ahead of time: so it waits alone,
+  // showing the owners' words meanwhile, and the rest of the menu does not (Next.js 16's guide to `usePathname`).
+  const label =
+    link.href === "/account" ? (
+      <Suspense fallback={link.label}>
+        <AccountLabel link={link} />
+      </Suspense>
+    ) : (
+      link.label
+    );
   return isInternalHref(link.href) ? (
     <Link href={link.href} className={className} onClick={onChoose}>
-      {link.label}
+      {label}
     </Link>
   ) : (
     <a href={link.href} className={className} onClick={onChoose}>
-      {link.label}
+      {label}
     </a>
   );
+}
+
+const noSubscription = () => () => {};
+
+/**
+ * The words of the link to the client's pages: "My Account" once the visitor is signed in, by the cookie set beside the
+ * session (src/lib/signed-in-hint.ts). The server draws them for everyone as signed out; the browser reads the cookie
+ * once the page is its own, and again after each move to another page, since signing in and out each lead to one.
+ */
+function AccountLabel({ link }: { link: SiteLink }) {
+  usePathname();
+  const signedIn = useSyncExternalStore(noSubscription, () => hintsSignedIn(document.cookie), () => false);
+  return menuLabel(link, signedIn);
 }
 
 /**
