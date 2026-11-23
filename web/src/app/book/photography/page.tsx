@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
 import { BookingFlow } from "@/components/BookingFlow";
+import { CodeBalanceCheck } from "@/components/CodeBalanceCheck";
 import { telHref } from "@/lib/site/frame";
 import { getCatalog } from "@/server/cached";
 import { shareMetadata, siteFrame } from "@/server/site";
@@ -48,6 +49,7 @@ export default async function BookPhotographyPage() {
             <p className="photographer-back">
               Have your own photographer? <Link href="/book">Rent a studio</Link>.
             </p>
+            <CodeBalanceCheck />
             <Suspense
               fallback={
                 <div className="wizard-container" style={{ textAlign: "center" }}>

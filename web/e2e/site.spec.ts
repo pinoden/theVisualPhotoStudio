@@ -454,6 +454,19 @@ test("a customer signs in, sees their booking, and turns it into a reschedule co
 });
 
 test("the released time is bookable again, and the code pays for a new booking with no card", async ({ page }) => {
+  // Before she books, she checks what her code is worth (the owner's brief of 2026-11-22, item 5). It spends nothing.
+  await page.goto("/book");
+  await page.getByRole("button", { name: "Check Code Balance" }).click();
+  await page.getByLabel(/^Your code/).fill(rescheduleCode.toLowerCase());
+  await page.getByRole("button", { name: "Check balance" }).click();
+  const balance = onScreen(page.locator(".code-balance-result"));
+  await expect(balance).toContainText(`Reschedule code · ${rescheduleCode}`);
+  await expect(balance).toContainText("$116.80 remaining");
+  await expect(balance).toContainText(/Valid until [A-Z][a-z]{2} \d{1,2}, \d{4}/);
+  await expect(balance).toContainText("Works only with the email address it was sent to.");
+  await shot(page, "11-code-balance");
+  expect(await accessibilityProblems(page), "the booking page, with a code's balance").toEqual([]);
+
   await bookStudioFirstToPayment(page, {
     studios: ["Studio Dayglow", "Studio Paris"],
     date: LATER,
@@ -507,6 +520,12 @@ test("the released time is bookable again, and the code pays for a new booking w
   // Answered in a few milliseconds, but once, on the tester's busy machine, in 21 seconds (2026-11-16): the development
   // server can stall for a moment, and every test after this one in the file waits on it.
   await expect(byText(page, "That code has already been used.")).toBeVisible({ timeout: 60_000 });
+  // And its balance says so.
+  await page.getByRole("button", { name: "Check Code Balance" }).click();
+  await page.getByLabel(/^Your code/).fill(rescheduleCode);
+  await page.getByRole("button", { name: "Check balance" }).click();
+  await expect(onScreen(page.locator(".code-balance-result"))).toContainText("Already used");
+  await expect(onScreen(page.locator(".code-balance-result"))).toContainText("$0 remaining");
 });
 
 test("a code only works for the person it was sent to", async ({ page }) => {
