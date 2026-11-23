@@ -7,7 +7,7 @@ import { formatCents } from "@/lib/domain/pricing";
 import { dollarsToCents, formText, hhmmToMinutes } from "@/lib/parse";
 import { PRICE_MAX_CENTS } from "@/server/admin";
 import { CATALOG_TAG } from "@/server/cached";
-import { blockPhotographer, savePhotoPackage, savePhotographerHours, unblockPhotographer } from "@/server/photography";
+import { blockPhotographer, blockPhotographerDays, daysText, savePhotoPackage, savePhotographerHours, unblockPhotographer } from "@/server/photography";
 import { requireStaff } from "@/server/session";
 
 /**
@@ -55,6 +55,16 @@ export async function blockPhotographerAction(formData: FormData): Promise<void>
   });
   if (!result.ok) back("error", result.message);
   back("notice", "Time blocked. No session can be booked in it.");
+}
+
+/** Whole days off: one day, or several in a row (the owner's answer of 2026-11-23, question 70). */
+export async function blockPhotographerDaysAction(formData: FormData): Promise<void> {
+  const viewer = await requireStaff(PAGE);
+  const from = formText(formData.get("from"));
+  const to = formText(formData.get("to"));
+  const result = await blockPhotographerDays(await getDb(), viewer, { from, to, note: formText(formData.get("note")) }, new Date());
+  if (!result.ok) back("error", result.message);
+  back("notice", `The photographer is off on ${daysText({ from, to: to || from })}: no session can be booked then.`);
 }
 
 export async function unblockPhotographerAction(formData: FormData): Promise<void> {

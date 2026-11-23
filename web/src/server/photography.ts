@@ -1,11 +1,11 @@
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
-import { photoPackages, photographerHolds, photographerHours, photographers, studios } from "@/db/schema";
+import { bookings, photoPackages, photographerHolds, photographerHours, photographers, studios } from "@/db/schema";
 import { PG_EXCLUSION_VIOLATION, pgErrorCode, queryRows, type Db, type DbLike } from "@/db/client";
-import { isIsoDate } from "@/lib/domain/time";
+import { daysBetween, isIsoDate, longDateLabel, studioToday, type IsoDate } from "@/lib/domain/time";
 import { can } from "@/lib/abilities";
 import type { AuthUser } from "./auth";
 import { loadSettings } from "./settings";
-import { localToUtc } from "./tz";
+import { dayBoundsUtc, formatInstant, localDateOf, localToUtc } from "./tz";
 
 /**
  * The admin side of photography: the hours the photographer is ready to work,
@@ -33,7 +33,25 @@ export interface PhotographerBlock {
   startAt: string;
   endAt: string;
   note: string;
+  /** Set when the block is whole days, from the start of the first to the end of the last. */
+  days: { from: IsoDate; to: IsoDate } | null;
 }
+
+/** The whole days a block covers, when it starts at the start of a day and ends at the end of one. */
+function wholeDaysOf(start: Date, end: Date): { from: IsoDate; to: IsoDate } | null {
+  const from = localDateOf(start);
+  const to = localDateOf(new Date(end.getTime() - 1));
+  if (dayBoundsUtc(from).start.getTime() !== start.getTime() || dayBoundsUtc(to).end.getTime() !== end.getTime()) return null;
+  return { from, to };
+}
+
+/** "Wednesday, December 3, 2026", or "Wednesday, December 3, 2026 to Friday, December 5, 2026". */
+export function daysText(days: { from: IsoDate; to: IsoDate }): string {
+  return days.from === days.to ? longDateLabel(days.from) : `${longDateLabel(days.from)} to ${longDateLabel(days.to)}`;
+}
+
+/** At most this many days in one go: a year. */
+const MOST_DAYS_OFF = 366;
 
 export interface PhotoPackageRow {
   id: string;
@@ -134,6 +152,65 @@ export async function blockPhotographer(
   }
 }
 
+/**
+ * The photographer's whole days off (the owner's answer of 2026-11-23: "she needs to be able to choose her schedule
+ * and black out some days completely", question 70 in ProjectLibrary.md): one day, or several in a row, from the start
+ * of the first to the end of the last, as one block. Time already blocked inside those days is joined into it. A session
+ * booked on one of them is not moved or cancelled: the block is refused, and the message names each session.
+ */
+export async function blockPhotographerDays(
+  db: Db,
+  viewer: AuthUser,
+  input: { from: string; to: string; note: string },
+  now: Date,
+): Promise<BlockPhotographerResult> {
+  if (!(await maySetTimes(db, viewer))) return { ok: false, message: "You cannot change the photographer's time." };
+  const from = input.from;
+  const to = input.to === "" ? input.from : input.to;
+  if (!isIsoDate(from) || !isIsoDate(to)) return { ok: false, message: "Choose valid days." };
+  if (to < from) return { ok: false, message: "The last day cannot be before the first." };
+  if (from < studioToday(now)) return { ok: false, message: "Choose days from today on." };
+  if (daysBetween(from, to) >= MOST_DAYS_OFF) return { ok: false, message: `Block at most ${MOST_DAYS_OFF} days at a time.` };
+  const person = await loadPhotographer(db);
+  if (!person) return { ok: false, message: "There is no photographer to block time for." };
+
+  const start = dayBoundsUtc(from).start.toISOString();
+  const end = dayBoundsUtc(to).end.toISOString();
+  const range = sql`tstzrange(${start}::timestamptz, ${end}::timestamptz, '[)')`;
+  const sessions = await db
+    .select({ ref: bookings.ref, name: bookings.customerName, startAt: bookings.startAt })
+    .from(photographerHolds)
+    .innerJoin(bookings, eq(bookings.id, photographerHolds.bookingId))
+    .where(and(eq(photographerHolds.photographerId, person.id), eq(photographerHolds.active, true), sql`${photographerHolds.occupied} && ${range}`))
+    .orderBy(asc(bookings.startAt));
+  if (sessions.length > 0) {
+    const named = sessions.map((session) => `${session.ref} (${session.name}, ${formatInstant(session.startAt)})`).join(", ");
+    return {
+      ok: false,
+      message: `The photographer has ${sessions.length === 1 ? "a session" : `${sessions.length} sessions`} on those days: ${named}. Move or cancel ${sessions.length === 1 ? "it" : "them"} first, or leave ${sessions.length === 1 ? "that day" : "those days"} out.`,
+    };
+  }
+  try {
+    const id = await db.transaction(async (tx) => {
+      // Time blocked inside those days becomes part of the whole days; a block reaching past them stays, and refuses.
+      await tx
+        .delete(photographerHolds)
+        .where(and(eq(photographerHolds.photographerId, person.id), isNull(photographerHolds.bookingId), sql`${photographerHolds.occupied} <@ ${range}`));
+      const [hold] = await tx
+        .insert(photographerHolds)
+        .values({ photographerId: person.id, occupied: range, note: input.note.slice(0, 200) })
+        .returning({ id: photographerHolds.id });
+      return hold.id;
+    });
+    return { ok: true, id };
+  } catch (error) {
+    if (pgErrorCode(error) === PG_EXCLUSION_VIOLATION) {
+      return { ok: false, message: "Time blocked before reaches into those days from outside them: remove that block first, or choose days around it." };
+    }
+    throw error;
+  }
+}
+
 /** Remove a block. Only time blocked by hand can be removed here, never a session's hold. */
 export async function unblockPhotographer(db: DbLike, viewer: AuthUser, holdId: string): Promise<boolean> {
   if (!(await maySetTimes(db, viewer))) return false;
@@ -161,6 +238,7 @@ export async function listPhotographerBlocks(db: DbLike, now: Date): Promise<Pho
     startAt: new Date(row.start_at).toISOString(),
     endAt: new Date(row.end_at).toISOString(),
     note: row.note,
+    days: wholeDaysOf(new Date(row.start_at), new Date(row.end_at)),
   }));
 }
 

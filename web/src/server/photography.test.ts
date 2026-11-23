@@ -13,6 +13,8 @@ import { cancelBooking, getManageChoices, requestRescheduleCode } from "./manage
 import { MOCK_TOKEN_DECLINED } from "./payments";
 import {
   blockPhotographer,
+  blockPhotographerDays,
+  daysText,
   listPhotoPackages,
   listPhotographerBlocks,
   loadPhotographer,
@@ -227,6 +229,68 @@ describe("the photographer's availability", () => {
     expect(await unblockPhotographer(world.db, owner, blocks[0].id)).toBe(true);
     expect(await listPhotographerBlocks(world.db, NOW)).toHaveLength(0);
     expect((await session({ studioIds: [world.ids.paris], startMinute: h(10) })).ok).toBe(true);
+  });
+
+  it("takes whole days off, one or several in a row, the time blocked inside them joined in (question 70)", async () => {
+    // An hour already blocked on the Thursday becomes part of the days off.
+    expect((await blockPhotographer(world.db, owner, { date: NEXT_DAY, startMinute: h(14), endMinute: h(15), note: "Dentist" })).ok).toBe(true);
+    const off = await blockPhotographerDays(world.db, owner, { from: SESSION_DAY, to: "2026-12-04", note: "Holiday" }, NOW);
+    expect(off.ok).toBe(true);
+    const blocks = await listPhotographerBlocks(world.db, NOW);
+    expect(blocks).toEqual([
+      { id: off.ok ? off.id : "", startAt: "2026-12-02T05:00:00.000Z", endAt: "2026-12-05T05:00:00.000Z", note: "Holiday", days: { from: SESSION_DAY, to: "2026-12-04" } },
+    ]);
+    expect(daysText(blocks[0].days!)).toBe("Wednesday, December 2, 2026 to Friday, December 4, 2026");
+    for (const date of [SESSION_DAY, NEXT_DAY, "2026-12-04"]) {
+      expect(await session({ date, startMinute: h(9) })).toMatchObject({ ok: false, code: "slot_taken" });
+      expect(await session({ date, startMinute: h(16) })).toMatchObject({ ok: false, code: "slot_taken" });
+    }
+    expect((await session({ date: "2026-12-05", startMinute: h(9) })).ok).toBe(true); // the Saturday after
+    expect((await rental({ date: NEXT_DAY, startMinute: h(10) })).ok).toBe(true); // the studios stay open
+
+    // One day, the last left empty; across the clocks' change, still whole days.
+    const single = await blockPhotographerDays(world.db, owner, { from: "2026-12-10", to: "", note: "" }, NOW);
+    expect(single.ok).toBe(true);
+    const spring = await blockPhotographerDays(world.db, owner, { from: "2027-03-13", to: "2027-03-15", note: "" }, NOW);
+    expect(spring.ok).toBe(true);
+    expect((await listPhotographerBlocks(world.db, NOW)).map((block) => block.days)).toEqual([
+      { from: SESSION_DAY, to: "2026-12-04" },
+      { from: "2026-12-10", to: "2026-12-10" },
+      { from: "2027-03-13", to: "2027-03-15" },
+    ]);
+    // Some hours of a day are not whole days.
+    await blockPhotographer(world.db, owner, { date: "2026-12-16", startMinute: h(9), endMinute: h(12), note: "" });
+    expect((await listPhotographerBlocks(world.db, NOW)).find((block) => block.startAt.startsWith("2026-12-16"))!.days).toBeNull();
+
+    // Removing it opens every day again.
+    expect(await unblockPhotographer(world.db, owner, off.ok ? off.id : "")).toBe(true);
+    expect((await session({ date: NEXT_DAY, startMinute: h(16) })).ok).toBe(true);
+  });
+
+  it("refuses whole days over a booked session, naming it, and days that cannot be", async () => {
+    const booked = expectOk(await session({ date: FAR, startMinute: h(11) }));
+    expect(await blockPhotographerDays(world.db, owner, { from: "2026-12-08", to: "2026-12-10", note: "" }, NOW)).toEqual({
+      ok: false,
+      message: `The photographer has a session on those days: ${booked.ref} (Jane Smith, Wed, Dec 9, 2026, 11:00 AM). Move or cancel it first, or leave that day out.`,
+    });
+    expect(await listPhotographerBlocks(world.db, NOW)).toEqual([]);
+
+    expect(await blockPhotographerDays(world.db, owner, { from: "2026-12-10", to: "2026-12-08", note: "" }, NOW)).toEqual({ ok: false, message: "The last day cannot be before the first." });
+    expect(await blockPhotographerDays(world.db, owner, { from: "2026-11-13", to: "", note: "" }, NOW)).toEqual({ ok: false, message: "Choose days from today on." });
+    expect(await blockPhotographerDays(world.db, owner, { from: "2026-12-01", to: "2027-12-02", note: "" }, NOW)).toEqual({ ok: false, message: "Block at most 366 days at a time." });
+    expect(await blockPhotographerDays(world.db, owner, { from: "next week", to: "", note: "" }, NOW)).toEqual({ ok: false, message: "Choose valid days." });
+    expect(await blockPhotographerDays(world.db, sam, { from: "2026-12-14", to: "", note: "" }, NOW)).toMatchObject({ ok: false });
+
+    // Days inside a longer block taken off before are not laid over it.
+    expect((await blockPhotographerDays(world.db, owner, { from: "2026-12-14", to: "2026-12-16", note: "" }, NOW)).ok).toBe(true);
+    expect(await blockPhotographerDays(world.db, owner, { from: "2026-12-15", to: "", note: "" }, NOW)).toEqual({
+      ok: false,
+      message: "Time blocked before reaches into those days from outside them: remove that block first, or choose days around it.",
+    });
+
+    // Staff may, once the owners switch it on.
+    await world.db.insert(settings).values({ key: "staffSetsPhotographerTimes", value: true });
+    expect((await blockPhotographerDays(world.db, sam, { from: "2026-12-21", to: "2026-12-22", note: "" }, NOW)).ok).toBe(true);
   });
 
   it("cannot be blocked over a session that is already booked, and a session's hold is never removed as a block", async () => {

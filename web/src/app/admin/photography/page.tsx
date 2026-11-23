@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { Suspense } from "react";
@@ -6,13 +7,14 @@ import { getDb } from "@/db/client";
 import { durationLabel, minutesToHHMM, weekdayName } from "@/lib/domain/time";
 import { centsToInput, PRICE_FIELD } from "@/lib/parse";
 import { can } from "@/lib/abilities";
-import { listPhotoPackages, listPhotographerBlocks, loadPhotographer } from "@/server/photography";
+import { daysText, listPhotoPackages, listPhotographerBlocks, loadPhotographer } from "@/server/photography";
 import { requireStaff } from "@/server/session";
 import { loadSettings } from "@/server/settings";
 import { formatRange, localDateOf } from "@/server/tz";
 import { AdminFrame, AdminLoading } from "../frame";
 import {
   blockPhotographerAction,
+  blockPhotographerDaysAction,
   savePhotoPackageAction,
   savePhotographerHoursAction,
   unblockPhotographerAction,
@@ -58,6 +60,13 @@ async function Photography({ searchParams }: Pick<PageProps<"/admin/photography"
           the photographer is at another session, whatever the studio. A session holds the photographer for its length
           and the 15 minutes after it.
         </p>
+        {viewer.role === "owner" && (
+          <p style={{ fontSize: ".875rem", margin: ".75rem 0 0" }}>
+            The photographer can set her working hours and days off herself: add her under{" "}
+            <Link href="/admin/staff">Staff</Link> as a Studio Attendant, and switch on &ldquo;Set the hours the photographer
+            works, and block their time&rdquo; under &ldquo;What Studio Attendants can do&rdquo; (it applies to every attendant).
+          </p>
+        )}
       </div>
 
       {!photographer ? (
@@ -125,9 +134,35 @@ async function Photography({ searchParams }: Pick<PageProps<"/admin/photography"
           <div className="admin-card">
             <h3>Blocked time</h3>
             <p style={{ fontSize: ".875rem" }}>
-              Time inside the working hours when the photographer cannot take a session: a day off, a job elsewhere.
+              Time when the photographer cannot take a session: days off, a holiday, a job elsewhere. Clients are offered
+              no session then.
             </p>
-            <form action={blockPhotographerAction} className="admin-form-row">
+            <h4 id="photo-days-off">Whole days off</h4>
+            <form action={blockPhotographerDaysAction} className="admin-form-row" aria-labelledby="photo-days-off">
+              <div className="form-group">
+                <label className="form-label" htmlFor="photo-days-from">
+                  First day off
+                </label>
+                <input id="photo-days-from" name="from" type="date" className="form-control" min={localDateOf(now)} required />
+              </div>
+              <div className="form-group">
+                <label className="form-label" htmlFor="photo-days-to">
+                  Last day off (empty for one day)
+                </label>
+                <input id="photo-days-to" name="to" type="date" className="form-control" min={localDateOf(now)} />
+              </div>
+              <div className="form-group">
+                <label className="form-label" htmlFor="photo-days-note">
+                  Note
+                </label>
+                <input id="photo-days-note" name="note" className="form-control" maxLength={200} />
+              </div>
+              <button type="submit" className="btn btn-dark btn-small">
+                Block whole days
+              </button>
+            </form>
+            <h4 id="photo-hours-off">Some hours of one day</h4>
+            <form action={blockPhotographerAction} className="admin-form-row" aria-labelledby="photo-hours-off">
               <div className="form-group">
                 <label className="form-label" htmlFor="photo-block-date">
                   Date
@@ -173,9 +208,7 @@ async function Photography({ searchParams }: Pick<PageProps<"/admin/photography"
                       const when = formatRange(new Date(block.startAt), new Date(block.endAt));
                       return (
                         <tr key={block.id}>
-                          <td>
-                            {when.day}, {when.time}
-                          </td>
+                          <td>{block.days ? `${block.days.from === block.days.to ? "Whole day" : "Whole days"}: ${daysText(block.days)}` : `${when.day}, ${when.time}`}</td>
                           <td>{block.note}</td>
                           <td>
                             <form action={unblockPhotographerAction}>

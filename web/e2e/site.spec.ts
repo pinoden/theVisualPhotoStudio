@@ -2150,7 +2150,7 @@ test("a client without a photographer books a session, and the photographer cann
   await expect(byText(page, /Photography session, Studio Blanche, 1 hour/)).toBeVisible();
   await expect(totalRow(page)).toContainText("$300");
   await shot(page, "21-photography-pay");
-  await confirmAndGetRef(page, "Confirm & pay $300");
+  const janesSession = await confirmAndGetRef(page, "Confirm & pay $300");
   await expect(byText(page, /With our in-house photographer, studio included/)).toBeVisible();
   const mail = await latestEmail(page, "booking_confirmation", jane.email);
   expect(mail.body).toContain("Photography session with our in-house photographer, studio included: 1–2 outfits, 20 edited images.");
@@ -2178,14 +2178,31 @@ test("a client without a photographer books a session, and the photographer cann
 
   // The owners block the photographer's afternoon.
   await page.goto("/admin/photography");
-  await byLabel(page, "Date").fill(PHOTO_DAY);
-  await byLabel(page, "From").fill("13:00");
-  await byLabel(page, "To").fill("16:00");
-  await byLabel(page, "Note").fill("Wedding");
-  await page.getByRole("button", { name: "Block", exact: true }).click();
+  const hoursOff = page.getByRole("form", { name: "Some hours of one day" });
+  await byLabel(hoursOff, "Date").fill(PHOTO_DAY);
+  await byLabel(hoursOff, "From").fill("13:00");
+  await byLabel(hoursOff, "To").fill("16:00");
+  await byLabel(hoursOff, "Note").fill("Wedding");
+  await hoursOff.getByRole("button", { name: "Block", exact: true }).click();
   await expect(byText(page, "Time blocked. No session can be booked in it.")).toBeVisible();
   await expect(page.getByRole("row", { name: /Wedding/ })).toContainText("1:00 PM");
+
+  // And two whole days off after it (the owner's answer of 2026-11-23): the photographer blacks out days completely.
+  const [offFrom, offTo] = [addDays(PHOTO_DAY, 1), addDays(PHOTO_DAY, 2)];
+  const daysOff = page.getByRole("form", { name: "Whole days off" });
+  await byLabel(daysOff, "First day off").fill(offFrom);
+  await byLabel(daysOff, "Last day off (empty for one day)").fill(offTo);
+  await byLabel(daysOff, "Note").fill("Holiday");
+  await daysOff.getByRole("button", { name: "Block whole days" }).click();
+  await expect(byText(page, `The photographer is off on ${longDateLabel(offFrom)} to ${longDateLabel(offTo)}: no session can be booked then.`)).toBeVisible();
+  await expect(page.getByRole("row", { name: /Holiday/ })).toContainText(`Whole days: ${longDateLabel(offFrom)} to ${longDateLabel(offTo)}`);
+  // Not over Jane's session: it is named, and nothing is blocked.
+  await byLabel(daysOff, "First day off").fill(PHOTO_DAY);
+  await daysOff.getByRole("button", { name: "Block whole days" }).click();
+  await expect(byText(page, new RegExp(`^The photographer has a session on those days: ${janesSession} \\(Jane Smith, .*\\)\\. Move or cancel it first, or leave that day out\\.$`))).toBeVisible();
+  await expect(page.getByRole("row", { name: /Whole day: / })).toHaveCount(0);
   await shot(page, "22-admin-photography");
+  expect(await accessibilityProblems(page), "the photographer's blocked time").toEqual([]);
 
   // The session is on the calendar, marked as photography.
   await page.goto(`/admin/calendar?view=day&date=${PHOTO_DAY}`);
@@ -2203,6 +2220,20 @@ test("a client without a photographer books a session, and the photographer cann
     await expect(page.getByRole("button", { name: blocked, exact: true })).toHaveCount(0);
   }
   await expect(page.getByRole("button", { name: "4:00 PM", exact: true })).toBeVisible();
+
+  // The days off are muted in the month calendar of sessions; the day after them can be chosen.
+  await page.getByRole("button", { name: "← Back" }).click();
+  const monthOf = (day: string) => new Date(`${day}T12:00:00Z`).toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+  const title = onScreen(page.locator(".month-cal-title"));
+  for (const [day, free] of [[offFrom, false], [offTo, false], [addDays(offTo, 1), true]] as const) {
+    if ((await title.innerText()) !== monthOf(day)) await page.getByRole("button", { name: "Following month" }).click();
+    await expect(title).toHaveText(monthOf(day));
+    await expect(onScreen(page.locator(".month-cal"))).toHaveAttribute("aria-busy", "false");
+    const button = page.getByRole("button", { name: free ? longDateLabel(day) : `${longDateLabel(day)}, not available`, exact: true });
+    await expect(button).toBeVisible();
+    if (free) await expect(button).toBeEnabled();
+    else await expect(button).toBeDisabled();
+  }
 });
 
 test("a booking whose answer is lost on the way is found when the customer presses again, and is charged once", async ({ page }) => {
