@@ -10,7 +10,8 @@ export const SETTING_GROUPS: { title: string; fields: SettingField[] }[] = [
     fields: [
       { key: "minLeadHours", label: "Minimum notice (hours)", help: "How far ahead a booking must be made." },
       { key: "maxAdvanceDays", label: "Booking horizon (days)", help: "How far ahead the calendar is open." },
-      { key: "photoMinLeadHours", label: "Minimum notice for photography and content creation (hours)", help: "336 is two weeks. A session with the photographer cannot be booked closer than this." },
+      { key: "photoMinLeadHours", label: "Minimum notice for photography (hours)", help: "336 is two weeks. A session with the photographer cannot be booked closer than this." },
+      { key: "contentNoticeBusinessDays", label: "Minimum notice for content creation (business days)", help: "Monday to Friday, counted from tomorrow: 3 booked on a Monday makes Thursday the first day; on a Friday or at the weekend, Wednesday." },
       { key: "slotIncrementMinutes", label: "Start times every (minutes)", help: "15 offers 9:00, 9:15, 9:30 and so on." },
       { key: "holdMinutes", label: "Hold while paying (minutes)", help: "How long a slot is kept for a customer at checkout." },
       {

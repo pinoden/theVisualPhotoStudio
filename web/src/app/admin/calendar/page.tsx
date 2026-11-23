@@ -122,7 +122,8 @@ async function Calendar({ searchParams }: Pick<PageProps<"/admin/calendar">, "se
   // Rescheduling inside the pop-up (item 5): `&move=<date>` shows the times free on that date, as the appointment's page does.
   const moving = opened !== null && opened.may.move && typeof query.move === "string";
   const moveDate = moving && !opened.moveBlocked && typeof query.move === "string" && isIsoDate(query.move) ? query.move : null;
-  const moveTimes = opened && moveDate ? await moveOptions(db, viewer, opened.ref, moveDate, new Date()) : null;
+  const afterHours = viewer.role === "owner" && query.afterHours === "1";
+  const moveTimes = opened && moveDate ? await moveOptions(db, viewer, opened.ref, moveDate, new Date(), { openAllDay: afterHours }) : null;
   const openedHref = opened ? href({ open: opened.ref }) : "";
   const move = opened && moving
     ? {
@@ -134,6 +135,8 @@ async function Calendar({ searchParams }: Pick<PageProps<"/admin/calendar">, "se
         },
         back: openedHref,
         closeHref: openedHref,
+        owner: viewer.role === "owner",
+        afterHours,
       }
     : null;
   const bookAnother =

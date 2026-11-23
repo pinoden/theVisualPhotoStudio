@@ -32,6 +32,8 @@ export function MoveToNewTime({
   back,
   today,
   idPrefix,
+  owner = false,
+  afterHours = false,
 }: {
   appointment: Appointment;
   /** The date whose free times are shown, or null before one is chosen. */
@@ -44,6 +46,9 @@ export function MoveToNewTime({
   today: string;
   /** Makes the fields' ids its own, as the calendar's pop-up and a page could share them. */
   idPrefix: string;
+  /** An owner, who may pass over the opening hours (question 76), and whether the times shown do. */
+  owner?: boolean;
+  afterHours?: boolean;
 }) {
   if (appointment.moveBlocked) return <p className="move-blocked">{appointment.moveBlocked}</p>;
   const day = localDateOf(new Date(appointment.startAt));
@@ -62,6 +67,12 @@ export function MoveToNewTime({
         <button type="submit" className="btn btn-outline btn-small">
           Show free times
         </button>
+        {owner && (
+          <label className="admin-check" style={{ display: "block", fontSize: ".85rem", flexBasis: "100%" }}>
+            <input type="checkbox" name="afterHours" value="1" defaultChecked={afterHours} /> Outside the opening hours (owners only). Other bookings,
+            the gap after each and blocked time still stand.
+          </label>
+        )}
       </form>
       {moveDate && moveTimes && !moveTimes.ok && <p className="field-error">{moveTimes.message}</p>}
       {moveDate && moveTimes?.ok && moveTimes.starts.length === 0 && (
@@ -79,6 +90,7 @@ export function MoveToNewTime({
           <input type="hidden" name="ref" value={appointment.ref} />
           <input type="hidden" name="date" value={moveDate} />
           {back && <input type="hidden" name="back" value={back} />}
+          {owner && afterHours && <input type="hidden" name="afterHours" value="1" />}
           <div className="admin-form-row">
             <div className="form-group">
               <label className="form-label" htmlFor={`${idPrefix}-time`}>

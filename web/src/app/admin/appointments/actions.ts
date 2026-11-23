@@ -80,7 +80,7 @@ export async function moveBookingAction(formData: FormData): Promise<void> {
     await getDb(),
     viewer,
     ref,
-    { date, startMinute, countsAsClientMove: formData.get("countsAsClientMove") !== null },
+    { date, startMinute, countsAsClientMove: formData.get("countsAsClientMove") !== null, openAllDay: formData.get("afterHours") === "1" },
     new Date(),
   );
   if (!result.ok) redirect(withMessage(retry, "error", result.message));
@@ -107,7 +107,7 @@ export async function editBookingAction(formData: FormData): Promise<void> {
     if (quantity > 0) addons.push({ addonId: name.slice("addon:".length), quantity });
   }
   const studioIds = formData.getAll("studio").filter((value): value is string => typeof value === "string");
-  const result = await editBooking(await getDb(), viewer, ref, { studioIds, durationMinutes: durationMinutes!, addons }, new Date());
+  const result = await editBooking(await getDb(), viewer, ref, { studioIds, durationMinutes: durationMinutes!, addons, openAllDay: formData.get("afterHours") === "1" }, new Date());
   if (!result.ok) redirect(withMessage(page, "error", result.message) + "#change");
   flushEmailsSoon();
   const words = [
@@ -132,6 +132,9 @@ export async function createAdminBookingAction(formData: FormData): Promise<void
   for (const id of studioIds) again.append("studio", id);
   again.set("date", date);
   if (durationMinutes !== null) again.set("duration", String(durationMinutes));
+  // An owner's override of the opening hours (question 76): the booking's own check passes it to the owner alone.
+  const afterHours = formData.get("afterHours") === "1";
+  if (afterHours) again.set("afterHours", "1");
   const form = `/admin/calendar/new?${again}`;
   if (durationMinutes === null || startMinute === null) redirect(withMessage(form, "error", "Choose a length and a start time."));
 
@@ -164,7 +167,7 @@ export async function createAdminBookingAction(formData: FormData): Promise<void
       promoCode: formText(formData.get("code")) || undefined,
     },
     // The processor set up now says what kind of money the booking is: test mode's, or real (src/server/test-mode.ts).
-    { now: new Date(), baseUrl: await siteUrl(), processor: resolvePayments().provider?.name ?? null },
+    { now: new Date(), baseUrl: await siteUrl(), processor: resolvePayments().provider?.name ?? null, openAllDay: afterHours },
   );
   if (!result.ok) redirect(withMessage(form, "error", result.message));
   flushEmailsSoon();

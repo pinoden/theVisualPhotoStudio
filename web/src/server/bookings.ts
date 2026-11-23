@@ -14,7 +14,7 @@ import {
   type DbLike,
 } from "@/db/client";
 import { extraGuestsFor, studioCombinationError } from "@/lib/catalog-view";
-import { isStartFree, noticeHours } from "@/lib/domain/availability";
+import { businessDaysInWords, isStartFree, noticeHours } from "@/lib/domain/availability";
 import { labelOf, type LabelKey } from "@/lib/domain/labels";
 import { formatCents, PricingError, PROMO_MISFIT_TEXT, quote, type PromoKind, type Quote } from "@/lib/domain/pricing";
 import { count, hoursInWords } from "@/lib/words";
@@ -144,6 +144,8 @@ export interface BookingDeps {
    * the kind of money the booking is (`moneyKindNow` in src/server/test-mode.ts). Left out, the name of `payments`.
    */
   processor?: string | null;
+  /** With `madeBy`, an owner's: the studios count as open all day (question 76 in ProjectLibrary.md). */
+  openAllDay?: boolean;
 }
 
 const REF_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
@@ -368,6 +370,7 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
   const day = await loadDayAvailability(db, catalog, input.date, now, {
     asAdmin: Boolean(deps.madeBy),
     withPhotographer: session ? input.service : false,
+    openAllDay: Boolean(deps.madeBy) && Boolean(deps.openAllDay),
   });
   if (day.problem) {
     const text = {
@@ -438,7 +441,10 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
   // Too close to now: said in so many words, because "no longer available" would send the customer
   // looking for another time on a day that has none. An administrator gives no notice.
   if (input.startMinute < day.earliestStartMinute) {
-    const notice = hoursInWords(noticeHours(catalog.settings, Boolean(session)));
+    const notice =
+      session && input.service === "content"
+        ? businessDaysInWords(catalog.settings.contentNoticeBusinessDays)
+        : hoursInWords(noticeHours(catalog.settings, Boolean(session)));
     return fail(
       409,
       "slot_taken",

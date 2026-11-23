@@ -21,6 +21,12 @@ export interface Settings {
    * owner's rule (2026-11-15): the photographer is available from two weeks out.
    */
   photoMinLeadHours: number;
+  /**
+   * A content creation session is booked at least this many business days ahead, Monday to Friday counted, from the
+   * start of the day (the owner's answer of 2026-11-23: "Give content creation 3 businesses days notice period"; question
+   * 69 in ProjectLibrary.md). Booked on a Monday, the first day is Thursday; on a Friday or at the weekend, Wednesday.
+   */
+  contentNoticeBusinessDays: number;
   /** Minutes an unpaid booking keeps its slot while the card is charged. */
   holdMinutes: number;
   /** Discount percent by number of studios booked together. */
@@ -141,6 +147,7 @@ export const DEFAULT_SETTINGS: Settings = {
   minLeadHours: 24,
   maxAdvanceDays: 180,
   photoMinLeadHours: 336, // two weeks, the owner's rule of 2026-11-15
+  contentNoticeBusinessDays: 3, // the owner's answer of 2026-11-23
   holdMinutes: 10,
   multiStudioPercent: { 2: 20, 3: 22 },
 
@@ -202,6 +209,7 @@ export const NUMBER_SETTING_RANGES = {
   minLeadHours: [0, 24 * 60],
   maxAdvanceDays: [1, 730],
   photoMinLeadHours: [0, 24 * 365],
+  contentNoticeBusinessDays: [0, 60],
   holdMinutes: [1, 60],
   refundWindowHours: [0, 24 * 365],
   photoRefundWindowHours: [0, 24 * 365],
@@ -251,6 +259,7 @@ const VALIDATORS: { [K in Exclude<keyof Settings, "multiStudioPercent">]: (v: un
   minLeadHours: int(NUMBER_SETTING_RANGES.minLeadHours),
   maxAdvanceDays: int(NUMBER_SETTING_RANGES.maxAdvanceDays),
   photoMinLeadHours: int(NUMBER_SETTING_RANGES.photoMinLeadHours),
+  contentNoticeBusinessDays: int(NUMBER_SETTING_RANGES.contentNoticeBusinessDays),
   holdMinutes: int(NUMBER_SETTING_RANGES.holdMinutes),
   refundWindowHours: int(NUMBER_SETTING_RANGES.refundWindowHours),
   photoRefundWindowHours: int(NUMBER_SETTING_RANGES.photoRefundWindowHours),

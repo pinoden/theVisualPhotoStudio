@@ -89,8 +89,15 @@ describe("Content Creation", () => {
 
   it("follows the content creator's hours and days off, and photography's notice", async () => {
     expectOk(await onSale());
-    // Two weeks' notice, as photography's: the setting is the same.
-    expect(await content({ date: "2026-11-20" })).toMatchObject({ ok: false, code: "slot_taken", message: expect.stringMatching(/^Content creation sessions are made at least/) });
+    // Three business days' notice (the owner's answer of 2026-11-23): booked on Saturday, November 14, the first day is
+    // Wednesday, November 18; photography keeps its two weeks.
+    expect(await content({ date: "2026-11-17", startMinute: h(10) })).toMatchObject({
+      ok: false,
+      code: "slot_taken",
+      message: "Content creation sessions are made at least 3 business days ahead. Please choose a later date.",
+    });
+    expectOk(await content({ date: "2026-11-18", startMinute: h(10) }));
+    expect(await photoSession({ date: "2026-11-18", startMinute: h(10), studioIds: [world.ids.blanche] })).toMatchObject({ ok: false, code: "slot_taken" });
     // Wednesdays from 1 to 5 only, for the content creator; the photographer keeps 9 to 5.
     expect(await savePhotographerHours(world.db, owner, 3, { openMinute: h(13), closeMinute: h(17) }, "content")).toBe(true);
     expect(await content({ startMinute: h(10) })).toMatchObject({ ok: false, code: "slot_taken", message: "Our content creator is not free at that time. Please choose another." });
@@ -146,5 +153,19 @@ describe("Content Creation", () => {
       NOW,
     );
     expect(waiting.ok).toBe(true);
+  });
+});
+
+describe("content creation's notice in business days", () => {
+  it("counts Monday to Friday from the day after", async () => {
+    const { afterBusinessDays, businessDaysInWords } = await import("@/lib/domain/availability");
+    expect(afterBusinessDays("2026-11-23", 3)).toBe("2026-11-26"); // Monday → Thursday
+    expect(afterBusinessDays("2026-11-27", 3)).toBe("2026-12-02"); // Friday → Wednesday
+    expect(afterBusinessDays("2026-11-28", 3)).toBe("2026-12-02"); // Saturday → Wednesday
+    expect(afterBusinessDays("2026-11-29", 3)).toBe("2026-12-02"); // Sunday → Wednesday
+    expect(afterBusinessDays("2026-11-25", 1)).toBe("2026-11-26");
+    expect(afterBusinessDays("2026-11-25", 0)).toBe("2026-11-25");
+    expect(businessDaysInWords(3)).toBe("3 business days");
+    expect(businessDaysInWords(1)).toBe("1 business day");
   });
 });

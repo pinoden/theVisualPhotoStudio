@@ -56,6 +56,9 @@ export function ChangeBooking({ bookingRef, options }: { bookingRef: string; opt
           </div>
         </fieldset>
       )}
+      <label className="admin-check" style={{ display: "block", fontSize: ".85rem", marginBottom: ".75rem" }}>
+        <input type="checkbox" name="afterHours" value="1" /> Outside the opening hours. Other bookings, the gap after each and blocked time still stand.
+      </label>
       <p style={{ fontSize: ".85rem" }}>
         The booking keeps its day and start. Its price is worked out again at today&rsquo;s prices, the add-ons it keeps at
         theirs, and the client is emailed the change. What it then owes, or was paid beyond its new price, shows under

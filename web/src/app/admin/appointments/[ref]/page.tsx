@@ -75,7 +75,9 @@ async function AppointmentDetails({
   const query = await searchParams;
   // "Move to a new time" works in two steps: choose the date, then one of the times that are free on it.
   const moveDate = appointment.may.move && !appointment.moveBlocked && typeof query.move === "string" && isIsoDate(query.move) ? query.move : null;
-  const moveTimes = moveDate ? await moveOptions(db, viewer, ref, moveDate, now) : null;
+  // An owner's override of the opening hours (question 76): `&afterHours=1` beside the date.
+  const afterHours = viewer.role === "owner" && query.afterHours === "1";
+  const moveTimes = moveDate ? await moveOptions(db, viewer, ref, moveDate, now, { openAllDay: afterHours }) : null;
   // An owner changes its studios, length, guests and add-ons (question 75); a booking that cannot be changed says why.
   const changing = await editOptions(db, viewer, ref, now);
 
@@ -275,6 +277,8 @@ async function AppointmentDetails({
             back={null}
             today={localDateOf(now)}
             idPrefix="move"
+            owner={viewer.role === "owner"}
+            afterHours={afterHours}
           />
         </div>
       )}
