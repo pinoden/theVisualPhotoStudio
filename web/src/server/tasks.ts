@@ -121,6 +121,7 @@ export async function queueReminders(db: Db, now: Date): Promise<number> {
           when: formatInstant(booking.startAt),
           duration: durationLabel(booking.durationMinutes),
           photoIncludes: booking.photographerId !== null ? (booking.photoIncludes ?? "") : undefined,
+          service: view.photography?.service,
           dueCents: view.dueCents,
           atStudio: booking.madeBy !== null,
           access: access || undefined,

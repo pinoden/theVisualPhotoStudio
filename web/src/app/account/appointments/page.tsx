@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { SERVICE_WORDS } from "@/lib/domain/services";
 import Link from "next/link";
 import { connection } from "next/server";
 import { Suspense } from "react";
@@ -219,7 +220,7 @@ async function Appointments({ searchParams }: Pick<PageProps<"/account/appointme
                     {when.day}, {when.time}
                   </span>
                   <span className="past-what">
-                    {booking.photography && "Photography session, "}
+                    {booking.photography && `${SERVICE_WORDS[booking.photography.service].Session}, `}
                     {booking.studios.map((studio) => studio.name).join(" + ")}
                   </span>
                   <Status booking={booking} />

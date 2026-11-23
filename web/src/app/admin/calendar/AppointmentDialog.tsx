@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { SERVICE_WORDS } from "@/lib/domain/services";
 import type { CSSProperties, ReactNode } from "react";
 import { StatusBadge } from "@/components/StatusBadge";
 import { hoursText, type AppointmentLook } from "@/lib/domain/appointment-look";
@@ -141,7 +142,7 @@ export function AppointmentDialog({
               {look.bundle && ` (${look.name})`}
             </dd>
             <dt>Type</dt>
-            <dd>{appointment.photography ? `Photography session: ${appointment.photography.includes}` : look.bundle ? "Studio bundle rental" : "Studio rental"}</dd>
+            <dd>{appointment.photography ? `${SERVICE_WORDS[appointment.photography.service].Session}: ${appointment.photography.includes}` : look.bundle ? "Studio bundle rental" : "Studio rental"}</dd>
             <dt>Date</dt>
             <dd>{longDateLabel(day)}</dd>
             <dt>Time</dt>

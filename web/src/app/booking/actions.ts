@@ -1,6 +1,7 @@
 "use server";
 
 import { refresh } from "next/cache";
+import type { BookPath } from "@/lib/domain/services";
 import { getDb } from "@/db/client";
 import { formatCents } from "@/lib/domain/pricing";
 import { askStudioToMove, cancelBooking, requestRescheduleCode, type Actor } from "@/server/manage";
@@ -15,7 +16,7 @@ export interface ManageState {
   message: string;
   /** The reschedule code, shown once on screen as well as emailed. */
   code?: string;
-  bookPath?: "/book" | "/book/photography";
+  bookPath?: BookPath;
 }
 
 /**

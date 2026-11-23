@@ -16,6 +16,7 @@ const LINKS = [
   { href: "/admin/props", label: "Props & Resources" },
   { href: "/admin/hours", label: "Hours" },
   { href: "/admin/photography", label: "Photography" },
+  { href: "/admin/content", label: "Content Creation" },
   { href: "/admin/codes", label: "Codes" },
   { href: "/admin/memberships", label: "Memberships" },
   { href: "/admin/website", label: "Website" },
@@ -41,6 +42,7 @@ function linksFor(viewer: { role: string }, settings: AbilitySettings): { href: 
     // Blocking time can be a manager's; the opening hours are the owners'.
     "/admin/availability": can(viewer, "blockTime", settings),
     "/admin/photography": can(viewer, "setPhotographerTimes", settings),
+    "/admin/content": can(viewer, "setPhotographerTimes", settings),
     "/admin/website": can(viewer, "editDesign", settings) || can(viewer, "editPages", settings),
   };
   return LINKS.filter((link) => pages[link.href] === true);

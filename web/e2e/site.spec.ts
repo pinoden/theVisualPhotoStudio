@@ -1057,7 +1057,7 @@ test("the owners write a seasonal question and an agreement, a client answers an
   await byLabel(page, "Kind").selectOption({ label: "Tick box" });
   await page.locator("#question-form").getByRole("checkbox", { name: "Required" }).check();
   await page.locator("#question-form").getByRole("checkbox", { name: "Studio Dayglow" }).check();
-  await page.locator("#question-form").getByRole("checkbox", { name: "Photography sessions" }).uncheck();
+  await page.locator("#question-form").getByRole("checkbox", { name: "Photography and content creation sessions" }).uncheck();
   await byLabel(page, "From (optional)").fill(addDays(day, -2));
   await byLabel(page, "Until (optional)").fill(addDays(day, 2));
   await page.getByRole("button", { name: "Add the question" }).click();
@@ -2081,7 +2081,7 @@ test("a Studio Manager runs the calendar and looks clients up, and sees no price
   await signIn(page, MANAGER);
   await page.getByRole("link", { name: "Studio calendar" }).click();
   await expect(page.getByRole("heading", { name: "Calendar", exact: true })).toBeVisible();
-  await expect(onScreen(page.locator(".admin-nav"))).toHaveText("CalendarAvailability & Blocked TimeWaitlistCustomersDay sheetPhotography");
+  await expect(onScreen(page.locator(".admin-nav"))).toHaveText("CalendarAvailability & Blocked TimeWaitlistCustomersDay sheetPhotographyContent Creation");
 
   // She sees a day nobody assigned to her, with the client's contact details, and no price.
   await page.goto(`/admin/calendar?view=day&date=${NEAR}`);
@@ -2127,13 +2127,13 @@ test("a client without a photographer books a session, and the photographer cann
   // The third and last sign-in code of this address. Create a discount for sessions only, named by the owner: the
   // site keeps it in capitals, as it reads what a client types.
   await signIn(page, THIRD_OWNER, "/admin/codes");
-  await byLabel(page, "Kind").selectOption({ label: "Percent off a photography session" });
+  await byLabel(page, "Kind").selectOption({ label: "Percent off a session (photography or content creation)" });
   await byLabel(page, "Percent off (1 to 100)").fill("20");
   await byLabel(page, "Code (optional)").fill("photo-twenty");
   await page.getByRole("button", { name: "Create", exact: true }).click();
   const discountCode = "PHOTO-TWENTY";
   await expect(byText(page, `Code created: ${discountCode}`)).toBeVisible();
-  await expect(page.getByRole("row", { name: new RegExp(discountCode) })).toContainText("Photography sessions");
+  await expect(page.getByRole("row", { name: new RegExp(discountCode) })).toContainText("Photography and content creation sessions");
 
   // The way in is on the studio booking page.
   await page.goto("/book");
@@ -2252,6 +2252,47 @@ test("a client without a photographer books a session, and the photographer cann
     if (free) await expect(button).toBeEnabled();
     else await expect(button).toBeDisabled();
   }
+
+  // Content Creation (the owner's answer of 2026-11-23, question 69): nothing of it is offered until the owners put a
+  // session on sale, under Admin → Content Creation.
+  await page.goto("/book");
+  await expect(page.getByRole("complementary", { name: "Want reels or stories made for you?" })).toHaveCount(0);
+  await page.goto("/admin/content");
+  await expect(page.locator("#sessions-on-sale")).toContainText("No content creation session is on sale yet");
+  const sale = page.getByRole("form", { name: "Put a session on sale" });
+  await byLabel(sale, "Studio").selectOption({ label: "Studio Paris" });
+  await byLabel(sale, "Length").selectOption("60");
+  await byLabel(sale, "Price ($)").fill("150");
+  await byLabel(sale, "Includes").fill("3 reels and 5 stories");
+  await sale.getByRole("button", { name: "Put on sale" }).click();
+  await expect(byText(page, "Session put on sale. Clients can book it on /book/content now.")).toBeVisible();
+  expect(await accessibilityProblems(page), "Admin → Content Creation").toEqual([]);
+
+  // A client books one on its own page, on a day the photographer is off: the content creator is not.
+  await page.goto("/book");
+  await page.getByRole("complementary", { name: "Want reels or stories made for you?" }).getByRole("link", { name: "Book Content Creation" }).click();
+  await expect(page.getByRole("heading", { name: "Book Content Creation" })).toBeVisible();
+  await pickStudio(page, "Studio Paris");
+  await next(page);
+  await byLabel(page, "Date").fill(offFrom);
+  await page.getByRole("button", { name: /1 hour · \$150/ }).click();
+  await next(page);
+  await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
+  await next(page);
+  await fillDetails(page, jane);
+  await agreeToPolicies(page);
+  await next(page);
+  await expect(byText(page, /Content creation session, Studio Paris/)).toBeVisible();
+  await expect(totalRow(page)).toContainText("$150");
+  await confirmAndGetRef(page, "Confirm & pay $150");
+  await expect(byText(page, /With our in-house content creator, studio included/)).toBeVisible();
+  const contentMail = await latestEmail(page, "booking_confirmation", jane.email);
+  expect(contentMail.body).toContain("Content creation session with our in-house content creator, studio included: 3 reels and 5 stories.");
+  expect(contentMail.body).not.toContain("edited images");
+
+  // On the calendar, marked as content creation.
+  await page.goto(`/admin/calendar?view=day&date=${offFrom}`);
+  await expect(page.getByRole("link", { name: /Jane Smith/ })).toContainText("Content Creation");
 });
 
 test("a booking whose answer is lost on the way is found when the customer presses again, and is charged once", async ({ page }) => {

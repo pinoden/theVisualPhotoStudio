@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { sessionsOf } from "@/lib/domain/services";
 import Link from "next/link";
 import { Suspense } from "react";
 import { BookingFlow } from "@/components/BookingFlow";
@@ -29,7 +30,7 @@ export default async function BookPage() {
       </div>
       <section className="section section-cream">
         {/* For clients without a photographer of their own. Only while sessions are on sale. */}
-        {catalog.photoPackages.length > 0 && (
+        {sessionsOf(catalog.photoPackages, "photography").length > 0 && (
           <aside className="photographer-callout" aria-labelledby="photographer-callout-title">
             <div>
               <h2 id="photographer-callout-title">Don&rsquo;t have a photographer?</h2>
@@ -40,6 +41,18 @@ export default async function BookPage() {
             </div>
             <Link href="/book/photography" className="btn btn-primary">
               Book a Photographer
+            </Link>
+          </aside>
+        )}
+        {/* Content creation (question 69): only once the owners put a session on sale. */}
+        {sessionsOf(catalog.photoPackages, "content").length > 0 && (
+          <aside className="photographer-callout" aria-labelledby="content-callout-title">
+            <div>
+              <h2 id="content-callout-title">Want reels or stories made for you?</h2>
+              <p>Book a content creation session: our in-house content creator films them with an iPhone, studio rental included.</p>
+            </div>
+            <Link href="/book/content" className="btn btn-primary">
+              Book Content Creation
             </Link>
           </aside>
         )}

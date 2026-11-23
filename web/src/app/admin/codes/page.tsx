@@ -177,7 +177,7 @@ async function Codes({ searchParams }: Pick<PageProps<"/admin/codes">, "searchPa
                   <tr key={code.id}>
                     <td>
                       <strong style={{ color: "var(--color-dark)" }}>{code.code}</strong>
-                      <div style={{ fontSize: ".8rem" }}>{code.photographyOnly ? "Photography sessions" : "Studio rentals"}</div>
+                      <div style={{ fontSize: ".8rem" }}>{code.photographyOnly ? "Photography and content creation sessions" : "Studio rentals"}</div>
                       {code.note && <div style={{ fontSize: ".8rem" }}>{code.note}</div>}
                     </td>
                     <td>

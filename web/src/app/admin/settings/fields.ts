@@ -10,7 +10,7 @@ export const SETTING_GROUPS: { title: string; fields: SettingField[] }[] = [
     fields: [
       { key: "minLeadHours", label: "Minimum notice (hours)", help: "How far ahead a booking must be made." },
       { key: "maxAdvanceDays", label: "Booking horizon (days)", help: "How far ahead the calendar is open." },
-      { key: "photoMinLeadHours", label: "Minimum notice for photography (hours)", help: "336 is two weeks. A session with the photographer cannot be booked closer than this." },
+      { key: "photoMinLeadHours", label: "Minimum notice for photography and content creation (hours)", help: "336 is two weeks. A session with the photographer cannot be booked closer than this." },
       { key: "slotIncrementMinutes", label: "Start times every (minutes)", help: "15 offers 9:00, 9:15, 9:30 and so on." },
       { key: "holdMinutes", label: "Hold while paying (minutes)", help: "How long a slot is kept for a customer at checkout." },
       {
@@ -30,7 +30,7 @@ export const SETTING_GROUPS: { title: string; fields: SettingField[] }[] = [
     title: "Cancelling and rescheduling",
     fields: [
       { key: "refundWindowHours", label: "Refund window (hours before start)", help: "168 is 7 days. Earlier cancellations are refunded automatically." },
-      { key: "photoRefundWindowHours", label: "Refund window for photography (hours before start)", help: "336 is 14 days." },
+      { key: "photoRefundWindowHours", label: "Refund window for photography and content creation (hours before start)", help: "336 is 14 days." },
       { key: "refundFeePercent", label: "Processing fee kept (%)", help: "0 refunds in full." },
       { key: "rescheduleCutoffHours", label: "Reschedule cut-off (hours before start)", help: "After this, customers must call." },
       { key: "maxReschedules", label: "Free reschedules per booking", help: "0 switches reschedule codes off." },

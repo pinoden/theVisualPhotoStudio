@@ -165,7 +165,7 @@ function drawReceipt(sheet: Sheet, receipt: Receipt, business: Business): void {
   sheet.space(6);
   sheet.text(`Customer: ${receipt.customerName}, ${receipt.customerEmail}`);
   sheet.text(`Appointment: ${when.day}, ${when.time} (${durationLabel(receipt.durationMinutes)})`);
-  sheet.text(`Studio: ${receipt.studios}${receipt.photography ? ", photography session" : ""}`);
+  sheet.text(`Studio: ${receipt.studios}${receipt.photography ? `, ${receipt.photography}` : ""}`);
   sheet.text(`Booking status: ${receipt.bookingStatus}`);
   sheet.space(12);
 

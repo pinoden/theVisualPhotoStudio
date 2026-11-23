@@ -587,6 +587,7 @@ test("the admin fits a phone: the calendar in its three views, an appointment, a
     "/admin/hours",
     "/admin/availability",
     "/admin/photography",
+    "/admin/content",
     "/admin/codes",
     "/admin/settings",
     "/admin/website",

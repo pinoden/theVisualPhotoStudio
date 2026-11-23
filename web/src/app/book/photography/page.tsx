@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { sessionsOf } from "@/lib/domain/services";
 import Link from "next/link";
 import { Suspense } from "react";
 import { BookingFlow } from "@/components/BookingFlow";
@@ -35,7 +36,7 @@ export default async function BookPhotographyPage() {
         <p>A professional photoshoot with our in-house photographer. Studio rental is included.</p>
       </div>
       <section className="section section-cream">
-        {catalog.photoPackages.length === 0 ? (
+        {sessionsOf(catalog.photoPackages, "photography").length === 0 ? (
           <div className="wizard-container" style={{ textAlign: "center" }}>
             <p>
               Photography sessions cannot be booked online right now. Please <Link href="/contact">send us a message</Link>{" "}
@@ -58,7 +59,7 @@ export default async function BookPhotographyPage() {
                 </div>
               }
             >
-              <BookingFlow catalog={catalog} photography policies={policies} />
+              <BookingFlow catalog={catalog} photography service="photography" policies={policies} />
             </Suspense>
           </>
         )}

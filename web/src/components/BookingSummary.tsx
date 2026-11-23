@@ -1,4 +1,5 @@
 import { formatCents } from "@/lib/domain/pricing";
+import { SERVICE_WORDS } from "@/lib/domain/services";
 import { durationLabel } from "@/lib/domain/time";
 import { listInWords } from "@/lib/words";
 import type { BookingView } from "@/server/bookings";
@@ -65,13 +66,13 @@ export function BookingSummary({ booking }: { booking: BookingView }) {
       {booking.studios.map((studio) => (
         <div className="price-row" key={studio.name}>
           <span>
-            {booking.photography && "Photography session, "}
+            {booking.photography && `${SERVICE_WORDS[booking.photography.service].Session}, `}
             {studio.name}
             {booking.photography && (
               <>
                 <br />
                 <small>
-                  With our in-house photographer, studio included
+                  {SERVICE_WORDS[booking.photography.service].withPerson.replace(/^w/, "W")}, studio included
                   {booking.photography.includes ? `. ${booking.photography.includes}` : ""}.
                 </small>
               </>

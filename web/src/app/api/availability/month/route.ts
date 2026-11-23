@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { isService, type Service } from "@/lib/domain/services";
 import { getDb } from "@/db/client";
 import { releaseExpiredHolds } from "@/server/availability";
 import { loadCatalog } from "@/server/catalog";
@@ -23,6 +24,7 @@ export async function GET(request: NextRequest) {
       studioIds: (params.get("studios") ?? "").split(",").filter(Boolean).slice(0, 10),
       durationMinutes: Number(params.get("duration")),
       photography: params.get("photography") === "1",
+      service: isService(params.get("service")) ? (params.get("service") as Service) : "photography",
     },
     now,
   );

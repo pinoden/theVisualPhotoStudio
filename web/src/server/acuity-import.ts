@@ -109,7 +109,7 @@ export async function importAcuityAppointments(db: Db, appointments: readonly Ac
       const [photographer] = await tx
         .select({ id: photographers.id })
         .from(photographers)
-        .where(eq(photographers.active, true))
+        .where(and(eq(photographers.active, true), eq(photographers.service, "photography")))
         .orderBy(asc(photographers.sortOrder), asc(photographers.name))
         .limit(1);
       for (const appointment of ordered) {
@@ -203,7 +203,7 @@ async function importOne(tx: Tx, appointment: AcuityAppointment, { catalog, phot
     appointment.priceCents,
     booked.studioIds.map((id) => findPrice(id, dayType, minutes, catalog.rules)),
   );
-  const session = booked.photography ? catalog.photoPackages.find((p) => p.studioId === booked.studioIds[0] && p.durationMinutes === minutes) : undefined;
+  const session = booked.photography ? catalog.photoPackages.find((p) => p.service === "photography" && p.studioId === booked.studioIds[0] && p.durationMinutes === minutes) : undefined;
   // Between two sessions the photographer keeps the gap the studios keep between bookings (availability.ts).
   const photographerGap = Math.max(0, ...catalog.studios.map((studio) => studio.bufferMinutes));
 

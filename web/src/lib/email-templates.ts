@@ -157,8 +157,8 @@ const TEMPLATES: readonly EmailTemplateSpec[] = [
       DURATION,
       {
         key: "photography",
-        label: "What the photography session includes, and when the edited images are delivered",
-        only: "Only for a photography session",
+        label: "What the session includes (photography or content creation), and for photography when the edited images are delivered",
+        only: "Only for a photography or content creation session",
         lines: true,
         sample: "Photography session with our in-house photographer, studio included: 1–2 outfits, 20 edited images.\nYour edited images are delivered within 7 to 14 days.",
       },
@@ -207,8 +207,8 @@ const TEMPLATES: readonly EmailTemplateSpec[] = [
       DURATION,
       {
         key: "photography",
-        label: "What the photography session includes",
-        only: "Only for a photography session",
+        label: "What the session includes (photography or content creation)",
+        only: "Only for a photography or content creation session",
         sample: "Photography session with our in-house photographer, studio included: 1–2 outfits, 20 edited images.",
       },
       {

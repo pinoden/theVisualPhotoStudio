@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import { SERVICE_WORDS, sessionsOf, type Service } from "@/lib/domain/services";
 import { useRouter, useSearchParams } from "next/navigation";
 import { type KeyboardEvent, type UIEvent, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
@@ -147,6 +148,7 @@ export function BookingFlow({
   catalog,
   navigate = loadPage,
   photography = false,
+  service = "photography",
   policies = null,
 }: {
   catalog: Catalog;
@@ -162,7 +164,10 @@ export function BookingFlow({
    * duration, and with times at which the photographer is free too.
    */
   photography?: boolean;
+  /** Whose sessions, in the session flow: the photographer's or the content creator's (question 69). */
+  service?: Service;
 }) {
+  const words = SERVICE_WORDS[service];
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -250,16 +255,18 @@ export function BookingFlow({
   const firstMonth = firstDate.slice(0, 7);
   const lastMonth = today ? addDays(today, settings.maxAdvanceDays).slice(0, 7) : "";
   const month = shownMonth || (date ? date.slice(0, 7) : firstMonth);
-  const monthKeyOf = (forMonth: string, minutes: number) => `${forMonth}|${studioIds.join(",")}|${minutes}|${photography ? 1 : 0}`;
+  const monthKeyOf = (forMonth: string, minutes: number) => `${forMonth}|${studioIds.join(",")}|${minutes}|${photography ? service : 0}`;
 
   // ── What can be chosen ─────────────────────────────────────────────────────
   /** The session packages of the chosen studio, shortest first. Only in the photography flow. */
   const packages = useMemo(
     () =>
       photography
-        ? catalog.photoPackages.filter((p) => p.studioId === studioIds[0]).sort((a, b) => a.durationMinutes - b.durationMinutes)
+        ? sessionsOf(catalog.photoPackages, service)
+            .filter((p) => p.studioId === studioIds[0])
+            .sort((a, b) => a.durationMinutes - b.durationMinutes)
         : [],
-    [photography, catalog.photoPackages, studioIds],
+    [photography, service, catalog.photoPackages, studioIds],
   );
 
   const durations = useMemo(() => {
@@ -382,7 +389,7 @@ export function BookingFlow({
           .filter((selection) => selection.quantity > 0),
         promo,
         membership: member?.membership ?? null,
-        photoPackage: session ? { priceCents: session.priceCents } : null,
+        photoPackage: session ? { priceCents: session.priceCents, service: session.service } : null,
       });
     } catch {
       return null;
@@ -399,7 +406,7 @@ export function BookingFlow({
   const fetchAvailability = useCallback(async (forDate: string) => {
     setLoadingSlots(true);
     try {
-      const response = await fetch(`/api/availability?date=${encodeURIComponent(forDate)}${photography ? "&photography=1" : ""}`, {
+      const response = await fetch(`/api/availability?date=${encodeURIComponent(forDate)}${photography ? `&photography=1&service=${service}` : ""}`, {
         cache: "no-store",
       });
       if (!response.ok) throw new Error();
@@ -409,7 +416,7 @@ export function BookingFlow({
     } finally {
       setLoadingSlots(false);
     }
-  }, [photography]);
+  }, [photography, service]);
 
   async function applyCode() {
     const code = codeInput.trim();
@@ -432,6 +439,7 @@ export function BookingFlow({
           promoCode: code,
           email: normalizedEmail,
           photography,
+          service,
         }),
       });
       const data = (await response.json().catch(() => ({}))) as {
@@ -464,7 +472,7 @@ export function BookingFlow({
     const key = monthKeyOf(forMonth, minutes);
     try {
       const response = await fetch(
-        `/api/availability/month?month=${forMonth}&studios=${studioIds.join(",")}&duration=${minutes}${photography ? "&photography=1" : ""}`,
+        `/api/availability/month?month=${forMonth}&studios=${studioIds.join(",")}&duration=${minutes}${photography ? `&photography=1&service=${service}` : ""}`,
         { cache: "no-store" },
       );
       const data = (await response.json().catch(() => ({}))) as { ok?: boolean; days?: Record<string, boolean> };
@@ -651,6 +659,7 @@ export function BookingFlow({
           // A code that does not fit this selection is not used, which the summary says.
           promoCode: member ? member.code : promo && !price.promoMisfit ? promo.code : undefined,
           photography,
+          service,
           acceptTerms: true,
           // The versions read on the policies step, and the answers given there (the owner's brief of 2026-11-22, item 6).
           accepted: [...(policies ? [policiesKey(policies.versionId)] : []), ...(forms?.agreements ?? []).map((agreement) => agreementKey(agreement.versionId))],
@@ -730,7 +739,7 @@ export function BookingFlow({
       {price.studioLines.map((line) => (
         <div className="price-row" key={line.studioId}>
           <span>
-            {session && "Photography session, "}
+            {session && `${words.Session}, `}
             {studioName(line.studioId)}, {durationLabel(duration)}
             {session && (
               <>
@@ -785,7 +794,7 @@ export function BookingFlow({
       </div>
       {session && (
         <p style={{ fontSize: ".8rem", margin: ".75rem 0 0" }}>
-          A photography session is refunded when it is cancelled {hoursInWords(settings.photoRefundWindowHours)} or more
+          A {words.session} is refunded when it is cancelled {hoursInWords(settings.photoRefundWindowHours)} or more
           before it starts{settings.refundFeePercent > 0 ? `, less the ${settings.refundFeePercent}% payment processing fee` : ""}.
         </p>
       )}
@@ -797,7 +806,7 @@ export function BookingFlow({
       {memberApplied && !member && (
         <p className="field-error" role="status" style={{ margin: ".75rem 0 0" }}>
           {photography
-            ? "Membership hours are for studio rentals: they cannot pay for a photography session."
+            ? `Membership hours are for studio rentals: they cannot pay for a ${words.session}.`
             : `The hours of membership ${memberApplied.code} are for ${orList(memberApplied.membership!.studioNames)}: they cannot pay for these studios.`}{" "}
           They are not used on this booking and stay yours.
         </p>
@@ -865,10 +874,12 @@ export function BookingFlow({
         ))}
         {packages.length === 0 && <p style={{ fontSize: ".85rem" }}>No sessions are offered in this studio.</p>}
       </div>
-      <p style={{ fontSize: ".8rem", margin: ".75rem 0 0" }}>
-        Every session is shot on a professional camera by our in-house photographer. Your edited images are delivered
-        within 7 to 14 days.
-      </p>
+      {service === "photography" && (
+        <p style={{ fontSize: ".8rem", margin: ".75rem 0 0" }}>
+          Every session is shot on a professional camera by our in-house photographer. Your edited images are delivered
+          within 7 to 14 days.
+        </p>
+      )}
     </div>
   ) : (
     <div className="form-group">
@@ -950,7 +961,7 @@ export function BookingFlow({
           {mode === "time" && loadingSlots && <p>Checking availability…</p>}
           <div className="studio-selector">
             {catalog.studios.map((studio) => {
-              const sessions = photography ? catalog.photoPackages.filter((p) => p.studioId === studio.id) : [];
+              const sessions = photography ? sessionsOf(catalog.photoPackages, service).filter((p) => p.studioId === studio.id) : [];
               const unavailable = photography ? sessions.length === 0 : mode === "time" && !freeAtStart.includes(studio.id);
               const cents = photography
                 ? sessions.length > 0
@@ -1032,7 +1043,7 @@ export function BookingFlow({
               {price.studioLines.map((line) => (
                 <div className="price-row" key={line.studioId}>
                   <span>
-                    {session && "Photography session, "}
+                    {session && `${words.Session}, `}
                     {studioName(line.studioId)}, {durationLabel(duration)}
                     {date && !session ? ` (${dayType})` : ""}
                   </span>
@@ -1101,7 +1112,7 @@ export function BookingFlow({
                     : availability.problem === "too_far"
                       ? `Bookings open ${count(settings.maxAdvanceDays, "day")} ahead.`
                       : firstDate && date < firstDate
-                        ? `${photography ? "Photography sessions" : "Bookings"} are made at least ${hoursInWords(leadHours)} ahead. Please choose a later date.`
+                        ? `${photography ? `${words.Session}s` : "Bookings"} are made at least ${hoursInWords(leadHours)} ahead. Please choose a later date.`
                         : mode === "studio" && studioIds.length > 1
                           ? "These studios are not free together on this date. Try another day, or fewer studios."
                           : "No times are available on this date. Please try another day."}
@@ -1115,6 +1126,7 @@ export function BookingFlow({
               key={`${studioIds.join(",")}|${date}|${duration}`}
               studioIds={studioIds}
               photography={photography}
+              service={service}
               durationMinutes={duration}
               date={date}
               openMinute={waitlistHours.open}
@@ -1279,7 +1291,7 @@ export function BookingFlow({
                 <input
                   id="promo-code"
                   className="form-control"
-                  placeholder={photography ? "Photography code" : "Discount, reward, credit or membership code"}
+                  placeholder={photography ? (service === "photography" ? "Photography code" : "Session code") : "Discount, reward, credit or membership code"}
                   autoCapitalize="characters"
                   autoComplete="off"
                   value={codeInput}

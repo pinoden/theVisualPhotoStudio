@@ -75,7 +75,7 @@ async function membershipBalance(db: DbLike, member: typeof memberships.$inferSe
     // Unused hours carry over: a membership's minutes do not end.
     expires: null,
     restrictions: [
-      `For studio rentals in ${orList(covered.map((studio) => studio.name))}, not for photography sessions.`,
+      `For studio rentals in ${orList(covered.map((studio) => studio.name))}, not for photography or content creation sessions.`,
       "Works only with the email address of the membership.",
     ],
   };
@@ -87,10 +87,10 @@ function promoBalance(row: typeof promoCodes.$inferSelect, now: Date): CodeBalan
   const usedUp = row.kind === "amount" ? row.value <= 0 : usesLeft === 0;
 
   const restrictions: string[] = [];
-  if (row.photographyOnly) restrictions.push("For photography sessions, not for studio rentals.");
-  else if (row.kind === "free_hour") restrictions.push("For one hour of one studio's rental: not for several studios booked together, add-ons or photography sessions.");
-  else if (row.kind === "percent") restrictions.push("Takes its percentage off a studio rental, not off add-ons. Not for photography sessions.");
-  else restrictions.push("Pays for a studio rental and its add-ons. Not for photography sessions.");
+  if (row.photographyOnly) restrictions.push("For photography and content creation sessions, not for studio rentals.");
+  else if (row.kind === "free_hour") restrictions.push("For one hour of one studio's rental: not for several studios booked together, add-ons, photography or content creation sessions.");
+  else if (row.kind === "percent") restrictions.push("Takes its percentage off a studio rental, not off add-ons. Not for photography or content creation sessions.");
+  else restrictions.push("Pays for a studio rental and its add-ons. Not for photography or content creation sessions.");
   if (row.email) restrictions.push("Works only with the email address it was sent to.");
 
   const title =

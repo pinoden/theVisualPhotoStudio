@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { SERVICE_WORDS } from "@/lib/domain/services";
 import Link from "next/link";
 import { connection } from "next/server";
 import { Suspense } from "react";
@@ -158,7 +159,7 @@ async function DaySheet({ searchParams }: Pick<PageProps<"/staff">, "searchParam
                           {addon.quantity > 1 ? ` × ${addon.quantity}` : ""}
                         </div>
                       ))}
-                      {entry.photography && <div>Photography session</div>}
+                      {entry.photography && <div>{SERVICE_WORDS[entry.photography].Session}</div>}
                       {entry.notes && <div style={{ fontStyle: "italic" }}>{entry.notes}</div>}
                     </td>
                     <td>

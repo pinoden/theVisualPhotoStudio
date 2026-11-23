@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import { sessionsOf } from "@/lib/domain/services";
+import { SERVICE_WORDS } from "@/lib/domain/services";
 import Link from "next/link";
 import { connection } from "next/server";
 import { Suspense } from "react";
@@ -83,7 +85,7 @@ async function Overview() {
                 {when.time} ({durationLabel(next.durationMinutes)})
               </p>
               <p>
-                {next.photography && "Photography session, "}
+                {next.photography && `${SERVICE_WORDS[next.photography.service].Session}, `}
                 {next.studios.map((studio) => studio.name).join(" + ")}{" "}
                 <span className={`status-badge status-${customerStatus(next).badge}`}>{customerStatus(next).text}</span>
               </p>
@@ -184,9 +186,14 @@ async function Overview() {
         <Link href="/book" className="btn btn-primary">
           Book a studio
         </Link>
-        {catalog.photoPackages.length > 0 && (
+        {sessionsOf(catalog.photoPackages, "photography").length > 0 && (
           <Link href="/book/photography" className="btn btn-outline">
             Book a photographer
+          </Link>
+        )}
+        {sessionsOf(catalog.photoPackages, "content").length > 0 && (
+          <Link href="/book/content" className="btn btn-outline">
+            Book content creation
           </Link>
         )}
       </div>

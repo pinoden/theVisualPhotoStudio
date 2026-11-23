@@ -1,3 +1,4 @@
+import { sessionsOf } from "@/lib/domain/services";
 import { multiStudioOffer, petPolicy } from "@/lib/catalog-view";
 import type { Catalog } from "@/server/catalog";
 
@@ -51,7 +52,7 @@ export function conditionsOf(catalog: Catalog): Record<ConditionName, boolean> {
     "reschedule fee": s.maxReschedules > 0 && s.rescheduleFeeCents > 0,
     "free hours": s.loyaltyEnabled,
     "getting in": catalog.accessInfoSent,
-    photography: catalog.photoPackages.length > 0,
+    photography: sessionsOf(catalog.photoPackages, "photography").length > 0,
     "several studios offer": multiStudioOffer(catalog) !== "",
   };
 }

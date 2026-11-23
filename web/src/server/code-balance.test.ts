@@ -30,13 +30,13 @@ describe("Check Code Balance (the owner's brief of 2026-11-22, item 5)", () => {
       status: "usable",
       remaining: "$75 remaining",
       expires: null,
-      restrictions: ["Pays for a studio rental and its add-ons. Not for photography sessions.", "Works only with the email address it was sent to."],
+      restrictions: ["Pays for a studio rental and its add-ons. Not for photography or content creation sessions.", "Works only with the email address it was sent to."],
     });
     const moved = await balanceOf("MOVE-CCCC-DDDD");
     expect(moved).toMatchObject({ title: "Reschedule code", status: "usable", remaining: "$68 remaining", expires: "May 20, 2027" });
     expect(JSON.stringify(moved)).not.toContain("jane"); // never whose it is
     expect(await balanceOf("spring20")).toMatchObject({ title: "Discount code", status: "usable", remaining: "20% off, usable once", expires: null });
-    expect((await balanceOf("SPRING20"))!.restrictions[0]).toBe("Takes its percentage off a studio rental, not off add-ons. Not for photography sessions.");
+    expect((await balanceOf("SPRING20"))!.restrictions[0]).toBe("Takes its percentage off a studio rental, not off add-ons. Not for photography or content creation sessions.");
   });
 
   it("tells a code used up or expired from one that can be used, and changes nothing", async () => {
@@ -53,7 +53,7 @@ describe("Check Code Balance (the owner's brief of 2026-11-22, item 5)", () => {
     const free = await balanceOf("FREE-EEEE-FFFF");
     expect(free).toMatchObject({ title: "Free studio hour", status: "usable", remaining: "One free hour" });
     expect(free!.restrictions[0]).toContain("not for several studios booked together");
-    expect(await balanceOf("PHOTO25")).toMatchObject({ remaining: "25% off, usable 3 times", restrictions: ["For photography sessions, not for studio rentals."] });
+    expect(await balanceOf("PHOTO25")).toMatchObject({ remaining: "25% off, usable 3 times", restrictions: ["For photography and content creation sessions, not for studio rentals."] });
 
     const before = await world.db.select().from(promoCodes);
     await balanceOf("FREE-EEEE-FFFF");
@@ -78,7 +78,7 @@ describe("Check Code Balance (the owner's brief of 2026-11-22, item 5)", () => {
       status: "usable",
       remaining: "180 minutes remaining",
       expires: null,
-      restrictions: ["For studio rentals in Studio Paris, not for photography sessions.", "Works only with the email address of the membership."],
+      restrictions: ["For studio rentals in Studio Paris, not for photography or content creation sessions.", "Works only with the email address of the membership."],
     });
     await world.db.insert(membershipMinutes).values({ membershipId: member.id, minutes: -180, kind: "correction", actor: "owner@studio.test" });
     expect(await balanceOf("MEMBER-GGGG-HHHH")).toMatchObject({ status: "used", remaining: "0 minutes remaining" });

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { SERVICE_WORDS } from "@/lib/domain/services";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
@@ -78,7 +79,7 @@ async function AppointmentDetails({
   const allStudios = await db.select({ id: studiosTable.id, slug: studiosTable.slug, name: studiosTable.name, color: studiosTable.color }).from(studiosTable);
   const look = appointmentLook(
     allStudios.filter((studio) => appointment.studios.includes(studio.name)),
-    appointment.photography !== null,
+    appointment.photography?.service ?? false,
   );
   const when = formatRange(new Date(appointment.startAt), new Date(appointment.endAt));
   const day = localDateOf(new Date(appointment.startAt));
@@ -145,9 +146,9 @@ async function AppointmentDetails({
           </dd>
           {appointment.photography && (
             <>
-              <dt>Photography</dt>
+              <dt>{SERVICE_WORDS[appointment.photography.service].name}</dt>
               <dd>
-                A session with the photographer, who is held for this time as well
+                A session with the {SERVICE_WORDS[appointment.photography.service].person}, who is held for this time as well
                 {appointment.photography.includes ? `. ${appointment.photography.includes}` : ""}.
               </dd>
             </>

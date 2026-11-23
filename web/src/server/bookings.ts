@@ -1,8 +1,9 @@
 import { randomBytes, randomInt, timingSafeEqual } from "node:crypto";
+import { SERVICE_WORDS, SERVICES, type Service } from "@/lib/domain/services";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
-import { bookingAddons, bookings, payments, photographerHolds, promoCodes, studioHolds, studios } from "@/db/schema";
+import { bookingAddons, bookings, payments, photographerHolds, photographers, promoCodes, studioHolds, studios } from "@/db/schema";
 import {
   PG_DEADLOCK_DETECTED,
   PG_EXCLUSION_VIOLATION,
@@ -79,6 +80,8 @@ export const bookingInput = z.object({
    * is held for the time as well as the studio.
    */
   photography: z.boolean().default(false),
+  /** Whose session it is, when `photography` is set: the photographer's, or the content creator's (question 69). */
+  service: z.enum(SERVICES).default("photography"),
   acceptTerms: z.literal(true),
   /**
    * The versions of the studio policies and agreements the client was shown and accepted at checkout (the owner's
@@ -217,12 +220,12 @@ async function answerAgain(db: Db, requestKey: string, input: ParsedInput): Prom
   return fail(409, "attempt_over", "That booking was made, and has been cancelled since. Please try again.");
 }
 
-const NO_SUCH_SESSION = "That photography session is not offered. Please choose a studio and a length from the list.";
+const noSuchSession = (service: Service) => `That ${SERVICE_WORDS[service].session} is not offered. Please choose a studio and a length from the list.`;
 
-/** The photography package for one studio and one length, if it is on sale. */
-function photoPackageFor(catalog: Catalog, studioIds: string[], durationMinutes: number): CatalogPhotoPackage | null {
+/** A service's session for one studio and one length, if it is on sale. */
+function photoPackageFor(catalog: Catalog, service: Service, studioIds: string[], durationMinutes: number): CatalogPhotoPackage | null {
   if (studioIds.length !== 1) return null;
-  return catalog.photoPackages.find((p) => p.studioId === studioIds[0] && p.durationMinutes === durationMinutes) ?? null;
+  return catalog.photoPackages.find((p) => p.service === service && p.studioId === studioIds[0] && p.durationMinutes === durationMinutes) ?? null;
 }
 
 // ── Price preview ────────────────────────────────────────────────────────────
@@ -235,6 +238,7 @@ const quoteInput = z.object({
   promoCode: textField(0, 40).optional(),
   email: emailField.optional(),
   photography: z.boolean().default(false),
+  service: z.enum(SERVICES).default("photography"),
 });
 
 export type QuoteResult =
@@ -286,8 +290,8 @@ export async function quoteSelection(db: DbLike, rawInput: unknown, now: Date, p
     }
   }
   const membership = member ? { minutesLeft: member.minutesLeft, weekendDifference: catalog.settings.memberWeekendDifference } : null;
-  const session = input.photography ? photoPackageFor(catalog, input.studioIds, input.durationMinutes) : null;
-  if (input.photography && !session) return fail(422, "invalid_price", NO_SUCH_SESSION);
+  const session = input.photography ? photoPackageFor(catalog, input.service, input.studioIds, input.durationMinutes) : null;
+  if (input.photography && !session) return fail(422, "invalid_price", noSuchSession(input.service));
   try {
     const price = quote({
       studioIds: input.studioIds,
@@ -356,13 +360,14 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
   if (combinationError) return fail(422, "invalid_price", combinationError);
   const studioNames = chosen.map((s) => s!.name).join(" + ");
 
-  // A photography session: its package, and the photographer's day beside the studio's.
-  const session = input.photography ? photoPackageFor(catalog, input.studioIds, input.durationMinutes) : null;
-  if (input.photography && !session) return fail(422, "invalid_price", NO_SUCH_SESSION);
+  // A session: its package, and the day of its person (the photographer, or the content creator) beside the studio's.
+  const session = input.photography ? photoPackageFor(catalog, input.service, input.studioIds, input.durationMinutes) : null;
+  if (input.photography && !session) return fail(422, "invalid_price", noSuchSession(input.service));
+  const words = SERVICE_WORDS[input.service];
 
   const day = await loadDayAvailability(db, catalog, input.date, now, {
     asAdmin: Boolean(deps.madeBy),
-    withPhotographer: Boolean(session),
+    withPhotographer: session ? input.service : false,
   });
   if (day.problem) {
     const text = {
@@ -437,7 +442,7 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
     return fail(
       409,
       "slot_taken",
-      `${session ? "Photography sessions" : "Bookings"} are made at least ${notice} ahead. Please choose a later ${session ? "date" : "time"}.`,
+      `${session ? `${words.Session}s` : "Bookings"} are made at least ${notice} ahead. Please choose a later ${session ? "date" : "time"}.`,
     );
   }
 
@@ -454,10 +459,10 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
   // The photographer has to be free as well: inside their working hours, and not at another session or blocked.
   const photographer = session ? (day.photographer ?? null) : null;
   if (session && !photographer) {
-    return fail(409, "slot_taken", "Photography sessions cannot be booked online right now. Please contact the studio.");
+    return fail(409, "slot_taken", `${words.Session}s cannot be booked online right now. Please contact the studio.`);
   }
   if (photographer && !isStartFree(photographer, input.startMinute, slot)) {
-    return fail(409, "slot_taken", "Our photographer is not free at that time. Please choose another.");
+    return fail(409, "slot_taken", `Our ${words.person} is not free at that time. Please choose another.`);
   }
 
   const chargesCard = price.totalCents > 0 && !deps.madeBy;
@@ -701,6 +706,7 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
         // A booking the studio made is paid at the studio, whatever a code or membership hours left to pay: no card is charged.
         payAtStudio: Boolean(deps.madeBy),
         photoIncludes: session ? session.includes : undefined,
+        service: session ? session.service : undefined,
         manageUrl: manageUrl(deps.baseUrl, ref, manageToken),
         access: await loadAccessInstructions(db),
       }),
@@ -746,8 +752,8 @@ export interface BookingView {
   label: LabelKey;
   /** Made in the admin for the client: nothing was charged online, the total is paid at the studio. */
   madeByAdmin: boolean;
-  /** Set on a photography session: what it includes, as it was sold. */
-  photography: { includes: string } | null;
+  /** Set on a session (photography or content creation: `service`): what it includes, as it was sold. */
+  photography: { includes: string; service: Service } | null;
   totalCents: number;
   /** Extra charges added once the appointment started (overtime, cleaning, damage), not taken back: src/server/charges.ts. */
   charges: { label: string; cents: number }[];
@@ -824,6 +830,13 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[], now: Date =
     () => refundedCentsByBooking(db, ids),
     () => acceptancesOf(db, ids),
   ]);
+  // Whose session each one is: the service of the person it holds (question 69).
+  const personIds = [...new Set(rows.map((row) => row.photographerId).filter((id): id is string => id !== null))];
+  const serviceOf = new Map(
+    personIds.length === 0
+      ? []
+      : (await db.select({ id: photographers.id, service: photographers.service }).from(photographers).where(inArray(photographers.id, personIds))).map((row) => [row.id, row.service] as const),
+  );
   return rows.map((booking) => ({
     id: booking.id,
     ref: booking.ref,
@@ -852,7 +865,7 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[], now: Date =
     membershipCents: booking.membershipCents,
     label: labelOf(booking),
     madeByAdmin: booking.madeBy !== null,
-    photography: booking.photographerId !== null ? { includes: booking.photoIncludes ?? "" } : null,
+    photography: booking.photographerId !== null ? { includes: booking.photoIncludes ?? "", service: serviceOf.get(booking.photographerId) ?? "photography" } : null,
     totalCents: booking.totalCents,
     charges: charged.get(booking.id) ?? [],
     chargesCents: (charged.get(booking.id) ?? []).reduce((sum, charge) => sum + charge.cents, 0),

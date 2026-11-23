@@ -88,7 +88,7 @@ describe("booking a photography session", () => {
     const [booking] = await world.db.select().from(bookings).where(eq(bookings.ref, booked.ref));
     const photographer = (await loadPhotographer(world.db))!;
     expect(booking).toMatchObject({ status: "confirmed", photographerId: photographer.id, photoIncludes: "1–2 outfits, 20 edited images" });
-    expect((await toBookingViews(world.db, [booking]))[0].photography).toEqual({ includes: "1–2 outfits, 20 edited images" });
+    expect((await toBookingViews(world.db, [booking]))[0].photography).toEqual({ includes: "1–2 outfits, 20 edited images", service: "photography" });
 
     // Both are held from 10:00 to 11:15: the hour, and the 15 minutes kept free after it.
     const [studio] = await world.db.select(range(studioHolds.occupied)).from(studioHolds).where(eq(studioHolds.bookingId, booking.id));
@@ -481,7 +481,7 @@ describe("after a session is booked", () => {
     const calendar = await loadCalendar(world.db, owner, await loadCatalog(world.db), { from: SESSION_DAY, to: NEXT_DAY });
     expect(calendar.appointments.map((entry) => [entry.ref === booked.ref, entry.photography])).toEqual(
       expect.arrayContaining([
-        [true, true],
+        [true, "photography"],
         [false, false],
       ]),
     );

@@ -121,7 +121,7 @@ describe("a fully booked day (the owner's admin brief of 2026-11-22, item 13)", 
     expect(appointmentLook(held(byRef(ada.ref)), false)).toEqual({ name: "Paris + Dayglow + Blanche", color: "#a88524", bundle: true });
     expect(appointmentLook(held(byRef(cy.ref)), false)).toEqual({ name: "Paris + Dayglow", color: "#c63f76", bundle: true });
     const blanche = catalog.studios.find((studio) => studio.slug === "blanche")!;
-    expect(byRef(bea.ref).photography).toBe(true);
+    expect(byRef(bea.ref).photography).toBe("photography");
     expect(appointmentLook(held(byRef(bea.ref)), true).color).toBe(deeper(blanche.color));
     expect(appointmentLook(held(byRef(dee.ref)), false).color).toBe(blanche.color);
     expect(appointmentLook(held(byRef(gus.ref)), false).color).toBe(blanche.color);

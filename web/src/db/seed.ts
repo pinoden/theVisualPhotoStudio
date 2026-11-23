@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { addons, membershipPlans, membershipPlanStudios, photoPackages, photographerHours, photographers, priceRules, studioHours, studios } from "./schema";
 import type { Db } from "./client";
 
@@ -178,7 +179,7 @@ export async function seed(db: Db): Promise<boolean> {
     // The in-house photographer. The migration that added photography creates one; this is for a
     // database that has none. They work 9 am to 5 pm (the owner, 2026-11-15), so the last one-hour
     // session starts at 4 pm. The owner changes the hours, and switches days off, under Admin, Photography.
-    const [someone] = await tx.select({ id: photographers.id }).from(photographers).limit(1);
+    const [someone] = await tx.select({ id: photographers.id }).from(photographers).where(eq(photographers.service, "photography")).limit(1);
     if (!someone) {
       const [photographer] = await tx.insert(photographers).values({ name: "In-house photographer" }).returning({ id: photographers.id });
       await tx.insert(photographerHours).values(
@@ -189,6 +190,17 @@ export async function seed(db: Db): Promise<boolean> {
           closeMinute: h(17),
         })),
       );
+    }
+
+    // The in-house content creator (question 69), as migration 0063 makes one: 9 am to 5 pm every day, after the
+    // photographer in order, with no session on sale until the owners add one under Admin, Content Creation.
+    const [creator] = await tx.select({ id: photographers.id }).from(photographers).where(eq(photographers.service, "content")).limit(1);
+    if (!creator) {
+      const [made] = await tx
+        .insert(photographers)
+        .values({ name: "In-house content creator", sortOrder: 1, service: "content" })
+        .returning({ id: photographers.id });
+      await tx.insert(photographerHours).values([1, 2, 3, 4, 5, 6, 7].map((weekday) => ({ photographerId: made.id, weekday, openMinute: h(9), closeMinute: h(17) })));
     }
 
     await tx.insert(addons).values([

@@ -1,6 +1,7 @@
 "use client";
 
 import { useId, useState, type FormEvent } from "react";
+import type { Service } from "@/lib/domain/services";
 import { EMAIL_FIELD } from "@/lib/parse";
 import { durationLabel, longDateLabel, minutesToLabel } from "@/lib/domain/time";
 
@@ -12,6 +13,7 @@ import { durationLabel, longDateLabel, minutesToLabel } from "@/lib/domain/time"
 export function WaitlistJoin({
   studioIds,
   photography,
+  service = "photography",
   durationMinutes,
   date,
   openMinute,
@@ -20,6 +22,8 @@ export function WaitlistJoin({
 }: {
   studioIds: string[];
   photography: boolean;
+  /** Whose session, in the session flow (question 69). */
+  service?: Service;
   durationMinutes: number;
   date: string;
   /** The day's opening hours across the studios chosen: the range is chosen inside them. */
@@ -48,7 +52,7 @@ export function WaitlistJoin({
       const response = await fetch("/api/waitlist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ studioIds, photography, durationMinutes, date, fromMinute: from, toMinute: to, firstName, lastName, email }),
+        body: JSON.stringify({ studioIds, photography, service, durationMinutes, date, fromMinute: from, toMinute: to, firstName, lastName, email }),
       });
       const data = (await response.json().catch(() => ({}))) as { ok?: boolean; code?: string; message?: string };
       if (response.ok && data.ok) {

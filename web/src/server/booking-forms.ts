@@ -269,7 +269,7 @@ export interface QuestionInput extends Applies {
 export type SaveResult = { ok: true; id: string } | { ok: false; message: string };
 
 async function checkApplies(db: DbLike, applies: Applies): Promise<string | null> {
-  if (!applies.forRentals && !applies.forPhotography) return "Choose rentals, photography sessions or both.";
+  if (!applies.forRentals && !applies.forPhotography) return "Choose rentals, photography and content creation sessions, or both.";
   const ids = [...new Set(applies.studioIds)];
   if (ids.length > 0 && (await db.select({ id: studios.id }).from(studios).where(inArray(studios.id, ids))).length !== ids.length) return "Unknown studio.";
   return null;

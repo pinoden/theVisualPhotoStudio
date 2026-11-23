@@ -1,4 +1,5 @@
 import type { DbLike } from "@/db/client";
+import { sessionsOf, type Service } from "@/lib/domain/services";
 import { studioCombinationError } from "@/lib/catalog-view";
 import { combinedStarts, type StudioDay } from "@/lib/domain/availability";
 import { findPrice } from "@/lib/domain/pricing";
@@ -21,6 +22,8 @@ export interface MonthFitsInput {
   studioIds: string[];
   durationMinutes: number;
   photography: boolean;
+  /** Whose session, for a session (question 69). */
+  service?: Service;
 }
 
 export type MonthFitsResult = { ok: true; month: string; days: Record<IsoDate, boolean> } | { ok: false; message: string };
@@ -43,7 +46,8 @@ export async function loadMonthFits(db: DbLike, catalog: Catalog, input: MonthFi
   if (ids.length === 0 || !ids.every((id) => catalog.studios.some((studio) => studio.id === id))) return { ok: false, message: "Choose a studio." };
   if (studioCombinationError(catalog.studios, ids)) return { ok: false, message: studioCombinationError(catalog.studios, ids)! };
   if (!Number.isInteger(input.durationMinutes) || input.durationMinutes <= 0) return { ok: false, message: "Choose a length." };
-  if (input.photography && (ids.length !== 1 || !catalog.photoPackages.some((pack) => pack.studioId === ids[0] && pack.durationMinutes === input.durationMinutes))) {
+  const service = input.service ?? "photography";
+  if (input.photography && (ids.length !== 1 || !sessionsOf(catalog.photoPackages, service).some((pack) => pack.studioId === ids[0] && pack.durationMinutes === input.durationMinutes))) {
     return { ok: false, message: "Choose a session this studio offers." };
   }
 
@@ -56,7 +60,7 @@ export async function loadMonthFits(db: DbLike, catalog: Catalog, input: MonthFi
       continue;
     }
     // A day outside the booking window comes back with its problem and reads nothing from the database.
-    const day = await loadDayAvailability(db, catalog, date, now, { withPhotographer: input.photography });
+    const day = await loadDayAvailability(db, catalog, date, now, { withPhotographer: input.photography ? service : false });
     if (day.problem) {
       days[date] = false;
       continue;
