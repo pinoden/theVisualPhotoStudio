@@ -1,3 +1,5 @@
+import { addDays, isoWeekday, type IsoDate } from "./time";
+
 /**
  * Availability for one calendar day. Pure functions over minutes from local
  * midnight. Both booking flows are views over the same result:
@@ -39,6 +41,23 @@ export interface SlotOptions {
  * more of it than a studio rental (the photographer is booked from two weeks
  * out), and never less than a rental does.
  */
+/**
+ * The first day a content creation session can be on: the `businessDays`th business day (Monday to Friday) after
+ * `today` (the owner's answer of 2026-11-23, question 69). Monday and 3 give Thursday; Friday, Saturday or Sunday,
+ * Wednesday. 0 is today.
+ */
+export function afterBusinessDays(today: IsoDate, businessDays: number): IsoDate {
+  let day = today;
+  for (let counted = 0; counted < businessDays; ) {
+    day = addDays(day, 1);
+    if (isoWeekday(day) <= 5) counted++;
+  }
+  return day;
+}
+
+/** "3 business days", "1 business day": a content creation session's notice in words. */
+export const businessDaysInWords = (days: number) => `${days} business ${days === 1 ? "day" : "days"}`;
+
 export function noticeHours(settings: { minLeadHours: number; photoMinLeadHours: number }, photography: boolean): number {
   return photography ? Math.max(settings.minLeadHours, settings.photoMinLeadHours) : settings.minLeadHours;
 }

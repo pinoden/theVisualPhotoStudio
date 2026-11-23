@@ -55,6 +55,9 @@ async function NewBooking({ searchParams }: Pick<PageProps<"/admin/calendar/new"
   };
   const client = { name: given("clientName", 120), email: given("clientEmail", 200), phone: given("clientPhone", 40) };
   const dayType = dayTypeFor(catalog, date);
+  // An owner's override of the opening hours (the owner's answer of 2026-11-23, question 76).
+  const owner = viewer.role === "owner";
+  const afterHours = owner && query.afterHours === "1";
 
   // The lengths on sale: for the chosen studios on that kind of day, or every length while nothing is chosen.
   const lengths =
@@ -75,7 +78,7 @@ async function NewBooking({ searchParams }: Pick<PageProps<"/admin/calendar/new"
       : studioIds.length > 1
         ? `None with these studios together: ${studioIds.length === 2 ? catalog.settings.twoStudioGuestLimit : catalog.settings.threeStudioGuestLimit} guests at most in all, and their prices include that many.`
         : "None with this studio.";
-  const free = ready ? await freeStartsFor(db, { studioIds, date, durationMinutes: duration }, now) : null;
+  const free = ready ? await freeStartsFor(db, { studioIds, date, durationMinutes: duration, openAllDay: afterHours }, now) : null;
   let price: number | null = null;
   if (ready) {
     try {
@@ -139,6 +142,12 @@ async function NewBooking({ searchParams }: Pick<PageProps<"/admin/calendar/new"
             Show free times
           </button>
         </div>
+        {owner && (
+          <label className="admin-check" style={{ display: "block", fontSize: ".85rem" }}>
+            <input type="checkbox" name="afterHours" value="1" defaultChecked={afterHours} /> Outside the opening hours (owners only).{" "}
+            An owner may book outside the studios&rsquo; opening hours: other bookings, the gap after each and blocked time still stand.
+          </label>
+        )}
         {combinationError && <p className="field-error" role="alert">{combinationError}</p>}
         {!combinationError && studioIds.length > 0 && query.duration !== undefined && duration === null && (
           <p className="field-error">That length is not sold for the chosen studios on that day. Choose another.</p>
@@ -169,6 +178,7 @@ async function NewBooking({ searchParams }: Pick<PageProps<"/admin/calendar/new"
               ))}
               <input type="hidden" name="date" value={date} />
               <input type="hidden" name="duration" value={duration} />
+              {afterHours && <input type="hidden" name="afterHours" value="1" />}
               <div className="admin-form-row">
                 <div className="form-group">
                   <label className="form-label" htmlFor="new-time">

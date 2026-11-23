@@ -944,7 +944,10 @@ test("the calendar shows a day, a week and a month, one studio or all, and a boo
   await expect(byText(page, /add Paris or choose a different combination/)).toBeVisible();
   await expect(page.getByLabel("Free start times")).toHaveCount(0);
   await page.getByRole("checkbox", { name: "Studio Blanche" }).uncheck();
+  // An owner may book outside the opening hours (the owner's answer of 2026-11-23: "Only admin may override").
+  await page.getByRole("checkbox", { name: /^Outside the opening hours/ }).check();
   await page.getByRole("button", { name: "Show free times" }).click();
+  await expect(page.getByLabel("Free start times").locator("option", { hasText: "7:00 AM – 8:00 AM" })).toHaveCount(1);
   await page.getByLabel("Free start times").selectOption({ label: "4:00 PM – 5:00 PM" });
   await page.getByLabel("Client’s name").fill("Dana Diaz");
   await page.getByLabel("Client’s email").fill("dana.e2e@example.com");

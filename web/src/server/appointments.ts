@@ -291,7 +291,7 @@ const WINDOW_PROBLEM = {
  */
 export async function freeStartsFor(
   db: DbLike,
-  selection: { studioIds: string[]; date: string; durationMinutes: number; excludeBookingId?: string; withPhotographer?: boolean | Service },
+  selection: { studioIds: string[]; date: string; durationMinutes: number; excludeBookingId?: string; withPhotographer?: boolean | Service; openAllDay?: boolean },
   now: Date,
 ): Promise<{ ok: true; starts: number[] } | { ok: false; message: string }> {
   const catalog = await loadCatalog(db);
@@ -299,6 +299,7 @@ export async function freeStartsFor(
     asAdmin: true,
     excludeBookingId: selection.excludeBookingId,
     withPhotographer: selection.withPhotographer,
+    openAllDay: selection.openAllDay,
   });
   if (day.problem) return { ok: false, message: WINDOW_PROBLEM[day.problem] };
   const days = selection.studioIds.map((id) => day.days.find((studio) => studio.studioId === id));
@@ -353,6 +354,8 @@ export async function moveOptions(
   ref: string,
   date: string,
   now: Date,
+  /** An owner's override of the opening hours (question 76): ignored for anyone else. */
+  options: { openAllDay?: boolean } = {},
 ): Promise<{ ok: true; starts: number[]; price: MovePricePreview | null } | { ok: false; message: string }> {
   const settings = await loadSettings(db);
   if (!isBookingRef(ref) || !can(viewer, "moveBookings", settings)) return { ok: false, message: "Booking not found." };
@@ -367,6 +370,7 @@ export async function moveOptions(
       durationMinutes: booking.durationMinutes,
       excludeBookingId: booking.id,
       withPhotographer: await sessionServiceOf(db, booking.photographerId),
+      openAllDay: Boolean(options.openAllDay) && viewer.role === "owner",
     },
     now,
   );
@@ -414,7 +418,7 @@ export async function moveBooking(
   db: Db,
   viewer: AuthUser,
   ref: string,
-  input: { date: string; startMinute: number; countsAsClientMove: boolean },
+  input: { date: string; startMinute: number; countsAsClientMove: boolean; /** An owner's override of the opening hours (question 76). */ openAllDay?: boolean },
   now: Date,
 ): Promise<MoveResult> {
   const refuse = (reason: Extract<MoveResult, { ok: false }>["reason"], message: string): MoveResult => ({ ok: false, reason, message });
@@ -451,6 +455,7 @@ export async function moveBooking(
     asAdmin: true,
     excludeBookingId: found.id,
     withPhotographer: await sessionServiceOf(db, found.photographerId),
+    openAllDay: Boolean(input.openAllDay) && viewer.role === "owner",
   });
   if (day.problem) return refuse("invalid_time", WINDOW_PROBLEM[day.problem]);
   const studioIds = await studioIdsOf(db, found.id);
@@ -605,11 +610,12 @@ export async function createAdminBooking(
   viewer: AuthUser,
   input: Omit<BookingInput, "acceptTerms" | "paymentToken" | "expectedTotalCents">,
   // `processor`: the one set up now, which says what kind of money the booking is. Left out: none is set up.
-  deps: Pick<BookingDeps, "now" | "baseUrl" | "processor">,
+  // `openAllDay`: an owner's override of the opening hours (question 76), ignored for anyone else.
+  deps: Pick<BookingDeps, "now" | "baseUrl" | "processor" | "openAllDay">,
 ): Promise<CreateBookingResult | { ok: false; status: 403; code: "forbidden"; message: string }> {
   const settings = await loadSettings(db);
   if (!can(viewer, "createBookings", settings)) {
     return { ok: false, status: 403, code: "forbidden", message: "You cannot make bookings for clients." };
   }
-  return createBooking(db, { ...input, acceptTerms: true }, { ...deps, processor: deps.processor ?? null, payments: null, madeBy: viewer.email });
+  return createBooking(db, { ...input, acceptTerms: true }, { ...deps, processor: deps.processor ?? null, payments: null, madeBy: viewer.email, openAllDay: Boolean(deps.openAllDay) && viewer.role === "owner" });
 }

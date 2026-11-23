@@ -7,6 +7,8 @@ import { type KeyboardEvent, type UIEvent, useCallback, useEffect, useMemo, useR
 import {
   availabilityGrid,
   combinedStarts,
+  afterBusinessDays,
+  businessDaysInWords,
   noticeHours,
   studiosFreeAt,
   type SlotOptions,
@@ -246,10 +248,15 @@ export function BookingFlow({
   const { settings, rules } = catalog;
 
   const dayType: DayType = date ? (catalog.specialDates[date] ?? defaultDayType(date)) : "weekday";
-  /** How far ahead this kind of booking has to be made. A session with the photographer needs more notice. */
-  const leadHours = noticeHours(settings, photography);
+  /**
+   * How far ahead this kind of booking has to be made. A session with the photographer needs more notice; content
+   * creation's is business days (question 69), from the start of its first day.
+   */
+  const contentNotice = photography && service === "content";
+  const leadHours = contentNotice ? 0 : noticeHours(settings, photography);
+  const noticeWords = contentNotice ? businessDaysInWords(settings.contentNoticeBusinessDays) : hoursInWords(leadHours);
   /** The first date that can have a free time at all: whole days of notice from today. */
-  const firstDate = today ? addDays(today, Math.floor(leadHours / 24)) : "";
+  const firstDate = today ? (contentNotice ? afterBusinessDays(today, settings.contentNoticeBusinessDays) : addDays(today, Math.floor(leadHours / 24))) : "";
   // The month calendar (the owner's brief of 2026-11-22, item 3): from the first month with a day that can be booked to
   // the month bookings open up to.
   const firstMonth = firstDate.slice(0, 7);
@@ -1012,8 +1019,8 @@ export function BookingFlow({
           <h3 tabIndex={-1} style={{ fontSize: "1.6rem", marginBottom: ".5rem" }}>{photography ? "Select date & session" : "Select date & duration"}</h3>
           <p className="text-muted mb-3">
             {mode === "studio" && chosenNames ? `${chosenNames}. ` : ""}
-            {leadHours > 0
-              ? `${photography ? "Sessions" : "Bookings"} open ${hoursInWords(leadHours)} to ${count(settings.maxAdvanceDays, "day")} ahead.`
+            {leadHours > 0 || contentNotice
+              ? `${photography ? "Sessions" : "Bookings"} open ${noticeWords} to ${count(settings.maxAdvanceDays, "day")} ahead.`
               : `Bookings open up to ${count(settings.maxAdvanceDays, "day")} ahead.`}
           </p>
           {mode === "studio" ? (
@@ -1112,7 +1119,7 @@ export function BookingFlow({
                     : availability.problem === "too_far"
                       ? `Bookings open ${count(settings.maxAdvanceDays, "day")} ahead.`
                       : firstDate && date < firstDate
-                        ? `${photography ? `${words.Session}s` : "Bookings"} are made at least ${hoursInWords(leadHours)} ahead. Please choose a later date.`
+                        ? `${photography ? `${words.Session}s` : "Bookings"} are made at least ${noticeWords} ahead. Please choose a later date.`
                         : mode === "studio" && studioIds.length > 1
                           ? "These studios are not free together on this date. Try another day, or fewer studios."
                           : "No times are available on this date. Please try another day."}

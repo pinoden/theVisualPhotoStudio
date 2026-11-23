@@ -2,7 +2,7 @@ import { and, asc, eq, lt, sql } from "drizzle-orm";
 import { bookings, photographerHours, photographers } from "@/db/schema";
 import type { Service } from "@/lib/domain/services";
 import { queryRows, type DbLike } from "@/db/client";
-import { noticeHours, type StudioDay } from "@/lib/domain/availability";
+import { afterBusinessDays, noticeHours, type StudioDay } from "@/lib/domain/availability";
 import { daysBetween, isIsoDate, isoWeekday, type DayType, type IsoDate } from "@/lib/domain/time";
 import { dayTypeFor, type Catalog } from "./catalog";
 import { releaseHolds } from "./holds";
@@ -65,11 +65,15 @@ function bookingWindow(
   date: string,
   now: Date,
   settings: Catalog["settings"],
+  /** The first day that can be booked at all, when the notice is days rather than hours (content creation's). */
+  firstDate: IsoDate | null = null,
 ): { problem: WindowProblem | null; earliestStartMinute: number } {
   if (!isIsoDate(date)) return { problem: "invalid_date", earliestStartMinute: 1440 };
   const today = localDateOf(now);
   if (date < today) return { problem: "past", earliestStartMinute: 1440 };
   if (daysBetween(today, date) > settings.maxAdvanceDays) return { problem: "too_far", earliestStartMinute: 1440 };
+  // Before the first day of a notice in days: nothing to offer, as a time inside the notice in hours.
+  if (firstDate !== null && date < firstDate) return { problem: null, earliestStartMinute: 1440 };
   const earliest = new Date(now.getTime() + settings.minLeadHours * 3_600_000);
   return { problem: null, earliestStartMinute: localMinuteOn(earliest, date) };
 }
@@ -83,6 +87,13 @@ export interface AvailabilityOptions {
    * hours, existing bookings and the gap between them apply as for anyone.
    */
   asAdmin?: boolean;
+  /**
+   * An owner passes over the opening hours (the owner's answer of 2026-11-23: "Only admin may override"; question 76 in
+   * ProjectLibrary.md): every studio counts as open from midnight to midnight, on a day it is closed too. Its other
+   * bookings, the gap after each and blocked time stand as for anyone: the database refuses two holds of one studio at
+   * once. The photographer's and the content creator's hours are theirs, and stay.
+   */
+  openAllDay?: boolean;
   /**
    * Also report the day of a session's person: for a session, which needs both the studio and the person. True is the
    * photographer's; a service names whose (question 69 in ProjectLibrary.md).
@@ -170,8 +181,10 @@ export async function loadDayAvailability(
 ): Promise<DayAvailability> {
   // The notice customers give: none for an administrator, and longer for a session with the photographer.
   const service = serviceAsked(options.withPhotographer);
-  const minLeadHours = options.asAdmin ? 0 : noticeHours(catalog.settings, service !== null);
-  const window = bookingWindow(date, now, { ...catalog.settings, minLeadHours });
+  const minLeadHours = options.asAdmin ? 0 : noticeHours(catalog.settings, service === "photography");
+  // Content creation's notice is business days (question 69): from the start of the first day it allows.
+  const firstDate = !options.asAdmin && service === "content" ? afterBusinessDays(localDateOf(now), catalog.settings.contentNoticeBusinessDays) : null;
+  const window = bookingWindow(date, now, { ...catalog.settings, minLeadHours }, firstDate);
   const exclude = options.excludeBookingId ?? null;
   if (window.problem === "invalid_date") {
     return { date, dayType: "weekday", problem: window.problem, earliestStartMinute: 1440, days: [] };
@@ -195,7 +208,7 @@ export async function loadDayAvailability(
 
   const weekday = isoWeekday(date);
   const days: StudioDay[] = catalog.studios.map((studio) => {
-    const hours = studio.hours[weekday];
+    const hours = options.openAllDay ? { openMinute: 0, closeMinute: 1440 } : studio.hours[weekday];
     return {
       studioId: studio.id,
       openMinute: hours ? hours.openMinute : null,

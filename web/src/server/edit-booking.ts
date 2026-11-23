@@ -33,6 +33,8 @@ export interface EditInput {
   studioIds: string[];
   durationMinutes: number;
   addons: { addonId: string; quantity: number }[];
+  /** The owner passes over the opening hours (question 76). */
+  openAllDay?: boolean;
 }
 
 export type EditResult =
@@ -89,7 +91,7 @@ export async function editBooking(db: Db, viewer: AuthUser, ref: string, input: 
   }
 
   // Free at its start in every studio, for the new length, its own time left out.
-  const day = await loadDayAvailability(db, catalog, date, now, { asAdmin: true, excludeBookingId: found.id });
+  const day = await loadDayAvailability(db, catalog, date, now, { asAdmin: true, excludeBookingId: found.id, openAllDay: Boolean(input.openAllDay) });
   const slot = { durationMinutes: minutes, incrementMinutes: 1, earliestStartMinute: 0 };
   const taken = studioIds.filter((id) => {
     const studioDay = day.days.find((studio) => studio.studioId === id);
@@ -97,7 +99,9 @@ export async function editBooking(db: Db, viewer: AuthUser, ref: string, input: 
   });
   if (taken.length > 0) {
     const names = taken.map((id) => catalog.studios.find((studio) => studio.id === id)!.name).join(" and ");
-    return refuse(`${names} ${taken.length > 1 ? "are" : "is"} not free for ${durationLabel(minutes)} from ${formatInstant(found.startAt)}, with the gap after it. Choose another studio or length, or move the booking first.`);
+    return refuse(
+      `${names} ${taken.length > 1 ? "are" : "is"} not free for ${durationLabel(minutes)} from ${formatInstant(found.startAt)}, with the gap after it${input.openAllDay ? "" : ", inside the opening hours"}. Choose another studio or length, or move the booking first.`,
+    );
   }
 
   const [held, kept, code] = await together(db, [
