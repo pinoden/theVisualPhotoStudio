@@ -20,7 +20,7 @@ import {
   totalRow,
   watchBrowser,
 } from "./helpers";
-import { longDateLabel } from "../src/lib/domain/time";
+import { addDays, longDateLabel } from "../src/lib/domain/time";
 
 /**
  * The site clicked through in a real browser, in the order a business day
@@ -1026,16 +1026,57 @@ test("the owner cancels a booking with a full refund and blocks a morning", asyn
   await row.getByRole("button", { name: "Cancel booking" }).click();
   await expect(byText(page, "Booking cancelled. $88 refunded to the card.")).toBeVisible();
 
-  await page.getByRole("link", { name: "Hours & blocks" }).click();
-  await expect(page.getByRole("heading", { name: "Hours & blocks" })).toBeVisible();
+  await page.getByRole("link", { name: "Availability & Blocked Time" }).click();
+  await expect(page.getByRole("heading", { name: "Availability & Blocked Time", level: 1 })).toBeVisible();
   await byLabel(page, "Studio Paris").check();
-  await byLabel(page, "Date").fill(NEAR);
-  await byLabel(page, "From").fill("09:00");
-  await byLabel(page, "To").fill("12:00");
+  await byLabel(page, "First day").fill(NEAR);
+  await byLabel(page, "Start").fill("09:00");
+  await byLabel(page, "End").fill("12:00");
+  await byLabel(page, "Reason").selectOption({ label: "Maintenance" });
   await byLabel(page, "Note").fill("Repainting");
   await page.getByRole("button", { name: "Block", exact: true }).click();
-  await expect(byText(page, "Time blocked.")).toBeVisible();
-  await expect(page.getByRole("row", { name: /Repainting/ })).toContainText("Studio Paris");
+  await expect(byText(page, "Blocked: 1 day. Clients can no longer book that time.")).toBeVisible();
+  // The list of blocks to come (the month's table above it has rows too).
+  const blocksList = page.locator("#blocks");
+  await expect(blocksList.getByRole("row", { name: /Repainting/ })).toContainText("Paris");
+  await expect(blocksList.getByRole("row", { name: /Repainting/ })).toContainText("Maintenance");
+
+  // The whole studio closed for three days, as the owner's admin brief of 2026-11-22 describes (December 24 to 26):
+  // every studio, the entire day.
+  const closed = [dateAhead(45), addDays(dateAhead(45), 1), addDays(dateAhead(45), 2)];
+  await byLabel(page, "Select All Studios").check();
+  await byLabel(page, "First day").fill(closed[0]);
+  await byLabel(page, "Last day").fill(closed[2]);
+  await byLabel(page, "Block Entire Day").check();
+  await byLabel(page, "Reason").selectOption({ label: "Holiday Closure" });
+  await page.getByRole("button", { name: "Block", exact: true }).click();
+  await expect(byText(page, "Blocked: 3 days. Clients can no longer book that time.")).toBeVisible();
+  const closure = blocksList.getByRole("row", { name: /Holiday Closure/ });
+  await expect(closure).toContainText("All studios");
+  await expect(closure).toContainText("Entire day");
+  await expect(closure).toContainText("(3 days)");
+  // It is in the month, day by day.
+  await expect(onScreen(page.locator(".avail-chip", { hasText: "Holiday Closure" }))).toHaveCount(closed.filter((day) => day.startsWith(closed[0].slice(0, 7))).length);
+  await shot(page, "18b-availability");
+  expect(await accessibilityProblems(page), "Availability & Blocked Time").toEqual([]);
+  // A block over appointments is refused, and names them: nothing is cancelled for it.
+  await byLabel(page, "Select All Studios").check();
+  await byLabel(page, "First day").fill(NEAR);
+  await byLabel(page, "Block Entire Day").check();
+  await page.getByRole("button", { name: "Block", exact: true }).click();
+  await expect(onScreen(page.locator(".flash-error"))).toContainText(/^Nothing was blocked\. \d+ appointments hold part of that time(, and part of it is blocked already)?: VS-.*Move or cancel the appointments first/);
+  // On the booking page those three days cannot be pressed.
+  await page.goto("/book");
+  await pickStudio(page, "Studio Paris");
+  await next(page);
+  await page.getByRole("button", { name: "1 hr", exact: true }).click();
+  await byLabel(page, "Date").fill(closed[1]);
+  await expect(page.getByRole("button", { name: `${longDateLabel(closed[1])}, not available` })).toBeDisabled();
+  await expect(page.getByRole("button", { name: `${longDateLabel(addDays(closed[2], 1))}` })).toBeEnabled();
+  // The closure is removed again: later tests book in those weeks.
+  await page.goto("/admin/availability");
+  await page.locator("#blocks").getByRole("row", { name: /Holiday Closure/ }).getByRole("button", { name: "Remove" }).click();
+  await expect(byText(page, "Removed: 3 days no longer blocked.")).toBeVisible();
 
   // The blocked morning is gone from the booking screen.
   await page.goto("/book");
@@ -1612,7 +1653,7 @@ test("a Studio Manager runs the calendar and looks clients up, and sees no price
   await signIn(page, MANAGER);
   await page.getByRole("link", { name: "Studio calendar" }).click();
   await expect(page.getByRole("heading", { name: "Calendar", exact: true })).toBeVisible();
-  await expect(onScreen(page.locator(".admin-nav"))).toHaveText("CalendarCustomersDay sheetHours & blocksPhotography");
+  await expect(onScreen(page.locator(".admin-nav"))).toHaveText("CalendarAvailability & Blocked TimeCustomersDay sheetPhotography");
 
   // She sees a day nobody assigned to her, with the client's contact details, and no price.
   await page.goto(`/admin/calendar?view=day&date=${NEAR}`);
@@ -1639,8 +1680,8 @@ test("a Studio Manager runs the calendar and looks clients up, and sees no price
   await expect(page.locator("#access-log")).toHaveCount(0);
 
   // She can block time in a studio, and cannot touch opening hours.
-  await page.getByRole("link", { name: "Hours & blocks" }).click();
-  await expect(page.getByRole("heading", { name: "Blocked time", level: 1 })).toBeVisible();
+  await page.getByRole("link", { name: "Availability & Blocked Time" }).click();
+  await expect(page.getByRole("heading", { name: "Availability & Blocked Time", level: 1 })).toBeVisible();
   await expect(page.getByRole("button", { name: "Block", exact: true })).toBeVisible();
   await expect(byText(page, /opening hours/)).toHaveCount(0);
 

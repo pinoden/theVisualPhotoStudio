@@ -726,7 +726,8 @@ details.faq-item[open] .faq-icon { transform: rotate(45deg); }
 .month-cal-day[aria-pressed="true"] { background: var(--color-dark); color: #fff; }
 .month-cal-day:disabled { background: transparent; color: #b5aaa1; font-weight: 400; cursor: default; }
 @media (min-width: 600px) { .month-cal-day { height: 3.25rem; font-size: 1.05rem; } }
-.month-cal-note { margin: .5rem 0 0; font-size: .85rem; }
+.month-cal-note { min-height: 3.4em; margin: .5rem 0 0; font-size: .85rem; }
+.month-cal[aria-busy="true"] .month-cal-grid { opacity: .55; }
 .month-cal-wait { margin: 0; padding: 1rem; border: 1px dashed var(--color-border); font-size: .9rem; }
 .month-cal-typed p { margin: 0 0 .25rem; font-size: .85rem; }
 .month-cal-typed .form-group { max-width: 16rem; }
@@ -1674,6 +1675,29 @@ button { font-family: inherit; }
 /* An appointment's page, in its studio's or bundle's colour, as on the calendar. */
 .appt-look { border-left: 4px solid var(--studio); }
 .appt-look .cal-swatch { display: inline-block; vertical-align: middle; }
+/* Availability & Blocked Time: the form, the month of blocks, and the list. */
+.avail-check { display: inline-flex; align-items: center; gap: .35rem; min-height: 2.5rem; margin-right: 1.1rem; font-size: .9rem; }
+.avail-check .cal-swatch { display: inline-block; }
+.avail-all { font-weight: 700; }
+.avail-hint { margin: -.25rem 0 .75rem; color: var(--color-muted); font-size: .8rem; }
+.avail-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+.avail-month-nav { margin-bottom: .75rem; }
+.avail-month td { height: 6.5rem; }
+.avail-chip {
+  display: block;
+  margin-bottom: 2px;
+  padding: 1px .35rem;
+  border-left: 3px solid #8a7f72;
+  border-radius: 3px;
+  background: repeating-linear-gradient(135deg, #f1ece6 0 6px, #faf7f3 6px 12px);
+  color: var(--color-dark);
+  font-size: .72rem;
+  line-height: 1.45;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+.avail-row-actions { display: flex; flex-wrap: wrap; gap: .4rem; }
+
 /* An appointment over the calendar (?open=), which stays behind it: everything about it, the actions at its top. */
 .appt-dialog-backdrop {
   position: fixed;

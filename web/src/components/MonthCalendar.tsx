@@ -1,6 +1,7 @@
 "use client";
 
-import { isoWeekday, longDateLabel, type IsoDate } from "@/lib/domain/time";
+import { monthTitle, shiftMonth, weeksOf } from "@/lib/domain/months";
+import { longDateLabel, type IsoDate } from "@/lib/domain/time";
 
 const WEEKDAYS: [short: string, long: string][] = [
   ["Sun", "Sunday"],
@@ -11,30 +12,6 @@ const WEEKDAYS: [short: string, long: string][] = [
   ["Fri", "Friday"],
   ["Sat", "Saturday"],
 ];
-
-/** "2026-12" a number of months later or earlier. */
-export function shiftMonth(month: string, by: number): string {
-  const [year, number] = month.split("-").map(Number);
-  const moved = new Date(Date.UTC(year, number - 1 + by, 1));
-  return `${moved.getUTCFullYear()}-${String(moved.getUTCMonth() + 1).padStart(2, "0")}`;
-}
-
-/** "December 2026". */
-export function monthTitle(month: string): string {
-  const [year, number] = month.split("-").map(Number);
-  return new Date(Date.UTC(year, number - 1, 1)).toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
-}
-
-/** The month's weeks, Sunday first, with the days of other months left empty. */
-export function weeksOf(month: string): (IsoDate | null)[][] {
-  const [year, number] = month.split("-").map(Number);
-  const last = new Date(Date.UTC(year, number, 0)).getUTCDate();
-  const days: (IsoDate | null)[] = Array.from({ length: last }, (_, index) => `${month}-${String(index + 1).padStart(2, "0")}`);
-  const lead = isoWeekday(`${month}-01`) % 7; // Sunday is 0
-  const cells = [...Array<null>(lead).fill(null), ...days];
-  while (cells.length % 7 !== 0) cells.push(null);
-  return Array.from({ length: cells.length / 7 }, (_, week) => cells.slice(week * 7, week * 7 + 7));
-}
 
 /**
  * The booking page's month calendar (the owner's brief of 2026-11-22, item 3): the whole month, larger, in the
@@ -106,12 +83,11 @@ export function MonthCalendar({
           ))}
         </tbody>
       </table>
+      {/* The same size whatever it says, so that nothing below it moves when the month's answer comes: a press on "Next"
+          a moment after choosing the duration lands where it was aimed (the phone test in WebKit, 2026-11-22). While the
+          answer is on its way the days are dimmed and cannot be pressed. */}
       <p className="month-cal-note" role="status">
-        {days === null
-          ? "Checking which days are free…"
-          : open === 0
-            ? "No day this month has a free time for this length. Try the next month, or a shorter length."
-            : "Only the days on which your length fits can be chosen."}
+        {days !== null && open === 0 ? "No free day this month for this length." : "Only the days on which your length fits can be chosen."}
       </p>
     </div>
   );

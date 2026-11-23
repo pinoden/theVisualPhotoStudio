@@ -23,6 +23,7 @@ const PATHS = [
   "/admin/prices",
   "/admin/studios", "/admin/calendar", "/admin/calendar/new", "/admin/photography", "/book/photography",
   "/admin/hours",
+  "/admin/availability",
   "/admin/codes",
   "/admin/memberships",
   "/admin/settings",

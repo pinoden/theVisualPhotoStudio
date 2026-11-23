@@ -523,11 +523,25 @@ export const bookingEvents = pgTable(
 );
 
 /** An owner-made block of time (maintenance, private event). */
-export const blocks = pgTable("blocks", {
-  id: id(),
-  note: text("note").notNull().default(""),
-  createdAt: createdAt(),
-});
+export const blocks = pgTable(
+  "blocks",
+  {
+    id: id(),
+    note: text("note").notNull().default(""),
+    /**
+     * Why the time is blocked (the owner's admin brief of 2026-11-22, item 12): "maintenance", "holiday" (Holiday
+     * Closure), "private_event" or "other"; empty when none was given. See src/server/blocked-time.ts.
+     */
+    reason: text("reason").notNull().default(""),
+    /**
+     * The blocks made together, one for each day of a range or of a weekly repeat: they are listed, changed and removed
+     * as one. Null for a block of one day made alone.
+     */
+    seriesId: uuid("series_id"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("blocks_series_idx").on(t.seriesId)],
+);
 
 /**
  * Every span of time during which a studio is taken, by a booking or a block.

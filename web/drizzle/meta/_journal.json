@@ -393,6 +393,13 @@
       "when": 1795402666623,
       "tag": "0055_studio_colours",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1795407606967,
+      "tag": "0056_block_series",
+      "breakpoints": true
     }
   ]
 }

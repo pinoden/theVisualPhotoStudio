@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { monthTitle, shiftMonth, weeksOf } from "./MonthCalendar";
+import { monthTitle, shiftMonth, weeksOf } from "@/lib/domain/months";
 
-describe("the booking page's month calendar", () => {
+describe("months, for the month calendars", () => {
   it("moves a month at a time, across the year", () => {
     expect(shiftMonth("2026-12", 1)).toBe("2027-01");
     expect(shiftMonth("2027-01", -1)).toBe("2026-12");

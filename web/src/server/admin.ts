@@ -1,7 +1,6 @@
 import { and, asc, desc, eq, gte, inArray, lt, ne, sql } from "drizzle-orm";
 import {
   addons,
-  blocks,
   bookings,
   loyaltyLedger,
   payments,
@@ -15,7 +14,7 @@ import {
   studios,
   users,
 } from "@/db/schema";
-import { PG_EXCLUSION_VIOLATION, pgErrorCode, queryRows, together, type Db, type DbLike } from "@/db/client";
+import { together, type Db, type DbLike } from "@/db/client";
 import { isAdminLevel, type AdminLevel } from "@/lib/abilities";
 import { isAddonKind, type AddonKind } from "@/lib/addon-kinds";
 import type { PromoKind } from "@/lib/domain/pricing";
@@ -27,7 +26,7 @@ import { deleteAllSessions, normalizeEmail } from "./auth";
 import { toBookingViews, type BookingView } from "./bookings";
 import { handPaidByBooking } from "./money";
 import { issuePromo, looksSiteMade, normalizeCode } from "./promos";
-import { dayBoundsUtc, localToUtc } from "./tz";
+import { dayBoundsUtc } from "./tz";
 
 /**
  * Everything only the owner may do. These functions do not check who is
@@ -210,90 +209,7 @@ export async function saveStudioHours(
   return true;
 }
 
-// ── Blocking time ────────────────────────────────────────────────────────────
-
-export type BlockResult = { ok: true; id: string } | { ok: false; message: string };
-
-/**
- * Take studios off the calendar for a span of one day (maintenance, a private
- * event). Refused if a booking already holds any of that time.
- */
-export async function createBlock(
-  db: Db,
-  input: { studioIds: string[]; date: string; startMinute: number; endMinute: number; note: string },
-): Promise<BlockResult> {
-  const { studioIds, date, startMinute, endMinute } = input;
-  if (!isIsoDate(date)) return { ok: false, message: "Choose a valid date." };
-  if (studioIds.length === 0) return { ok: false, message: "Choose at least one studio." };
-  if (!Number.isInteger(startMinute) || !Number.isInteger(endMinute) || startMinute < 0 || endMinute > 1440 || startMinute >= endMinute) {
-    return { ok: false, message: "The end time must be after the start time." };
-  }
-  const known = await db.select({ id: studios.id }).from(studios).where(inArray(studios.id, studioIds));
-  if (known.length !== new Set(studioIds).size) return { ok: false, message: "Unknown studio." };
-
-  const from = localToUtc(date, startMinute).toISOString();
-  const to = localToUtc(date, endMinute).toISOString();
-  try {
-    const id = await db.transaction(async (tx) => {
-      const [block] = await tx.insert(blocks).values({ note: input.note.slice(0, 200) }).returning({ id: blocks.id });
-      for (const studioId of [...new Set(studioIds)].sort()) {
-        await tx.insert(studioHolds).values({
-          studioId,
-          blockId: block.id,
-          occupied: sql`tstzrange(${from}::timestamptz, ${to}::timestamptz, '[)')`,
-        });
-      }
-      return block.id;
-    });
-    return { ok: true, id };
-  } catch (error) {
-    if (pgErrorCode(error) === PG_EXCLUSION_VIOLATION) {
-      return { ok: false, message: "A booking or another block already takes part of that time." };
-    }
-    throw error;
-  }
-}
-
-export async function removeBlock(db: DbLike, blockId: string): Promise<void> {
-  await db.delete(blocks).where(eq(blocks.id, blockId)); // its holds go with it
-}
-
-export interface BlockView {
-  id: string;
-  note: string;
-  studios: string[];
-  startAt: string;
-  endAt: string;
-}
-
-export async function listBlocks(db: DbLike, from: Date): Promise<BlockView[]> {
-  const rows = await queryRows<{ id: string; note: string; name: string; start_at: string | Date; end_at: string | Date }>(
-    db,
-    sql`
-      select b.id, b.note, s.name, lower(h.occupied) as start_at, upper(h.occupied) as end_at
-      from blocks b
-      join studio_holds h on h.block_id = b.id and h.active
-      join studios s on s.id = h.studio_id
-      where upper(h.occupied) > ${from.toISOString()}::timestamptz
-      order by lower(h.occupied), s.sort_order
-    `,
-  );
-  const byId = new Map<string, BlockView>();
-  for (const row of rows) {
-    const existing = byId.get(row.id);
-    if (existing) existing.studios.push(row.name);
-    else {
-      byId.set(row.id, {
-        id: row.id,
-        note: row.note,
-        studios: [row.name],
-        startAt: new Date(row.start_at).toISOString(),
-        endAt: new Date(row.end_at).toISOString(),
-      });
-    }
-  }
-  return [...byId.values()];
-}
+// Blocking time: src/server/blocked-time.ts (Availability & Blocked Time).
 
 // ── Bookings ─────────────────────────────────────────────────────────────────
 

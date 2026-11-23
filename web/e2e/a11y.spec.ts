@@ -83,6 +83,7 @@ const ADMIN_PAGES = [
   "/admin/prices",
   "/admin/studios",
   "/admin/hours",
+  "/admin/availability",
   "/admin/staff",
   "/admin/codes",
   "/admin/memberships",

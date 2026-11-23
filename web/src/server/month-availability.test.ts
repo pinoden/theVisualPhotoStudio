@@ -1,10 +1,14 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { createBlock } from "./admin";
+import { createBlocks } from "./blocked-time";
 import { loadCatalog } from "./catalog";
 import { datesOfMonth, loadMonthFits } from "./month-availability";
 import { createTestWorld, NOW, type TestWorld } from "./testing";
 
 const h = (hours: number) => hours * 60;
+
+/** Block studios for part of one day (src/server/blocked-time.ts). */
+const block = (world: TestWorld, studioIds: string[], date: string, startMinute: number, endMinute: number) =>
+  createBlocks(world.db, { studioIds, from: date, to: date, wholeDay: false, startMinute, endMinute, weekdays: [], reason: "", note: "" }, NOW);
 
 describe("the days of a month a booking fits on (the owner's brief of 2026-11-22, item 3)", () => {
   let world: TestWorld;
@@ -24,8 +28,8 @@ describe("the days of a month a booking fits on (the owner's brief of 2026-11-22
 
   it("offers a day only for a length that fits on it, not for any free time that day", async () => {
     // Blanche is free on the 18th only from 2:00 to 3:30 PM: one hour and its clean-up gap fit, two hours do not.
-    expect((await createBlock(world.db, { studioIds: [world.ids.blanche], date: DAY, startMinute: h(9), endMinute: h(14), note: "" })).ok).toBe(true);
-    expect((await createBlock(world.db, { studioIds: [world.ids.blanche], date: DAY, startMinute: h(15.5), endMinute: h(19), note: "" })).ok).toBe(true);
+    expect((await block(world, [world.ids.blanche], DAY, h(9), h(14))).ok).toBe(true);
+    expect((await block(world, [world.ids.blanche], DAY, h(15.5), h(19))).ok).toBe(true);
     expect((await fits([world.ids.blanche], 60))[DAY]).toBe(true);
     expect((await fits([world.ids.blanche], 120))[DAY]).toBe(false);
     // The day after is free for either.
@@ -33,7 +37,7 @@ describe("the days of a month a booking fits on (the owner's brief of 2026-11-22
   });
 
   it("needs every studio of a bundle free at once", async () => {
-    expect((await createBlock(world.db, { studioIds: [world.ids.dayglow], date: DAY, startMinute: h(9), endMinute: h(19), note: "Closed" })).ok).toBe(true);
+    expect((await block(world, [world.ids.dayglow], DAY, h(9), h(19))).ok).toBe(true);
     expect((await fits([world.ids.paris], 60))[DAY]).toBe(true);
     expect((await fits([world.ids.paris, world.ids.dayglow], 60))[DAY]).toBe(false);
     expect((await fits([world.ids.paris, world.ids.dayglow], 60))["2026-11-19"]).toBe(true);

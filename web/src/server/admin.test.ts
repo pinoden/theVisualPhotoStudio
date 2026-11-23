@@ -5,14 +5,11 @@ import { priceRules, sessions, staffShifts, users } from "@/db/schema";
 import {
   addStaff,
   countUpcoming,
-  createBlock,
   createManualCode,
-  listBlocks,
   listBookings,
   listCodes,
   listRefundProblems,
   listStaff,
-  removeBlock,
   removeStaff,
   savePrice,
   saveStudioHours,
@@ -21,6 +18,7 @@ import {
   setStaffLevel,
   voidCode,
 } from "./admin";
+import { createBlocks, listBlockSeries, removeBlocks } from "./blocked-time";
 import { getSessionUser, requestLoginCode, verifyLoginCode } from "./auth";
 import { loadDayAvailability } from "./availability";
 import { loadCatalog } from "./catalog";
@@ -190,10 +188,13 @@ describe("opening hours", () => {
 });
 
 describe("blocking time", () => {
+  // One day, part of it, as the Hours page made it before Availability & Blocked Time (src/server/blocked-time.ts).
+  const oneDay = (studioIds: string[], startMinute: number, endMinute: number, note = "") =>
+    createBlocks(world.db, { studioIds, from: NEAR, to: NEAR, wholeDay: false, startMinute, endMinute, weekdays: [], reason: "", note }, NOW);
+
   it("takes studios off the calendar for a span and gives the time back when removed", async () => {
-    const block = expectOk(
-      await createBlock(world.db, { studioIds: [world.ids.blanche, world.ids.paris], date: NEAR, startMinute: h(12), endMinute: h(14), note: "Repainting" }),
-    );
+    const block = await oneDay([world.ids.blanche, world.ids.paris], h(12), h(14), "Repainting");
+    expect(block.ok).toBe(true);
     const starts = await freeStarts("blanche", NEAR);
     expect(starts).not.toContain(h(12));
     expect(starts).not.toContain(h(13));
@@ -202,42 +203,28 @@ describe("blocking time", () => {
     expect(await freeStarts("dayglow", NEAR)).toContain(h(12));
     expect(await world.book({ startMinute: h(12), durationMinutes: 60 })).toMatchObject({ ok: false, code: "slot_taken" });
 
-    expect(await listBlocks(world.db, NOW)).toEqual([
-      {
-        id: block.id,
-        note: "Repainting",
-        studios: ["Studio Blanche", "Studio Paris"],
-        startAt: "2026-11-18T17:00:00.000Z",
-        endAt: "2026-11-18T19:00:00.000Z",
-      },
-    ]);
+    const [series] = await listBlockSeries(world.db, NOW);
+    expect(series).toMatchObject({ note: "Repainting", studios: ["Studio Blanche", "Studio Paris"], days: [{ date: NEAR, startMinute: h(12), endMinute: h(14) }] });
 
-    await removeBlock(world.db, block.id);
+    await removeBlocks(world.db, series.key);
     expect(await freeStarts("blanche", NEAR)).toContain(h(12));
-    expect(await listBlocks(world.db, NOW)).toEqual([]);
+    expect(await listBlockSeries(world.db, NOW)).toEqual([]);
   });
 
   it("is refused where a booking already is, leaving nothing half-blocked", async () => {
     expectOk(await world.book({ studioIds: [world.ids.paris], startMinute: h(13), durationMinutes: 60 }));
-    const result = await createBlock(world.db, {
-      studioIds: [world.ids.blanche, world.ids.paris],
-      date: NEAR,
-      startMinute: h(12),
-      endMinute: h(14),
-      note: "",
-    });
-    expect(result).toEqual({ ok: false, message: "A booking or another block already takes part of that time." });
-    expect(await listBlocks(world.db, NOW)).toEqual([]);
+    const result = await oneDay([world.ids.blanche, world.ids.paris], h(12), h(14));
+    expect(result.ok).toBe(false);
+    expect(await listBlockSeries(world.db, NOW)).toEqual([]);
     expect(await freeStarts("blanche", NEAR)).toContain(h(12)); // Blanche was not blocked either
   });
 
   it("validates its input", async () => {
-    const base = { studioIds: [world.ids.blanche], date: NEAR, startMinute: h(12), endMinute: h(14), note: "" };
-    expect((await createBlock(world.db, { ...base, studioIds: [] })).ok).toBe(false);
-    expect((await createBlock(world.db, { ...base, date: "2026-02-30" })).ok).toBe(false);
-    expect((await createBlock(world.db, { ...base, startMinute: h(14), endMinute: h(12) })).ok).toBe(false);
-    expect((await createBlock(world.db, { ...base, studioIds: ["3f2c1e9a-6b7d-4c8e-9f10-112233445566"] })).ok).toBe(false);
-    expect((await createBlock(world.db, { ...base, startMinute: 0, endMinute: 1440 })).ok).toBe(true); // a whole day
+    expect((await oneDay([], h(12), h(14))).ok).toBe(false);
+    expect((await createBlocks(world.db, { studioIds: [world.ids.blanche], from: "2026-02-30", to: "", wholeDay: true, startMinute: 0, endMinute: 0, weekdays: [], reason: "", note: "" }, NOW)).ok).toBe(false);
+    expect((await oneDay([world.ids.blanche], h(14), h(12))).ok).toBe(false);
+    expect((await oneDay(["3f2c1e9a-6b7d-4c8e-9f10-112233445566"], h(12), h(14))).ok).toBe(false);
+    expect((await oneDay([world.ids.blanche], 0, 1440)).ok).toBe(true); // a whole day
     expect(await freeStarts("blanche", NEAR)).toEqual([]);
   });
 });

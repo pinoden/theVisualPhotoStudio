@@ -5,13 +5,14 @@ import { can, type AbilitySettings } from "@/lib/abilities";
 const LINKS = [
   { href: "/admin", label: "Overview" },
   { href: "/admin/calendar", label: "Calendar" },
+  { href: "/admin/availability", label: "Availability & Blocked Time" },
   { href: "/admin/bookings", label: "Bookings" },
   { href: "/admin/customers", label: "Customers" },
   { href: "/staff", label: "Day sheet" },
   { href: "/admin/staff", label: "Staff" },
   { href: "/admin/prices", label: "Prices" },
   { href: "/admin/studios", label: "Studios & add-ons" },
-  { href: "/admin/hours", label: "Hours & blocks" },
+  { href: "/admin/hours", label: "Hours" },
   { href: "/admin/photography", label: "Photography" },
   { href: "/admin/codes", label: "Codes" },
   { href: "/admin/memberships", label: "Memberships" },
@@ -33,7 +34,8 @@ function linksFor(viewer: { role: string }, settings: AbilitySettings): { href: 
     "/staff": true,
     "/admin/bookings": can(viewer, "refund", settings),
     "/admin/customers": can(viewer, "seeCustomers", settings),
-    "/admin/hours": can(viewer, "blockTime", settings),
+    // Blocking time can be a manager's; the opening hours are the owners'.
+    "/admin/availability": can(viewer, "blockTime", settings),
     "/admin/photography": can(viewer, "setPhotographerTimes", settings),
     "/admin/website": can(viewer, "editDesign", settings) || can(viewer, "editPages", settings),
   };
