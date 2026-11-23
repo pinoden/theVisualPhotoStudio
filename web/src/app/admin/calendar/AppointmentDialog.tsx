@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { StatusBadge } from "@/components/StatusBadge";
 import { hoursText, type AppointmentLook } from "@/lib/domain/appointment-look";
 import { LABEL_MEANING } from "@/lib/domain/labels";
@@ -161,16 +161,32 @@ export function AppointmentDialog({
 
         <section aria-labelledby="appt-dialog-forms">
           <h3 id="appt-dialog-forms">Forms &amp; Agreements</h3>
-          <dl className="detail-list">
-            <dt>Studio policies</dt>
-            <dd>
+          {appointment.forms.acceptances.length === 0 && appointment.forms.answers.length === 0 ? (
+            <p>
               {appointment.termsAcceptedAt
-                ? `Accepted ${formatInstant(new Date(appointment.termsAcceptedAt))}, when booking online`
-                : "Booked by the studio: the client accepted nothing online"}
-            </dd>
-            <dt>Intake answers</dt>
-            <dd>None</dd>
-          </dl>
+                ? `The client ticked the studio policies on ${formatInstant(new Date(appointment.termsAcceptedAt))}, booking online.`
+                : "Booked by the studio: the client accepted nothing online."}
+            </p>
+          ) : (
+            <dl className="detail-list">
+              {appointment.forms.acceptances.map((acceptance) => (
+                <FormLine key={`${acceptance.kind}-${acceptance.title}`} term={acceptance.title}>
+                  Version {acceptance.versionNumber}, accepted {formatInstant(new Date(acceptance.acceptedAt))}
+                  {acceptance.agreementVersionId && (
+                    <>
+                      {" "}
+                      (<Link href={`/admin/forms/versions/${acceptance.agreementVersionId}`}>read it</Link>)
+                    </>
+                  )}
+                </FormLine>
+              ))}
+              {appointment.forms.answers.map((answer, index) => (
+                <FormLine key={index} term={answer.label}>
+                  {answer.answer}
+                </FormLine>
+              ))}
+            </dl>
+          )}
         </section>
 
         <p className="appt-dialog-full">
@@ -201,6 +217,15 @@ function PaymentRow({ payment, receipt }: { payment: NonNullable<Appointment["pa
           </>
         )}
       </dd>
+    </>
+  );
+}
+
+function FormLine({ term, children }: { term: string; children: ReactNode }) {
+  return (
+    <>
+      <dt>{term}</dt>
+      <dd>{children}</dd>
     </>
   );
 }

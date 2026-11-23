@@ -17,6 +17,7 @@ const LINKS = [
   { href: "/admin/codes", label: "Codes" },
   { href: "/admin/memberships", label: "Memberships" },
   { href: "/admin/website", label: "Website" },
+  { href: "/admin/forms", label: "Booking Forms & Agreements" },
   { href: "/admin/emails", label: "Emails" },
   { href: "/admin/settings", label: "Settings" },
 ] as const;

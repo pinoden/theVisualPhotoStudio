@@ -57,8 +57,18 @@ test("every step of a booking can be used with a screen reader and a keyboard", 
   await next(page);
   await fillDetails(page, { name: "Ada Access", email: "ada.access@example.com", phone: "407-555-0190" });
   await check("the client's details");
-  // The policies are agreed to, which leads on to the last step.
-  await page.getByRole("checkbox", { name: /I have read and agree/ }).check();
+  // The policies step: the policies read to the end from the keyboard, and agreed to with the space bar.
+  await next(page);
+  await expect(page.getByRole("heading", { name: "Policies & booking form" })).toBeVisible();
+  await check("the policies and the booking form");
+  const agree = page.getByRole("checkbox", { name: /I have read and agree/ });
+  await expect(agree).toBeDisabled();
+  await page.getByRole("region", { name: "Studio policies and booking terms" }).focus();
+  await page.keyboard.press("End");
+  await expect(agree).toBeEnabled();
+  await agree.focus();
+  await page.keyboard.press("Space");
+  await expect(agree).toBeChecked();
   await next(page);
   await expect(page.getByRole("button", { name: /^Confirm & pay/ })).toBeVisible();
   await check("the summary and the payment");

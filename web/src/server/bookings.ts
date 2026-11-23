@@ -48,6 +48,7 @@ import {
   type UsablePromo,
 } from "./promos";
 import { loadAccessInstructions } from "./settings";
+import { checkForms, recordForms, type CheckedForms } from "./booking-forms";
 import { termsAtBooking } from "./terms";
 import { moneyKindNow, moneyKindOf, moneyKindOfCode, OTHER_MONEY_CODE } from "./test-mode";
 import { formatInstant, localToUtc } from "./tz";
@@ -78,6 +79,13 @@ export const bookingInput = z.object({
    */
   photography: z.boolean().default(false),
   acceptTerms: z.literal(true),
+  /**
+   * The versions of the studio policies and agreements the client was shown and accepted at checkout (the owner's
+   * brief of 2026-11-22, items 6 and 7): `policiesKey` and `agreementKey` in src/server/booking-forms.ts.
+   */
+  accepted: z.array(z.string().max(100)).max(50).default([]),
+  /** The client's answers to the intake questions, by the question's id: words, or true for a tick box. */
+  answers: z.record(z.string().max(60), z.union([z.string().max(2000), z.boolean()])).default({}),
   paymentToken: z.string().min(1).max(1000).optional(),
   /** The total the customer was shown. A mismatch stops the booking before any charge. */
   expectedTotalCents: z.number().int().nonnegative().optional(),
@@ -103,7 +111,9 @@ export type BookingErrorCode =
   | "payments_unavailable"
   | "payment_failed"
   | "in_progress"
-  | "attempt_over";
+  | "attempt_over"
+  /** The policies or an agreement were published again while the client was booking: they read them again. */
+  | "policies_changed";
 
 export type CreateBookingResult =
   | { ok: true; ref: string; manageToken: string; totalCents: number }
@@ -358,6 +368,15 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
     return fail(400, "not_bookable_date", text);
   }
 
+  // What the client accepted and answered at checkout, checked before anything is charged. A booking the studio makes
+  // for a client is not: the client has not read the policies there.
+  let forms: CheckedForms | null = null;
+  if (!deps.madeBy) {
+    const checked = await checkForms(db, { studioIds: input.studioIds, photography: Boolean(session), date: input.date }, { accepted: input.accepted, answers: input.answers });
+    if (!checked.ok) return fail(checked.problem.code === "policies_changed" ? 409 : 422, checked.problem.code === "policies_changed" ? "policies_changed" : "invalid_input", checked.problem.message);
+    forms = checked.forms;
+  }
+
   // The kind of money this booking is (src/server/test-mode.ts): the card processor's, and for a booking it does not
   // charge (one made in the admin), that of the processor set up now.
   const moneyKind = await moneyKindNow(db, deps.processor !== undefined ? deps.processor : (deps.payments?.name ?? null));
@@ -510,6 +529,7 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
         if (spendsMinutes && !(await takeBookingMinutes(tx, { membershipId: member!.id, bookingId: row.id, minutes: price.membershipMinutes, ref }))) {
           throw new MinutesGone();
         }
+        if (forms) await recordForms(tx, row.id, forms, now);
 
         // Always take studios in the same order, so two multi-studio bookings
         // that overlap can never wait on each other in a cycle.

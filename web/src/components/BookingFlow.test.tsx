@@ -78,6 +78,10 @@ let availabilityAsked: string;
 let monthAsked: string[];
 /** Days the month calendar is told the length does not fit on. */
 let closedDays: string[];
+/** What the policies step was asked for, and what it is answered. */
+let formsAsked: string[];
+let formQuestions: { id: string; label: string; help: string; kind: string; options: string[]; required: boolean }[];
+let formAgreements: { versionId: string; number: number; title: string; body: string }[];
 let photographerBusy: [number, number][];
 let posted: Record<string, unknown>[];
 let bookingReply: { status: number; body: Record<string, unknown> };
@@ -93,6 +97,9 @@ beforeEach(() => {
   availabilityCalls = 0;
   monthAsked = [];
   closedDays = [];
+  formsAsked = [];
+  formQuestions = [];
+  formAgreements = [];
   availabilityAsked = "";
   photographerBusy = [];
   posted = [];
@@ -104,6 +111,10 @@ beforeEach(() => {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: string, init?: { body?: string }) => {
+      if (input.startsWith("/api/checkout-forms")) {
+        formsAsked.push(input);
+        return reply({ ok: true, questions: formQuestions, agreements: formAgreements });
+      }
       if (input.startsWith("/api/availability/month")) {
         // The month calendar: every day of the month fits, as the times below say each day is open.
         const month = new URL(input, "http://test").searchParams.get("month")!;
@@ -173,11 +184,23 @@ const pickDate = (value: string) => fireEvent.change(screen.getByLabelText("Date
 const pickDuration = (label: string) => user.click(screen.getByRole("button", { name: label }));
 const pickTime = async (label: string) => user.click(await screen.findByRole("button", { name: new RegExp(`^${label}`) }));
 
-async function fillDetails() {
+/** The client's details, typed. */
+async function typeDetails() {
   await user.type(screen.getByLabelText("Full name *"), "Jane Smith");
   await user.type(screen.getByLabelText("Email address *"), "jane@example.com");
   await user.type(screen.getByLabelText("Phone number *"), "407-555-0100");
-  await user.click(screen.getByRole("checkbox", { name: /I have read and agree/ }));
+}
+
+/** From the details, the policies step: the policies read and agreed to (jsdom has no layout, so the box is read at once). */
+async function agreeToPolicies() {
+  await next();
+  await user.click(await screen.findByRole("checkbox", { name: /I have read and agree/ }));
+}
+
+/** The client's details, then the policies agreed to. */
+async function fillDetails() {
+  await typeDetails();
+  await agreeToPolicies();
 }
 
 describe("studio-first flow", () => {
@@ -201,8 +224,9 @@ describe("studio-first flow", () => {
     await pickTime("10:00 AM");
     await next();
 
-    await fillDetails();
+    await typeDetails();
     expect(screen.getByText("Wednesday, January 9, 2030, 10:00 AM – 11:00 AM")).toBeTruthy();
+    await agreeToPolicies();
     await next();
 
     expect(await screen.findByText(/No card processor is connected/)).toBeTruthy();
@@ -249,6 +273,80 @@ describe("studio-first flow", () => {
     await next();
     expect(await screen.findByRole("button", { name: "1:00 PM" })).toBeTruthy();
     expect(screen.getByText(/Thursday, January 10, 2030/)).toBeTruthy();
+  });
+
+  it("asks the booking form's questions, shows the policies to read to the end, and sends what was accepted and answered (the owner's brief of 2026-11-22, item 6)", async () => {
+    formQuestions = [
+      { id: "q-group", label: "How many people are coming?", help: "", kind: "dropdown", options: ["1–5", "6–10"], required: true },
+      { id: "q-decor", label: "I understand the Christmas decor stays in place.", help: "", kind: "checkbox", options: [], required: true },
+    ];
+    formAgreements = [{ versionId: "v-equipment", number: 2, title: "Equipment terms", body: "Handle the lights with care.\n\nReturn the props." }];
+    const policies = { versionId: "v-policies", title: "Studio Policies", html: "<p>Cancellations made 7 days ahead are refunded.</p>" };
+    // A box taller inside than out: it has to be scrolled to its end.
+    const sizes = vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(1000);
+    const height = vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(300);
+    render(<BookingFlow catalog={catalog} navigate={nav.push} policies={policies} />);
+    await user.click(studioBox("Studio Paris"));
+    await next();
+    pickDate(WED);
+    await pickDuration("1 hr");
+    await next();
+    await pickTime("9:00 AM");
+    await next();
+    await typeDetails();
+    await next();
+
+    expect(await screen.findByRole("heading", { name: "Policies & booking form" })).toBeTruthy();
+    expect(formsAsked[0]).toContain(`studios=${P}`);
+    expect(formsAsked[0]).toContain(`date=${WED}`);
+    const box = screen.getByRole("region", { name: "Studio policies and booking terms" });
+    expect(box.textContent).toContain("Cancellations made 7 days ahead are refunded.");
+    expect(box.textContent).toContain("Equipment terms");
+    const agree = screen.getByRole("checkbox", { name: /I have read and agree to The Visuals Photo Studio’s policies and booking terms\./ }) as HTMLInputElement;
+    expect(agree.disabled).toBe(true);
+    expect(screen.getByText("Scroll to the end of the policies to agree.")).toBeTruthy();
+    await next();
+    expect(screen.getByRole("alert").textContent).toBe("Please answer: How many people are coming?");
+
+    await user.selectOptions(screen.getByLabelText("How many people are coming? *"), "6–10");
+    await user.click(screen.getByRole("checkbox", { name: /Christmas decor/ }));
+    await next();
+    expect(screen.getByRole("alert").textContent).toBe("Please read the policies to the end.");
+    // Scrolled to the end, the agreement can be ticked.
+    box.scrollTop = 700;
+    fireEvent.scroll(box);
+    expect(agree.disabled).toBe(false);
+    await next();
+    expect(screen.getByRole("alert").textContent).toBe("Please agree to the studio policies to continue.");
+    await user.click(agree);
+    await next();
+    await user.click(await screen.findByRole("button", { name: /^Confirm & pay/ }));
+    expect(posted[0]).toMatchObject({
+      accepted: ["page:v-policies", "agreement:v-equipment"],
+      answers: { "q-group": "6–10", "q-decor": true },
+    });
+    sizes.mockRestore();
+    height.mockRestore();
+  });
+
+  it("sends the client back to read the policies again when they were published meanwhile", async () => {
+    bookingReply = { status: 409, body: { ok: false, code: "policies_changed", message: "The studio's policies or booking forms changed while you were booking. Please read them again and confirm." } };
+    render(<BookingFlow catalog={catalog} navigate={nav.push} policies={{ versionId: "v1", title: "Studio Policies", html: "<p>Rules.</p>" }} />);
+    await user.click(studioBox("Studio Paris"));
+    await next();
+    pickDate(WED);
+    await pickDuration("1 hr");
+    await next();
+    await pickTime("9:00 AM");
+    await next();
+    await fillDetails();
+    await next();
+    await user.click(await screen.findByRole("button", { name: /^Confirm & pay/ }));
+    expect(await screen.findByRole("heading", { name: "Policies & booking form" })).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toContain("Please read them again and confirm.");
+    expect((screen.getByRole("checkbox", { name: /I have read and agree/ }) as HTMLInputElement).checked).toBe(false);
+    expect(nav.refresh).toHaveBeenCalled();
+    await waitFor(() => expect(formsAsked.length).toBe(2)); // read again
   });
 
   it("offers only times when every chosen studio is free", async () => {
@@ -478,7 +576,7 @@ describe("studio-first flow", () => {
     await next();
     await pickTime("9:00 AM");
     await next();
-    await fillDetails();
+    await typeDetails();
     await user.type(screen.getByLabelText("Have a code?"), "thanks-free-hour");
     await user.click(screen.getByRole("button", { name: "Apply" }));
 
@@ -502,6 +600,7 @@ describe("studio-first flow", () => {
     // ($88 + $68) less the 20% two-studio discount, with nothing taken off for the code.
     expect(screen.getByText("To pay").nextElementSibling?.textContent).toBe("$124.80");
 
+    await agreeToPolicies();
     await next();
     await user.click(await screen.findByRole("button", { name: "Confirm & pay $124.80" }));
     expect(posted[0]).toMatchObject({ expectedTotalCents: 12480 });
@@ -527,7 +626,7 @@ describe("studio-first flow", () => {
     expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Choose a time" }));
     await next();
 
-    await fillDetails();
+    await typeDetails();
     await user.type(screen.getByLabelText("Have a code?"), "thanks-free-hour{Enter}");
     expect(await screen.findByText("Free hour, code THANKS-FREE-HOUR")).toBeTruthy();
     // Enter checked the code and did nothing else: the customer is still on their details.
@@ -792,9 +891,10 @@ describe("the photography flow", () => {
     await pickTime("11:00 AM");
     await next();
 
-    await fillDetails();
+    await typeDetails();
     expect(screen.getByText(/Photography session, Studio Paris, 1 hour/)).toBeTruthy();
     expect(screen.getByText(/A photography session is refunded when it is cancelled 14 days or more before it starts/)).toBeTruthy();
+    await agreeToPolicies();
     await next();
     await user.click(await screen.findByRole("button", { name: "Confirm & pay $315" }));
 

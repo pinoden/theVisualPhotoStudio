@@ -61,6 +61,8 @@ const EMAILS_OWNER = "owner13@studio.test";
 const PRICES_OWNER = "owner14@studio.test";
 /** Chooses the contact form's inbox. Each owner signs in only a few times: the site sends an address three codes in 15 minutes. */
 const INBOX_OWNER = "owner15@studio.test";
+/** Writes the booking form and its agreements. */
+const FORMS_OWNER = "owner16@studio.test";
 const STAFF = "sam.e2e@studio.test";
 const MANAGER = "mia.e2e@studio.test";
 
@@ -327,10 +329,16 @@ test("books two studios together, starting from the studios", async ({ page }) =
   await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
   await next(page);
 
-  // Nothing is submitted until the customer has agreed to the policies.
+  // Nothing is submitted until the customer has read the policies to their end and agreed to them, on a step of its
+  // own (the owner's brief of 2026-11-22, item 6).
   await fillDetails(page, jane);
   await next(page);
-  await expect(onScreen(page.locator(".flash-error"))).toHaveText("Please agree to the studio policies to continue.");
+  await expect(page.getByRole("heading", { name: "Policies & booking form" })).toBeVisible();
+  await expect(page.getByRole("checkbox", { name: "I have read and agree to The Visuals Photo Studio’s policies and booking terms." })).toBeDisabled();
+  await expect(byText(page, "Scroll to the end of the policies to agree.")).toBeVisible();
+  await expect(onScreen(page.getByRole("region", { name: "Studio policies and booking terms" }))).toContainText("Cancellations & Rescheduling");
+  await next(page);
+  await expect(onScreen(page.locator(".flash-error"))).toHaveText("Please read the policies to the end.");
   await agreeToPolicies(page);
   await shot(page, "05-details");
   await next(page);
@@ -855,7 +863,7 @@ test("the calendar shows a day, a week and a month, one studio or all, and a boo
   await expect(popup).toBeVisible();
   await expect(page).toHaveURL(/\/admin\/calendar\?.*open=VS-/);
   await expect(page.getByRole("navigation", { name: "Calendar view" })).toBeVisible();
-  for (const words of ["First name", "Brown", bob.email, bob.phone, "Studio Blanche", "Studio rental", "1 hour", "Booked", "by the client", "Payment date", "Card, online", "Forms & Agreements", "Accepted"]) {
+  for (const words of ["First name", "Brown", bob.email, bob.phone, "Studio Blanche", "Studio rental", "1 hour", "Booked", "by the client", "Payment date", "Card, online", "Forms & Agreements", "Studio Policies", "Version 1, accepted"]) {
     await expect(popup).toContainText(words);
   }
   await shot(page, "17c2-calendar-popup");
@@ -1016,6 +1024,99 @@ test("the owner sets a weekend price and the booking screen charges it on Saturd
 
   await page.goto("/rates");
   await expect(page.locator(".rate-card", { hasText: "Studio Blanche" }).getByRole("row", { name: /1 hour/ })).toContainText("$120");
+});
+
+test("the owners write a seasonal question and an agreement, a client answers and accepts them, and the booking keeps them", async ({ page, browser }) => {
+  // The owner's brief of 2026-11-22, items 6 and 7, with the brief's own example: the Christmas decor acknowledgment,
+  // required for Dayglow in the season.
+  const day = dateAhead(120);
+  await signIn(page, FORMS_OWNER, "/admin/forms");
+  await expect(page.getByRole("heading", { name: "Booking Forms & Agreements", level: 1 })).toBeVisible();
+  await expect(onScreen(page.locator(".admin-card", { hasText: "At checkout every client reads" }))).toContainText("version 1");
+  await byLabel(page, "Question").fill("I understand the Christmas decor stays in place.");
+  await byLabel(page, "Kind").selectOption({ label: "Tick box" });
+  await page.locator("#question-form").getByRole("checkbox", { name: "Required" }).check();
+  await page.locator("#question-form").getByRole("checkbox", { name: "Studio Dayglow" }).check();
+  await page.locator("#question-form").getByRole("checkbox", { name: "Photography sessions" }).uncheck();
+  await byLabel(page, "From (optional)").fill(addDays(day, -2));
+  await byLabel(page, "Until (optional)").fill(addDays(day, 2));
+  await page.getByRole("button", { name: "Add the question" }).click();
+  await expect(byText(page, "Question added. It is a draft: clients are asked it once you publish it.")).toBeVisible();
+  const decorRow = page.locator("#questions").getByRole("row", { name: /Christmas decor/ });
+  await expect(decorRow).toContainText("Draft");
+  await expect(decorRow).toContainText("Dayglow · Rentals");
+  // The preview shows it for Dayglow on that day, as a draft, and not for Blanche.
+  await byLabel(page, "Studio").selectOption({ label: "Studio Dayglow" });
+  await byLabel(page, "Day").fill(day);
+  await page.locator("#preview").getByRole("button", { name: "Show" }).click();
+  await expect(onScreen(page.locator(".forms-preview").first())).toContainText("I understand the Christmas decor stays in place. * (draft)");
+  await byLabel(page, "Studio").selectOption({ label: "Studio Blanche" });
+  await page.locator("#preview").getByRole("button", { name: "Show" }).click();
+  await expect(onScreen(page.locator(".forms-preview").first())).toContainText("No question is asked of this booking.");
+  await page.locator("#questions").getByRole("row", { name: /Christmas decor/ }).getByRole("button", { name: "Publish" }).click();
+  await expect(byText(page, "Published: clients are asked it from now on.")).toBeVisible();
+
+  // An agreement beside the policies, written as a draft and published.
+  await byLabel(page, "Title").fill("Equipment terms");
+  await byLabel(page, "Text").fill("Please handle the lights and stands with care.\n\nTell us at once if anything breaks.");
+  await page.getByRole("button", { name: "Save the draft" }).click();
+  await expect(byText(page, "Saved as a draft. Clients read the version published last until you publish this one.")).toBeVisible();
+  await page.locator("#agreements").getByRole("row", { name: /Equipment terms/ }).getByRole("button", { name: "Publish" }).click();
+  await expect(byText(page, /^Published as version 1\./)).toBeVisible();
+  expect(await accessibilityProblems(page), "Booking Forms & Agreements").toEqual([]);
+
+  // A client books Dayglow on that day: the question is asked, and the agreement is in the box to read.
+  const client = await (await browser.newContext()).newPage();
+  await client.goto("/book");
+  await pickStudio(client, "Studio Dayglow");
+  await next(client);
+  await client.getByRole("button", { name: "1 hr", exact: true }).click();
+  await byLabel(client, "Date").fill(day);
+  await next(client);
+  await client.getByRole("button", { name: "10:00 AM", exact: true }).click();
+  await next(client);
+  await fillDetails(client, { name: "Cora Checkout", email: "cora.e2e@example.com", phone: "407-555-0144" });
+  await next(client);
+  await expect(onScreen(client.getByRole("region", { name: "Studio policies and booking terms" }))).toContainText("Please handle the lights and stands with care.");
+  await expect(client.getByRole("checkbox", { name: /Christmas decor/ })).toBeVisible();
+  await shot(client, "05b-policies-step");
+  expect(await accessibilityProblems(client), "the policies step with a question and an agreement").toEqual([]);
+  await agreeToPolicies(client);
+  await next(client);
+  await expect(onScreen(client.locator(".flash-error"))).toHaveText("Please answer: I understand the Christmas decor stays in place.");
+  await client.getByRole("checkbox", { name: /Christmas decor/ }).check();
+  await next(client);
+  await confirmAndGetRef(client, /^Confirm & pay/);
+  await client.context().close();
+
+  // The appointment keeps what was accepted and answered.
+  await page.goto(`/admin/calendar?view=day&date=${day}&studio=dayglow`);
+  await page.getByRole("link", { name: /Cora Checkout/ }).click();
+  const forms = page.getByRole("dialog", { name: /Cora Checkout/ }).locator("section", { hasText: "Forms & Agreements" });
+  await expect(forms).toContainText(/Studio Policies\s*Version 1, accepted/);
+  await expect(forms).toContainText(/Equipment terms\s*Version 1, accepted/);
+  await expect(forms).toContainText(/I understand the Christmas decor stays in place\.\s*Yes/);
+  // A new version later: the booking keeps the one its client read.
+  await page.goto("/admin/forms");
+  await page.locator("#agreements").getByRole("row", { name: /Equipment terms/ }).getByRole("link", { name: "Edit" }).click();
+  await expect(page.getByRole("heading", { name: "Change Equipment terms" })).toBeVisible();
+  await expect(byLabel(page, "Text")).toHaveValue("Please handle the lights and stands with care.\n\nTell us at once if anything breaks.");
+  await byLabel(page, "Text").fill("Please handle the lights and stands with care. A damaged stand costs $40.");
+  await page.getByRole("button", { name: "Save the draft" }).click();
+  await page.locator("#agreements").getByRole("row", { name: /Equipment terms/ }).getByRole("button", { name: "Publish" }).click();
+  await expect(byText(page, /^Published as version 2\./)).toBeVisible();
+  await page.goto(`/admin/calendar?view=day&date=${day}&studio=dayglow`);
+  await page.getByRole("link", { name: /Cora Checkout/ }).click();
+  await expect(forms).toContainText(/Equipment terms\s*Version 1, accepted/);
+  await forms.getByRole("link", { name: "read it" }).click();
+  await expect(page.getByRole("heading", { name: "Equipment terms", level: 1 })).toBeVisible();
+  await expect(onScreen(page.locator(".admin-card"))).toContainText("Tell us at once if anything breaks.");
+  // Taken off again: the tests after this one book without them.
+  await page.goto("/admin/forms");
+  await page.locator("#questions").getByRole("row", { name: /Christmas decor/ }).getByRole("button", { name: "Take off" }).click();
+  await expect(byText(page, /^Taken off: clients are no longer asked it\./)).toBeVisible();
+  await page.locator("#agreements").getByRole("row", { name: /Equipment terms/ }).getByRole("button", { name: "Take off" }).click();
+  await expect(byText(page, /^Taken off: clients no longer accept it\./)).toBeVisible();
 });
 
 test("the owner cancels a booking with a full refund and blocks a morning", async ({ page }) => {
@@ -1218,7 +1319,10 @@ test("a client buys a membership, gets its code, sees it in their account and ca
   // Studio Blanche chosen instead after the code was applied: its hours are for Paris, so they are not used, and the
   // screen says why (the tester's finding of 2026-11-18). Back to Paris, they pay for it again.
   const swapStudio = async (from: string, to: string) => {
-    for (let step = 0; step < 4; step++) await page.getByRole("button", { name: "← Back" }).click();
+    // Back to the studios, however many steps that is.
+    for (let step = 0; step < 8 && !(await page.getByRole("heading", { name: "Select studio(s)" }).isVisible()); step++) {
+      await page.getByRole("button", { name: "← Back" }).click();
+    }
     await pickStudio(page, from);
     await pickStudio(page, to);
     await next(page);

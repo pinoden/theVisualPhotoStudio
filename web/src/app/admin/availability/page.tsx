@@ -81,7 +81,8 @@ async function Availability({ searchParams }: Pick<PageProps<"/admin/availabilit
 
   return (
     <AdminFrame active="/admin/availability" title="Availability & Blocked Time" query={query} viewer={viewer} settings={catalog.settings}>
-      <form action={editing ? updateBlocksAction : createBlocksAction} className="admin-card avail-form" id="block-form">
+      {/* Drawn afresh for each block changed: a form already on screen keeps what its fields held, not their new defaults. */}
+      <form action={editing ? updateBlocksAction : createBlocksAction} className="admin-card avail-form" id="block-form" key={`block-${editing?.key ?? "new"}`}>
         <h3>{editing ? "Change this block" : "Block time"}</h3>
         <p style={{ fontSize: ".875rem" }}>
           Clients cannot book a blocked time, in any studio it covers, bundles and photography sessions included. A
@@ -209,12 +210,14 @@ async function Availability({ searchParams }: Pick<PageProps<"/admin/availabilit
                           <Link href={`/admin/calendar?view=day&date=${day}`} className="cal-daynum" aria-label={longDateLabel(day)}>
                             {Number(day.slice(8))}
                           </Link>
-                          {(byDay.get(day) ?? []).map(({ series: item, time }) => (
-                            <Link key={item.key} href={`/admin/availability?month=${month}&edit=${item.key}#block-form`} className="avail-chip">
-                              {studiosText(item, catalog.studios)} · {time}
-                              {item.reason && ` · ${BLOCK_REASONS[item.reason]}`}
-                            </Link>
-                          ))}
+                          {(byDay.get(day) ?? []).map(({ series: item, time }) => {
+                            const said = `${studiosText(item, catalog.studios)} · ${time}${item.reason ? ` · ${BLOCK_REASONS[item.reason]}` : ""}`;
+                            return (
+                              <Link key={item.key} href={`/admin/availability?month=${month}&edit=${item.key}#block-form`} className="avail-chip" title={said}>
+                                {said}
+                              </Link>
+                            );
+                          })}
                         </>
                       )}
                     </td>

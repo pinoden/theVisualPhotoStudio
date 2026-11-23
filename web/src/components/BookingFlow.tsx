@@ -1,8 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { type KeyboardEvent, type UIEvent, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   availabilityGrid,
   combinedStarts,
@@ -34,22 +33,24 @@ import {
 import { EMAIL_FIELD, EMAIL_RULE } from "@/lib/parse";
 import { count, hoursInWords } from "@/lib/words";
 import type { DayAvailability } from "@/server/availability";
+import { agreementKey, policiesKey, type QuestionKind } from "@/lib/booking-form-keys";
 import type { Catalog } from "@/server/catalog";
 import { buyerVerification, useCardForm } from "./square-card";
 
 type Mode = "studio" | "time";
-type Step = "studios" | "when" | "time" | "details" | "pay";
+type Step = "studios" | "when" | "time" | "details" | "policies" | "pay";
 
 /** The two booking paths are the same steps in a different order. */
 const ORDER: Record<Mode, Step[]> = {
-  studio: ["studios", "when", "time", "details", "pay"],
-  time: ["when", "time", "studios", "details", "pay"],
+  studio: ["studios", "when", "time", "details", "policies", "pay"],
+  time: ["when", "time", "studios", "details", "policies", "pay"],
 };
 const STEP_LABEL: Record<Step, string> = {
   studios: "Studios",
   when: "Date",
   time: "Time",
   details: "Details",
+  policies: "Policies",
   pay: "Payment",
 };
 
@@ -114,12 +115,44 @@ function moveAmongTimes(event: KeyboardEvent<HTMLDivElement>): void {
   buttons[Math.min(Math.max(moves[event.key], 0), buttons.length - 1)].focus();
 }
 
+/** A question of the intake form, as the booking page asks it (`/api/checkout-forms`). */
+interface FormQuestion {
+  id: string;
+  label: string;
+  help: string;
+  kind: QuestionKind;
+  options: string[];
+  required: boolean;
+}
+
+/** An agreement beside the studio policies, as published (`/api/checkout-forms`). */
+interface FormAgreement {
+  versionId: string;
+  number: number;
+  title: string;
+  body: string;
+}
+
+/** The studio policies a client reads and accepts at checkout: the website's Policies page as published, and its version. */
+export interface CheckoutPolicies {
+  versionId: string;
+  title: string;
+  /** The page's headings and text as HTML (`pageTextHtml`), cleaned as the page's own. */
+  html: string;
+}
+
 export function BookingFlow({
   catalog,
   navigate = loadPage,
   photography = false,
+  policies = null,
 }: {
   catalog: Catalog;
+  /**
+   * The studio policies of the policies step (the owner's brief of 2026-11-22, item 6), drawn by the booking page from
+   * the website's Policies page. Null when the site has none published: the step then shows only the agreements.
+   */
+  policies?: CheckoutPolicies | null;
   navigate?: (url: string) => void;
   /**
    * The photography flow: a session with the in-house photographer in one
@@ -153,6 +186,13 @@ export function BookingFlow({
   const [phone, setPhone] = useState("");
   const [notes, setNotes] = useState("");
   const [terms, setTerms] = useState(false);
+  /** The questions and agreements of the policies step, for the booking they were read for (`key`). */
+  const [forms, setForms] = useState<{ key: string; questions: FormQuestion[]; agreements: FormAgreement[] } | null>(null);
+  /** The client's answers to the intake questions, by question. */
+  const [answers, setAnswers] = useState<Record<string, string | boolean>>({});
+  /** Whether the client has scrolled to the end of the policies: the agreement can be ticked only then. */
+  const [readToEnd, setReadToEnd] = useState(false);
+  const policiesBox = useRef<HTMLDivElement>(null);
   const [codeInput, setCodeInput] = useState("");
   const [applied, setApplied] = useState<AppliedCode | null>(null);
   const [codeError, setCodeError] = useState("");
@@ -406,6 +446,27 @@ export function BookingFlow({
     }
   }
 
+  /** The booking the policies step's questions and agreements were read for. */
+  const formsKey = `${studioIds.join(",")}|${date}|${photography ? 1 : 0}`;
+
+  /** Read the questions and agreements a booking of these studios on this day meets (`/api/checkout-forms`). */
+  async function fetchForms() {
+    const key = formsKey;
+    try {
+      const response = await fetch(`/api/checkout-forms?studios=${studioIds.join(",")}&date=${date}${photography ? "&photography=1" : ""}`, { cache: "no-store" });
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; questions?: FormQuestion[]; agreements?: FormAgreement[] };
+      if (!response.ok || !data.ok) throw new Error();
+      setForms({ key, questions: data.questions ?? [], agreements: data.agreements ?? [] });
+    } catch {
+      setError("Could not load the studio's booking form. Please try again.");
+    }
+  }
+
+  /** Whether the policies box is read to its end, or so short that there is nothing to scroll. */
+  function noticeEnd(box: HTMLDivElement | null) {
+    if (box && box.scrollTop + box.clientHeight >= box.scrollHeight - 4) setReadToEnd(true);
+  }
+
   function showMonth(next: string) {
     setShownMonth(next);
     void fetchMonth(next, duration);
@@ -424,6 +485,8 @@ export function BookingFlow({
     }
     // The month calendar is read fresh on each arrival too: bookings change while the client looks.
     if (target === "when" && duration > 0) void fetchMonth(month, duration);
+    // The booking form and agreements are read again for each booking they are shown for.
+    if (target === "policies" && (options.refetch || forms?.key !== formsKey)) void fetchForms();
     topRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" });
   }
 
@@ -493,8 +556,15 @@ export function BookingFlow({
         // The booking's own rule (src/lib/parse.ts): an address taken here is never refused at "Confirm & pay".
         if (!EMAIL_RULE.test(email.trim())) return "Please enter a valid email address.";
         if (phone.trim().length < 7) return "Please enter your phone number.";
+        return "";
+      case "policies": {
+        if (!forms || forms.key !== formsKey) return "The studio's booking form is still loading.";
+        const missing = forms.questions.find((question) => question.required && (question.kind === "checkbox" ? answers[question.id] !== true : !String(answers[question.id] ?? "").trim()));
+        if (missing) return `Please answer: ${missing.label}`;
+        if (!readToEnd) return "Please read the policies to the end.";
         if (!terms) return "Please agree to the studio policies to continue.";
         return "";
+      }
       default:
         return "";
     }
@@ -539,6 +609,9 @@ export function BookingFlow({
           promoCode: member ? member.code : promo && !price.promoMisfit ? promo.code : undefined,
           photography,
           acceptTerms: true,
+          // The versions read on the policies step, and the answers given there (the owner's brief of 2026-11-22, item 6).
+          accepted: [...(policies ? [policiesKey(policies.versionId)] : []), ...(forms?.agreements ?? []).map((agreement) => agreementKey(agreement.versionId))],
+          answers: Object.fromEntries(Object.entries(answers).filter(([id]) => forms?.questions.some((question) => question.id === id))),
           paymentToken,
           expectedTotalCents: price.totalCents,
           requestId: (requestIdRef.current ??= newRequestId()),
@@ -574,6 +647,13 @@ export function BookingFlow({
       if (data.code === "invalid_code") {
         setApplied(null);
         go(steps.indexOf("details"));
+      }
+      // The policies or an agreement were published again meanwhile: the page shows them as they are now, read again.
+      if (data.code === "policies_changed") {
+        router.refresh();
+        setTerms(false);
+        setReadToEnd(false);
+        go(steps.indexOf("policies"), { refetch: true });
       }
       setError(
         data.code === "invalid_price"
@@ -1166,26 +1246,78 @@ export function BookingFlow({
           </div>
 
           {summary}
-
-          <label className="addon-row" style={{ borderBottom: "none" }}>
-            <input
-              type="checkbox"
-              checked={terms}
-              onChange={(event) => {
-                setTerms(event.target.checked);
-                setError(""); // the usual reason an error is showing on this step
-              }}
-            />
-            <span>
-              I have read and agree to the{" "}
-              <Link href="/policies" target="_blank">
-                studio policies
-              </Link>
-              , including the cancellation and rescheduling rules. I will check the date and time in my confirmation
-              email; the studio is open by appointment only.
-            </span>
-          </label>
           {actions(nextLabelFor("details"))}
+        </div>
+      )}
+
+      {/* ── Policies and the booking form (the owner's brief of 2026-11-22, item 6) ── */}
+      {step === "policies" && (
+        <div className="wizard-panel active">
+          <h3 tabIndex={-1} style={{ fontSize: "1.6rem", marginBottom: ".5rem" }}>
+            Policies &amp; booking form
+          </h3>
+          {!forms || forms.key !== formsKey ? (
+            <div style={{ textAlign: "center", padding: "2rem" }}>
+              <div className="spinner" />
+            </div>
+          ) : (
+            <>
+              {forms.questions.length > 0 && (
+                <fieldset className="intake-form">
+                  <legend>A few questions</legend>
+                  {forms.questions.map((question) => (
+                    <IntakeField
+                      key={question.id}
+                      question={question}
+                      value={answers[question.id]}
+                      onChange={(value) => {
+                        setAnswers((current) => ({ ...current, [question.id]: value }));
+                        setError("");
+                      }}
+                    />
+                  ))}
+                </fieldset>
+              )}
+              <p className="text-muted" style={{ marginBottom: ".5rem" }}>
+                Please read the studio policies and booking terms to the end.
+              </p>
+              <div
+                className="policies-box"
+                ref={(box) => {
+                  policiesBox.current = box;
+                  noticeEnd(box);
+                }}
+                onScroll={(event: UIEvent<HTMLDivElement>) => noticeEnd(event.currentTarget)}
+                tabIndex={0}
+                role="region"
+                aria-label="Studio policies and booking terms"
+              >
+                {policies && <div className="rich-text" dangerouslySetInnerHTML={{ __html: policies.html }} />}
+                {forms.agreements.map((agreement) => (
+                  <section key={agreement.versionId} className="policies-agreement">
+                    <h4>{agreement.title}</h4>
+                    {agreement.body.split(/\n{2,}/).map((paragraph, index) => (
+                      <p key={index}>{paragraph}</p>
+                    ))}
+                  </section>
+                ))}
+              </div>
+              <label className={`policies-agree${readToEnd ? "" : " policies-agree-locked"}`}>
+                <input
+                  type="checkbox"
+                  checked={terms}
+                  disabled={!readToEnd}
+                  onChange={(event) => {
+                    setTerms(event.target.checked);
+                    setError(""); // the usual reason an error is showing on this step
+                  }}
+                />
+                <span>I have read and agree to The Visuals Photo Studio&rsquo;s policies and booking terms.</span>
+              </label>
+              {!readToEnd && <p className="policies-hint">Scroll to the end of the policies to agree.</p>}
+            </>
+          )}
+          {actions(nextLabelFor("policies"))}
         </div>
       )}
 
@@ -1248,6 +1380,62 @@ export function BookingFlow({
             </button>
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+/** One question of the intake form, as its kind asks it. */
+function IntakeField({ question, value, onChange }: { question: FormQuestion; value: string | boolean | undefined; onChange: (value: string | boolean) => void }) {
+  const id = `intake-${question.id}`;
+  const label = (
+    <>
+      {question.label}
+      {question.required && " *"}
+    </>
+  );
+  const help = question.help ? <span className="intake-help">{question.help}</span> : null;
+  if (question.kind === "checkbox") {
+    return (
+      <label className="intake-check">
+        <input type="checkbox" checked={value === true} onChange={(event) => onChange(event.target.checked)} />
+        <span>
+          {label}
+          {help}
+        </span>
+      </label>
+    );
+  }
+  if (question.kind === "choice") {
+    return (
+      <fieldset className="intake-choice">
+        <legend>{label}</legend>
+        {help}
+        {question.options.map((option) => (
+          <label key={option} className="intake-option">
+            <input type="radio" name={id} value={option} checked={value === option} onChange={() => onChange(option)} /> {option}
+          </label>
+        ))}
+      </fieldset>
+    );
+  }
+  return (
+    <div className="form-group">
+      <label className="form-label" htmlFor={id}>
+        {label}
+      </label>
+      {help}
+      {question.kind === "dropdown" ? (
+        <select id={id} className="form-control" value={typeof value === "string" ? value : ""} onChange={(event) => onChange(event.target.value)}>
+          <option value="">Choose…</option>
+          {question.options.map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <textarea id={id} className="form-control" rows={2} maxLength={1000} value={typeof value === "string" ? value : ""} onChange={(event) => onChange(event.target.value)} />
       )}
     </div>
   );

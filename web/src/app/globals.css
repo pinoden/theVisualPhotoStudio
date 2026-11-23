@@ -732,6 +732,32 @@ details.faq-item[open] .faq-icon { transform: rotate(45deg); }
 .month-cal-typed p { margin: 0 0 .25rem; font-size: .85rem; }
 .month-cal-typed .form-group { max-width: 16rem; }
 
+/* The policies step of the booking pages: the intake questions, the policies in a box read to its end, the agreement. */
+.intake-form { margin: 0 0 1.25rem; padding: 0; border: 0; }
+.intake-form > legend { margin-bottom: .5rem; color: var(--color-dark); font-family: var(--font-serif); font-size: 1.2rem; }
+.intake-check, .intake-option { display: flex; gap: .55rem; align-items: flex-start; min-height: 2.5rem; margin-bottom: .5rem; font-size: .95rem; }
+.intake-check input, .intake-option input { margin-top: .3rem; }
+.intake-choice { margin: 0 0 1rem; padding: 0; border: 0; }
+.intake-choice legend { margin-bottom: .35rem; color: var(--color-dark); font-size: .9rem; font-weight: 700; }
+.intake-help { display: block; color: var(--color-muted); font-size: .82rem; }
+.policies-box {
+  max-height: 22rem;
+  overflow-y: auto;
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--color-border);
+  background: #fff;
+  font-size: .9rem;
+}
+.policies-box:focus-visible { outline: 2px solid var(--color-dark); outline-offset: 2px; }
+.policies-box .site-page { background: transparent; }
+.policies-box h2 { font-size: 1.2rem; margin: 1rem 0 .4rem; }
+.policies-box h4 { font-size: 1.05rem; margin: 1rem 0 .4rem; }
+.policies-box .blk-section, .policies-box section { padding: 0 !important; background: transparent !important; }
+.policies-agree { display: flex; gap: .6rem; align-items: flex-start; min-height: 2.5rem; margin: 1rem 0 .25rem; color: var(--color-dark); font-weight: 700; }
+.policies-agree input { margin-top: .3rem; width: 1.15rem; height: 1.15rem; }
+.policies-agree-locked { color: var(--color-muted); font-weight: 400; }
+.policies-hint { margin: 0 0 .75rem; color: var(--color-muted); font-size: .85rem; }
+
 /* "Check Code Balance" on the booking pages: a button, and under it a small form and what the code is worth. */
 .code-balance { max-width: 780px; margin: 1rem auto 0; }
 .code-balance-toggle { padding: .55rem 1.25rem; }
@@ -1694,9 +1720,17 @@ button { font-family: inherit; }
   font-size: .72rem;
   line-height: 1.45;
   text-decoration: none;
-  overflow-wrap: anywhere;
+  /* One line, cut short where the day is narrow (a phone): the list below says it in full. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .avail-row-actions { display: flex; flex-wrap: wrap; gap: .4rem; }
+
+/* Booking Forms & Agreements */
+.forms-row-actions { display: flex; flex-wrap: wrap; gap: .35rem; }
+.forms-preview { margin-top: 1rem; padding: 1rem 1.25rem; border: 1px dashed var(--color-border); background: var(--color-ivory); }
+.forms-preview-question { margin-bottom: .75rem; }
 
 /* An appointment over the calendar (?open=), which stays behind it: everything about it, the actions at its top. */
 .appt-dialog-backdrop {

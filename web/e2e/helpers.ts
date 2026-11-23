@@ -290,7 +290,20 @@ export async function fillDetails(page: Page, customer: { name: string; email: s
   await byLabel(page, "Phone number *").fill(customer.phone);
 }
 
-export const agreeToPolicies = (page: Page) => page.getByRole("checkbox", { name: /I have read and agree/ }).check();
+/**
+ * The policies step (the owner's brief of 2026-11-22, item 6): on to it from the details when not there yet, the
+ * policies read to their end (the agreement cannot be ticked before), and agreed to.
+ */
+export async function agreeToPolicies(page: Page): Promise<void> {
+  const step = page.getByRole("heading", { name: "Policies & booking form" });
+  if (!(await step.isVisible())) await next(page);
+  await expect(step).toBeVisible();
+  const box = page.getByRole("region", { name: "Studio policies and booking terms" });
+  await box.evaluate((element) => element.scrollTo(0, element.scrollHeight));
+  const agree = page.getByRole("checkbox", { name: /I have read and agree/ });
+  await expect(agree).toBeEnabled();
+  await agree.check();
+}
 
 /** Finish checkout and land on the booking page. Returns the booking reference. */
 export async function confirmAndGetRef(page: Page, buttonName: RegExp | string): Promise<string> {
