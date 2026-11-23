@@ -3,7 +3,7 @@
 - **Project:** The Visuals Photo Studio
 - **Updated:** 2026-11-22
 - **Branch:** `rebuild`
-- **Start here:** [November 20 implementation brief](#november-20-implementation-brief) and [remaining owner questions](#remaining-questions-and-owner-actions).
+- **Start here:** [November 22 implementation brief](#november-22-implementation-brief), then the [November 20 implementation brief](#november-20-implementation-brief) and the [remaining owner questions](#remaining-questions-and-owner-actions).
 
 ## Current state
 
@@ -145,7 +145,7 @@ Not yet covered by an independent tester pass: renaming a studio and taking one 
 
 0. **PR #27 is merged and live** (`b96ca51`, 2026-11-22; see "Current state"). Nothing waits on `rebuild` for `master` but notes.
    - **For the next migration, as `0051` was done:** once the pull request's checks have passed and just before its merge, from `web/`, `npm run db:migrate` with `DATABASE_URL` set, for that one command, to the `DATABASE_URL_UNPOOLED` that `neon link` wrote into `web/.env.local`, printing neither address. Then check the preview after Vercel deploys it.
-   - **What is next for a builder, none of it started:** the rest of the owners' decisions of 2026-11-20 ("November 20 implementation brief" below). The rescheduling rule waits on the owners' two answers under "Rescheduling" below; the booking calendar, tax and agreements each have a question or a review of theirs too. Nothing in it is left that needs no word of theirs: on 2026-11-21 the privacy policy was drafted for their lawyer and the seasonal collections were checked (below);
+   - **What is next for a builder:** the owner's brief of 2026-11-22 ("November 22 implementation brief" below), in its order of work. Then the rest of the owners' decisions of 2026-11-20 ("November 20 implementation brief" below). The rescheduling rule waits on the owners' two answers under "Rescheduling" below; the booking calendar, tax and agreements each have a question or a review of theirs too. Nothing in it is left that needs no word of theirs: on 2026-11-21 the privacy policy was drafted for their lawyer and the seasonal collections were checked (below);
    - the points the test of the hosted preview found, once the owners have said which they want ("Remaining questions and owner actions"). Needing no decision: the `webkit-production` flake in item 5 (#419). The chunk flake there was remedied on 2026-11-22 (on `rebuild`). The two keyboard gaps the test left, the times as one stop and a link that skips the menu, were closed on 2026-11-21 (on `rebuild`).
 
 1. **Resend: done** (2026-11-20). The domain is verified, and the preview sends from `hello@` (see "Current state"). Only item 3 is left, and it now works for every owner's address.
@@ -277,6 +277,58 @@ Status is pending unless existing behavior is called out. Start with the Square 
 - **Newsletter.** Add a signup section. Provider selection is deferred, so activate submissions when the provider and destination are agreed.
 - **Yearly-spend memberships.** The owner declined this for now.
 
+### November 22 implementation brief
+
+The owner's brief of 2026-11-22, "Website Updates — Homepage, Booking Calendar, Waitlist & Checkout": eight items, with the aim of a booking experience as simple and familiar as the original website's, and the owner in full control of booking forms, seasonal questions and policies. The owner's own words are kept in [ProjectLibrary.md](ProjectLibrary.md#owner-decisions-of-2026-11-22). Status is "To build" unless stated. Order of work: 1–2 (small), 5 (stands alone), 3 (the calendar, which the waitlist's matching reuses), 6–7 (the policies step and the forms behind it), then 4.
+
+#### 1–2. The bundle sentence on the booking page
+
+- **Where it is:** the first step of the booking page ("Select studio(s)", `src/components/BookingFlow.tsx`), not the home page. No built-in page and no stored page on staging holds it (checked 2026-11-22). The FAQ and Rates pages give the discount through the live value "several studios offer", in the owners' own sentences, and are not part of this item.
+- Remove "Paris is included in every bundle."
+- Say "Save 20% when booking two studios and 22% when booking three studios." in its place: the numbers of studios in words, the percentages from the discount the owners set (Settings), so the sentence follows a change of it.
+
+#### 3. The booking calendar
+
+- Takes up the November 20 brief's "Booking calendar" item. The flow: **Select Studio → Select Duration → Select Date & Time and Add-ons → Next → Policies & Intake Form → Payment**.
+- A larger month grid, in the original website's warm brown and tan, the whole month at once with navigation between months, easy to use on a computer and a phone.
+- Only the dates on which the chosen length fits are selectable: the chosen studio or all the studios of a bundle at once, the length, existing bookings, the clean-up gap and the opening hours. The others are shown muted. A day free for one hour but not for two is not selectable for two hours.
+- Once a date is chosen, only the start times at which the whole length fits, every 15 minutes. The time step does this today; the month grid is what is new, with a month's availability from the server, worked out by the same rules as the times.
+- Still open from November 20: whether the date-first search ("I know when I want to come") stays. It stays until the owners say.
+
+#### 4. Join the waitlist
+
+- On the booking page, when the time a client wants is not available.
+- The form: the appointment type or studio, the preferred date, a preferred time range (such as 9 AM–12 PM), first name, last name, email.
+- Saved in the admin, where the owners see, manage and remove entries.
+- When a cancellation or a move frees a time that fits an entry (its type, date, length and range), the client is emailed with a direct booking link. Nothing is booked for them, and the time goes to whoever books first. The same availability rules as the calendar.
+- Questions, below: the length (the matching needs it, the form does not list it), how long an entry lasts, and whether an entry is emailed more than once.
+
+#### 5. Check a code's balance
+
+- A clearly visible "Check Code Balance" on the booking page, before or during a booking. It deducts nothing.
+- For each kind of code: valid or not, the money or minutes left ("$75 remaining", "180 minutes remaining"), the expiry date if any, whether it was used, and what it can be used for.
+- The site's codes today: studio credit (a set amount, the reschedule and pet-fee credits among them), percent codes, loyalty's free hour and a membership's minutes. The site sells no gift cards yet; a studio credit is what one would be.
+- Question, below: whether the code alone is enough, as asked. Today a code works only with the email address it was sent to.
+
+#### 6. The policies step at checkout
+
+- After "Next", a page of its own with the studio policies and the booking agreement, in a section that scrolls. The agreement box is enabled once the client has scrolled to the end, and must be ticked: "I have read and agree to The Visuals Photo Studio's policies and booking terms." It cannot be skipped, and reads well on a phone.
+- Saved with the appointment: the date and time, and the version of the policies accepted.
+- Today the details step has one box, "I have read and agree to the studio policies", linking to `/policies`, and the booking keeps when it was ticked (`termsAcceptedAt`) and the cancellation terms in force (`terms`), not the text.
+
+#### 7. Booking Forms & Agreements, in the admin
+
+- The owner's emphasis: "especially important". The owners change booking forms and policies themselves, with no developer and no deployment.
+- **Intake questions:** add, edit, delete or deactivate, reorder, required or optional; text, tick box, dropdown and multiple choice; assigned to studios or appointment types; start and end dates for seasonal questions; a preview before publishing. The example: the Christmas decor acknowledgment, required for certain studios in the holiday season, added and removed by the owners.
+- **Policies:** edit them; different policies or agreements for different appointment types; publish new versions with a preview first; a history of earlier versions; which version each client accepted. An accepted agreement stays as it was when the policies change.
+- Today the policies are a page of the page editor (`/policies`), with drafts, publishing and earlier versions, but not assigned to appointment types and not saved with a booking. Intake questions do not exist.
+- This also answers the November 20 brief's "Agreements and waivers": a tick box, with the sentence in item 6. Whether a lawyer reviews the text stays the owners' to decide before live payments ("Remaining questions").
+
+#### 8. Across all of them
+
+- Keep booking, payment and appointment management working; the original branding; computers and phones; real availability, never a static highlight; no double booking.
+- Test the whole flow: unavailable dates, the waitlist's emails, the balance check, the policies' acceptance and payment. Payment in the Square sandbox and the site's test mode only, as before: no real card.
+
 ### Remaining questions and owner actions
 
 Everything that waits on the owners, in one list (reconciled on 2026-11-20 with their answers and the older questions in `ProjectLibrary.md`). Most urgent first.
@@ -284,12 +336,13 @@ Everything that waits on the owners, in one list (reconciled on 2026-11-20 with 
 | Area | Decision or action still needed |
 | --- | --- |
 | Testing | The owner's word to run the independent tester pass ("Now" 2). The hosted preview on a real iPhone, and the page editor in Safari on a Mac. One sign-in on the hosted preview with a new code ("Now" 3). Katya tries the studio admin role there; Resend now sends her code. |
+| The brief of 2026-11-22 | The waitlist (item 4): the form asks for the appointment's length too, since a freed time has to fit it: is that right? Does an entry last until its preferred date has passed, unless the client or the studio removes it sooner? Is an entry emailed once for each time that frees up and fits, or only once? The balance check (item 5): is the code alone enough, as asked? A code works today only with the email address it was sent to; the check would show no name or address, and limit how often it can be tried. Until the owners answer, the builder builds on these readings and records them under "Rules built on the builder's reading" in `ProjectLibrary.md`. |
 | Test bookings (2026-11-21) | Fourteen things the test found, each as built today (`TEST-REPORT-2026-11-21.md` has them in full). From the fourth round: (14) twelve of the 18 page addresses in the current site's sitemap answer 404 on the preview (`/appointments`, `/blanche-1`, `/dayglow-1`, `/paris`, `/membership`, `/home-1`, `/christmas-2026-dayglow`, `/christmas-2026-paris`, `/styled-setups`, `/events`, `/store`, `/privacy-policy`): where should each lead? An owner adds one under Admin → Website → Pages, "Old addresses"; (12) the browser's Back button leaves the booking screen, a refresh starts the booking again and closing the tab asks nothing: should Back go one step back?; (13) the phone number field takes any 7 to 40 characters, words included: should it need digits? From the third round: (9) a signed-in customer types their name, email and phone again on the booking screen; (10) when a studio's move lowers a paid booking's price, the client's email promises the refund, but a manager with prices switched off sees nothing of it and no owner is told: who should be?; (11) eight pages share one description for search engines, which each page can have of its own in the page editor. On the employee's side: (6) when staff move a booking, "The client asked for this move" starts ticked, which uses the client's free reschedule unless it is unticked; (7) a manager who opens `/admin` reads "This page could not be found", since the Overview is the owners', where the calendar would be kinder; (8) a manager sees the price while booking for a client, though "See what bookings cost" is off for managers. On the customer's side: (1) a booking that cost nothing (a 100% code, a free hour, loyalty's included) cannot be moved online: the page says to cancel it and book again; (2) "Getting in" under Settings is empty, so confirmations do not say how to enter the building; (3) the confirmation email gives the total, not the extra guests or the pet fee, which the booking's page lists; (4) two studios together take no extra guests, since both pairs already include the limit of 10; (5) a percent code's use comes back after any cancellation, also inside the days when nothing is refunded. And the staff level for `hello@`, which the owner adds under Admin → Staff. |
 | Acuity import | Question 50 (an Email field with several addresses): "OK", or otherwise. Settle in Acuity the three appointments the rehearsal refused: two paid more than their price after a move, one inside the 15-minute clean-up gap. |
 | Acuity history | Questions 51 (do past visits count for stamps?), 52 (their money: the unpaid ones come in as paid at the studio, or stay out?) and 53 (which visits come in). The visits set aside: 43 Acuity marks unpaid, 18 with no email address, 2 Reschedule Pending; and whether the 50 workshops, content days and setup previews should come in. Square's payment history, exported from Square, for refunds. |
 | Adding a studio | Question 29's last part. Before it is built: the owner answered on 2026-11-21 that the rule that Blanche and Dayglow go together only with Paris stays, a fourth studio or not. Still to answer: the discount for four studios booked together (today 20% for two, 22% for three), the most guests for four (10 for two, 20 for three). Agreed on 2026-11-21: a new studio waits off the site until its prices and hours are set (the builder's proposal; the owner: "Agreed"). Renaming and taking a studio off the site are built and confirmed (question 59). |
 | Rescheduling | Does the $20 fee apply when the studio itself starts a later move? The owner's note on administrators' moves ends mid-sentence. And how is the $20 paid when staff make a later move the client asked for? The builder's reading, not built yet: it is added to what the booking owes, to pay at the studio or through a payment link. Today the client's own later moves take it off their reschedule code instead, and building half of the new rule would make later moves free. |
-| Booking calendar | Does the studio-first calendar replace the date-first search, or do both stay? |
+| Booking calendar | Does the studio-first calendar replace the date-first search ("I know when I want to come"), or do both stay? The brief of 2026-11-22 describes the studio-first flow only; the date-first search stays until the owners say. |
 | Tax | The accountant confirms the rate (6.5% provisionally) and what it applies to (rentals, photography, add-ons, discounts, credits, refunds) before live charging. |
 | Privacy, agreements and waivers | A lawyer reviews the privacy policy's draft: a private doc the owners have since 2026-11-21, with the facts to fill in square brackets and the points to settle in its last section (the owners' own, how long email copies and sign-in records are kept, was answered on 2026-11-21: 5 years). How long bookings and payments are kept is the accountant's to say. The approved text of each agreement and waiver, the appointment types each applies to, and whether a tick box or a typed signature is needed. |
 | Newsletter | The email service, and where sign-ups go, before the form takes them. |
