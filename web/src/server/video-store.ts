@@ -1,9 +1,8 @@
-import { DeleteObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, HeadObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { eq } from "drizzle-orm";
-import { siteFiles } from "@/db/schema";
 import type { DbLike } from "@/db/client";
 import { fileStore } from "./files";
+import { neonBucket } from "./neon-storage";
 
 /**
  * Where uploaded video files are kept (question 77 in ProjectLibrary.md). On the host, Neon's object storage: the
@@ -28,29 +27,10 @@ export interface VideoStore {
 /** A file kept in the database: at most this big (a request to the site carries it whole). */
 export const DATABASE_VIDEO_MAX_BYTES = 4 * 1024 * 1024;
 
-function neonSettings(): { bucket: string; endpoint: string; region: string; keyId: string; secret: string } | null {
-  const bucket = process.env.VIDEO_BUCKET;
-  const endpoint = process.env.NEON_STORAGE_ENDPOINT;
-  const region = process.env.NEON_STORAGE_REGION;
-  const keyId = process.env.NEON_STORAGE_KEY_ID;
-  const secret = process.env.NEON_STORAGE_SECRET;
-  return bucket && endpoint && region && keyId && secret ? { bucket, endpoint: endpoint.replace(/\/$/, ""), region, keyId, secret } : null;
-}
-
-let client: { key: string; s3: S3Client } | null = null;
-
 export function videoStore(db: DbLike): VideoStore {
-  const neon = neonSettings();
+  const neon = neonBucket("VIDEO_BUCKET");
   if (!neon) return databaseVideos(db);
-  const cacheKey = `${neon.endpoint}|${neon.keyId}`;
-  if (!client || client.key !== cacheKey) {
-    client = {
-      key: cacheKey,
-      // Its own credentials, named: never the default chain, which on Vercel would find Vercel's own AWS keys.
-      s3: new S3Client({ forcePathStyle: true, region: neon.region, endpoint: neon.endpoint, credentials: { accessKeyId: neon.keyId, secretAccessKey: neon.secret } }),
-    };
-  }
-  const s3 = client.s3;
+  const s3 = neon.s3;
   return {
     kind: "neon",
     async uploadAddress({ key, contentType }) {
@@ -79,10 +59,7 @@ function databaseVideos(db: DbLike): VideoStore {
     uploadAddress: async ({ id, contentType }) => ({ url: `/api/videos/${id}/upload`, method: "PUT", headers: { "content-type": contentType } }),
     // The site serves it itself (src/app/videos/[id]/route.ts).
     readAddress: () => null,
-    async sizeOf(key) {
-      const [row] = await db.select({ size: siteFiles.size }).from(siteFiles).where(eq(siteFiles.key, key)).limit(1);
-      return row?.size ?? null;
-    },
+    sizeOf: (key) => files.sizeOf(key),
     remove: (key) => files.remove(key),
   };
 }

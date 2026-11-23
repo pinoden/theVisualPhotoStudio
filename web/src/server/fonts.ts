@@ -5,7 +5,7 @@ import type { Db, DbLike } from "@/db/client";
 import { can } from "@/lib/abilities";
 import { customFontFamily, customFontId, FONT_FORMATS, weightsOf, type CustomFont, type FontFormat, type FontGroup } from "@/lib/site/fonts";
 import type { AuthUser } from "./auth";
-import { fileStore } from "./files";
+import { fileStore, removeFiles } from "./files";
 import { loadSettings } from "./settings";
 
 /**
@@ -174,18 +174,14 @@ export async function addFontFile(
     return { ok: false, message: "Choose the weight the file holds; for a variable font, its lightest and its heaviest." };
   }
   const fileKey = `fonts/${randomUUID()}.${ENDINGS[format]}`;
-  return db.transaction(async (tx): Promise<FontResult> => {
+  const outcome = await db.transaction(async (tx): Promise<{ result: FontResult; gone?: string }> => {
     const [font] = await tx.select().from(siteFonts).where(eq(siteFonts.id, fontId)).for("update").limit(1);
-    if (!font) return { ok: false, message: NOT_FOUND };
-    const files = fileStore(tx);
+    if (!font) return { result: { ok: false, message: NOT_FOUND } };
     const existing = await tx.select().from(siteFontFiles).where(eq(siteFontFiles.fontId, fontId));
     const replaced = existing.find((file) => file.weight === input.weight && file.italic === input.italic);
-    if (!replaced && existing.length >= FONT_LIMITS.files) return { ok: false, message: `A font takes ${FONT_LIMITS.files} files at most.` };
-    await files.put(fileKey, input.bytes, CONTENT_TYPES[format]);
-    if (replaced) {
-      await tx.delete(siteFontFiles).where(eq(siteFontFiles.id, replaced.id));
-      await files.remove(replaced.fileKey);
-    }
+    if (!replaced && existing.length >= FONT_LIMITS.files) return { result: { ok: false, message: `A font takes ${FONT_LIMITS.files} files at most.` } };
+    await fileStore(tx).put(fileKey, input.bytes, CONTENT_TYPES[format]);
+    if (replaced) await tx.delete(siteFontFiles).where(eq(siteFontFiles.id, replaced.id));
     await tx.insert(siteFontFiles).values({
       fontId,
       fileKey,
@@ -196,42 +192,46 @@ export async function addFontFile(
       size: input.bytes.byteLength,
       createdAt: now,
     });
-    return { ok: true, id: fontId };
+    return { result: { ok: true, id: fontId }, gone: replaced?.fileKey };
   });
+  if (outcome.gone) await removeFiles(db, [outcome.gone]);
+  return outcome.result;
 }
 
 /** Take one file off a font. The last file of a font the design uses stays: the design would lose its font. */
 export async function removeFontFile(db: Db, viewer: AuthUser, fileId: string): Promise<FontResult> {
   if (!(await mayEditFonts(db, viewer))) return { ok: false, message: CANNOT };
   if (!isUuid(fileId)) return { ok: false, message: "That file was not found." };
-  return db.transaction(async (tx): Promise<FontResult> => {
+  const outcome = await db.transaction(async (tx): Promise<{ result: FontResult; gone?: string }> => {
     const [file] = await tx.select().from(siteFontFiles).where(eq(siteFontFiles.id, fileId)).for("update").limit(1);
-    if (!file) return { ok: false, message: "That file was not found." };
+    if (!file) return { result: { ok: false, message: "That file was not found." } };
     const others = await tx.select({ id: siteFontFiles.id }).from(siteFontFiles).where(eq(siteFontFiles.fontId, file.fontId));
     if (others.length === 1 && (await designUses(tx, file.fontId))) {
-      return { ok: false, message: "This is the font's only file and the design uses the font. Choose another font in the design first." };
+      return { result: { ok: false, message: "This is the font's only file and the design uses the font. Choose another font in the design first." } };
     }
     await tx.delete(siteFontFiles).where(eq(siteFontFiles.id, fileId));
-    await fileStore(tx).remove(file.fileKey);
-    return { ok: true, id: file.fontId };
+    return { result: { ok: true, id: file.fontId }, gone: file.fileKey };
   });
+  if (outcome.gone) await removeFiles(db, [outcome.gone]);
+  return outcome.result;
 }
 
 /** Delete a font and its files. One the design uses, published or in a draft, stays. */
 export async function deleteFont(db: Db, viewer: AuthUser, fontId: string): Promise<FontResult> {
   if (!(await mayEditFonts(db, viewer))) return { ok: false, message: CANNOT };
   if (!isUuid(fontId)) return { ok: false, message: NOT_FOUND };
-  return db.transaction(async (tx): Promise<FontResult> => {
+  const outcome = await db.transaction(async (tx): Promise<{ result: FontResult; gone: string[] }> => {
     const [font] = await tx.select().from(siteFonts).where(eq(siteFonts.id, fontId)).for("update").limit(1);
-    if (!font) return { ok: false, message: NOT_FOUND };
+    if (!font) return { result: { ok: false, message: NOT_FOUND }, gone: [] };
     if (await designUses(tx, fontId)) {
-      return { ok: false, message: `The design uses ${font.name}, in what is published or in a draft. Choose another font there first.` };
+      return { result: { ok: false, message: `The design uses ${font.name}, in what is published or in a draft. Choose another font there first.` }, gone: [] };
     }
     const files = await tx.select().from(siteFontFiles).where(eq(siteFontFiles.fontId, fontId));
     await tx.delete(siteFonts).where(eq(siteFonts.id, fontId));
-    for (const file of files) await fileStore(tx).remove(file.fileKey);
-    return { ok: true, id: fontId };
+    return { result: { ok: true, id: fontId }, gone: files.map((file) => file.fileKey) };
   });
+  await removeFiles(db, outcome.gone);
+  return outcome.result;
 }
 
 /** The file behind a font file's address. Null when there is none. */
