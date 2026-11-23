@@ -788,9 +788,11 @@ details.faq-item[open] .faq-icon { transform: rotate(45deg); }
 .code-balance-code { overflow-wrap: anywhere; }
 .code-balance-status { font-size: .8rem; letter-spacing: .08em; text-transform: uppercase; }
 .code-balance-usable .code-balance-status { color: #2d6a2d; }
-.code-balance-used .code-balance-status, .code-balance-expired .code-balance-status { color: #8b2020; }
+.code-balance-used .code-balance-status, .code-balance-expired .code-balance-status,
+.code-balance-cancelled .code-balance-status, .code-balance-unpaid .code-balance-status { color: #8b2020; }
 .code-balance-remaining { font-family: var(--font-serif); font-size: 1.6rem; }
 .code-balance-restrictions { margin: .5rem 0 0; padding-left: 1.1rem; font-size: .85rem; color: var(--color-muted); }
+.code-uses { margin: 0; padding-left: 1.1rem; }
 
 .wizard-container {
   max-width: 820px;

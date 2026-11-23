@@ -1,6 +1,6 @@
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import type { DbLike } from "@/db/client";
-import { membershipPlanStudios, memberships, promoCodes, studios } from "@/db/schema";
+import { bookings, membershipMinutes, membershipPlanStudios, memberships, promoCodes, studios } from "@/db/schema";
 import { formatCents } from "@/lib/domain/pricing";
 import { minutesLeftOf } from "./membership-minutes";
 import { normalizeCode } from "./promos";
@@ -14,7 +14,8 @@ import { formatDay } from "./tz";
  * the brief is question 60 in ProjectLibrary.md.
  */
 
-export type CodeStatus = "usable" | "used" | "expired";
+/** `cancelled` (by the studio) and `unpaid` (a membership never paid for) are for the studio's own check only: a client's finds no such code. */
+export type CodeStatus = "usable" | "used" | "expired" | "cancelled" | "unpaid";
 
 export interface CodeBalance {
   code: string;
@@ -47,36 +48,40 @@ const orList = (names: string[]) => (names.length <= 1 ? names.join("") : `${nam
 export async function checkCodeBalance(db: DbLike, rawCode: unknown, now: Date): Promise<CodeBalanceResult> {
   const code = normalizeCode(rawCode);
   if (code.length < 4 || code.length > 40) return { found: false };
-
   const [member] = await db.select().from(memberships).where(eq(memberships.code, code)).limit(1);
   if (member) {
     if (member.status === "starting" || member.status === "failed") return { found: false };
-    const minutesLeft = await minutesLeftOf(db, member.id);
-    const covered = await db
-      .select({ name: studios.name })
-      .from(membershipPlanStudios)
-      .innerJoin(studios, eq(studios.id, membershipPlanStudios.studioId))
-      .where(eq(membershipPlanStudios.planId, member.planId))
-      .orderBy(asc(studios.sortOrder));
-    return {
-      found: true,
-      balance: {
-        code,
-        title: `Membership: ${member.planName}`,
-        status: minutesLeft > 0 ? "usable" : "used",
-        remaining: `${minutesLeft} minutes remaining`,
-        // Unused hours carry over: a membership's minutes do not end.
-        expires: null,
-        restrictions: [
-          `For studio rentals in ${orList(covered.map((studio) => studio.name))}, not for photography sessions.`,
-          "Works only with the email address of the membership.",
-        ],
-      },
-    };
+    return { found: true, balance: await membershipBalance(db, member) };
   }
-
   const [row] = await db.select().from(promoCodes).where(eq(promoCodes.code, code)).limit(1);
   if (!row || row.voidedAt) return { found: false };
+  return { found: true, balance: promoBalance(row, now) };
+}
+
+async function membershipBalance(db: DbLike, member: typeof memberships.$inferSelect): Promise<CodeBalance> {
+  const minutesLeft = await minutesLeftOf(db, member.id);
+  const covered = await db
+    .select({ name: studios.name })
+    .from(membershipPlanStudios)
+    .innerJoin(studios, eq(studios.id, membershipPlanStudios.studioId))
+    .where(eq(membershipPlanStudios.planId, member.planId))
+    .orderBy(asc(studios.sortOrder));
+  const unpaid = member.status === "starting" || member.status === "failed";
+  return {
+    code: member.code,
+    title: `Membership: ${member.planName}`,
+    status: unpaid ? "unpaid" : minutesLeft > 0 ? "usable" : "used",
+    remaining: `${minutesLeft} minutes remaining`,
+    // Unused hours carry over: a membership's minutes do not end.
+    expires: null,
+    restrictions: [
+      `For studio rentals in ${orList(covered.map((studio) => studio.name))}, not for photography sessions.`,
+      "Works only with the email address of the membership.",
+    ],
+  };
+}
+
+function promoBalance(row: typeof promoCodes.$inferSelect, now: Date): CodeBalance {
   const expired = row.expiresAt !== null && row.expiresAt.getTime() <= now.getTime();
   const usesLeft = Math.max(0, row.maxUses - row.usedCount);
   const usedUp = row.kind === "amount" ? row.value <= 0 : usesLeft === 0;
@@ -108,14 +113,106 @@ export async function checkCodeBalance(db: DbLike, rawCode: unknown, now: Date):
           : `${row.value}% off, usable ${uses(usesLeft)}`;
 
   return {
-    found: true,
-    balance: {
-      code,
-      title,
-      status: usedUp ? "used" : expired ? "expired" : "usable",
-      remaining,
-      expires: row.expiresAt ? formatDay(row.expiresAt) : null,
-      restrictions,
-    },
+    code: row.code,
+    title,
+    status: row.voidedAt ? "cancelled" : usedUp ? "used" : expired ? "expired" : "usable",
+    remaining,
+    expires: row.expiresAt ? formatDay(row.expiresAt) : null,
+    restrictions,
+  };
+}
+
+/** A booking a code paid for, in part or in whole. */
+export interface CodeUse {
+  ref: string;
+  customerName: string;
+  /** ISO: the booking's start. */
+  startAt: string;
+  status: (typeof bookings.$inferSelect)["status"];
+  /** What the code covered of it: "$68", "60 minutes". */
+  covered: string;
+}
+
+/**
+ * The studio's own check of a code (the owner's answer of 2026-11-23: "can we check its balance from admin page?",
+ * question 71 in ProjectLibrary.md): the client's check, and what only the studio sees. Whose it is, where it came
+ * from, and every booking it paid for. A code the studio cancelled, and a membership never paid for, are found here.
+ */
+export interface StudioCodeCheck {
+  balance: CodeBalance;
+  /** The address it works with; null when anyone may use it. */
+  whose: string | null;
+  origin: "loyalty" | "reschedule" | "manual" | "pet_fee" | "membership";
+  /** The booking it was issued for: the visit rewarded, or the booking moved. */
+  originRef: string | null;
+  /** What a code of credit was worth when it was issued: "$136". */
+  issued: string | null;
+  /** ISO. */
+  madeAt: string;
+  /** ISO, when the studio cancelled it. */
+  cancelledAt: string | null;
+  note: string;
+  uses: CodeUse[];
+}
+
+export async function studioCodeCheck(db: DbLike, rawCode: unknown, now: Date): Promise<StudioCodeCheck | null> {
+  const code = normalizeCode(rawCode);
+  if (code.length < 4 || code.length > 40) return null;
+
+  const [member] = await db.select().from(memberships).where(eq(memberships.code, code)).limit(1);
+  if (member) {
+    const spent = await db
+      .select({ ref: bookings.ref, customerName: bookings.customerName, startAt: bookings.startAt, status: bookings.status, minutes: membershipMinutes.minutes })
+      .from(membershipMinutes)
+      .innerJoin(bookings, eq(bookings.id, membershipMinutes.bookingId))
+      .where(and(eq(membershipMinutes.membershipId, member.id), eq(membershipMinutes.kind, "booking")))
+      .orderBy(asc(bookings.startAt));
+    return {
+      balance: await membershipBalance(db, member),
+      whose: member.email,
+      origin: "membership",
+      originRef: null,
+      issued: null,
+      madeAt: member.createdAt.toISOString(),
+      cancelledAt: member.cancelledAt?.toISOString() ?? null,
+      note: "",
+      uses: spent.map((use) => ({
+        ref: use.ref,
+        customerName: use.customerName,
+        startAt: use.startAt.toISOString(),
+        status: use.status,
+        covered: `${Math.abs(use.minutes)} minutes`,
+      })),
+    };
+  }
+
+  const [row] = await db.select().from(promoCodes).where(eq(promoCodes.code, code)).limit(1);
+  if (!row) return null;
+  const [paid, origin] = await Promise.all([
+    db
+      .select({ ref: bookings.ref, customerName: bookings.customerName, startAt: bookings.startAt, status: bookings.status, cents: bookings.promoDiscountCents })
+      .from(bookings)
+      .where(eq(bookings.promoCodeId, row.id))
+      .orderBy(asc(bookings.startAt)),
+    row.originBookingId
+      ? db.select({ ref: bookings.ref }).from(bookings).where(eq(bookings.id, row.originBookingId)).limit(1)
+      : Promise.resolve([]),
+  ]);
+  return {
+    balance: promoBalance(row, now),
+    whose: row.email,
+    origin: row.source,
+    originRef: origin[0]?.ref ?? null,
+    issued: row.kind === "amount" && row.issuedCents !== null ? formatCents(row.issuedCents) : null,
+    madeAt: row.createdAt.toISOString(),
+    cancelledAt: row.voidedAt?.toISOString() ?? null,
+    note: row.note,
+    uses: paid.map((use) => ({
+      ref: use.ref,
+      customerName: use.customerName,
+      startAt: use.startAt.toISOString(),
+      status: use.status,
+      covered: formatCents(use.cents),
+    })),
   };
 }

@@ -1785,7 +1785,7 @@ test("a booking made with a discount code is moved without paying the discount a
     code: discountCode,
   });
   await expect(totalRow(page)).toContainText("$61.20");
-  await confirmAndGetRef(page, "Confirm & pay $61.20");
+  const discountedRef = await confirmAndGetRef(page, "Confirm & pay $61.20");
 
   // Moving it gives a code for the whole $68: the discount code is used up and checkout takes one code.
   await page.getByRole("button", { name: "Reschedule" }).click();
@@ -1808,7 +1808,31 @@ test("a booking made with a discount code is moved without paying the discount a
   });
   await expect(byText(page, "Nothing to pay: your code covers this booking. No card is needed.")).toBeVisible();
   await expect(totalRow(page)).toContainText("$0");
-  await confirmAndGetRef(page, "Confirm booking");
+  const paidByCodeRef = await confirmAndGetRef(page, "Confirm booking");
+
+  // The owner checks both codes from the admin (the owner's answer of 2026-11-23): what a client sees, and whose each
+  // is, where it came from and what it paid for.
+  await page.goto("/admin/codes");
+  const check = page.locator("#code-check");
+  await check.getByLabel("Code", { exact: true }).fill(moveCode.toLowerCase());
+  await check.getByRole("button", { name: "Check balance" }).click();
+  await expect(page).toHaveURL(new RegExp(`check=${moveCode.toLowerCase()}`));
+  const answer = check.getByRole("status");
+  for (const words of ["Reschedule code", moveCode, "Already used", "$0 remaining", bob.email, `Reschedule credit, for ${discountedRef}`, "$68", `${paidByCodeRef}, ${bob.name}`, "(Confirmed): $68"]) {
+    await expect(answer).toContainText(words);
+  }
+  await expect(answer.getByRole("link", { name: bob.email })).toBeVisible();
+  await check.getByLabel("Code", { exact: true }).fill(discountCode);
+  await check.getByRole("button", { name: "Check balance" }).click();
+  await expect(answer).toContainText("Discount code");
+  await expect(answer).toContainText("10% off");
+  await expect(answer).toContainText("Already used");
+  await expect(answer).toContainText(`${discountedRef}, ${bob.name}`);
+  await expect(answer).toContainText("(Cancelled): $6.80");
+  expect(await accessibilityProblems(page), "a code checked in the admin").toEqual([]);
+  await check.getByLabel("Code", { exact: true }).fill("NO-SUCH-CODE");
+  await check.getByRole("button", { name: "Check balance" }).click();
+  await expect(answer).toContainText("There is no code NO-SUCH-CODE.");
 });
 
 test("a free hour takes one hour off a booking of one studio, and is not for several studios", async ({ page }) => {
