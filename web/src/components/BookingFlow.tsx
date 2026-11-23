@@ -10,7 +10,7 @@ import {
   studiosFreeAt,
   type SlotOptions,
 } from "@/lib/domain/availability";
-import { extraGuestsFor, multiStudioOffer, studioCombinationError } from "@/lib/catalog-view";
+import { extraGuestsFor, multiStudioSaving, studioCombinationError } from "@/lib/catalog-view";
 import {
   bookableDurations,
   findPrice,
@@ -264,7 +264,7 @@ export function BookingFlow({
   const guestsAllowed = extraGuestsFor(catalog, studioIds);
   /** The most of an add-on this booking can take. */
   const mostOf = (addon: (typeof catalog.addons)[number]) => (addon.kind === "people" ? Math.min(addon.maxQuantity, guestsAllowed) : addon.maxQuantity);
-  const studioOffer = multiStudioOffer(catalog);
+  const studioOffer = multiStudioSaving(catalog);
   const combinationError = studioCombinationError(catalog.studios, studioIds);
 
   // A code is tied to an email address, so it stops applying if the address changes.
@@ -753,11 +753,7 @@ export function BookingFlow({
               );
             })}
           </div>
-          {!photography && (
-            <p style={{ fontSize: ".85rem" }}>
-              Paris is included in every bundle. {studioOffer && `${studioOffer}.`}
-            </p>
-          )}
+          {!photography && studioOffer && <p style={{ fontSize: ".85rem" }}>{studioOffer}.</p>}
           {actions(nextLabelFor("studios"))}
         </div>
       )}

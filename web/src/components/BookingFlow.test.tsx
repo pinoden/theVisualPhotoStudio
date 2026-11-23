@@ -421,9 +421,8 @@ describe("studio-first flow", () => {
   it("states the discount for several studios as it is charged, not more", () => {
     const settings = { ...catalog.settings, multiStudioPercent: { 2: 15, 3: 0 } };
     render(<BookingFlow catalog={{ ...catalog, settings }} navigate={nav.push} />);
-    expect(screen.getByText(/Paris is included in every bundle/).textContent).toBe(
-      "Paris is included in every bundle. 15% off when you book exactly 2.",
-    );
+    expect(screen.getByText(/^Save /).textContent).toBe("Save 15% when booking two studios.");
+    expect(screen.queryByText(/included in every bundle/)).toBeNull();
   });
 
   it("takes a free hour off one studio, and sets it aside with the reason when a second studio is added", async () => {
