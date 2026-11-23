@@ -95,6 +95,13 @@ function AddonFields({ id, addon, studios }: { id: string; addon?: AdminAddon; s
           </select>
         </div>
       </div>
+      <div className="form-group" style={{ maxWidth: "22rem" }}>
+        <label className="form-label" htmlFor={`addon-${id}-stock`}>
+          How many there are
+        </label>
+        <input id={`addon-${id}-stock`} name="stock" type="number" min={1} max={100} step={1} className="form-control" defaultValue={addon?.stock ?? ""} />
+        <p className="avail-hint">For a prop in a limited number, such as one pair of angel wings: bookings at the same time share them. Empty: no limit.</p>
+      </div>
       <div className="form-group">
         <label className="form-label" htmlFor={`addon-${id}-description`}>
           Description
@@ -387,7 +394,7 @@ async function StudiosAndAddons({ searchParams }: Pick<PageProps<"/admin/studios
         </div>
       )}
 
-      <div className="admin-card">
+      <div className="admin-card" id="addons">
         <h3>Add-ons</h3>
         <p style={{ fontSize: ".875rem" }}>
           Extras a customer can add while booking, once per booking. A change applies to new bookings; bookings

@@ -193,6 +193,8 @@ export function BookingFlow({
   /** Whether the client has scrolled to the end of the policies: the agreement can be ticked only then. */
   const [readToEnd, setReadToEnd] = useState(false);
   const policiesBox = useRef<HTMLDivElement>(null);
+  /** How many of each prop are free at the chosen time (the owner's admin brief of 2026-11-22, item 10), for `key`. */
+  const [propsFreeNow, setPropsFreeNow] = useState<{ key: string; free: Record<string, number> } | null>(null);
   const [codeInput, setCodeInput] = useState("");
   const [applied, setApplied] = useState<AppliedCode | null>(null);
   const [codeError, setCodeError] = useState("");
@@ -322,7 +324,12 @@ export function BookingFlow({
   // Extra guests these studios can take: each studio's own, and the owners' limit for studios booked together.
   const guestsAllowed = extraGuestsFor(catalog, studioIds);
   /** The most of an add-on this booking can take. */
-  const mostOf = (addon: (typeof catalog.addons)[number]) => (addon.kind === "people" ? Math.min(addon.maxQuantity, guestsAllowed) : addon.maxQuantity);
+  /** The time the props' free counts were read for. */
+  const propsKey = `${date}|${start}|${duration}`;
+  /** How many of a prop are free at the chosen time; undefined for an add-on with no limit, or before they are read. */
+  const freeOf = (addonId: string) => (propsFreeNow && propsFreeNow.key === propsKey ? propsFreeNow.free[addonId] : undefined);
+  const mostOf = (addon: (typeof catalog.addons)[number]) =>
+    Math.min(addon.kind === "people" ? Math.min(addon.maxQuantity, guestsAllowed) : addon.maxQuantity, freeOf(addon.id) ?? Number.POSITIVE_INFINITY);
   const studioOffer = multiStudioSaving(catalog);
   const combinationError = studioCombinationError(catalog.studios, studioIds);
 
@@ -449,6 +456,19 @@ export function BookingFlow({
   /** The booking the policies step's questions and agreements were read for. */
   const formsKey = `${studioIds.join(",")}|${date}|${photography ? 1 : 0}`;
 
+  /** Read how many of each prop are free at the chosen time (`/api/props-free`). The booking checks again. */
+  async function fetchPropsFree() {
+    if (!date || start === null || duration <= 0) return;
+    const key = propsKey;
+    try {
+      const response = await fetch(`/api/props-free?date=${date}&start=${start}&duration=${duration}`, { cache: "no-store" });
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; free?: Record<string, number> };
+      if (response.ok && data.ok) setPropsFreeNow({ key, free: data.free ?? {} });
+    } catch {
+      // Without the counts the add-ons are offered as usual, and the booking says if a prop is taken.
+    }
+  }
+
   /** Read the questions and agreements a booking of these studios on this day meets (`/api/checkout-forms`). */
   async function fetchForms() {
     const key = formsKey;
@@ -485,6 +505,8 @@ export function BookingFlow({
     }
     // The month calendar is read fresh on each arrival too: bookings change while the client looks.
     if (target === "when" && duration > 0) void fetchMonth(month, duration);
+    // The props free at the chosen time are read on each arrival at the details, where the add-ons are.
+    if (target === "details") void fetchPropsFree();
     // The booking form and agreements are read again for each booking they are shown for.
     if (target === "policies" && (options.refetch || forms?.key !== formsKey)) void fetchForms();
     topRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" });
@@ -648,6 +670,8 @@ export function BookingFlow({
         setApplied(null);
         go(steps.indexOf("details"));
       }
+      // A prop chosen was taken by another booking at that time: back to the add-ons, with what is free now.
+      if (data.code === "prop_taken") go(steps.indexOf("details"));
       // The policies or an agreement were published again meanwhile: the page shows them as they are now, read again.
       if (data.code === "policies_changed") {
         router.refresh();
@@ -1158,7 +1182,11 @@ export function BookingFlow({
                       </span>
                       {addon.description && <span className="addon-description">{addon.description}</span>}
                       <span className="addon-description" id={`addon-${addon.id}-limit`}>
-                        {addon.kind !== "people"
+                        {freeOf(addon.id) !== undefined && freeOf(addon.id)! < addon.maxQuantity
+                          ? freeOf(addon.id) === 0
+                            ? "Already reserved at this time."
+                            : `Up to ${freeOf(addon.id)}: the others are reserved at this time.`
+                          : addon.kind !== "people"
                           ? `Up to ${addon.maxQuantity}.`
                           : guestsAllowed > 0
                             ? `Up to ${count(guestsAllowed, "extra guest")} with ${studioIds.length > 1 ? "these studios" : "this studio"}.`
@@ -1172,7 +1200,8 @@ export function BookingFlow({
                 <label className="addon-row" key={addon.id}>
                   <input
                     type="checkbox"
-                    checked={(addonCounts[addon.id] ?? 0) > 0}
+                    checked={Math.min(addonCounts[addon.id] ?? 0, mostOf(addon)) > 0}
+                    disabled={mostOf(addon) === 0}
                     onChange={(event) => setAddonCounts((current) => ({ ...current, [addon.id]: event.target.checked ? 1 : 0 }))}
                   />
                   {/* The name and its price on one line, which puts the price under the name when both do not fit; the description below. */}
@@ -1182,6 +1211,7 @@ export function BookingFlow({
                       <span className="addon-price">{formatCents(addon.priceCents)}</span>
                     </span>
                     {addon.description && <span className="addon-description">{addon.description}</span>}
+                    {freeOf(addon.id) === 0 && <span className="addon-description addon-taken">Already reserved at this time.</span>}
                   </span>
                 </label>
                 ),

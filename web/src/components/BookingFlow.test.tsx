@@ -82,6 +82,8 @@ let closedDays: string[];
 let formsAsked: string[];
 let formQuestions: { id: string; label: string; help: string; kind: string; options: string[]; required: boolean }[];
 let formAgreements: { versionId: string; number: number; title: string; body: string }[];
+/** How many of each prop the server says are free at the chosen time. */
+let propsFree: Record<string, number>;
 let photographerBusy: [number, number][];
 let posted: Record<string, unknown>[];
 let bookingReply: { status: number; body: Record<string, unknown> };
@@ -100,6 +102,7 @@ beforeEach(() => {
   formsAsked = [];
   formQuestions = [];
   formAgreements = [];
+  propsFree = {};
   availabilityAsked = "";
   photographerBusy = [];
   posted = [];
@@ -111,6 +114,7 @@ beforeEach(() => {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: string, init?: { body?: string }) => {
+      if (input.startsWith("/api/props-free")) return reply({ ok: true, free: propsFree });
       if (input.startsWith("/api/checkout-forms")) {
         formsAsked.push(input);
         return reply({ ok: true, questions: formQuestions, agreements: formAgreements });
@@ -445,6 +449,33 @@ describe("studio-first flow", () => {
     render(<BookingFlow catalog={catalog} navigate={nav.push} />);
     expect((studioBox("Studio Paris") as HTMLInputElement).checked).toBe(true);
     expect((studioBox("Studio Blanche") as HTMLInputElement).checked).toBe(false);
+  });
+
+  it("offers a prop only while one is free at the chosen time (the owner's admin brief of 2026-11-22, item 10)", async () => {
+    const wings = { id: "addon-wings", slug: "angel-wings", name: "Angel wings", description: "One pair.", priceCents: 4000, studioId: null, maxQuantity: 1, kind: "other" as const };
+    propsFree = { "addon-wings": 0 };
+    render(<BookingFlow catalog={{ ...catalog, addons: [...catalog.addons, wings] }} navigate={nav.push} />);
+    await user.click(studioBox("Studio Paris"));
+    await next();
+    pickDate(WED);
+    await pickDuration("1 hr");
+    await next();
+    await pickTime("9:00 AM");
+    await next();
+    const box = (await screen.findByRole("checkbox", { name: /Angel wings/ })) as HTMLInputElement;
+    await waitFor(() => expect(box.disabled).toBe(true));
+    expect(screen.getByText("Already reserved at this time.")).toBeTruthy();
+    // Another time, where the pair is free.
+    propsFree = { "addon-wings": 1 };
+    await user.click(screen.getByRole("button", { name: /Back/ }));
+    await pickTime("11:00 AM");
+    await next();
+    await waitFor(() => expect((screen.getByRole("checkbox", { name: /Angel wings/ }) as HTMLInputElement).disabled).toBe(false));
+    await user.click(screen.getByRole("checkbox", { name: /Angel wings/ }));
+    await fillDetails();
+    await next();
+    await user.click(await screen.findByRole("button", { name: /^Confirm & pay/ }));
+    expect(posted[0]).toMatchObject({ addons: [{ addonId: "addon-wings", quantity: 1 }] });
   });
 
   it("shows an add-on only when its studio is booked, and charges it", async () => {

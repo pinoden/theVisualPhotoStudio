@@ -1,0 +1,1 @@
+ALTER TABLE "addons" ADD COLUMN "stock" integer;

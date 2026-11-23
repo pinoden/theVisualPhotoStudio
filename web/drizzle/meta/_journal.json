@@ -407,6 +407,13 @@
       "when": 1795410508711,
       "tag": "0057_booking_forms",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1795415398316,
+      "tag": "0058_addon_stock",
+      "breakpoints": true
     }
   ]
 }

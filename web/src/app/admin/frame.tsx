@@ -12,6 +12,7 @@ const LINKS = [
   { href: "/admin/staff", label: "Staff" },
   { href: "/admin/prices", label: "Prices" },
   { href: "/admin/studios", label: "Studios & add-ons" },
+  { href: "/admin/props", label: "Props & Resources" },
   { href: "/admin/hours", label: "Hours" },
   { href: "/admin/photography", label: "Photography" },
   { href: "/admin/codes", label: "Codes" },

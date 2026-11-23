@@ -49,6 +49,7 @@ import {
 } from "./promos";
 import { loadAccessInstructions } from "./settings";
 import { checkForms, recordForms, type CheckedForms } from "./booking-forms";
+import { propsProblem } from "./props";
 import { termsAtBooking } from "./terms";
 import { moneyKindNow, moneyKindOf, moneyKindOfCode, OTHER_MONEY_CODE } from "./test-mode";
 import { formatInstant, localToUtc } from "./tz";
@@ -113,7 +114,9 @@ export type BookingErrorCode =
   | "in_progress"
   | "attempt_over"
   /** The policies or an agreement were published again while the client was booking: they read them again. */
-  | "policies_changed";
+  | "policies_changed"
+  /** A prop chosen is held by overlapping bookings as many times as there are. */
+  | "prop_taken";
 
 export type CreateBookingResult =
   | { ok: true; ref: string; manageToken: string; totalCents: number }
@@ -172,6 +175,8 @@ function firstIssue(error: z.ZodError): string {
 class PromoGone extends Error {}
 /** A membership's minutes were spent by another booking between the price and the hold. */
 class MinutesGone extends Error {}
+/** A prop of the booking is held by overlapping bookings as many times as there are (src/server/props.ts). */
+class PropTaken extends Error {}
 
 type ParsedInput = z.output<typeof bookingInput>;
 
@@ -484,6 +489,9 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
     ref = newRef();
     try {
       bookingId = await db.transaction(async (tx) => {
+        // Props first, their rows locked until this booking is written: two bookings at once never take the last one.
+        const propProblem = await propsProblem(tx, price.addonLines.map((line) => ({ addonId: line.addonId, quantity: line.quantity })), startAt, endAt);
+        if (propProblem) throw new PropTaken(propProblem);
         if (spendsCode && !(await redeemPromo(tx, promo!, price.promoDiscountCents, now))) throw new PromoGone();
 
         const [row] = await tx
@@ -574,6 +582,7 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
       if (error instanceof PromoGone) {
         return fail(409, "invalid_code", "That code was just used. Please remove it and try again.");
       }
+      if (error instanceof PropTaken) return fail(409, "prop_taken", error.message);
       if (error instanceof MinutesGone) {
         return fail(409, "invalid_code", "The hours left on your membership changed meanwhile. Please apply the code again to see the price.");
       }

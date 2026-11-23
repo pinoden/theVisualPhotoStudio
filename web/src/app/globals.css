@@ -732,6 +732,9 @@ details.faq-item[open] .faq-icon { transform: rotate(45deg); }
 .month-cal-typed p { margin: 0 0 .25rem; font-size: .85rem; }
 .month-cal-typed .form-group { max-width: 16rem; }
 
+/* A prop all reserved at the chosen time (the owner's admin brief of 2026-11-22, item 10). */
+.addon-taken { color: #8b2020; }
+
 /* The policies step of the booking pages: the intake questions, the policies in a box read to its end, the agreement. */
 .intake-form { margin: 0 0 1.25rem; padding: 0; border: 0; }
 .intake-form > legend { margin-bottom: .5rem; color: var(--color-dark); font-family: var(--font-serif); font-size: 1.2rem; }

@@ -580,6 +580,8 @@ export async function saveAddonAction(formData: FormData): Promise<void> {
     priceCents,
     kind,
     studioId: text(formData, "studioId") || null,
+    // A prop (the owner's admin brief of 2026-11-22, item 10): how many there are. Empty is no limit.
+    stock: text(formData, "stock") === "" ? null : Number(text(formData, "stock")),
   });
   if (!result.ok) failed("/admin/studios", result.message);
   updateTag(CATALOG_TAG);

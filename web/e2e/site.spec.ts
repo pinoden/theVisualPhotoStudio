@@ -1119,6 +1119,53 @@ test("the owners write a seasonal question and an agreement, a client answers an
   await expect(byText(page, /^Taken off: clients no longer accept it\./)).toBeVisible();
 });
 
+test("one pair of angel wings is booked once for any overlapping time, and the owners see who has it", async ({ page, browser }) => {
+  // The owner's admin brief of 2026-11-22, item 10: a prop in a limited number.
+  const day = dateAhead(125);
+  await signIn(page, FORMS_OWNER, "/admin/studios");
+  await onScreen(page.locator("#addon-new-name")).fill("Angel wings");
+  await onScreen(page.locator("#addon-new-price")).fill("40");
+  await onScreen(page.locator("#addon-new-stock")).fill("1");
+  await page.getByRole("button", { name: "Add add-on" }).click();
+  await expect(byText(page, "Add-on added.")).toBeVisible();
+
+  // Wynn books them, with Blanche, at ten.
+  const wynn = await (await browser.newContext()).newPage();
+  await bookStudioFirstToPayment(wynn, { studios: ["Studio Blanche"], date: day, duration: "1 hr", time: "10:00 AM", customer: { name: "Wynn Wings", email: "wynn.e2e@example.com", phone: "407-555-0145" }, addons: ["Angel wings"] });
+  await confirmAndGetRef(wynn, /^Confirm & pay/);
+  await wynn.context().close();
+
+  // Pia, in Paris at the same hour, cannot add them: they are on the set in Blanche.
+  const pia = await (await browser.newContext()).newPage();
+  await pia.goto("/book");
+  await pickStudio(pia, "Studio Paris");
+  await next(pia);
+  await pia.getByRole("button", { name: "1 hr", exact: true }).click();
+  await byLabel(pia, "Date").fill(day);
+  await next(pia);
+  await pia.getByRole("button", { name: "10:00 AM", exact: true }).click();
+  await next(pia);
+  await expect(pia.getByRole("checkbox", { name: /Angel wings/ })).toBeDisabled();
+  await expect(byText(pia, "Already reserved at this time.")).toBeVisible();
+  // At noon they are free.
+  await pia.getByRole("button", { name: "← Back" }).click();
+  await pia.getByRole("button", { name: "12:00 PM", exact: true }).click();
+  await next(pia);
+  await expect(pia.getByRole("checkbox", { name: /Angel wings/ })).toBeEnabled();
+  await pia.context().close();
+
+  // The owners see who has them reserved.
+  await page.goto("/admin/props");
+  const card = onScreen(page.locator(".admin-card", { hasText: "Reserved from now on" }).filter({ hasText: "Angel wings" }));
+  await expect(card).toContainText("Wynn Wings");
+  await expect(card).toContainText("10:00 AM – 11:00 AM");
+  expect(await accessibilityProblems(page), "Props & Resources").toEqual([]);
+  // Taken off again: the tests after this one offer every add-on.
+  await page.goto("/admin/studios");
+  await page.getByRole("button", { name: "Stop offering Angel wings" }).click();
+  await expect(page.getByRole("button", { name: "Offer Angel wings again" })).toBeVisible();
+});
+
 test("the owner cancels a booking with a full refund and blocks a morning", async ({ page }) => {
   await signIn(page, OWNER, "/admin/bookings");
   const row = page.getByRole("row", { name: /Bob Brown/ }).first(); // Bob's Blanche booking on the near date
@@ -1449,7 +1496,8 @@ test("the owner changes an add-on's price and a studio's guest number, and custo
   await page.goto("/admin/studios");
   await page.getByRole("button", { name: "Stop offering Pet fee" }).click();
   await expect(byText(page, /The add-on is no longer offered/)).toBeVisible();
-  await expect(byText(page, "Not offered at the moment.")).toBeVisible();
+  // The pet fee's own form says so (an add-on another test took off says it too).
+  await expect(onScreen(page.locator("form", { has: page.getByRole("button", { name: "Offer Pet fee again" }) }))).toContainText("Not offered at the moment.");
 
   // The customer is told why, sees what is offered now, and books without it: they are not left stuck.
   await shop.getByRole("button", { name: "Confirm & pay $123" }).click();

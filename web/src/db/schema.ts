@@ -294,6 +294,12 @@ export const addons = pgTable("addons", {
   studioId: uuid("studio_id").references(() => studios.id, { onDelete: "cascade" }),
   maxQuantity: integer("max_quantity").notNull().default(1),
   /**
+   * How many of a prop there are (the owner's admin brief of 2026-11-22, item 10: one pair of angel wings). Bookings
+   * whose times overlap can hold at most this many between them; null for an add-on with no such limit (a pet fee).
+   * See src/server/props.ts.
+   */
+  stock: integer("stock"),
+  /**
    * What the add-on is for. The guest information page reads it to say whether
    * larger groups and pets can be booked, so those answers follow what is
    * offered and not what an add-on happens to be called.

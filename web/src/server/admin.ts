@@ -581,6 +581,8 @@ export interface AddonInput {
   kind: AddonKind;
   /** null = any booking; otherwise only bookings that include this studio. */
   studioId: string | null;
+  /** How many of a prop there are, which overlapping bookings share (src/server/props.ts); null for no such limit. */
+  stock?: number | null;
 }
 
 export interface AdminAddon extends AddonInput {
@@ -601,6 +603,7 @@ export async function listAddons(db: DbLike): Promise<AdminAddon[]> {
     priceCents: row.priceCents,
     kind: row.kind,
     studioId: row.studioId,
+    stock: row.stock,
     active: row.active,
   }));
 }
@@ -630,7 +633,11 @@ export async function saveAddon(db: DbLike, addonId: string | null, input: Addon
       : [];
     if (!studio) return { ok: false, message: "Unknown studio." };
   }
-  const values = { name, description, priceCents: input.priceCents, kind: input.kind, studioId: input.studioId };
+  const stock = input.stock ?? null;
+  if (stock !== null && (!Number.isInteger(stock) || stock < 1 || stock > 100)) {
+    return { ok: false, message: "Give how many there are as a whole number from 1 to 100, or leave it empty for no limit." };
+  }
+  const values = { name, description, priceCents: input.priceCents, kind: input.kind, studioId: input.studioId, stock };
 
   if (addonId !== null) {
     const updated = UUID.test(addonId)
