@@ -841,7 +841,35 @@ test("the calendar shows a day, a week and a month, one studio or all, and a boo
   // so it does not count as Bob's own reschedule.
   await page.goto(`/admin/calendar?view=day&date=${NEAR}`);
   await page.getByRole("link", { name: /Bob Brown/ }).click();
-  await expect(page.getByRole("heading", { name: "Bob Brown" })).toBeVisible();
+  // It opens over the calendar, which stays behind it, with everything about it (the owner's admin brief, items 5, 7, 8).
+  const popup = page.getByRole("dialog", { name: /Bob Brown/ });
+  await expect(popup).toBeVisible();
+  await expect(page).toHaveURL(/\/admin\/calendar\?.*open=VS-/);
+  await expect(page.getByRole("navigation", { name: "Calendar view" })).toBeVisible();
+  for (const words of ["First name", "Brown", bob.email, bob.phone, "Studio Blanche", "Studio rental", "1 hour", "Booked", "by the client", "Payment date", "Card, online", "Forms & Agreements", "Accepted"]) {
+    await expect(popup).toContainText(words);
+  }
+  await shot(page, "17c2-calendar-popup");
+  expect(await accessibilityProblems(page), "an appointment's pop-up over the calendar").toEqual([]);
+  // Escape closes it, back to the calendar as it was.
+  await page.keyboard.press("Escape");
+  await expect(popup).toHaveCount(0);
+  await expect(page).not.toHaveURL(/open=/);
+  // Book Another Appointment: a new booking for the same client, with their details filled in.
+  await page.getByRole("link", { name: /Bob Brown/ }).click();
+  await popup.getByRole("link", { name: "Book Another Appointment" }).click();
+  await expect(byText(page, "Another appointment for Bob Brown: their details are filled in below.")).toBeVisible();
+  await page.getByRole("checkbox", { name: "Studio Paris" }).check();
+  await byLabel(page, "Length").selectOption({ label: "1 hour" });
+  await page.getByRole("button", { name: "Show free times" }).click();
+  await expect(page.getByLabel("Client’s email")).toHaveValue(bob.email);
+  await expect(page.getByLabel("Client’s name")).toHaveValue("Bob Brown");
+  await expect(page.getByLabel("Client’s phone")).toHaveValue(bob.phone);
+  // Reschedule leads to the appointment's move.
+  await page.goto(`/admin/calendar?view=day&date=${NEAR}`);
+  await page.getByRole("link", { name: /Bob Brown/ }).click();
+  await popup.getByRole("link", { name: "Reschedule" }).click();
+  await expect(page.getByRole("heading", { name: "Bob Brown", level: 1 })).toBeVisible();
   await byLabel(page, "New date").fill(NEAR);
   await page.getByRole("button", { name: "Show free times" }).click();
   await page.getByLabel(/Free start times on/).selectOption({ label: "2:00 PM – 3:00 PM" });
@@ -904,7 +932,8 @@ test("the calendar shows a day, a week and a month, one studio or all, and a boo
 
   // Jane booked this day with her dog, and the dog is not coming: the owner returns the pet fee as studio credit.
   await page.getByRole("link", { name: /Jane Smith/ }).click();
-  await expect(page.getByRole("heading", { name: "Jane Smith" })).toBeVisible();
+  await page.getByRole("dialog", { name: /Jane Smith/ }).getByRole("link", { name: "Edit" }).click();
+  await expect(page.getByRole("heading", { name: "Jane Smith", level: 1 })).toBeVisible();
   await expect(byText(page, /This booking has a pet fee of \$40\. It is not refunded to a card\./)).toBeVisible();
   const appointmentPath = new URL(page.url()).pathname;
   await expect(page.getByRole("button", { name: /The pet did not come/ })).toHaveCount(0);
@@ -1579,6 +1608,11 @@ test("a Studio Manager runs the calendar and looks clients up, and sees no price
   // She sees a day nobody assigned to her, with the client's contact details, and no price.
   await page.goto(`/admin/calendar?view=day&date=${NEAR}`);
   await page.getByRole("link", { name: /Jane Smith/ }).click();
+  // Without prices at her level, the pop-up says so; its Edit leads to the appointment's page.
+  const janes = page.getByRole("dialog", { name: /Jane Smith/ });
+  await expect(janes).toContainText("Prices and payments are not shown at your level.");
+  expect(await janes.innerText()).not.toContain("$");
+  await janes.getByRole("link", { name: "Edit" }).click();
   await expect(page.getByRole("heading", { name: "Jane Smith", level: 1 })).toBeVisible();
   const appointment = onScreen(page.locator(".admin-main"));
   await expect(appointment).toContainText(jane.email);

@@ -57,6 +57,8 @@ export interface Appointment {
   durationMinutes: number;
   studios: string[];
   customerName: string;
+  /** When the client ticked the studio policies, booking online; null for a booking the studio made (`termsAcceptedAt`). */
+  termsAcceptedAt: string | null;
   /** Set on a photography session: what it includes. */
   photography: { includes: string } | null;
   /** Null unless the viewer may see contact details. */
@@ -147,6 +149,7 @@ export async function getAppointment(db: DbLike, viewer: AuthUser, ref: string, 
     durationMinutes: booking.durationMinutes,
     studios: view.studios.map((studio) => studio.name),
     customerName: booking.customerName,
+    termsAcceptedAt: booking.termsAcceptedAt ? booking.termsAcceptedAt.toISOString() : null,
     photography: view.photography,
     customerPhone: may("seeContact") ? booking.customerPhone : null,
     customerEmail: may("seeContact") ? booking.customerEmail : null,

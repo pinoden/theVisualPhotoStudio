@@ -4,6 +4,7 @@ import { connection } from "next/server";
 import { Suspense, type CSSProperties } from "react";
 import { StatusBadge } from "@/components/StatusBadge";
 import { getDb } from "@/db/client";
+import { studios as studiosTable } from "@/db/schema";
 import {
   BUFFER_SHOWN_MINUTES,
   CALENDAR_VIEWS,
@@ -23,11 +24,13 @@ import { isIsoDate, isoWeekday, longDateLabel, minutesToLabel, type IsoDate } fr
 import { can } from "@/lib/abilities";
 import { studioCombinationError } from "@/lib/catalog-view";
 import { count } from "@/lib/words";
+import { getAppointment } from "@/server/appointments";
 import { loadCalendar, type CalendarAppointment, type CalendarBlock } from "@/server/calendar";
 import { loadCatalog, type CatalogStudio } from "@/server/catalog";
 import { requireStaff } from "@/server/session";
 import { localDateOf } from "@/server/tz";
 import { AdminFrame, AdminLoading } from "../frame";
+import { AppointmentDialog } from "./AppointmentDialog";
 
 export const metadata: Metadata = { title: "Calendar", robots: { index: false } };
 
@@ -52,6 +55,8 @@ const place = (top: number, length: number, color?: string) =>
 interface Entry extends CalendarAppointment {
   held: CatalogStudio[];
   look: AppointmentLook;
+  /** The calendar as it is, with this appointment open over it. */
+  openHref: string;
 }
 
 /**
@@ -86,26 +91,44 @@ async function Calendar({ searchParams }: Pick<PageProps<"/admin/calendar">, "se
   const data = await loadCalendar(db, viewer, catalog, span);
   const visible = new Set(data.days);
 
+  const href = (to: { view?: CalendarView; date?: IsoDate; studio?: string | null; zoom?: Zoom; open?: string }) => {
+    const studio = to.studio === undefined ? (chosen?.slug ?? null) : to.studio;
+    const scale = to.zoom ?? zoom;
+    return `/admin/calendar?view=${to.view ?? view}&date=${to.date ?? date}${studio ? `&studio=${studio}` : ""}${scale === "0.5" ? "" : `&zoom=${scale}`}${to.open ? `&open=${encodeURIComponent(to.open)}` : ""}`;
+  };
   // One entry for each appointment that holds a studio being shown. It keeps its bundle's name and colour when one studio is shown.
   const entries: Entry[] = data.appointments.flatMap((appointment) => {
     const held = studios.filter((studio) => appointment.studioIds.includes(studio.id));
     const all = catalog.studios.filter((studio) => appointment.studioIds.includes(studio.id));
-    return held.length === 0 ? [] : [{ ...appointment, held, look: appointmentLook(all, appointment.photography) }];
+    return held.length === 0 ? [] : [{ ...appointment, held, look: appointmentLook(all, appointment.photography), openHref: href({ open: appointment.ref }) }];
   });
   const blocks = data.blocks.filter((block) => studios.some((studio) => studio.id === block.studioId));
 
-  const href = (to: { view?: CalendarView; date?: IsoDate; studio?: string | null; zoom?: Zoom }) => {
-    const studio = to.studio === undefined ? (chosen?.slug ?? null) : to.studio;
-    const scale = to.zoom ?? zoom;
-    return `/admin/calendar?view=${to.view ?? view}&date=${to.date ?? date}${studio ? `&studio=${studio}` : ""}${scale === "0.5" ? "" : `&zoom=${scale}`}`;
-  };
+  const mayBook = can(viewer, "createBookings", catalog.settings);
+
+  // The appointment open over the calendar, if one is (the owner's admin brief of 2026-11-22, item 5): one this viewer
+  // may see. Its colour comes from every studio, a studio taken off the site since included.
+  const openRef = typeof query.open === "string" ? query.open : null;
+  const opened = openRef ? await getAppointment(db, viewer, openRef, new Date()) : null;
+  const openedLook = opened
+    ? appointmentLook(
+        (await db.select({ id: studiosTable.id, slug: studiosTable.slug, name: studiosTable.name, color: studiosTable.color }).from(studiosTable)).filter((studio) =>
+          opened.studios.includes(studio.name),
+        ),
+        opened.photography !== null,
+      )
+    : null;
+  const bookAnother =
+    opened && mayBook && opened.customerEmail !== null
+      ? `/admin/calendar/new?date=${date}&clientName=${encodeURIComponent(opened.customerName)}&clientEmail=${encodeURIComponent(opened.customerEmail)}&clientPhone=${encodeURIComponent(opened.customerPhone ?? "")}`
+      : null;
+
   // How many appointments the day, the week or the month holds (the owners' note of 2026-11-22), in the studios shown.
   const inSpan = entries.filter((entry) => (view === "month" ? entry.date.slice(0, 7) === date.slice(0, 7) : view === "day" ? entry.date === date : true));
   const spanCount = `${count(inSpan.length, "appointment")} ${view === "day" ? "this day" : view === "week" ? "this week" : "this month"}`;
   // The bundles of the studios shown, for the key under the grid.
   const bundles = studios.length < 2 ? [] : bundlesOf(studios);
   const title = view === "month" ? monthLabel(date) : view === "week" ? weekLabel(date) : longDateLabel(date);
-  const mayBook = can(viewer, "createBookings", catalog.settings);
 
   return (
     <AdminFrame active="/admin/calendar" title="Calendar" query={query} viewer={viewer} settings={catalog.settings}>
@@ -194,6 +217,9 @@ async function Calendar({ searchParams }: Pick<PageProps<"/admin/calendar">, "se
           each appointment.
           <span className="cal-legend-block" aria-hidden="true" /> Time the studio blocked.
         </p>
+      )}
+      {opened && openedLook && (
+        <AppointmentDialog appointment={opened} look={openedLook} closeHref={href({})} bookAnotherHref={bookAnother} />
       )}
       {bundles.length > 0 && (
         <p className="cal-legend cal-key">
@@ -295,7 +321,8 @@ const describe = (entry: Entry) =>
 function AppointmentChip({ entry }: { entry: Entry }) {
   return (
     <Link
-      href={`/admin/appointments/${entry.ref}`}
+      href={entry.openHref}
+      scroll={false}
       className="cal-chip"
       style={{ "--studio": entry.look.color } as CSSProperties}
       title={describe(entry)}
@@ -354,7 +381,8 @@ function HourAxis({ start, end }: { start: number; end: number }) {
 function GridAppointment({ entry, gridStart, lane, span, lanes, full }: { entry: Entry; gridStart: number; lane: number; span: number; lanes: number; full: boolean }) {
   return (
     <Link
-      href={`/admin/appointments/${entry.ref}`}
+      href={entry.openHref}
+      scroll={false}
       className={`cal-appt${full || span > 1 ? " cal-appt-full" : ""}${entry.look.bundle ? " cal-appt-bundle" : ""}`}
       style={
         {
@@ -481,7 +509,7 @@ function Week({
                 <ul>
                   {listed.map((entry) => (
                     <li key={entry.ref} style={{ "--studio": entry.look.color } as CSSProperties}>
-                      <Link href={`/admin/appointments/${entry.ref}`}>
+                      <Link href={entry.openHref} scroll={false}>
                         <span className="cal-agenda-time">
                           {minutesToLabel(entry.startMinute)} – {minutesToLabel(entry.endMinute)}
                         </span>

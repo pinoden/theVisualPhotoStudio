@@ -391,7 +391,9 @@ test("a tablet's touch screen gets the touch rules: controls a finger can press,
   const OWNER_PAGES = ["/admin", "/admin/calendar", "/admin/calendar/new", "/admin/bookings", "/admin/customers", "/admin/prices", "/admin/studios", "/admin/hours", "/admin/codes", "/admin/settings", "/admin/website/pages", "/account", "/account/appointments?tab=past"];
   for (const size of [
     { width: 768, height: 1024 },
+    // Held sideways: an iPad Air or Pro, and the smaller iPads (the owners' note of 2026-11-22: the front desk's iPad).
     { width: 1180, height: 820 },
+    { width: 1080, height: 810 },
   ]) {
     await page.setViewportSize(size);
     for (const path of PUBLIC_PAGES) {
@@ -425,6 +427,17 @@ test("a tablet's touch screen gets the touch rules: controls a finger can press,
       await expect(page.locator("main h1").first()).toBeVisible();
       await touchable(`${path} at ${size.width}px`);
     }
+    // What the front desk's iPad is used for most (the owners' note of 2026-11-22): the calendar's day and week with
+    // every studio, on the day the phones booked above, and an appointment opened over the calendar.
+    const busyDay = dateAhead(70);
+    for (const path of [`/admin/calendar?view=week&date=${busyDay}`, `/admin/calendar?view=day&date=${busyDay}`]) {
+      await page.goto(path);
+      await expect(page.getByRole("link", { name: /Mia Mobile/ }).first()).toBeVisible();
+      await touchable(`${path} at ${size.width}px`);
+    }
+    await page.getByRole("link", { name: /Mia Mobile/ }).first().click();
+    await expect(page.getByRole("dialog", { name: /Mia Mobile/ })).toBeVisible();
+    await touchable(`an appointment's pop-up at ${size.width}px`);
   }
   await context.close();
 });
@@ -477,9 +490,16 @@ test("the admin fits a phone: the calendar in its three views, an appointment, a
   await expectFits(page, "the calendar's day");
   expect(await tooSmallToRead(page), "the calendar's day: text too small").toEqual([]);
 
-  // An appointment: its details, the label buttons and the form to move it.
+  // An appointment: first over the calendar, then its page, with the label buttons and the form to move it.
   await appointment.click();
-  await expect(page.getByRole("heading", { name: "Mia Mobile" })).toBeVisible();
+  const popup = page.getByRole("dialog", { name: /Mia Mobile/ });
+  await expect(popup).toBeVisible();
+  await expectFits(page, "an appointment's pop-up");
+  expect(await hardToTouch(page), "an appointment's pop-up: hard to use by touch").toEqual([]);
+  expect(await tooSmallToRead(page), "an appointment's pop-up: text too small").toEqual([]);
+  await shot(page, "m-390-appointment-popup");
+  await popup.getByRole("link", { name: "Edit" }).click();
+  await expect(page.getByRole("heading", { name: "Mia Mobile", level: 1 })).toBeVisible();
   await expectFits(page, "an appointment");
   await shot(page, "m-390-appointment");
   expect(await hardToTouch(page), "an appointment: hard to use by touch").toEqual([]);
