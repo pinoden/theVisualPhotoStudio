@@ -13,3 +13,13 @@
 # Exports from Acuity or Square, for the imports (HANDOFF.md, steps 5 and 7), hold clients' details. They belong outside
 # the project; this keeps one saved here by mistake out of the repository, which is public.
 *.csv
+
+# The project's notes are a private repository of their own, cloned into notes/ and linked from here (notes/AGENTS.md,
+# "Two repositories"). Never committed to this public one.
+/notes/
+/AGENTS.md
+/CLAUDE.md
+/HANDOFF.md
+/ProjectLibrary.md
+/RUNBOOK.md
+/TEST-REPORT-*.md
