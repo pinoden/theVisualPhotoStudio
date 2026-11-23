@@ -67,7 +67,12 @@ export const Gallery = defineBlock({
   label: "Gallery",
   group: "pictures",
   fields: {
-    source: { kind: "choice", label: "Which pictures", options: { chosen: "The pictures I choose here", collection: "A collection of the library" }, start: "chosen" },
+    source: {
+      kind: "choice",
+      label: "Which pictures",
+      options: { chosen: "The pictures I choose here", collection: "A collection of the library", photography: "The photos chosen under Admin → Photography" },
+      start: "chosen",
+    },
     pictures: { kind: "pictures", label: "Pictures", max: 60 },
     collection: { kind: "collection", label: "Collection" },
     layout: {
@@ -88,8 +93,16 @@ export const Gallery = defineBlock({
     }
     // A collection outside its dates shows nothing to visitors. The editor shows it, with a note, so it can be arranged ahead of time.
     if (set && !set.shows && !editing) return null;
-    const shown = (set ? set.pictures : pictures).map((id) => site.pictures[id]).filter((picture): picture is LibraryPicture => picture !== undefined);
-    if (shown.length === 0) return <EditorNote editing={editing}>{set ? `The collection ${set.name} has no pictures yet.` : "Gallery: choose its pictures in the panel."}</EditorNote>;
+    const photography = source === "photography";
+    const ids = photography ? (site.photography ?? []) : set ? set.pictures : pictures;
+    const shown = ids.map((id) => site.pictures[id]).filter((picture): picture is LibraryPicture => picture !== undefined);
+    if (shown.length === 0) {
+      return (
+        <EditorNote editing={editing}>
+          {photography ? "No photos are chosen under Admin → Photography yet." : set ? `The collection ${set.name} has no pictures yet.` : "Gallery: choose its pictures in the panel."}
+        </EditorNote>
+      );
+    }
     // On a phone: as many side by side as was chosen for phones; otherwise two at most in rows, and one at a time in a
     // row that scrolls, as the old website showed its portfolio.
     const onPhone = columnsPhone ?? (layout === "row" ? 1 : Math.min(columns, 2));
@@ -107,7 +120,7 @@ export const Gallery = defineBlock({
       <div className="blk blk-gallery-wrap">
         {set && !set.shows && <p className="blk-note">The collection {set.name} is outside its dates: visitors do not see this gallery now.</p>}
         {layout === "row" ? (
-          <PictureRow label={set ? set.name : "Pictures"} columns={columns} columnsPhone={onPhone} ratio={RATIO[shape]} gap={gap} count={shown.length} listClassName="blk-gallery-row">
+          <PictureRow label={set ? set.name : photography ? "Photography" : "Pictures"} columns={columns} columnsPhone={onPhone} ratio={RATIO[shape]} gap={gap} count={shown.length} listClassName="blk-gallery-row">
             {items}
           </PictureRow>
         ) : (

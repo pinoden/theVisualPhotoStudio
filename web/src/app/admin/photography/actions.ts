@@ -6,9 +6,10 @@ import { getDb } from "@/db/client";
 import { formatCents } from "@/lib/domain/pricing";
 import { dollarsToCents, formText, hhmmToMinutes } from "@/lib/parse";
 import { PRICE_MAX_CENTS } from "@/server/admin";
-import { CATALOG_TAG } from "@/server/cached";
+import { CATALOG_TAG, WEBSITE_TAG } from "@/server/cached";
 import { blockPhotographer, blockPhotographerDays, daysText, savePhotoPackage, savePhotographerHours, unblockPhotographer } from "@/server/photography";
-import { requireStaff } from "@/server/session";
+import { addPhotographyPhotos, movePhotographyPhoto, removePhotographyPhoto } from "@/server/photography-photos";
+import { requireOwner, requireStaff } from "@/server/session";
 
 /**
  * The photographer's working hours, their blocked time, and the packages.
@@ -88,4 +89,40 @@ export async function savePhotoPackageAction(formData: FormData): Promise<void> 
   if (!saved) back("error", "The session could not be saved.");
   updateTag(CATALOG_TAG);
   back("notice", "Session saved. Sessions already booked keep what they were sold with.");
+}
+
+// ── The photos the site shows for photography (question 73) ──────────────────
+
+const PHOTOS = (kind: "notice" | "error", text: string): never => redirect(`${PAGE}?${kind}=${encodeURIComponent(text)}#photography-photos`);
+
+export async function addPhotographyPhotosAction(formData: FormData): Promise<void> {
+  const viewer = await requireOwner(PAGE);
+  const result = await addPhotographyPhotos(await getDb(), viewer, formText(formData.get("mediaIds")).split(","));
+  if (!result.ok) PHOTOS("error", result.message);
+  updateTag(WEBSITE_TAG);
+  PHOTOS("notice", "Photos added. The website shows them now.");
+}
+
+export async function removePhotographyPhotoAction(formData: FormData): Promise<void> {
+  const viewer = await requireOwner(PAGE);
+  const result = await removePhotographyPhoto(await getDb(), viewer, formText(formData.get("mediaId")));
+  if (!result.ok) PHOTOS("error", result.message);
+  updateTag(WEBSITE_TAG);
+  PHOTOS("notice", "The photo was taken off. It is still in the media library.");
+}
+
+async function movePhotographyPhotoBy(formData: FormData, by: -1 | 1): Promise<void> {
+  const viewer = await requireOwner(PAGE);
+  const result = await movePhotographyPhoto(await getDb(), viewer, formText(formData.get("mediaId")), by);
+  if (!result.ok) PHOTOS("error", result.message);
+  updateTag(WEBSITE_TAG);
+  PHOTOS("notice", "Order saved.");
+}
+
+export async function movePhotographyPhotoEarlierAction(formData: FormData): Promise<void> {
+  await movePhotographyPhotoBy(formData, -1);
+}
+
+export async function movePhotographyPhotoLaterAction(formData: FormData): Promise<void> {
+  await movePhotographyPhotoBy(formData, 1);
 }

@@ -218,6 +218,8 @@ function services(): BuiltInPage {
               ],
             }),
             b("Text", { text: "<p>Final images are delivered within 7 to 14 days.</p>", size: "small" }),
+            // The photos the owners choose under Admin → Photography (question 73): nothing shows until they add some.
+            b("Gallery", { source: "photography", columns: 3, shape: "tall" }),
           ],
         }),
         b("Section", {

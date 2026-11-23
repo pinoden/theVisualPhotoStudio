@@ -435,6 +435,13 @@
       "when": 1795426522707,
       "tag": "0061_policies_text_kept",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1795453500441,
+      "tag": "0062_photography_photos",
+      "breakpoints": true
     }
   ]
 }

@@ -30,6 +30,8 @@ export interface SiteContext {
   pictures: Record<string, Picture>;
   /** The collections the page names, by id: their pictures in order, and whether today is inside their dates. */
   collections: Record<string, { name: string; pictures: string[]; shows: boolean }>;
+  /** The photos chosen under Admin → Photography, in order, when the page shows them (question 73). */
+  photography?: string[];
   /** The studios, their prices, hours and add-ons, and the settings: for the blocks that show the studio's data. */
   catalog?: Catalog;
   /** The studio's name and contact details. */

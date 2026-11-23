@@ -12,6 +12,7 @@ import { paragraphs } from "@/lib/site/rich-text";
 import type { AuthUser } from "./auth";
 import { loadCatalog } from "./catalog";
 import { collectionShows, loadCollection } from "./collections";
+import { loadPhotographyPhotos, showsPhotographyPhotos } from "./photography-photos";
 import { loadPictures } from "./media";
 import { loadSettings } from "./settings";
 import { localDateOf } from "./tz";
@@ -118,9 +119,20 @@ async function pageSite(db: DbLike, content: PageContent, now: Date): Promise<Si
     collections[id] = { name: collection.name, pictures: collection.pictures.map((picture) => picture.id), shows: collectionShows(collection, today) };
     for (const picture of collection.pictures) pictureIds.add(picture.id);
   }
+  // The photos chosen under Admin → Photography, when a Gallery of the page shows them (question 73).
+  const photography = showsPhotographyPhotos(content.blocks) ? await loadPhotographyPhotos(db) : null;
+  for (const picture of photography ?? []) pictureIds.add(picture.id);
   const [pictures, catalog, business] = await together(db, [() => loadPictures(db, [...pictureIds]), () => loadCatalog(db), () => loadBusiness(db)]);
   const values = Object.fromEntries(liveValues(catalog, business).map((entry) => [entry.name, entry.value]));
-  return { pictures: Object.fromEntries(pictures), collections, catalog, business, values, conditions: conditionsOf(catalog) };
+  return {
+    pictures: Object.fromEntries(pictures),
+    collections,
+    ...(photography ? { photography: photography.map((picture) => picture.id) } : {}),
+    catalog,
+    business,
+    values,
+    conditions: conditionsOf(catalog),
+  };
 }
 
 /**
@@ -138,6 +150,12 @@ export async function pageEditorContext(db: DbLike, content: PageContent, now: D
     if (!collection) continue;
     site.collections[row.id] = { name: collection.name, pictures: collection.pictures.map((picture) => picture.id), shows: collectionShows(collection, today) };
     for (const picture of collection.pictures) site.pictures[picture.id] = picture;
+  }
+  // The photography photos too, so that a Gallery set to them shows them as soon as it is chosen.
+  if (!site.photography) {
+    const photography = await loadPhotographyPhotos(db);
+    site.photography = photography.map((picture) => picture.id);
+    for (const picture of photography) site.pictures[picture.id] = picture;
   }
   return { site, collections: rows };
 }

@@ -1,20 +1,28 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { Suspense } from "react";
+import { ChoosePictures } from "@/components/media/PictureChooser";
 import { getDb } from "@/db/client";
 import { durationLabel, minutesToHHMM, weekdayName } from "@/lib/domain/time";
 import { centsToInput, PRICE_FIELD } from "@/lib/parse";
 import { can } from "@/lib/abilities";
 import { daysText, listPhotoPackages, listPhotographerBlocks, loadPhotographer } from "@/server/photography";
+import { loadPhotographyPhotos, pagesShowingPhotographyPhotos, PHOTOGRAPHY_PHOTO_LIMIT } from "@/server/photography-photos";
+import type { Picture } from "@/server/media";
 import { requireStaff } from "@/server/session";
 import { loadSettings } from "@/server/settings";
 import { formatRange, localDateOf } from "@/server/tz";
 import { AdminFrame, AdminLoading } from "../frame";
 import {
+  addPhotographyPhotosAction,
   blockPhotographerAction,
   blockPhotographerDaysAction,
+  movePhotographyPhotoEarlierAction,
+  movePhotographyPhotoLaterAction,
+  removePhotographyPhotoAction,
   savePhotoPackageAction,
   savePhotographerHoursAction,
   unblockPhotographerAction,
@@ -43,10 +51,13 @@ async function Photography({ searchParams }: Pick<PageProps<"/admin/photography"
   if (!can(viewer, "setPhotographerTimes", settings)) notFound();
 
   const now = new Date();
-  const [photographer, blocks, packages] = await Promise.all([
+  const owner = viewer.role === "owner";
+  const [photographer, blocks, packages, photos, showing] = await Promise.all([
     loadPhotographer(db),
     listPhotographerBlocks(db, now),
-    viewer.role === "owner" ? listPhotoPackages(db) : [],
+    owner ? listPhotoPackages(db) : [],
+    owner ? loadPhotographyPhotos(db) : [],
+    owner ? pagesShowingPhotographyPhotos(db) : [],
   ]);
   const studios = [...new Set(packages.map((pack) => pack.studioName))];
 
@@ -229,6 +240,8 @@ async function Photography({ searchParams }: Pick<PageProps<"/admin/photography"
         </>
       )}
 
+      {owner && <PhotographyPhotos photos={photos} showing={showing} />}
+
       {viewer.role === "owner" && (
         <div className="admin-card">
           <h3>Sessions on sale</h3>
@@ -283,5 +296,72 @@ async function Photography({ searchParams }: Pick<PageProps<"/admin/photography"
         </div>
       )}
     </AdminFrame>
+  );
+}
+
+/**
+ * The photos the site shows for photography, in the owners' order (the owner's answer of 2026-11-23, question 73), and
+ * the pages that show them: wherever a Gallery is set to them.
+ */
+function PhotographyPhotos({ photos, showing }: { photos: Picture[]; showing: { title: string; slug: string }[] }) {
+  const last = photos.length - 1;
+  return (
+    <div className="admin-card" id="photography-photos">
+      <h3>Photos</h3>
+      <p style={{ fontSize: ".875rem" }}>
+        From the media library, in this order. A change shows on the website at once, wherever a Gallery is set to
+        &ldquo;The photos chosen under Admin → Photography&rdquo;. Up to {PHOTOGRAPHY_PHOTO_LIMIT}.
+      </p>
+      <p style={{ fontSize: ".875rem" }}>
+        {showing.length === 0 ? (
+          <>
+            No published page shows them yet. To show them: Website → Pages, the page, add a Gallery, and choose &ldquo;The
+            photos chosen under Admin → Photography&rdquo; under &ldquo;Which pictures&rdquo;.
+          </>
+        ) : (
+          <>
+            Shown on{" "}
+            {showing.map((page, index) => (
+              <span key={page.slug}>
+                {index > 0 && (index === showing.length - 1 ? " and " : ", ")}
+                <Link href={`/${page.slug}`}>{page.title || page.slug}</Link>
+              </span>
+            ))}
+            .
+          </>
+        )}
+      </p>
+      {photos.length > 0 && (
+        <ol className="media-ordered">
+          {photos.map((photo, index) => (
+            <li key={photo.id}>
+              <Image src={photo.url} width={photo.width} height={photo.height} alt={photo.alt} sizes="160px" />
+              <span className="media-facts">{photo.alt}</span>
+              <span className="editor-row-buttons">
+                <form action={movePhotographyPhotoEarlierAction}>
+                  <input type="hidden" name="mediaId" value={photo.id} />
+                  <button type="submit" className="btn btn-outline btn-small" disabled={index === 0} aria-label={`Move photo ${index + 1} earlier`}>
+                    ↑
+                  </button>
+                </form>
+                <form action={movePhotographyPhotoLaterAction}>
+                  <input type="hidden" name="mediaId" value={photo.id} />
+                  <button type="submit" className="btn btn-outline btn-small" disabled={index === last} aria-label={`Move photo ${index + 1} later`}>
+                    ↓
+                  </button>
+                </form>
+                <form action={removePhotographyPhotoAction}>
+                  <input type="hidden" name="mediaId" value={photo.id} />
+                  <button type="submit" className="btn btn-outline btn-small" aria-label={`Take off photo ${index + 1}`}>
+                    Take off
+                  </button>
+                </form>
+              </span>
+            </li>
+          ))}
+        </ol>
+      )}
+      {photos.length < PHOTOGRAPHY_PHOTO_LIMIT && <ChoosePictures label="Add photos" action={addPhotographyPhotosAction} fields={{}} />}
+    </div>
   );
 }

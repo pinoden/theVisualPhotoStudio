@@ -1134,6 +1134,18 @@ export const studioPhotos = pgTable(
 );
 
 /**
+ * The photos the site shows for photography (the owners' note of 2026-11-22: "under Admin → Photography the owners
+ * should be able to add and edit photos without a deployment"; question 73 in ProjectLibrary.md): pictures of the media
+ * library, in the owners' order. A page shows them through a Gallery set to "The photos chosen under Admin → Photography".
+ */
+export const photographyPhotos = pgTable("photography_photos", {
+  mediaId: uuid("media_id")
+    .primaryKey()
+    .references(() => media.id, { onDelete: "restrict" }),
+  position: integer("position").notNull().default(0),
+});
+
+/**
  * A font of the owners' own, uploaded as files: the brand font that no
  * library has. The design can use it like a font of the library
  * (src/lib/site/fonts.ts). See src/server/fonts.ts.
