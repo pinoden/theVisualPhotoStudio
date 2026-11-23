@@ -74,6 +74,10 @@ let busy: Record<string, [number, number][]>;
 let availabilityCalls: number;
 /** What the fake server was last asked for, and when its photographer is taken. */
 let availabilityAsked: string;
+/** The months the month calendar asked about. */
+let monthAsked: string[];
+/** Days the month calendar is told the length does not fit on. */
+let closedDays: string[];
 let photographerBusy: [number, number][];
 let posted: Record<string, unknown>[];
 let bookingReply: { status: number; body: Record<string, unknown> };
@@ -87,6 +91,8 @@ function reply(body: unknown, status = 200) {
 beforeEach(() => {
   busy = {};
   availabilityCalls = 0;
+  monthAsked = [];
+  closedDays = [];
   availabilityAsked = "";
   photographerBusy = [];
   posted = [];
@@ -98,6 +104,15 @@ beforeEach(() => {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: string, init?: { body?: string }) => {
+      if (input.startsWith("/api/availability/month")) {
+        // The month calendar: every day of the month fits, as the times below say each day is open.
+        const month = new URL(input, "http://test").searchParams.get("month")!;
+        monthAsked.push(input);
+        const [year, number] = month.split("-").map(Number);
+        const last = new Date(Date.UTC(year, number, 0)).getUTCDate();
+        const days = Object.fromEntries(Array.from({ length: last }, (_, i) => `${month}-${String(i + 1).padStart(2, "0")}`).map((day) => [day, !closedDays.includes(day)]));
+        return reply({ ok: true, month, days });
+      }
       if (input.startsWith("/api/availability")) {
         availabilityCalls++;
         availabilityAsked = input;
@@ -206,6 +221,34 @@ describe("studio-first flow", () => {
       paymentToken: "mock-card-ok",
       expectedTotalCents: 12480,
     });
+  });
+
+  it("shows the month once a duration is chosen, lets only its free days be pressed, and books the day pressed (the owner's brief of 2026-11-22)", async () => {
+    closedDays = ["2030-01-11"];
+    render(<BookingFlow catalog={catalog} navigate={nav.push} />);
+    await user.click(studioBox("Studio Paris"));
+    await next();
+    // Duration first, then the days it fits on.
+    expect(screen.getByText("Choose a duration to see the days it fits on.")).toBeTruthy();
+    await pickDuration("1 hr");
+    pickDate(WED); // a date typed in another month moves the calendar there
+    expect(await screen.findByRole("heading", { name: "January 2030" })).toBeTruthy();
+    await waitFor(() => expect(monthAsked.some((url) => url.includes("month=2030-01") && url.includes(`studios=${P}`) && url.includes("duration=60"))).toBe(true));
+    const friday = await screen.findByRole("button", { name: "Friday, January 11, 2030, not available" });
+    expect((friday as HTMLButtonElement).disabled).toBe(true);
+    const thursday = screen.getByRole("button", { name: "Thursday, January 10, 2030" });
+    expect(screen.getByRole("button", { name: "Wednesday, January 9, 2030" }).getAttribute("aria-pressed")).toBe("true");
+    await user.click(thursday);
+    expect(thursday.getAttribute("aria-pressed")).toBe("true");
+    expect((screen.getByLabelText("Date") as HTMLInputElement).value).toBe("2030-01-10");
+    // The month before, asked of the server.
+    await user.click(screen.getByRole("button", { name: "Previous month" }));
+    expect(await screen.findByRole("heading", { name: "December 2029" })).toBeTruthy();
+    await waitFor(() => expect(monthAsked.some((url) => url.includes("month=2029-12"))).toBe(true));
+    // The times of the day pressed.
+    await next();
+    expect(await screen.findByRole("button", { name: "1:00 PM" })).toBeTruthy();
+    expect(screen.getByText(/Thursday, January 10, 2030/)).toBeTruthy();
   });
 
   it("offers only times when every chosen studio is free", async () => {

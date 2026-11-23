@@ -685,6 +685,52 @@ details.faq-item[open] .faq-icon { transform: rotate(45deg); }
 }
 .booking-request-note a { text-decoration: underline; text-underline-offset: 3px; }
 
+/* The booking page's month calendar (the owner's brief of 2026-11-22): the length first, then the whole month, larger,
+   in the original website's tans. Only the days the length fits on can be pressed; the rest are muted. */
+.when-studio { display: grid; gap: .5rem 2rem; }
+@media (min-width: 900px) { .when-studio { grid-template-columns: minmax(14rem, 1fr) minmax(0, 1.6fr); align-items: start; } .month-cal-typed { grid-column: 2; } }
+.month-cal { padding: 1rem; border: 1px solid var(--color-border); background: var(--color-ivory); }
+.month-cal-head { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin-bottom: .5rem; }
+.month-cal-title { margin: 0; color: var(--color-dark); font-family: var(--font-serif); font-size: 1.6rem; font-weight: 400; }
+.month-cal-nav {
+  width: 2.75rem;
+  height: 2.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: 50%;
+  background: #fff;
+  color: var(--color-dark);
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.month-cal-nav:hover:not(:disabled) { border-color: var(--color-rose-dark); }
+.month-cal-nav:disabled { opacity: .35; cursor: default; }
+.month-cal-grid { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: .25rem; }
+.month-cal-grid th { padding-bottom: .25rem; color: var(--color-muted); font-size: .8rem; font-weight: 400; letter-spacing: .06em; text-transform: uppercase; }
+.month-cal-grid abbr { text-decoration: none; }
+.month-cal-grid td { padding: 0; text-align: center; }
+.month-cal-day {
+  width: 100%;
+  height: 2.75rem;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: var(--color-rose-light);
+  color: var(--color-dark);
+  font-family: var(--font-sans);
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.month-cal-day:hover:not(:disabled), .month-cal-day:focus-visible { background: var(--color-rose); color: var(--on-accent); }
+.month-cal-day[aria-pressed="true"] { background: var(--color-dark); color: #fff; }
+.month-cal-day:disabled { background: transparent; color: #b5aaa1; font-weight: 400; cursor: default; }
+@media (min-width: 600px) { .month-cal-day { height: 3.25rem; font-size: 1.05rem; } }
+.month-cal-note { margin: .5rem 0 0; font-size: .85rem; }
+.month-cal-wait { margin: 0; padding: 1rem; border: 1px dashed var(--color-border); font-size: .9rem; }
+.month-cal-typed p { margin: 0 0 .25rem; font-size: .85rem; }
+.month-cal-typed .form-group { max-width: 16rem; }
+
 /* "Check Code Balance" on the booking pages: a button, and under it a small form and what the code is worth. */
 .code-balance { max-width: 780px; margin: 1rem auto 0; }
 .code-balance-toggle { padding: .55rem 1.25rem; }

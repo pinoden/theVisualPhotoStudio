@@ -11,6 +11,7 @@ import {
   type SlotOptions,
 } from "@/lib/domain/availability";
 import { extraGuestsFor, multiStudioSaving, studioCombinationError } from "@/lib/catalog-view";
+import { MonthCalendar } from "./MonthCalendar";
 import {
   bookableDurations,
   findPrice,
@@ -159,6 +160,12 @@ export function BookingFlow({
 
   const today = useSyncExternalStore(subscribeNever, browserToday, serverToday);
   const [availability, setAvailability] = useState<DayAvailability | null>(null);
+  /** The month the calendar shows, once the client has moved it; until then, the chosen date's or the first open one's. */
+  const [shownMonth, setShownMonth] = useState("");
+  /** Which days of a month the chosen length fits on, for the studios chosen (`key`): from `/api/availability/month`. */
+  const [monthDays, setMonthDays] = useState<{ key: string; days: Record<string, boolean> } | null>(null);
+  /** The latest month asked for: an answer to an earlier question is not shown over it. */
+  const monthRequest = useRef(0);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -189,6 +196,12 @@ export function BookingFlow({
   const leadHours = noticeHours(settings, photography);
   /** The first date that can have a free time at all: whole days of notice from today. */
   const firstDate = today ? addDays(today, Math.floor(leadHours / 24)) : "";
+  // The month calendar (the owner's brief of 2026-11-22, item 3): from the first month with a day that can be booked to
+  // the month bookings open up to.
+  const firstMonth = firstDate.slice(0, 7);
+  const lastMonth = today ? addDays(today, settings.maxAdvanceDays).slice(0, 7) : "";
+  const month = shownMonth || (date ? date.slice(0, 7) : firstMonth);
+  const monthKeyOf = (forMonth: string, minutes: number) => `${forMonth}|${studioIds.join(",")}|${minutes}|${photography ? 1 : 0}`;
 
   // ── What can be chosen ─────────────────────────────────────────────────────
   /** The session packages of the chosen studio, shortest first. Only in the photography flow. */
@@ -202,13 +215,19 @@ export function BookingFlow({
 
   const durations = useMemo(() => {
     if (photography) return packages.map((p) => p.durationMinutes);
-    if (mode === "studio") return bookableDurations(studioIds, dayType, rules);
+    if (mode === "studio") {
+      // The length is chosen before the day: every length the studios are priced for on some kind of day. Once a day is
+      // chosen, those of its kind of day, which the month calendar only offers days for.
+      if (date) return bookableDurations(studioIds, dayType, rules);
+      return [...new Set([...bookableDurations(studioIds, "weekday", rules), ...bookableDurations(studioIds, "weekend", rules)])].sort((a, b) => a - b);
+    }
     const all = new Set(rules.filter((r) => r.dayType === dayType).map((r) => r.durationMinutes));
     return [...all].sort((a, b) => a - b);
-  }, [photography, packages, mode, studioIds, dayType, rules]);
+  }, [photography, packages, mode, studioIds, date, dayType, rules]);
 
   /** A chosen duration stops counting once the current selection no longer offers it. */
   const duration = durations.includes(durationChoice) ? durationChoice : 0;
+  const shownDays = monthDays && monthDays.key === monthKeyOf(month, duration) ? monthDays.days : null;
   const session = photography ? (packages.find((p) => p.durationMinutes === duration) ?? null) : null;
 
   const slotOptions: SlotOptions | null = useMemo(
@@ -370,6 +389,28 @@ export function BookingFlow({
     }
   }
 
+  /** Read which days of a month a booking of the chosen studios fits on, for `minutes`. */
+  async function fetchMonth(forMonth: string, minutes: number) {
+    if (mode !== "studio" || !forMonth || minutes <= 0 || studioIds.length === 0) return;
+    const request = ++monthRequest.current;
+    const key = monthKeyOf(forMonth, minutes);
+    try {
+      const response = await fetch(
+        `/api/availability/month?month=${forMonth}&studios=${studioIds.join(",")}&duration=${minutes}${photography ? "&photography=1" : ""}`,
+        { cache: "no-store" },
+      );
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; days?: Record<string, boolean> };
+      if (request === monthRequest.current) setMonthDays({ key, days: response.ok && data.ok && data.days ? data.days : {} });
+    } catch {
+      if (request === monthRequest.current) setMonthDays({ key, days: {} });
+    }
+  }
+
+  function showMonth(next: string) {
+    setShownMonth(next);
+    void fetchMonth(next, duration);
+  }
+
   // ── Navigation ─────────────────────────────────────────────────────────────
   function go(index: number, options: { refetch?: boolean } = {}) {
     requestIdRef.current = null;
@@ -381,6 +422,8 @@ export function BookingFlow({
     if ((target === "time" || target === "studios") && date && (options.refetch || availability?.date !== date)) {
       void fetchAvailability(date);
     }
+    // The month calendar is read fresh on each arrival too: bookings change while the client looks.
+    if (target === "when" && duration > 0) void fetchMonth(month, duration);
     topRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" });
   }
 
@@ -411,6 +454,11 @@ export function BookingFlow({
 
   function chooseDate(value: string) {
     setDateInput(value);
+    // A date typed in another month moves the calendar there.
+    if (isIsoDate(value) && value.slice(0, 7) !== month) {
+      setShownMonth(value.slice(0, 7));
+      void fetchMonth(value.slice(0, 7), duration);
+    }
     setStart(null);
     setAvailability(null);
     if (mode === "time") setStudioIds([]);
@@ -419,6 +467,7 @@ export function BookingFlow({
   function chooseDuration(minutes: number) {
     setDuration(minutes);
     setStart(null);
+    void fetchMonth(month, minutes);
     if (mode === "time") setStudioIds([]);
   }
 
@@ -653,6 +702,69 @@ export function BookingFlow({
     return following ? `Next: ${STEP_LABEL[following]}` : undefined;
   };
 
+  // The date step's two choices, which the studio-first flow shows length first (the owner's brief of 2026-11-22: Select
+  // Studio, then Duration, then Date & Time) and the time-first flow date first.
+  const dateField = (
+    <div className="form-group">
+      <label className="form-label" htmlFor="booking-date">
+        Date
+      </label>
+      <input
+        id="booking-date"
+        type="date"
+        className="form-control"
+        value={dateInput}
+        min={firstDate || undefined}
+        max={today ? addDays(today, settings.maxAdvanceDays) : undefined}
+        onChange={(event) => chooseDate(event.target.value)}
+      />
+    </div>
+  );
+  const lengthChoice = photography ? (
+    <div className="form-group">
+      <span className="form-label">Session</span>
+      <div className="package-list">
+        {packages.map((pack) => (
+          <button
+            type="button"
+            key={pack.id}
+            className={`package-btn${duration === pack.durationMinutes ? " selected" : ""}`}
+            aria-pressed={duration === pack.durationMinutes}
+            onClick={() => chooseDuration(pack.durationMinutes)}
+          >
+            <strong>
+              {durationLabel(pack.durationMinutes)} · {formatCents(pack.priceCents)}
+            </strong>
+            <span>Studio included. {pack.includes}.</span>
+          </button>
+        ))}
+        {packages.length === 0 && <p style={{ fontSize: ".85rem" }}>No sessions are offered in this studio.</p>}
+      </div>
+      <p style={{ fontSize: ".8rem", margin: ".75rem 0 0" }}>
+        Every session is shot on a professional camera by our in-house photographer. Your edited images are delivered
+        within 7 to 14 days.
+      </p>
+    </div>
+  ) : (
+    <div className="form-group">
+      <span className="form-label">Duration</span>
+      <div className="duration-grid">
+        {durations.map((minutes) => (
+          <button
+            type="button"
+            key={minutes}
+            className={`duration-btn${duration === minutes ? " selected" : ""}`}
+            aria-pressed={duration === minutes}
+            onClick={() => chooseDuration(minutes)}
+          >
+            {durationLabel(minutes).replace(" hours", " hr").replace(" hour", " hr").replace(/ minutes?/, " min")}
+          </button>
+        ))}
+        {durations.length === 0 && <p style={{ fontSize: ".85rem" }}>No durations are offered for this selection.</p>}
+      </div>
+    </div>
+  );
+
   return (
     <div className="wizard-container" ref={topRef} style={{ scrollMarginTop: 90 }}>
       {!photography && (
@@ -768,67 +880,28 @@ export function BookingFlow({
               ? `${photography ? "Sessions" : "Bookings"} open ${hoursInWords(leadHours)} to ${count(settings.maxAdvanceDays, "day")} ahead.`
               : `Bookings open up to ${count(settings.maxAdvanceDays, "day")} ahead.`}
           </p>
-          <div className="form-grid">
-            <div className="form-group">
-              <label className="form-label" htmlFor="booking-date">
-                Date
-              </label>
-              <input
-                id="booking-date"
-                type="date"
-                className="form-control"
-                value={dateInput}
-                min={firstDate || undefined}
-                max={today ? addDays(today, settings.maxAdvanceDays) : undefined}
-                onChange={(event) => chooseDate(event.target.value)}
-              />
+          {mode === "studio" ? (
+            <div className="when-studio">
+              {lengthChoice}
+              <div className="form-group">
+                <span className="form-label">Day</span>
+                {duration > 0 && month ? (
+                  <MonthCalendar month={month} firstMonth={firstMonth} lastMonth={lastMonth} days={shownDays} selected={date} onMonth={showMonth} onChoose={chooseDate} />
+                ) : (
+                  <p className="month-cal-wait">Choose {photography ? "a session" : "a duration"} to see the days it fits on.</p>
+                )}
+              </div>
+              <div className="month-cal-typed">
+                <p>Or type the date:</p>
+                {dateField}
+              </div>
             </div>
-            {photography && (
-              <div className="form-group">
-                <span className="form-label">Session</span>
-                <div className="package-list">
-                  {packages.map((pack) => (
-                    <button
-                      type="button"
-                      key={pack.id}
-                      className={`package-btn${duration === pack.durationMinutes ? " selected" : ""}`}
-                      aria-pressed={duration === pack.durationMinutes}
-                      onClick={() => chooseDuration(pack.durationMinutes)}
-                    >
-                      <strong>
-                        {durationLabel(pack.durationMinutes)} · {formatCents(pack.priceCents)}
-                      </strong>
-                      <span>Studio included. {pack.includes}.</span>
-                    </button>
-                  ))}
-                  {packages.length === 0 && <p style={{ fontSize: ".85rem" }}>No sessions are offered in this studio.</p>}
-                </div>
-                <p style={{ fontSize: ".8rem", margin: ".75rem 0 0" }}>
-                  Every session is shot on a professional camera by our in-house photographer. Your edited images are
-                  delivered within 7 to 14 days.
-                </p>
-              </div>
-            )}
-            {!photography && (
-              <div className="form-group">
-                <span className="form-label">Duration</span>
-                <div className="duration-grid">
-                  {durations.map((minutes) => (
-                    <button
-                      type="button"
-                      key={minutes}
-                      className={`duration-btn${duration === minutes ? " selected" : ""}`}
-                      aria-pressed={duration === minutes}
-                      onClick={() => chooseDuration(minutes)}
-                    >
-                      {durationLabel(minutes).replace(" hours", " hr").replace(" hour", " hr").replace(/ minutes?/, " min")}
-                    </button>
-                  ))}
-                  {durations.length === 0 && <p style={{ fontSize: ".85rem" }}>No durations are offered for this selection.</p>}
-                </div>
-              </div>
-            )}
-          </div>
+          ) : (
+            <div className="form-grid">
+              {dateField}
+              {lengthChoice}
+            </div>
+          )}
           {mode === "studio" && price && (
             <div className="price-summary">
               {price.studioLines.map((line) => (

@@ -20,6 +20,7 @@ import {
   totalRow,
   watchBrowser,
 } from "./helpers";
+import { longDateLabel } from "../src/lib/domain/time";
 
 /**
  * The site clicked through in a real browser, in the order a business day
@@ -307,8 +308,16 @@ test("books two studios together, starting from the studios", async ({ page }) =
   await pickStudio(page, "Studio Paris");
   await next(page);
 
-  await byLabel(page, "Date").fill(NEAR);
+  // The duration first, then a month calendar of the days it fits on (the owner's brief of 2026-11-22, item 3).
+  await expect(byText(page, "Choose a duration to see the days it fits on.")).toBeVisible();
   await page.getByRole("button", { name: "1 hr", exact: true }).click();
+  await expect(byText(page, "Only the days on which your length fits can be chosen.")).toBeVisible();
+  await byLabel(page, "Date").fill(NEAR);
+  const nearDay = page.getByRole("button", { name: new RegExp(`^${longDateLabel(NEAR)}$`) });
+  await expect(nearDay).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("heading", { name: new Date(`${NEAR}T12:00:00Z`).toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" }) })).toBeVisible();
+  await shot(page, "03b-month-calendar");
+  expect(await accessibilityProblems(page), "the month calendar").toEqual([]);
   // ($78 + $68) less the 20% two-studio discount
   await expect(totalRow(page)).toContainText("$116.80");
   await next(page);
