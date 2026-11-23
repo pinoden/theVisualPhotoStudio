@@ -9,6 +9,7 @@ import { dollarsToCents, formText, intInRange } from "@/lib/parse";
 import { createAdminBooking, moveBooking, setLabel } from "@/server/appointments";
 import { addCharge, OVERTIME_MAX_MINUTES, voidCharge, type AddChargeInput } from "@/server/charges";
 import { editBooking } from "@/server/edit-booking";
+import { changeConflicts, confirmedKeys, conflictsFor, moveConflicts } from "@/server/override";
 import { cancelPayLink, checkBookingPayLink, closePayLinkByHand, sendPayLink } from "@/server/pay-links";
 import { resolvePayments } from "@/server/payments";
 import { givePetFeeCredit } from "@/server/pet-fee";
@@ -80,7 +81,7 @@ export async function moveBookingAction(formData: FormData): Promise<void> {
     await getDb(),
     viewer,
     ref,
-    { date, startMinute, countsAsClientMove: formData.get("countsAsClientMove") !== null, openAllDay: formData.get("afterHours") === "1" },
+    { date, startMinute, countsAsClientMove: formData.get("countsAsClientMove") !== null, override: confirmedKeys(formData.get("overrideConfirmed")) },
     new Date(),
   );
   if (!result.ok) redirect(withMessage(retry, "error", result.message));
@@ -107,7 +108,7 @@ export async function editBookingAction(formData: FormData): Promise<void> {
     if (quantity > 0) addons.push({ addonId: name.slice("addon:".length), quantity });
   }
   const studioIds = formData.getAll("studio").filter((value): value is string => typeof value === "string");
-  const result = await editBooking(await getDb(), viewer, ref, { studioIds, durationMinutes: durationMinutes!, addons, openAllDay: formData.get("afterHours") === "1" }, new Date());
+  const result = await editBooking(await getDb(), viewer, ref, { studioIds, durationMinutes: durationMinutes!, addons, override: confirmedKeys(formData.get("overrideConfirmed")) }, new Date());
   if (!result.ok) redirect(withMessage(page, "error", result.message) + "#change");
   flushEmailsSoon();
   const words = [
@@ -118,6 +119,37 @@ export async function editBookingAction(formData: FormData): Promise<void> {
     "The client has been emailed.",
   ];
   redirect(withMessage(page, "notice", words.join(" ")));
+}
+
+// ── An owner's override: what a time passes over, for the pop-up (question 79) ──
+// Each answers an owner alone (anything else gets nothing listed, and the save checks the time as free), and changes
+// nothing: the save checks it all again.
+
+type ConflictList = { conflicts: { key: string; text: string }[] };
+const listed = (conflicts: { key: string; text: string }[]): ConflictList => ({ conflicts: conflicts.map(({ key, text }) => ({ key, text })) });
+
+export async function newBookingConflictsAction(formData: FormData): Promise<ConflictList> {
+  const viewer = await requireStaff("/admin/calendar/new");
+  const durationMinutes = intInRange(formText(formData.get("duration")), 15, 1440);
+  const startMinute = intInRange(formText(formData.get("startMinute")), 0, 1439);
+  if (durationMinutes === null || startMinute === null) return { conflicts: [] };
+  const studioIds = formData.getAll("studio").filter((value): value is string => typeof value === "string");
+  return listed(await conflictsFor(await getDb(), viewer, { studioIds, date: formText(formData.get("date")), startMinute, durationMinutes }));
+}
+
+export async function moveConflictsAction(formData: FormData): Promise<ConflictList> {
+  const viewer = await requireStaff("/admin/calendar");
+  const startMinute = intInRange(formText(formData.get("startMinute")), 0, 1439);
+  if (startMinute === null) return { conflicts: [] };
+  return listed(await moveConflicts(await getDb(), viewer, formText(formData.get("ref")), formText(formData.get("date")), startMinute));
+}
+
+export async function changeConflictsAction(formData: FormData): Promise<ConflictList> {
+  const viewer = await requireStaff("/admin/calendar");
+  const durationMinutes = intInRange(formText(formData.get("duration")), 15, 1440);
+  if (durationMinutes === null) return { conflicts: [] };
+  const studioIds = formData.getAll("studio").filter((value): value is string => typeof value === "string");
+  return listed(await changeConflicts(await getDb(), viewer, formText(formData.get("ref")), { studioIds, durationMinutes }));
 }
 
 /** Make a booking for a client from the admin. Nothing is charged online. */
@@ -132,9 +164,8 @@ export async function createAdminBookingAction(formData: FormData): Promise<void
   for (const id of studioIds) again.append("studio", id);
   again.set("date", date);
   if (durationMinutes !== null) again.set("duration", String(durationMinutes));
-  // An owner's override of the opening hours (question 76): the booking's own check passes it to the owner alone.
-  const afterHours = formData.get("afterHours") === "1";
-  if (afterHours) again.set("afterHours", "1");
+  // An owner's form with every start of the day (question 79) comes back so.
+  if (formData.get("anyTime") === "1") again.set("anyTime", "1");
   const form = `/admin/calendar/new?${again}`;
   if (durationMinutes === null || startMinute === null) redirect(withMessage(form, "error", "Choose a length and a start time."));
 
@@ -167,7 +198,7 @@ export async function createAdminBookingAction(formData: FormData): Promise<void
       promoCode: formText(formData.get("code")) || undefined,
     },
     // The processor set up now says what kind of money the booking is: test mode's, or real (src/server/test-mode.ts).
-    { now: new Date(), baseUrl: await siteUrl(), processor: resolvePayments().provider?.name ?? null, openAllDay: afterHours },
+    { now: new Date(), baseUrl: await siteUrl(), processor: resolvePayments().provider?.name ?? null, override: confirmedKeys(formData.get("overrideConfirmed")) },
   );
   if (!result.ok) redirect(withMessage(form, "error", result.message));
   flushEmailsSoon();

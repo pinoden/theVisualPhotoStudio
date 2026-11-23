@@ -588,6 +588,11 @@ export const studioHolds = pgTable(
     /** Booking time plus the studio's clean-up buffer. */
     occupied: tstzrange("occupied").notNull(),
     active: boolean("active").notNull().default(true),
+    /**
+     * An owner saved this hold over another's time, having read what it passes over in a pop-up (question 79 in
+     * ProjectLibrary.md): the no-overlap constraint leaves it out. Set again each time the booking is moved or changed.
+     */
+    overlapAllowed: boolean("overlap_allowed").notNull().default(false),
     bookingId: uuid("booking_id").references(() => bookings.id, { onDelete: "cascade" }),
     blockId: uuid("block_id").references(() => blocks.id, { onDelete: "cascade" }),
     /** Price of this studio within the booking. */
@@ -612,6 +617,8 @@ export const photographerHolds = pgTable(
       .references(() => photographers.id, { onDelete: "restrict" }),
     occupied: tstzrange("occupied").notNull(),
     active: boolean("active").notNull().default(true),
+    /** An owner saved this session over the person's other time, as on `studio_holds` (question 79). */
+    overlapAllowed: boolean("overlap_allowed").notNull().default(false),
     /** The session that holds the photographer. Null for time blocked in the admin. */
     bookingId: uuid("booking_id").references(() => bookings.id, { onDelete: "cascade" }),
     /** Why the time is blocked, when it is. */

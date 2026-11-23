@@ -946,14 +946,23 @@ test("the calendar shows a day, a week and a month, one studio or all, and a boo
   await expect(byText(page, /add Paris or choose a different combination/)).toBeVisible();
   await expect(page.getByLabel("Free start times")).toHaveCount(0);
   await page.getByRole("checkbox", { name: "Studio Blanche" }).uncheck();
-  // An owner may book outside the opening hours (the owner's answer of 2026-11-23: "Only admin may override").
-  await page.getByRole("checkbox", { name: /^Outside the opening hours/ }).check();
+  // An owner may choose any time (the owner's answers of 2026-11-23, question 79): every start of the day, each that
+  // passes over something marked, and a pop-up says what before anything is booked.
+  await page.getByRole("checkbox", { name: /^Any time/ }).check();
   await page.getByRole("button", { name: "Show free times" }).click();
-  await expect(page.getByLabel("Free start times").locator("option", { hasText: "7:00 AM – 8:00 AM" })).toHaveCount(1);
-  await page.getByLabel("Free start times").selectOption({ label: "4:00 PM – 5:00 PM" });
+  await expect(page.getByLabel("Start times").locator("option", { hasText: "7:00 AM – 8:00 AM — passes over 1 thing" })).toHaveCount(1);
+  await page.getByLabel("Start times").selectOption({ label: "7:00 AM – 8:00 AM — passes over 1 thing" });
   await page.getByLabel("Client’s name").fill("Dana Diaz");
   await page.getByLabel("Client’s email").fill("dana.e2e@example.com");
   await page.getByLabel("Client’s phone").fill("407-555-0142");
+  await page.getByRole("button", { name: "Book for the client" }).click();
+  const passesOver = page.getByRole("dialog", { name: "This time passes over" });
+  await expect(passesOver).toContainText("Studio Dayglow is open");
+  expect(await accessibilityProblems(page), "the owner's pop-up of what a time passes over").toEqual([]);
+  await passesOver.getByRole("button", { name: "Cancel" }).click();
+  await expect(passesOver).toBeHidden();
+  await expect(page.getByRole("heading", { name: "New booking" })).toBeVisible();
+  await page.getByLabel("Start times").selectOption({ label: "4:00 PM – 5:00 PM" });
   // The add-ons of the booking screen are offered: those for any booking, and Dayglow's pet fee.
   // Dayglow alone takes 6 extra guests, at $5 each.
   await expect(page.getByRole("spinbutton", { name: "Extra guest" })).toHaveAttribute("max", "6");
@@ -1033,6 +1042,23 @@ test("the calendar shows a day, a week and a month, one studio or all, and a boo
   await page.getByRole("navigation", { name: "Calendar view" }).getByRole("link", { name: "Week" }).click();
   await expect(page.getByRole("link", { name: /Bea Bundle/ })).toHaveCount(1);
   expect(await accessibilityProblems(page), "the calendar's week, with a bundle").toEqual([]);
+
+  // Before the studio opens, with the owner's OK in the pop-up (question 79): booked, and its history says what it passed over.
+  await page.goto(`/admin/calendar/new?date=${NEAR}`);
+  await page.getByRole("checkbox", { name: "Studio Paris" }).check();
+  await byLabel(page, "Length").selectOption({ label: "1 hour" });
+  await page.getByRole("checkbox", { name: /^Any time/ }).check();
+  await page.getByRole("button", { name: "Show free times" }).click();
+  await page.getByLabel("Start times").selectOption({ label: "6:00 AM – 7:00 AM — passes over 1 thing" });
+  await page.getByLabel("Client’s name").fill("Ed Early");
+  await page.getByLabel("Client’s email").fill("ed.e2e@example.com");
+  await page.getByLabel("Client’s phone").fill("407-555-0145");
+  await page.getByRole("button", { name: "Book for the client" }).click();
+  const early = page.getByRole("dialog", { name: "This time passes over" });
+  await expect(early).toContainText("Studio Paris is open");
+  await early.getByRole("button", { name: "OK" }).click();
+  await expect(page.getByRole("heading", { name: "Ed Early" })).toBeVisible();
+  await expect(page.getByRole("row", { name: /over: Studio Paris is open/ })).toBeVisible();
 });
 
 test("the owner sets a weekend price and the booking screen charges it on Saturday only", async ({ page }) => {

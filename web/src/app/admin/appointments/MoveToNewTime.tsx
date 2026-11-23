@@ -1,9 +1,11 @@
 import { formatCents } from "@/lib/domain/pricing";
-import { durationLabel, longDateLabel, minutesToLabel } from "@/lib/domain/time";
+import { durationLabel, longDateLabel } from "@/lib/domain/time";
+import { OverrideSubmit } from "@/components/OverrideSubmit";
+import { startLabel } from "@/lib/start-label";
 import type { Appointment, MovePricePreview, moveOptions } from "@/server/appointments";
 import { PRICED_AS } from "@/server/reprice";
 import { localDateOf } from "@/server/tz";
-import { moveBookingAction } from "./actions";
+import { moveBookingAction, moveConflictsAction } from "./actions";
 
 /** What moving the booking to `date` does to its price (follow-up 5), in a sentence: its amounts only for a viewer who sees prices. */
 function movePriceSentence(price: MovePricePreview, date: string, seesPrices: boolean): string {
@@ -33,7 +35,7 @@ export function MoveToNewTime({
   today,
   idPrefix,
   owner = false,
-  afterHours = false,
+  anyTime = false,
 }: {
   appointment: Appointment;
   /** The date whose free times are shown, or null before one is chosen. */
@@ -46,9 +48,9 @@ export function MoveToNewTime({
   today: string;
   /** Makes the fields' ids its own, as the calendar's pop-up and a page could share them. */
   idPrefix: string;
-  /** An owner, who may pass over the opening hours (question 76), and whether the times shown do. */
+  /** An owner, who may choose any time over what is in its way (question 79), and whether every start is shown. */
   owner?: boolean;
-  afterHours?: boolean;
+  anyTime?: boolean;
 }) {
   if (appointment.moveBlocked) return <p className="move-blocked">{appointment.moveBlocked}</p>;
   const day = localDateOf(new Date(appointment.startAt));
@@ -69,8 +71,8 @@ export function MoveToNewTime({
         </button>
         {owner && (
           <label className="admin-check" style={{ display: "block", fontSize: ".85rem", flexBasis: "100%" }}>
-            <input type="checkbox" name="afterHours" value="1" defaultChecked={afterHours} /> Outside the opening hours (owners only). Other bookings,
-            the gap after each and blocked time still stand.
+            <input type="checkbox" name="anyTime" value="1" defaultChecked={anyTime} /> Any time (owners only): every start of the day, over
+            the opening hours, other bookings or blocked time too. A pop-up says what it passes over before it is moved.
           </label>
         )}
       </form>
@@ -90,23 +92,28 @@ export function MoveToNewTime({
           <input type="hidden" name="ref" value={appointment.ref} />
           <input type="hidden" name="date" value={moveDate} />
           {back && <input type="hidden" name="back" value={back} />}
-          {owner && afterHours && <input type="hidden" name="afterHours" value="1" />}
           <div className="admin-form-row">
             <div className="form-group">
               <label className="form-label" htmlFor={`${idPrefix}-time`}>
-                Free start times on {longDateLabel(moveDate)}
+                {anyTime ? "Start times" : "Free start times"} on {longDateLabel(moveDate)}
               </label>
               <select id={`${idPrefix}-time`} name="startMinute" className="form-control" required>
                 {moveTimes.starts.map((minute) => (
                   <option key={minute} value={minute}>
-                    {minutesToLabel(minute)} – {minutesToLabel(minute + appointment.durationMinutes)}
+                    {startLabel(minute, appointment.durationMinutes, moveTimes.passes)}
                   </option>
                 ))}
               </select>
             </div>
-            <button type="submit" className="btn btn-dark btn-small">
-              Move booking
-            </button>
+            {owner ? (
+              <OverrideSubmit check={moveConflictsAction} className="btn btn-dark btn-small">
+                Move booking
+              </OverrideSubmit>
+            ) : (
+              <button type="submit" className="btn btn-dark btn-small">
+                Move booking
+              </button>
+            )}
           </div>
           {appointment.terms.maxReschedules > 0 ? (
             <label style={{ display: "block", fontSize: ".85rem" }}>
@@ -128,8 +135,8 @@ export function MoveToNewTime({
       <p style={{ fontSize: ".78rem", margin: ".75rem 0 0" }}>
         The studio and the length stay the same. Moved to a day of the other kind (a weekday or a weekend), the booking takes that day&rsquo;s
         price, from today&rsquo;s prices: the client then owes the difference, or has paid more than its price, which the studio refunds. Only times
-        that are free are offered: inside opening hours, and at least 15 minutes from any other appointment in the studio. The client is emailed
-        the new time.
+        that are free are offered: inside opening hours, and at least 15 minutes from any other appointment in the studio
+        {owner ? ", unless an owner ticks “Any time”" : ""}. The client is emailed the new time.
       </p>
     </>
   );

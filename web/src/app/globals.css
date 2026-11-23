@@ -1815,6 +1815,23 @@ button { font-family: inherit; }
 .appt-dialog-what .cal-swatch { display: inline-block; vertical-align: middle; }
 .appt-dialog-notes { margin: 0; white-space: pre-wrap; }
 .appt-dialog-full { margin: 1.25rem 0 0; font-size: .9rem; }
+/* An owner's override: what a time passes over, before OK saves it (src/components/OverrideSubmit.tsx). */
+.override-dialog {
+  width: min(32rem, calc(100% - 2rem));
+  padding: 1.25rem 1.5rem;
+  border: 0;
+  border-left: 6px solid #b45309;
+  border-radius: 6px;
+  background: #fff;
+  color: var(--color-dark);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .25);
+}
+.override-dialog::backdrop { background: rgba(44, 36, 32, .45); }
+.override-dialog h3 { margin: 0 0 .75rem; font-size: 1.1rem; }
+.override-dialog ul { margin: 0 0 .75rem; padding-left: 1.25rem; }
+.override-dialog li { margin-bottom: .35rem; }
+.override-dialog p { margin: 0 0 1rem; font-size: .9rem; }
+.override-dialog-buttons { display: flex; gap: .5rem; justify-content: flex-end; }
 .cal-axis span {
   position: absolute;
   top: calc(var(--top) * var(--ppm));

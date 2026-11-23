@@ -1,7 +1,8 @@
 import { formatCents } from "@/lib/domain/pricing";
 import { durationLabel } from "@/lib/domain/time";
+import { OverrideSubmit } from "@/components/OverrideSubmit";
 import type { EditOptions } from "@/server/edit-booking";
-import { editBookingAction } from "./actions";
+import { changeConflictsAction, editBookingAction } from "./actions";
 
 /**
  * An owner's form to change a booking's studios, length, guests and add-ons (the owner's admin brief of 2026-11-22,
@@ -56,17 +57,15 @@ export function ChangeBooking({ bookingRef, options }: { bookingRef: string; opt
           </div>
         </fieldset>
       )}
-      <label className="admin-check" style={{ display: "block", fontSize: ".85rem", marginBottom: ".75rem" }}>
-        <input type="checkbox" name="afterHours" value="1" /> Outside the opening hours. Other bookings, the gap after each and blocked time still stand.
-      </label>
       <p style={{ fontSize: ".85rem" }}>
         The booking keeps its day and start. Its price is worked out again at today&rsquo;s prices, the add-ons it keeps at
         theirs, and the client is emailed the change. What it then owes, or was paid beyond its new price, shows under
-        Payment below.
+        Payment below. Should the change pass over the opening hours, another booking or blocked time, a pop-up says so first,
+        and only OK saves it.
       </p>
-      <button type="submit" className="btn btn-dark btn-small">
+      <OverrideSubmit check={changeConflictsAction} className="btn btn-dark btn-small">
         Save the change
-      </button>
+      </OverrideSubmit>
     </form>
   );
 }

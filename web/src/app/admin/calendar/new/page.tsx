@@ -5,7 +5,7 @@ import { connection } from "next/server";
 import { Suspense } from "react";
 import { getDb } from "@/db/client";
 import { bookableDurations, formatCents, PricingError, quote } from "@/lib/domain/pricing";
-import { durationLabel, isIsoDate, longDateLabel, minutesToLabel } from "@/lib/domain/time";
+import { durationLabel, isIsoDate, longDateLabel } from "@/lib/domain/time";
 import { can } from "@/lib/abilities";
 import { extraGuestsFor, studioCombinationError } from "@/lib/catalog-view";
 import { EMAIL_FIELD } from "@/lib/parse";
@@ -13,7 +13,9 @@ import { freeStartsFor } from "@/server/appointments";
 import { dayTypeFor, loadCatalog } from "@/server/catalog";
 import { requireStaff } from "@/server/session";
 import { localDateOf } from "@/server/tz";
-import { createAdminBookingAction } from "../../appointments/actions";
+import { OverrideSubmit } from "@/components/OverrideSubmit";
+import { startLabel } from "@/lib/start-label";
+import { createAdminBookingAction, newBookingConflictsAction } from "../../appointments/actions";
 import { AdminFrame, AdminLoading } from "../../frame";
 
 export const metadata: Metadata = { title: "New booking", robots: { index: false } };
@@ -55,9 +57,9 @@ async function NewBooking({ searchParams }: Pick<PageProps<"/admin/calendar/new"
   };
   const client = { name: given("clientName", 120), email: given("clientEmail", 200), phone: given("clientPhone", 40) };
   const dayType = dayTypeFor(catalog, date);
-  // An owner's override of the opening hours (the owner's answer of 2026-11-23, question 76).
+  // An owner may choose any time, over what is in its way, after a pop-up says what (question 79).
   const owner = viewer.role === "owner";
-  const afterHours = owner && query.afterHours === "1";
+  const anyTime = owner && query.anyTime === "1";
 
   // The lengths on sale: for the chosen studios on that kind of day, or every length while nothing is chosen.
   const lengths =
@@ -78,7 +80,7 @@ async function NewBooking({ searchParams }: Pick<PageProps<"/admin/calendar/new"
       : studioIds.length > 1
         ? `None with these studios together: ${studioIds.length === 2 ? catalog.settings.twoStudioGuestLimit : catalog.settings.threeStudioGuestLimit} guests at most in all, and their prices include that many.`
         : "None with this studio.";
-  const free = ready ? await freeStartsFor(db, { studioIds, date, durationMinutes: duration, openAllDay: afterHours }, now) : null;
+  const free = ready ? await freeStartsFor(db, { studioIds, date, durationMinutes: duration, anyTime }, now) : null;
   let price: number | null = null;
   if (ready) {
     try {
@@ -144,8 +146,9 @@ async function NewBooking({ searchParams }: Pick<PageProps<"/admin/calendar/new"
         </div>
         {owner && (
           <label className="admin-check" style={{ display: "block", fontSize: ".85rem" }}>
-            <input type="checkbox" name="afterHours" value="1" defaultChecked={afterHours} /> Outside the opening hours (owners only).{" "}
-            An owner may book outside the studios&rsquo; opening hours: other bookings, the gap after each and blocked time still stand.
+            <input type="checkbox" name="anyTime" value="1" defaultChecked={anyTime} /> Any time (owners only). Every start of the day is
+            offered, outside the opening hours and over other bookings or blocked time too; before it is booked, a pop-up says what it passes
+            over.
           </label>
         )}
         {combinationError && <p className="field-error" role="alert">{combinationError}</p>}
@@ -178,16 +181,16 @@ async function NewBooking({ searchParams }: Pick<PageProps<"/admin/calendar/new"
               ))}
               <input type="hidden" name="date" value={date} />
               <input type="hidden" name="duration" value={duration} />
-              {afterHours && <input type="hidden" name="afterHours" value="1" />}
+              {anyTime && <input type="hidden" name="anyTime" value="1" />}
               <div className="admin-form-row">
                 <div className="form-group">
                   <label className="form-label" htmlFor="new-time">
-                    Free start times
+                    {anyTime ? "Start times" : "Free start times"}
                   </label>
                   <select id="new-time" name="startMinute" className="form-control" required>
                     {free.starts.map((minute) => (
                       <option key={minute} value={minute}>
-                        {minutesToLabel(minute)} – {minutesToLabel(minute + duration)}
+                        {startLabel(minute, duration, free.passes)}
                       </option>
                     ))}
                   </select>
@@ -277,9 +280,15 @@ async function NewBooking({ searchParams }: Pick<PageProps<"/admin/calendar/new"
                   what is paid at the studio.
                 </div>
               </div>
-              <button type="submit" className="btn btn-dark">
-                Book for the client
-              </button>
+              {owner ? (
+                <OverrideSubmit check={newBookingConflictsAction} className="btn btn-dark">
+                  Book for the client
+                </OverrideSubmit>
+              ) : (
+                <button type="submit" className="btn btn-dark">
+                  Book for the client
+                </button>
+              )}
               <p style={{ fontSize: ".78rem", margin: ".75rem 0 0" }}>
                 The client is emailed a confirmation with their own link to the booking. The same rules apply as for a
                 booking made online: opening hours, no overlap, and 15 minutes between appointments.
