@@ -1719,6 +1719,7 @@ button { font-family: inherit; }
 .cal-count { margin: 0 0 0 .5rem; font-size: .85rem; color: var(--color-muted); }
 .cal-head-count { font-weight: 400; color: var(--color-muted); }
 .cal-zoom a { min-width: 3rem; justify-content: center; }
+.cal-zoom a.cal-zoom-reset { min-width: 0; padding-left: .75rem; padding-right: .75rem; }
 .cal-key { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem 1rem; }
 .cal-key .cal-studio { display: inline-flex; align-items: center; gap: .35rem; }
 /* An appointment's page, in its studio's or bundle's colour, as on the calendar. */

@@ -797,7 +797,7 @@ describe("studio-first flow", () => {
 describe("time-first flow", () => {
   it("allows Blanche and Dayglow together once Paris is added", async () => {
     render(<BookingFlow catalog={catalog} navigate={nav.push} />);
-    await user.click(screen.getByRole("radio", { name: /I know when I want to come/ }));
+    await user.click(screen.getByRole("radio", { name: /I want to choose the date first/ }));
     pickDate(WED);
     await pickDuration("1 hr");
     await next();
@@ -816,7 +816,7 @@ describe("time-first flow", () => {
   it("shows which studios are free at the chosen time and books from there", async () => {
     busy = { [B]: [[h(10), h(12) + 10]] };
     render(<BookingFlow catalog={catalog} navigate={nav.push} />);
-    await user.click(screen.getByRole("radio", { name: /I know when I want to come/ }));
+    await user.click(screen.getByRole("radio", { name: /I want to choose the date first/ }));
 
     // The first step is now the date, not the studio.
     pickDate(WED);
@@ -856,7 +856,7 @@ describe("time-first flow", () => {
   it("lists a time only if some studio is free then", async () => {
     busy = { [B]: [[0, 1440]], [D]: [[0, 1440]], [P]: [[h(9), h(15)]] };
     render(<BookingFlow catalog={catalog} navigate={nav.push} />);
-    await user.click(screen.getByRole("radio", { name: /I know when I want to come/ }));
+    await user.click(screen.getByRole("radio", { name: /I want to choose the date first/ }));
     pickDate(WED);
     await pickDuration("1 hr");
     await next();
@@ -867,7 +867,7 @@ describe("time-first flow", () => {
 
   it("counts only studios that offer the chosen duration", async () => {
     render(<BookingFlow catalog={catalog} navigate={nav.push} />);
-    await user.click(screen.getByRole("radio", { name: /I know when I want to come/ }));
+    await user.click(screen.getByRole("radio", { name: /I want to choose the date first/ }));
     pickDate(WED);
     await pickDuration("10 hr"); // only Blanche has a 10-hour price
     await next();
@@ -881,7 +881,7 @@ describe("time-first flow", () => {
   it("forgets the studio choice when the customer goes back and changes the time", async () => {
     busy = { [P]: [[h(14), h(15) + 10]] };
     render(<BookingFlow catalog={catalog} navigate={nav.push} />);
-    await user.click(screen.getByRole("radio", { name: /I know when I want to come/ }));
+    await user.click(screen.getByRole("radio", { name: /I want to choose the date first/ }));
     pickDate(WED);
     await pickDuration("1 hr");
     await next();
@@ -904,7 +904,7 @@ describe("switching between the two flows", () => {
     await user.click(studioBox("Studio Paris"));
     await next();
     expect(screen.getByLabelText("Date")).toBeTruthy();
-    await user.click(screen.getByRole("radio", { name: /I know when I want to come/ }));
+    await user.click(screen.getByRole("radio", { name: /I want to choose the date first/ }));
     expect(screen.getByLabelText("Date")).toBeTruthy(); // date is the first step here
     expect(screen.queryByRole("button", { name: /Back/ })).toBeNull();
     await user.click(screen.getByRole("radio", { name: /I know which studio I want/ }));

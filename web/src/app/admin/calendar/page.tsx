@@ -192,10 +192,16 @@ async function Calendar({ searchParams }: Pick<PageProps<"/admin/calendar">, "se
         {view !== "month" && (
           <nav className="cal-tabs cal-zoom" aria-label="Zoom">
             {(Object.keys(ZOOMS) as Zoom[]).map((scale) => (
-              <Link key={scale} href={href({ zoom: scale })} aria-current={scale === zoom ? "true" : undefined}>
+              <Link key={scale} href={href({ zoom: scale })} aria-current={scale === zoom ? "true" : undefined} title={scale === "0.5" ? "The normal size" : undefined}>
                 {scale}
               </Link>
             ))}
+            {/* Back to the size the calendar has before it is zoomed (the owner, 2026-11-23: no button to go back). */}
+            {zoom !== "0.5" && (
+              <Link href={href({ zoom: "0.5" })} className="cal-zoom-reset">
+                Normal size
+              </Link>
+            )}
           </nav>
         )}
         <nav className="cal-filter" aria-label="Studio">

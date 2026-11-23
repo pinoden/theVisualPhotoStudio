@@ -382,7 +382,7 @@ test("a taken time is no longer offered, nor any time within 15 minutes of it", 
 
 test("starting from the time shows which studios are free, and books one", async ({ page }) => {
   await page.goto("/book");
-  await page.getByRole("radio", { name: /I know when I want to come/ }).click();
+  await page.getByRole("radio", { name: /I want to choose the date first/ }).click();
   await byLabel(page, "Date").fill(NEAR);
   await page.getByRole("button", { name: "1 hr", exact: true }).click();
   await next(page);
@@ -833,8 +833,10 @@ test("the calendar shows a day, a week and a month, one studio or all, and a boo
   await expect(page.getByRole("link", { name: /Bob Brown/ })).toContainText("10:00 AM – 11:00 AM");
   await page.getByRole("navigation", { name: "Calendar view" }).getByRole("link", { name: "Week" }).click();
   await expect(page).toHaveURL(/view=week.*zoom=0\.75/);
-  await page.getByRole("navigation", { name: "Zoom" }).getByRole("link", { name: "0.5" }).click();
+  // Back to the normal size with its own button (the owner, 2026-11-23), which is not there at the normal size.
+  await page.getByRole("navigation", { name: "Zoom" }).getByRole("link", { name: "Normal size" }).click();
   await expect(page).not.toHaveURL(/zoom=/);
+  await expect(page.getByRole("navigation", { name: "Zoom" }).getByRole("link", { name: "Normal size" })).toHaveCount(0);
   await page.goto(`/admin/calendar?view=day&date=${NEAR}`);
 
   // One studio at a time, or all of them.
