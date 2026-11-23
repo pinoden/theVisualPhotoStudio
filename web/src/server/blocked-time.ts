@@ -98,12 +98,13 @@ async function conflictsOf(db: DbLike, studioIds: string[], spans: { start: Date
     customer_name: string | null;
     booking_start: string | Date | null;
     booking_end: string | Date | null;
+    block_id: string | null;
     series: string | null;
   }>(
     db,
     sql`
       select lower(h.occupied) as start_at, upper(h.occupied) as end_at, s.name as studio, b.ref, b.customer_name,
-             b.start_at as booking_start, b.end_at as booking_end, coalesce(k.series_id, k.id) as series
+             b.start_at as booking_start, b.end_at as booking_end, h.block_id, coalesce(k.series_id, k.id) as series
       from studio_holds h
       join studios s on s.id = h.studio_id
       left join bookings b on b.id = h.booking_id
@@ -114,16 +115,23 @@ async function conflictsOf(db: DbLike, studioIds: string[], spans: { start: Date
       order by lower(h.occupied), s.sort_order
     `,
   );
-  return rows
-    .filter((row) => (exceptKey === null || row.series === null || row.series !== exceptKey))
-    .filter((row) => {
-      const [start, end] = [new Date(row.start_at).getTime(), new Date(row.end_at).getTime()];
-      return spans.some((span) => start < span.end.getTime() && end > span.start.getTime());
-    })
-    .map((row) => {
-      const when = formatRange(new Date(row.booking_start ?? row.start_at), new Date(row.booking_end ?? row.end_at));
-      return { ref: row.ref, customerName: row.customer_name ?? "", studio: row.studio, day: when.day, time: when.time };
-    });
+  // A bundle holds each of its studios, and a block each studio it closes: each is named once, with all its studios
+  // ("Studio Blanche + Studio Paris"), as the calendar draws it once (the owner's admin brief of 2026-11-22, item 3).
+  const named = new Map<string, BlockConflict>();
+  for (const row of rows) {
+    if (exceptKey !== null && row.series !== null && row.series === exceptKey) continue;
+    const [start, end] = [new Date(row.start_at).getTime(), new Date(row.end_at).getTime()];
+    if (!spans.some((span) => start < span.end.getTime() && end > span.start.getTime())) continue;
+    const key = row.ref ?? `block:${row.block_id}`;
+    const already = named.get(key);
+    if (already) {
+      already.studio += ` + ${row.studio}`;
+      continue;
+    }
+    const when = formatRange(new Date(row.booking_start ?? row.start_at), new Date(row.booking_end ?? row.end_at));
+    named.set(key, { ref: row.ref, customerName: row.customer_name ?? "", studio: row.studio, day: when.day, time: when.time });
+  }
+  return [...named.values()];
 }
 
 /** "Nothing was blocked. 2 appointments hold part of that time: …": the appointments first, then time blocked already. */

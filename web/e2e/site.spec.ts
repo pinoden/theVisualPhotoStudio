@@ -63,6 +63,8 @@ const PRICES_OWNER = "owner14@studio.test";
 const INBOX_OWNER = "owner15@studio.test";
 /** Writes the booking form and its agreements. */
 const FORMS_OWNER = "owner16@studio.test";
+/** Looks at the fully booked day. */
+const FULL_DAY_OWNER = "owner17@studio.test";
 const STAFF = "sam.e2e@studio.test";
 const MANAGER = "mia.e2e@studio.test";
 
@@ -1216,6 +1218,133 @@ test("a client joins the waitlist for a time that is taken, and the owners see a
   await row.getByRole("button", { name: "Take off" }).click();
   await expect(byText(page, "Taken off the waitlist: they will not be emailed.")).toBeVisible();
   await expect(page.getByRole("row", { name: /Hal Later/ })).toContainText("Taken off");
+});
+
+test("a fully booked day: the calendar draws every appointment once and apart, at every zoom, and the booking page offers none of it", async ({ page, browser }) => {
+  // The owner's admin brief of 2026-11-22, item 13. Its rules (the photographer, a prop, a closure, a move, a
+  // cancellation) meet on one day in src/server/full-day.test.ts; this is the calendar a person reads on that day.
+  const day = dateAhead(136);
+  await signIn(page, FULL_DAY_OWNER, `/admin/calendar/new?date=${day}`);
+  const ids: Record<string, string> = {};
+  for (const studio of ["Blanche", "Paris", "Dayglow"]) ids[studio] = (await page.getByRole("checkbox", { name: `Studio ${studio}` }).getAttribute("value"))!;
+
+  // Ada books all three studios from nine to eleven on the booking page. What it sent, with the policies she
+  // accepted, books the rest of the day in the same way, straight to the server.
+  const client = await (await browser.newContext()).newPage();
+  let sent = null as Record<string, unknown> | null;
+  await client.route("**/api/bookings", async (route) => {
+    sent ??= route.request().postDataJSON();
+    await route.continue();
+  });
+  await bookStudioFirstToPayment(client, { studios: ["Studio Blanche", "Studio Paris", "Studio Dayglow"], date: day, duration: "2 hr", time: "9:00 AM", customer: { name: "Ada Ames", email: "ada.e2e@example.com", phone: "407-555-0160" } });
+  await confirmAndGetRef(client, /^Confirm & pay/);
+  const book = (name: string, studios: string[], startHours: number, hours: number) =>
+    client.request.post("/api/bookings", {
+      data: {
+        ...sent,
+        requestId: undefined,
+        expectedTotalCents: undefined,
+        studioIds: studios.map((studio) => ids[studio]),
+        startMinute: startHours * 60,
+        durationMinutes: hours * 60,
+        customer: { name, email: `${name.split(" ")[0].toLowerCase()}.e2e@example.com`, phone: "407-555-0160" },
+      },
+    });
+  // Blanche: Ada · Bea 11:15–1:15 · Dee 1:30–3:30 · Gus 3:45–6:45. Paris: Ada · Cy 11:15–2:15 (with Dayglow) · Eve
+  // 2:30–4:30 · Hal 4:45–6:45. Dayglow: Ada · Cy · Fay 2:30–6:30. Each keeps its studio's 15 minutes after it.
+  const rest: [string, string[], number, number][] = [
+    ["Bea Bell", ["Blanche"], 11.25, 2],
+    ["Cy Cole", ["Paris", "Dayglow"], 11.25, 3],
+    ["Dee Dunn", ["Blanche"], 13.5, 2],
+    ["Eve Eng", ["Paris"], 14.5, 2],
+    ["Fay Fox", ["Dayglow"], 14.5, 4],
+    ["Gus Gray", ["Blanche"], 15.75, 3],
+    ["Hal Hunt", ["Paris"], 16.75, 2],
+  ];
+  for (const [name, studios, start, hours] of rest) expect((await book(name, studios, start, hours)).status(), name).toBe(201);
+  const twice = await book("Ivy Ivers", ["Paris"], 12, 1);
+  expect([twice.status(), (await twice.json()).code]).toEqual([409, "slot_taken"]);
+
+  // The booking page offers nothing that day, to a studio or to a bundle, and the day before or after as usual.
+  const other = day.endsWith("-01") ? addDays(day, 1) : addDays(day, -1);
+  for (const studios of ["paris", "blanche,paris,dayglow"]) {
+    await client.goto(`/book?studio=${studios}&date=${day}&duration=60`);
+    await next(client);
+    // Every day reads "not available" until the month's answer comes: the open day first, then the full one.
+    await expect(client.getByRole("button", { name: longDateLabel(other), exact: true })).toBeEnabled();
+    await expect(client.getByRole("button", { name: `${longDateLabel(day)}, not available` })).toBeDisabled();
+  }
+  await client.context().close();
+
+  // The calendar: eight appointments, each drawn once, a bundle across its studios side by side, none over another,
+  // each with its client's name and time in full, in its studio's or bundle's colour.
+  await page.goto(`/admin/calendar?view=day&date=${day}`);
+  await expect(onScreen(page.locator(".cal-count"))).toHaveText("8 appointments this day");
+  const layout = () =>
+    onScreen(page.locator(".cal-day")).evaluate((grid) => {
+      const box = (element: Element) => {
+        const { left, right, top, bottom } = element.getBoundingClientRect();
+        return { left, right, top, bottom };
+      };
+      return {
+        columns: [...grid.querySelectorAll(".cal-body .cal-col")].map(box),
+        appointments: [...grid.querySelectorAll(".cal-lanes .cal-appt")].map((link) => ({
+          name: link.querySelector(".cal-appt-name")!.textContent!,
+          box: box(link),
+          inner: box(link.querySelector(".cal-appt-in")!),
+          lines: [".cal-appt-name", ".cal-appt-time"].map((line) => box(link.querySelector(line)!)),
+          clipped: [...link.querySelectorAll(".cal-appt-name, .cal-appt-time")].some((line) => line.scrollWidth > line.clientWidth),
+          color: getComputedStyle(link).borderLeftColor,
+        })),
+      };
+    });
+  const readable = async (where: string) => {
+    const { columns, appointments } = await layout();
+    expect(appointments.map((appointment) => appointment.name).sort(), where).toEqual(["Ada Ames", "Bea Bell", "Cy Cole", "Dee Dunn", "Eve Eng", "Fay Fox", "Gus Gray", "Hal Hunt"]);
+    for (const [index, a] of appointments.entries()) {
+      for (const b of appointments.slice(index + 1)) {
+        const sideBySide = a.box.right <= b.box.left + 1 || b.box.right <= a.box.left + 1;
+        const oneAfterTheOther = a.box.bottom <= b.box.top + 1 || b.box.bottom <= a.box.top + 1;
+        expect(sideBySide || oneAfterTheOther, `${where}: ${a.name} and ${b.name} overlap`).toBe(true);
+      }
+      for (const line of a.lines) expect(line.top >= a.inner.top - 1 && line.bottom <= a.inner.bottom + 1, `${where}: ${a.name}'s lines fit`).toBe(true);
+      expect(a.clipped, `${where}: ${a.name}'s name and time are not cut short`).toBe(false);
+    }
+    const of = (name: string) => appointments.find((appointment) => appointment.name === name)!;
+    // Columns Blanche, Paris, Dayglow: Ada across all three, Cy across Paris and Dayglow.
+    expect(Math.abs(of("Ada Ames").box.left - columns[0].left) < 4 && Math.abs(of("Ada Ames").box.right - columns[2].right) < 4, `${where}: Ada across the three`).toBe(true);
+    expect(Math.abs(of("Cy Cole").box.left - columns[1].left) < 4 && Math.abs(of("Cy Cole").box.right - columns[2].right) < 4, `${where}: Cy across Paris and Dayglow`).toBe(true);
+    const colours = ["Ada Ames", "Cy Cole", "Bea Bell", "Eve Eng", "Fay Fox"].map((name) => of(name).color);
+    expect(new Set(colours).size, `${where}: the three studios and the two bundles each in a colour of their own`).toBe(5);
+    expect([of("Dee Dunn").color, of("Gus Gray").color], `${where}: Blanche's in Blanche's colour`).toEqual([of("Bea Bell").color, of("Bea Bell").color]);
+    expect(of("Hal Hunt").color).toBe(of("Eve Eng").color);
+    return of("Ada Ames").box.bottom - of("Ada Ames").box.top;
+  };
+  const normal = await readable("zoom 0.5");
+  await shot(page, "17f-calendar-full-day");
+  expect(await accessibilityProblems(page), "the calendar of a full day").toEqual([]);
+  const zoom = page.getByRole("navigation", { name: "Zoom" });
+  await zoom.getByRole("link", { name: "0.75" }).click();
+  await expect(page).toHaveURL(/zoom=0\.75/);
+  await expect.poll(async () => (await page.getByRole("link", { name: /Ada Ames/ }).boundingBox())!.height).toBeGreaterThan(normal * 1.4);
+  await readable("zoom 0.75");
+  await page.getByRole("navigation", { name: "Zoom" }).getByRole("link", { name: "0.25" }).click();
+  await expect(page).toHaveURL(/zoom=0\.25/);
+  await expect.poll(async () => (await page.getByRole("link", { name: /Ada Ames/ }).boundingBox())!.height).toBeLessThan(normal * 0.7);
+  await readable("zoom 0.25");
+  // On an iPad held upright, too.
+  await page.setViewportSize({ width: 768, height: 1024 });
+  await readable("zoom 0.25 at 768px");
+  await page.setViewportSize({ width: 1280, height: 900 });
+
+  // A press on the bundle opens it over the calendar.
+  await page.getByRole("link", { name: /Ada Ames/ }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toContainText("Ada Ames");
+  await expect(dialog).toContainText("Studio bundle rental");
+  for (const studio of ["Blanche", "Paris", "Dayglow"]) await expect(dialog).toContainText(`Studio ${studio}`);
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
 });
 
 test("the owner cancels a booking with a full refund and blocks a morning", async ({ page }) => {

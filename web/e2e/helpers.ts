@@ -285,9 +285,21 @@ export const pickStudio = (page: Page, name: string) => onScreen(page.locator("l
 export const totalRow = (scope: Scope) => onScreen(scope.locator(".price-row.total"));
 
 export async function fillDetails(page: Page, customer: { name: string; email: string; phone: string }): Promise<void> {
-  await byLabel(page, "Full name *").fill(customer.name);
-  await byLabel(page, "Email address *").fill(customer.email);
-  await byLabel(page, "Phone number *").fill(customer.phone);
+  const fields = [
+    ["Full name *", customer.name],
+    ["Email address *", customer.email],
+    ["Phone number *", customer.phone],
+  ] as const;
+  // In WebKit a fill made as the details step opens has twice ended with its field empty, with no error, while the
+  // props' counts arrived (`/api/props-free`) and drew the step again ("Conventions and gotchas" in ProjectLibrary.md).
+  // So each value is checked once all are in, and a field that lost its value is filled again.
+  await expect(async () => {
+    for (const [label, value] of fields) {
+      const field = byLabel(page, label);
+      if ((await field.inputValue()) !== value) await field.fill(value);
+    }
+    for (const [label, value] of fields) await expect(byLabel(page, label)).toHaveValue(value, { timeout: 1_000 });
+  }).toPass({ timeout: 15_000 });
 }
 
 /**
