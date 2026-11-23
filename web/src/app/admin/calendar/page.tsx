@@ -24,7 +24,7 @@ import { isIsoDate, isoWeekday, longDateLabel, minutesToLabel, type IsoDate } fr
 import { can } from "@/lib/abilities";
 import { studioCombinationError } from "@/lib/catalog-view";
 import { count } from "@/lib/words";
-import { getAppointment } from "@/server/appointments";
+import { getAppointment, moveOptions } from "@/server/appointments";
 import { loadCalendar, type CalendarAppointment, type CalendarBlock } from "@/server/calendar";
 import { loadCatalog, type CatalogStudio } from "@/server/catalog";
 import { requireStaff } from "@/server/session";
@@ -117,6 +117,23 @@ async function Calendar({ searchParams }: Pick<PageProps<"/admin/calendar">, "se
         ),
         opened.photography !== null,
       )
+    : null;
+  // Rescheduling inside the pop-up (item 5): `&move=<date>` shows the times free on that date, as the appointment's page does.
+  const moving = opened !== null && opened.may.move && typeof query.move === "string";
+  const moveDate = moving && !opened.moveBlocked && typeof query.move === "string" && isIsoDate(query.move) ? query.move : null;
+  const moveTimes = opened && moveDate ? await moveOptions(db, viewer, opened.ref, moveDate, new Date()) : null;
+  const openedHref = opened ? href({ open: opened.ref }) : "";
+  const move = opened && moving
+    ? {
+        date: moveDate,
+        times: moveTimes,
+        dateForm: {
+          action: "/admin/calendar",
+          keep: { view, date, ...(chosen ? { studio: chosen.slug } : {}), ...(zoom === "0.5" ? {} : { zoom }), open: opened.ref },
+        },
+        back: openedHref,
+        closeHref: openedHref,
+      }
     : null;
   const bookAnother =
     opened && mayBook && opened.customerEmail !== null
@@ -219,7 +236,15 @@ async function Calendar({ searchParams }: Pick<PageProps<"/admin/calendar">, "se
         </p>
       )}
       {opened && openedLook && (
-        <AppointmentDialog appointment={opened} look={openedLook} closeHref={href({})} bookAnotherHref={bookAnother} />
+        <AppointmentDialog
+          appointment={opened}
+          look={openedLook}
+          closeHref={href({})}
+          bookAnotherHref={bookAnother}
+          rescheduleHref={`${openedHref}&move=${localDateOf(new Date(opened.startAt))}`}
+          move={move}
+          today={today}
+        />
       )}
       {bundles.length > 0 && (
         <p className="cal-legend cal-key">

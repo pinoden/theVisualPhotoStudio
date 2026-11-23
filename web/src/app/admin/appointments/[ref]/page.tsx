@@ -10,28 +10,27 @@ import { studios as studiosTable } from "@/db/schema";
 import { appointmentLook } from "@/lib/domain/appointment-look";
 import { LABEL_MEANING, LABEL_TEXT } from "@/lib/domain/labels";
 import { formatCents } from "@/lib/domain/pricing";
-import { durationLabel, isIsoDate, longDateLabel, minutesToLabel } from "@/lib/domain/time";
+import { durationLabel, isIsoDate } from "@/lib/domain/time";
 import { centsToInput, CHARGE_FIELD, MONEY_FIELD } from "@/lib/parse";
 import { PAYMENT_METHODS } from "@/lib/payment-methods";
 import { hoursInWords } from "@/lib/words";
-import { getAppointment, moveOptions, type MovePricePreview } from "@/server/appointments";
+import { getAppointment, moveOptions } from "@/server/appointments";
 import { CHARGE_NOTE_MAX, OVERTIME_MAX_MINUTES, overtimeBlocks, overtimeCents } from "@/server/charges";
 import { BY_CUSTOMER, BY_SYSTEM } from "@/server/history";
 import { resolvePayments } from "@/server/payments";
-import { PRICED_AS } from "@/server/reprice";
 import { requireStaff } from "@/server/session";
 import { loadSettings } from "@/server/settings";
 import { moneyKindOf, payLinkPossible } from "@/server/test-mode";
 import { formatInstant, formatRange, localDateOf } from "@/server/tz";
 import { ownerRefundAction } from "../../actions";
 import { AdminFrame, AdminLoading } from "../../frame";
+import { MoveToNewTime } from "../MoveToNewTime";
 import {
   addChargeAction,
   cancelPayLinkAction,
   checkPayLinkAction,
   closePayLinkByHandAction,
   handRefundAction,
-  moveBookingAction,
   recordPaymentAction,
   sendPayLinkAction,
   setLabelAction,
@@ -53,19 +52,6 @@ const WHO: Record<string, string> = { [BY_CUSTOMER]: "The customer", [BY_SYSTEM]
 
 /** Square's Dashboard, where a payment is found by the receipt number on its receipt (Square's help: "View and search transactions"). */
 const SQUARE_TRANSACTIONS = "https://squareup.com/dashboard/sales/transactions";
-
-/** What moving the booking to `date` does to its price (follow-up 5), in a sentence: its amounts only for a viewer who sees prices. */
-function movePriceSentence(price: MovePricePreview, date: string, seesPrices: boolean): string {
-  const day = `${longDateLabel(date)} is priced as ${PRICED_AS[price.dayType]}`;
-  if (!seesPrices) return `${day}, so the booking’s price changes with the move. The client is emailed the new price.`;
-  return [
-    `${day}: the booking’s total becomes ${formatCents(price.nowCents)} instead of ${formatCents(price.wasCents)}.`,
-    ...(price.codeBackCents > 0 ? [`${formatCents(price.codeBackCents)} of the credit it was paid with goes back on its code.`] : []),
-    ...(price.owedCents > 0 ? [`The client will then owe ${formatCents(price.owedCents)}.`] : []),
-    ...(price.creditLeftCents > 0 ? [`The client will then have paid ${formatCents(price.creditLeftCents)} more than its price: it is theirs, to refund.`] : []),
-    "The client is emailed the new price.",
-  ].join(" ");
-}
 
 /**
  * One appointment, for every level of the admin. `getAppointment` decides
@@ -273,92 +259,18 @@ async function AppointmentDetails({
         </div>
       )}
 
-      {appointment.may.move && appointment.moveBlocked && (
+      {appointment.may.move && (
         <div className="admin-card" id="move">
           <h3>Move to a new time</h3>
-          <p className="move-blocked">{appointment.moveBlocked}</p>
-        </div>
-      )}
-
-      {appointment.may.move && !appointment.moveBlocked && (
-        <div className="admin-card" id="move">
-          <h3>Move to a new time</h3>
-          <form method="get" action={`/admin/appointments/${appointment.ref}#move`} className="admin-form-row">
-            <div className="form-group">
-              <label className="form-label" htmlFor="move-date">
-                New date
-              </label>
-              <input
-                id="move-date"
-                type="date"
-                name="move"
-                className="form-control"
-                defaultValue={moveDate ?? day}
-                min={localDateOf(now)}
-                required
-              />
-            </div>
-            <button type="submit" className="btn btn-outline btn-small">
-              Show free times
-            </button>
-          </form>
-          {moveDate && moveTimes && !moveTimes.ok && <p className="field-error">{moveTimes.message}</p>}
-          {moveDate && moveTimes?.ok && moveTimes.starts.length === 0 && (
-            <p className="field-error">
-              No time is free on {longDateLabel(moveDate)} for {durationLabel(appointment.durationMinutes)} in{" "}
-              {appointment.studios.join(" + ")}.
-            </p>
-          )}
-          {moveDate && moveTimes?.ok && moveTimes.starts.length > 0 && moveTimes.price && (
-            <p className="move-price" role="status">
-              {movePriceSentence(moveTimes.price, moveDate, appointment.money !== null)}
-            </p>
-          )}
-          {moveDate && moveTimes?.ok && moveTimes.starts.length > 0 && (
-            <form action={moveBookingAction}>
-              <input type="hidden" name="ref" value={appointment.ref} />
-              <input type="hidden" name="date" value={moveDate} />
-              <div className="admin-form-row">
-                <div className="form-group">
-                  <label className="form-label" htmlFor="move-time">
-                    Free start times on {longDateLabel(moveDate)}
-                  </label>
-                  <select id="move-time" name="startMinute" className="form-control" required>
-                    {moveTimes.starts.map((minute) => (
-                      <option key={minute} value={minute}>
-                        {minutesToLabel(minute)} – {minutesToLabel(minute + appointment.durationMinutes)}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <button type="submit" className="btn btn-dark btn-small">
-                  Move booking
-                </button>
-              </div>
-              {appointment.terms.maxReschedules > 0 ? (
-                <label style={{ display: "block", fontSize: ".85rem" }}>
-                  <input type="checkbox" name="countsAsClientMove" defaultChecked /> The client asked for this move. It
-                  counts as a reschedule of theirs: the booking is then no longer refunded automatically, as the rental
-                  terms say
-                  {appointment.terms.rescheduleFeeCents > 0
-                    ? `, and each move beyond their ${appointment.terms.maxReschedules === 1 ? "free one" : `${appointment.terms.maxReschedules} free ones`} costs them ${formatCents(appointment.terms.rescheduleFeeCents)} online`
-                    : ""}
-                  . Untick it when the studio needs the change.
-                </label>
-              ) : (
-                <p style={{ fontSize: ".85rem", margin: 0 }}>
-                  Moving is switched off under Settings, so the rental terms say nothing about it: the move does not
-                  count against the client, and the booking keeps its refund.
-                </p>
-              )}
-            </form>
-          )}
-          <p style={{ fontSize: ".78rem", margin: ".75rem 0 0" }}>
-            The studio and the length stay the same. Moved to a day of the other kind (a weekday or a weekend), the
-            booking takes that day&rsquo;s price, from today&rsquo;s prices: the client then owes the difference, or has
-            paid more than its price, which the studio refunds. Only times that are free are offered: inside opening
-            hours, and at least 15 minutes from any other appointment in the studio. The client is emailed the new time.
-          </p>
+          <MoveToNewTime
+            appointment={appointment}
+            moveDate={moveDate}
+            moveTimes={moveTimes}
+            dateForm={{ action: `/admin/appointments/${appointment.ref}#move`, keep: {} }}
+            back={null}
+            today={localDateOf(now)}
+            idPrefix="move"
+          />
         </div>
       )}
 

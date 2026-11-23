@@ -5,9 +5,10 @@ import { hoursText, type AppointmentLook } from "@/lib/domain/appointment-look";
 import { LABEL_MEANING } from "@/lib/domain/labels";
 import { formatCents } from "@/lib/domain/pricing";
 import { longDateLabel } from "@/lib/domain/time";
-import type { Appointment } from "@/server/appointments";
+import type { Appointment, moveOptions } from "@/server/appointments";
 import { BY_CUSTOMER, BY_SYSTEM } from "@/server/history";
 import { formatInstant, formatRange, localDateOf } from "@/server/tz";
+import { MoveToNewTime } from "../appointments/MoveToNewTime";
 import { CloseOnEscape } from "./CloseOnEscape";
 
 /** "Jane Smith" as a first and a last name: the last name is what follows the first space. */
@@ -21,20 +22,35 @@ const who = (actor: string) => (actor === BY_CUSTOMER ? "the client" : actor ===
 /**
  * An appointment over the calendar, in place of a page of its own (the owner's admin brief of 2026-11-22, items 5, 7
  * and 8): everything about it, and at its top the three things done most often. It is part of the calendar's page
- * (`?open=<ref>`), so the calendar stays behind it, and closing it is a link back to the calendar as it was. The
- * appointment's own page keeps every form; the buttons lead there for what is changed.
+ * (`?open=<ref>`), so the calendar stays behind it, and closing it is a link back to the calendar as it was.
+ * "Reschedule" moves it here (`&move=<date>`), with the appointment's page's own form; the appointment's page keeps
+ * every other form, and "Edit" leads there.
  */
 export function AppointmentDialog({
   appointment,
   look,
   closeHref,
   bookAnotherHref,
+  rescheduleHref,
+  move,
+  today,
 }: {
   appointment: Appointment;
   look: AppointmentLook;
   closeHref: string;
   /** Null when the viewer may not make bookings, or not see the client's details to fill them in. */
   bookAnotherHref: string | null;
+  /** The pop-up with rescheduling open on the appointment's own day. */
+  rescheduleHref: string;
+  /** Rescheduling, when it is open: the date chosen and its free times, where its forms go, and how to close it. */
+  move: {
+    date: string | null;
+    times: Awaited<ReturnType<typeof moveOptions>> | null;
+    dateForm: { action: string; keep: Record<string, string> };
+    back: string;
+    closeHref: string;
+  } | null;
+  today: string;
 }) {
   const when = formatRange(new Date(appointment.startAt), new Date(appointment.endAt));
   const day = localDateOf(new Date(appointment.startAt));
@@ -59,8 +75,8 @@ export function AppointmentDialog({
           <Link href={page} className="btn btn-outline btn-small">
             Edit
           </Link>
-          {appointment.may.move && (
-            <Link href={`${page}?move=${day}#move`} className="btn btn-outline btn-small">
+          {appointment.may.move && !move && (
+            <Link href={rescheduleHref} scroll={false} className="btn btn-outline btn-small">
               Reschedule
             </Link>
           )}
@@ -75,6 +91,26 @@ export function AppointmentDialog({
         <p className="appt-dialog-what">
           <span className="cal-swatch" aria-hidden="true" /> {look.name} · {hoursText(appointment.durationMinutes)} · {when.day}, {when.time}
         </p>
+
+        {move && (
+          <section aria-labelledby="appt-dialog-move" className="appt-dialog-move">
+            <h3 id="appt-dialog-move">Reschedule</h3>
+            <MoveToNewTime
+              appointment={appointment}
+              moveDate={move.date}
+              moveTimes={move.times}
+              dateForm={move.dateForm}
+              back={move.back}
+              today={today}
+              idPrefix="appt-move"
+            />
+            <p style={{ margin: ".75rem 0 0" }}>
+              <Link href={move.closeHref} scroll={false}>
+                Keep the time it has
+              </Link>
+            </p>
+          </section>
+        )}
 
         <section aria-labelledby="appt-dialog-client">
           <h3 id="appt-dialog-client">Client</h3>

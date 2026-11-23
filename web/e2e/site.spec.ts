@@ -884,17 +884,25 @@ test("the calendar shows a day, a week and a month, one studio or all, and a boo
   await expect(page.getByLabel("Client’s email")).toHaveValue(bob.email);
   await expect(page.getByLabel("Client’s name")).toHaveValue("Bob Brown");
   await expect(page.getByLabel("Client’s phone")).toHaveValue(bob.phone);
-  // Reschedule leads to the appointment's move.
+  // Reschedule, inside the pop-up (item 5): the times free on a day, then the move, with the calendar behind it.
   await page.goto(`/admin/calendar?view=day&date=${NEAR}`);
   await page.getByRole("link", { name: /Bob Brown/ }).click();
   await popup.getByRole("link", { name: "Reschedule" }).click();
-  await expect(page.getByRole("heading", { name: "Bob Brown", level: 1 })).toBeVisible();
-  await byLabel(page, "New date").fill(NEAR);
-  await page.getByRole("button", { name: "Show free times" }).click();
-  await page.getByLabel(/Free start times on/).selectOption({ label: "2:00 PM – 3:00 PM" });
-  await page.getByRole("checkbox", { name: /The client asked for this move/ }).uncheck();
-  await page.getByRole("button", { name: "Move booking" }).click();
+  await expect(popup.getByRole("heading", { name: "Reschedule", exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/open=VS-.*move=|move=.*open=VS-/);
+  await byLabel(popup, "New date").fill(NEAR);
+  await popup.getByRole("button", { name: "Show free times" }).click();
+  await popup.getByLabel(/Free start times on/).selectOption({ label: "2:00 PM – 3:00 PM" });
+  expect(await accessibilityProblems(page), "rescheduling in the pop-up").toEqual([]);
+  await popup.getByRole("checkbox", { name: /The client asked for this move/ }).uncheck();
+  await popup.getByRole("button", { name: "Move booking" }).click();
   await expect(byText(page, /Moved to .* The client has been emailed\./)).toBeVisible();
+  // Back on the calendar's day, the appointment open at its new time; its page keeps the move in its history.
+  await expect(page).toHaveURL(new RegExp(`/admin/calendar\\?.*date=${NEAR}.*open=VS-`));
+  await expect(popup).toContainText("2:00 PM – 3:00 PM");
+  await expect(popup.getByRole("heading", { name: "Reschedule", exact: true })).toHaveCount(0);
+  await popup.getByRole("link", { name: "Edit" }).click();
+  await expect(page.getByRole("heading", { name: "Bob Brown", level: 1 })).toBeVisible();
   await expect(onScreen(page.locator(".admin-card h3 .status-badge"))).toHaveText("Rescheduled");
   await expect(page.getByRole("row", { name: /Confirmed → Rescheduled/ })).toContainText("Moved from");
   expect((await latestEmail(page, "booking_moved", bob.email)).body).toContain("New time: ");
