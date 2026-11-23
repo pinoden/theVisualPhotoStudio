@@ -4,6 +4,7 @@ import type { Db } from "@/db/client";
 import { releaseExpiredHolds } from "./availability";
 import { pruneRateLimits } from "./rate-limit";
 import { noticeWaitlist } from "./waitlist";
+import { dropUnfinishedVideos } from "./videos";
 import { loadCatalog } from "./catalog";
 import { deleteOldRecords } from "./retention";
 import { durationLabel } from "@/lib/domain/time";
@@ -72,6 +73,8 @@ export interface TaskSummary {
   oldRecordsDeleted: number;
   /** Clients on the waitlist emailed that a time that fits has opened up (src/server/waitlist.ts). */
   waitlistEmailed: number;
+  /** Uploads of videos never finished, a day on, dropped (src/server/videos.ts). */
+  videoUploadsDropped: number;
 }
 
 const DAY = 86_400_000;
@@ -303,6 +306,7 @@ export async function runScheduledTasks(db: Db, deps: TaskDeps): Promise<TaskSum
   const pagesRemoved = await emptyOldTrash(db, deps.now);
   await pruneRateLimits(db, deps.now);
   const old = await deleteOldRecords(db, deps.now, (await loadSettings(db)).retentionYears);
+  const videoUploadsDropped = await dropUnfinishedVideos(db, deps.now);
   return {
     holdsReleased,
     paymentsFlagged,
@@ -327,5 +331,6 @@ export async function runScheduledTasks(db: Db, deps: TaskDeps): Promise<TaskSum
     pagesRemoved,
     oldRecordsDeleted: old.emails + old.loginCodes + old.sessions + old.customerViews,
     waitlistEmailed,
+    videoUploadsDropped,
   };
 }

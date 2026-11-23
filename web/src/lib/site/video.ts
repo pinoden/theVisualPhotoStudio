@@ -6,13 +6,10 @@
  * here.
  */
 
-export const VIDEO_SERVICES = { youtube: "YouTube", vimeo: "Vimeo", instagram: "Instagram" } as const;
+export const VIDEO_SERVICES = { youtube: "YouTube", vimeo: "Vimeo", instagram: "Instagram", file: "this website" } as const;
 
-/** "YouTube, Vimeo or Instagram". */
-export const VIDEO_SERVICE_NAMES = (() => {
-  const names: string[] = Object.values(VIDEO_SERVICES);
-  return `${names.slice(0, -1).join(", ")} or ${names.at(-1)}`;
-})();
+/** "YouTube, Vimeo or Instagram", the services a video can come from besides the media library. */
+export const VIDEO_SERVICE_NAMES = "YouTube, Vimeo or Instagram";
 export type VideoService = keyof typeof VIDEO_SERVICES;
 
 export interface Video {
@@ -25,6 +22,9 @@ export interface Video {
 /** The video an address names, or null when it is not a video of a service the site plays. */
 export function parseVideo(address: unknown): Video | null {
   if (typeof address !== "string") return null;
+  // A video file of the media library (question 77): its address on this site, as the library gives it.
+  const own = /^\/videos\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(address.trim());
+  if (own) return { service: "file", id: own[1].toLowerCase(), player: `/videos/${own[1].toLowerCase()}` };
   let url: URL;
   try {
     url = new URL(address.trim());

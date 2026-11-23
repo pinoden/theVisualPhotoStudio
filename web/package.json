@@ -22,6 +22,8 @@
     "check:square": "tsx scripts/square-sandbox-check.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1175.0",
+    "@aws-sdk/s3-request-presigner": "^3.1175.0",
     "@cantoo/pdf-lib": "^2.11.1",
     "@electric-sql/pglite": "^0.5.16",
     "@puckeditor/core": "0.24.0",
