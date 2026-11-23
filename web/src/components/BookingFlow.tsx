@@ -11,6 +11,7 @@ import {
 } from "@/lib/domain/availability";
 import { extraGuestsFor, multiStudioSaving, studioCombinationError } from "@/lib/catalog-view";
 import { MonthCalendar } from "./MonthCalendar";
+import { WaitlistJoin } from "./WaitlistJoin";
 import {
   bookableDurations,
   findPrice,
@@ -166,16 +167,21 @@ export function BookingFlow({
 
   const [mode, setMode] = useState<Mode>("studio");
   const [stepIndex, setStepIndex] = useState(0);
+  // A link can choose the studios, the day and the length: `?studio=paris,dayglow&date=…&duration=120`, as the
+  // waitlist's email does (src/server/waitlist.ts).
   const [studioIds, setStudioIds] = useState<string[]>(() => {
-    const slug = searchParams.get("studio");
-    const match = catalog.studios.find((s) => s.slug === slug);
-    return match ? [match.id] : [];
+    const slugs = (searchParams.get("studio") ?? "").split(",");
+    const chosen = catalog.studios.filter((s) => slugs.includes(s.slug)).map((s) => s.id);
+    return photography ? chosen.slice(0, 1) : chosen;
   });
   /** What the date field holds. While a date is typed it passes through values such as 0002-12-28. */
-  const [dateInput, setDateInput] = useState("");
+  const [dateInput, setDateInput] = useState(() => {
+    const linked = searchParams.get("date") ?? "";
+    return isIsoDate(linked) ? linked : "";
+  });
   /** The date chosen: what the field holds, once that is a real date. */
   const date = isIsoDate(dateInput) ? dateInput : "";
-  const [durationChoice, setDuration] = useState(0);
+  const [durationChoice, setDuration] = useState(() => Number(searchParams.get("duration")) || 0);
   const [start, setStart] = useState<number | null>(null);
   /** The time the keyboard last reached: the times' one Tab stop (`moveAmongTimes`). */
   const [timeFocus, setTimeFocus] = useState<number | null>(null);
@@ -311,6 +317,16 @@ export function BookingFlow({
   }, [availability, slotOptions, studioIds, photography]);
 
   const offeredTimes = mode === "studio" ? startsForChosenStudios : (grid?.times ?? []);
+  // Join the waitlist (the owner's brief of 2026-11-22, item 4): in the studio-first flow, for a day that can be booked,
+  // inside the hours every chosen studio is open.
+  const waitlistHours = (() => {
+    if (mode !== "studio" || !availability || availability.problem || duration <= 0 || studioIds.length === 0) return null;
+    const days = studioIds.map((id) => availability.days.find((day) => day.studioId === id));
+    if (days.some((day) => !day || day.openMinute === null || day.closeMinute === null)) return null;
+    const open = Math.max(...days.map((day) => day!.openMinute!));
+    const close = Math.min(...days.map((day) => day!.closeMinute!));
+    return close - open >= duration ? { open, close } : null;
+  })();
   // The times' one Tab stop: the time the keyboard last reached, else the chosen one, else the first.
   const timeStop =
     timeFocus !== null && offeredTimes.includes(timeFocus) ? timeFocus : start !== null && offeredTimes.includes(start) ? start : (offeredTimes[0] ?? null);
@@ -1087,6 +1103,19 @@ export function BookingFlow({
                 </div>
               )}
             </>
+          )}
+          {/* Outside the times, which are read again while it stays: it keeps what it says when they reload. */}
+          {waitlistHours && (
+            <WaitlistJoin
+              key={`${studioIds.join(",")}|${date}|${duration}`}
+              studioIds={studioIds}
+              photography={photography}
+              durationMinutes={duration}
+              date={date}
+              openMinute={waitlistHours.open}
+              closeMinute={waitlistHours.close}
+              onFreeNow={() => void fetchAvailability(date)}
+            />
           )}
           {actions(nextLabelFor("time"))}
         </div>

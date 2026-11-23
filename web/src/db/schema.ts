@@ -1276,3 +1276,31 @@ export const bookingAcceptances = pgTable(
   },
   (t) => [index("booking_acceptances_booking_idx").on(t.bookingId)],
 );
+
+/**
+ * A client waiting for a time (the owner's brief of 2026-11-22, item 4): the studios or the photography session, the
+ * length, the day and the range of time the appointment should lie in. The scheduled task emails the client once,
+ * when a time that fits frees up; nothing is held for them. See src/server/waitlist.ts.
+ */
+export const waitlistEntries = pgTable(
+  "waitlist_entries",
+  {
+    id: id(),
+    studioIds: jsonb("studio_ids").$type<string[]>().notNull(),
+    photography: boolean("photography").notNull().default(false),
+    durationMinutes: integer("duration_minutes").notNull(),
+    day: date("day", { mode: "string" }).notNull(),
+    /** The range of the studio's day the whole appointment should lie in, in minutes from midnight. */
+    fromMinute: integer("from_minute").notNull(),
+    toMinute: integer("to_minute").notNull(),
+    firstName: text("first_name").notNull(),
+    lastName: text("last_name").notNull(),
+    email: text("email").notNull(),
+    createdAt: createdAt(),
+    /** When the client was emailed that a time fits. */
+    notifiedAt: ts("notified_at"),
+    removedAt: ts("removed_at"),
+    removedBy: text("removed_by"),
+  },
+  (t) => [index("waitlist_entries_day_idx").on(t.day), index("waitlist_entries_email_idx").on(t.email)],
+);

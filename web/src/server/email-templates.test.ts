@@ -175,6 +175,7 @@ describe("every email to a client", () => {
       emails.loginCodeEmail("a@x.test", "123456", 10),
       emails.emailChangeCodeEmail({ to: "b@x.test", name: "Jane", code: "123456", minutes: 10 }),
       emails.emailChangedEmail({ to: "a@x.test", name: "Jane", newEmail: "b@x.test" }),
+      emails.waitlistOpeningEmail({ to: "a@x.test", name: "Jane Smith", studios: "Studio Paris", duration: "2 hours", day: "Saturday, December 19, 2026", timeRange: "9:00 AM and 12:00 PM", link: "https://x.test/book?studio=paris" }),
       emails.membershipStartedEmail({ to: "a@x.test", name: "Jane", planName: "P", minutes: 300, priceCents: 100, code: "C", nextBilling: "2026-12-14", bookUrl: "U", accountUrl: "A" }),
       emails.membershipCancelledEmail({ to: "a@x.test", name: "Jane", planName: "P", code: "C", endsOn: null, minutesLeft: 0, bookUrl: "U" }),
       emails.membershipMonthPaidEmail({ to: "a@x.test", name: "Jane", planName: "P", minutes: 300, priceCents: 100, code: "C", minutesLeft: 300, nextBilling: "2027-01-14", accountUrl: "A" }),

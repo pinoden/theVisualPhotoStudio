@@ -414,6 +414,13 @@
       "when": 1795415398316,
       "tag": "0058_addon_stock",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1795417468885,
+      "tag": "0059_waitlist",
+      "breakpoints": true
     }
   ]
 }

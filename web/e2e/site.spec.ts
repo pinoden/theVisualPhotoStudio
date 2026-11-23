@@ -1166,6 +1166,58 @@ test("one pair of angel wings is booked once for any overlapping time, and the o
   await expect(page.getByRole("button", { name: "Offer Angel wings again" })).toBeVisible();
 });
 
+test("a client joins the waitlist for a time that is taken, and the owners see and remove the place", async ({ page, browser }) => {
+  // The owner's brief of 2026-11-22, item 4. Gil has Paris from ten to twelve; Hal wants that time too.
+  const day = dateAhead(130);
+  const gil = await (await browser.newContext()).newPage();
+  await bookStudioFirstToPayment(gil, { studios: ["Studio Paris"], date: day, duration: "2 hr", time: "10:00 AM", customer: { name: "Gil Early", email: "gil.e2e@example.com", phone: "407-555-0146" } });
+  await confirmAndGetRef(gil, /^Confirm & pay/);
+  await gil.context().close();
+
+  const hal = await (await browser.newContext()).newPage();
+  await hal.goto("/book");
+  await pickStudio(hal, "Studio Paris");
+  await next(hal);
+  await hal.getByRole("button", { name: "2 hr", exact: true }).click();
+  await byLabel(hal, "Date").fill(day);
+  await next(hal);
+  await expect(hal.getByRole("button", { name: "1:00 PM", exact: true })).toBeVisible();
+  await expect(hal.getByRole("button", { name: "10:00 AM", exact: true })).toHaveCount(0);
+  await hal.getByRole("button", { name: "Join the waitlist" }).click();
+  await byLabel(hal, "Between").selectOption({ label: "1:00 PM" });
+  await byLabel(hal, "And").selectOption({ label: "5:00 PM" });
+  await byLabel(hal, "First name").fill("Hal");
+  await byLabel(hal, "Last name").fill("Later");
+  await byLabel(hal, "Email address").fill("hal.e2e@example.com");
+  await hal.getByRole("button", { name: "Put me on the waitlist" }).click();
+  // The afternoon is free: nothing to wait for.
+  await expect(onScreen(hal.locator(".waitlist-join .flash-error"))).toContainText(/^A time that fits is free now: 1:00 PM/);
+  await byLabel(hal, "Between").selectOption({ label: "10:00 AM" });
+  await byLabel(hal, "And").selectOption({ label: "12:00 PM" });
+  await hal.getByRole("button", { name: "Put me on the waitlist" }).click();
+  await expect(onScreen(hal.locator(".waitlist-join"))).toContainText("You are on the waitlist. We will email hal.e2e@example.com if a time opens up between 10:00 AM and 12:00 PM.");
+  expect(await accessibilityProblems(hal), "the waitlist on the booking page").toEqual([]);
+  // A link chooses the studios, the day and the length, as the waitlist's email does.
+  await hal.goto(`/book?studio=paris,dayglow&date=${day}&duration=60`);
+  await expect(hal.getByRole("checkbox", { name: /Studio Paris/ })).toBeChecked();
+  await expect(hal.getByRole("checkbox", { name: /Studio Dayglow/ })).toBeChecked();
+  await next(hal);
+  await expect(hal.getByRole("button", { name: "1 hr", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(byLabel(hal, "Date")).toHaveValue(day);
+  await hal.context().close();
+
+  // The owners see the place, and can take it off.
+  await signIn(page, FORMS_OWNER, "/admin/waitlist");
+  const row = page.getByRole("row", { name: /Hal Later/ });
+  await expect(row).toContainText("10:00 AM – 12:00 PM");
+  await expect(row).toContainText("Studio Paris, 2 hours");
+  await expect(row).toContainText("Waiting since");
+  expect(await accessibilityProblems(page), "the waitlist").toEqual([]);
+  await row.getByRole("button", { name: "Take off" }).click();
+  await expect(byText(page, "Taken off the waitlist: they will not be emailed.")).toBeVisible();
+  await expect(page.getByRole("row", { name: /Hal Later/ })).toContainText("Taken off");
+});
+
 test("the owner cancels a booking with a full refund and blocks a morning", async ({ page }) => {
   await signIn(page, OWNER, "/admin/bookings");
   const row = page.getByRole("row", { name: /Bob Brown/ }).first(); // Bob's Blanche booking on the near date
@@ -1805,7 +1857,7 @@ test("a Studio Manager runs the calendar and looks clients up, and sees no price
   await signIn(page, MANAGER);
   await page.getByRole("link", { name: "Studio calendar" }).click();
   await expect(page.getByRole("heading", { name: "Calendar", exact: true })).toBeVisible();
-  await expect(onScreen(page.locator(".admin-nav"))).toHaveText("CalendarAvailability & Blocked TimeCustomersDay sheetPhotography");
+  await expect(onScreen(page.locator(".admin-nav"))).toHaveText("CalendarAvailability & Blocked TimeWaitlistCustomersDay sheetPhotography");
 
   // She sees a day nobody assigned to her, with the client's contact details, and no price.
   await page.goto(`/admin/calendar?view=day&date=${NEAR}`);

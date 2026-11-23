@@ -732,6 +732,11 @@ details.faq-item[open] .faq-icon { transform: rotate(45deg); }
 .month-cal-typed p { margin: 0 0 .25rem; font-size: .85rem; }
 .month-cal-typed .form-group { max-width: 16rem; }
 
+/* Join the waitlist, under the booking page's times. */
+.waitlist-join { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--color-border); }
+.waitlist-join h4 { margin: 0 0 .35rem; }
+.waitlist-note { font-size: .85rem; }
+
 /* A prop all reserved at the chosen time (the owner's admin brief of 2026-11-22, item 10). */
 .addon-taken { color: #8b2020; }
 
