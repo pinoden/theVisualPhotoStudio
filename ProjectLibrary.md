@@ -425,7 +425,7 @@ Item 8 is built with items 6 and 7 of the first brief of the day. Item 6 was lar
 
 ### Owners' notes of 2026-11-22
 
-Six notes added to `HANDOFF.md` on 2026-11-22, under the two briefs of the day; it carries them as [November 22 notes](HANDOFF.md#november-22-notes-front-desk-contact-map-photos-counts-loyalty), with the status of each. In the owners' words, lightly tidied:
+Seven notes added to `HANDOFF.md` on 2026-11-22, under the two briefs of the day; it carries them as [November 22 notes](HANDOFF.md#november-22-notes-front-desk-contact-map-photos-counts-loyalty), with the status of each. In the owners' words, lightly tidied:
 
 1. The receptionist will use the iPad on the front desk, horizontally, from the browser: make it easy to work with.
 2. If a customer uses "Contact us", where do we receive that email? It should be `hello@`.
@@ -433,8 +433,9 @@ Six notes added to `HANDOFF.md` on 2026-11-22, under the two briefs of the day; 
 4. Under Admin → Photography, the owners should be able to add and edit photos without a deployment: Katya does that pretty often.
 5. In the calendar view, list the number of appointments for that day, week or month.
 6. Loyalty: Katya wants a way for clients to see that they collected loyalty.
+7. Everywhere we currently add photos, we (the admin) should be able to add videos as well.
 
-Note 2 is answered as a decision: the contact form's messages go to `hello@`. **Built 2026-11-22:** Settings → "Messages from the contact form", an email address the owners set (`contactInbox`, stored beside the settings but, like the getting-in text, never sent to a browser). Empty, the messages go where the site's notices go (`ownerNotifyEmail`: `OWNER_NOTIFY_EMAIL`, else the first owner). Notes 4 and 6 leave a question each (`HANDOFF.md`, the owners' table).
+Note 2 is answered as a decision: the contact form's messages go to `hello@`. **Built 2026-11-22:** Settings → "Messages from the contact form", an email address the owners set (`contactInbox`, stored beside the settings but, like the getting-in text, never sent to a browser). Empty, the messages go where the site's notices go (`ownerNotifyEmail`: `OWNER_NOTIFY_EMAIL`, else the first owner). Notes 4, 6 and 7 leave a question each (`HANDOFF.md`, the owners' table): for note 7, video files uploaded to the site or links to YouTube, Vimeo or Instagram.
 
 ### Owner decisions of 2026-11-20
 
