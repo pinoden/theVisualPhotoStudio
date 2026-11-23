@@ -691,7 +691,13 @@ test("staff see the day sheet of their assigned day and nothing else", async ({ 
 });
 
 test("a customer cannot open the staff or owner areas", async ({ page }) => {
+  // The menu says "Log In" to a visitor, and "My Account" once they are signed in (the owner's brief of 2026-11-22).
+  await page.goto("/");
+  const menu = page.locator(".site-nav");
+  await expect(menu.getByRole("link", { name: "Log In", exact: true })).toBeVisible();
   await signIn(page, bob.email);
+  await expect(menu.getByRole("link", { name: "My Account", exact: true })).toBeVisible();
+  await expect(menu.getByRole("link", { name: "Log In", exact: true })).toHaveCount(0);
   for (const path of ["/admin", "/admin/codes", "/staff"]) {
     await page.goto(path);
     await expect(byText(page, /could not be found/i)).toBeVisible();
@@ -701,6 +707,7 @@ test("a customer cannot open the staff or owner areas", async ({ page }) => {
   await expect(onScreen(page.locator(".account-who"))).toContainText(bob.email);
   await page.getByRole("button", { name: "Sign out" }).click();
   await page.waitForURL((url) => url.pathname === "/");
+  await expect(page.locator(".site-nav").getByRole("link", { name: "Log In", exact: true })).toBeVisible();
   // Signing out loads a new document: nothing of the pages just visited stays behind, not even hidden.
   await expect(page.getByRole("link", { name: "Book Now" }).first()).toBeVisible();
   await expect(page.getByText(bob.email)).toHaveCount(0);

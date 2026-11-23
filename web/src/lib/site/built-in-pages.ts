@@ -315,12 +315,12 @@ function faq(): BuiltInPage {
         "<li>Closer to the start than that, a cancellation is not refunded.</li>" +
         "<li>{if moving}You can move the booking instead: see the next question.</li>" +
         "<li>{if moving}A booking that has been moved can no longer be refunded.</li>" +
-        "<li>Cancel from the link in your confirmation email, or from My Bookings.</li>" +
+        "<li>Cancel from the link in your confirmation email, or from your account (Log In, at the top of the page).</li>" +
         "</ul>",
     ),
     question(
       "{if moving}Can I move my booking to another time?",
-      "<p>Yes, until {reschedule cutoff} before it starts. Press Reschedule on your booking page or in My Bookings. We release your time and email you a code worth what you paid, plus anything a discount code took off that booking, so the same booking at a new time costs nothing more. Book the new time and enter the code at checkout: if the new booking costs more you pay the difference, and if it costs less the rest stays on the code. The code is valid for {reschedule code valid}.</p>" +
+      "<p>Yes, until {reschedule cutoff} before it starts. Press Reschedule on your booking page or in your account (Log In, at the top of the page). We release your time and email you a code worth what you paid, plus anything a discount code took off that booking, so the same booking at a new time costs nothing more. Book the new time and enter the code at checkout: if the new booking costs more you pay the difference, and if it costs less the rest stays on the code. The code is valid for {reschedule code valid}.</p>" +
         "<p>{if reschedule fee}You can move a booking {reschedules allowed} free of charge. Moving it again costs {reschedule fee} each time, which is taken off the code.</p>" +
         "<p>{if not reschedule fee}A booking can be moved {reschedules allowed}.</p>",
     ),

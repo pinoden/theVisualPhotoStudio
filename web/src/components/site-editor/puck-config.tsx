@@ -139,7 +139,7 @@ export interface EditorLists {
 const SITE_LINKS: { path: string; title: string }[] = [
   { path: "/book", title: "Book a studio" },
   { path: "/book/photography", title: "Book a photographer" },
-  { path: "/account", title: "My Bookings" },
+  { path: "/account", title: "Log In / My Account" },
 ];
 
 /** What formatted text may hold: what the cleaner keeps (src/lib/site/rich-text.ts), and nothing it would drop. */

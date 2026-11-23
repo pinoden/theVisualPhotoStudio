@@ -25,7 +25,7 @@ import { useDocumentEditor } from "./useDocumentEditor";
 const PAGES: [path: string, name: string][] = [
   ["/book", "Book a studio"],
   ["/book/photography", "Book a photographer"],
-  ["/account", "My Bookings"],
+  ["/account", "Log In / My Account"],
 ];
 
 const options = <T extends string>(choices: Record<T, string>) => (Object.keys(choices) as T[]).map((value) => ({ value, label: choices[value] }));

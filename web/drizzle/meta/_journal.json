@@ -379,6 +379,13 @@
       "when": 1795312813126,
       "tag": "0053_email_changes",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1795400710488,
+      "tag": "0054_log_in_menu",
+      "breakpoints": true
     }
   ]
 }

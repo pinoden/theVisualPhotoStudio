@@ -2,6 +2,7 @@ import { cache } from "react";
 import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { getDb } from "@/db/client";
+import { SIGNED_IN_HINT } from "@/lib/signed-in-hint";
 import { deleteSession, getSessionUser, parseOwnerEmails, type AuthUser, type Role } from "./auth";
 
 /**
@@ -87,6 +88,7 @@ export async function openSession(token: string, expiresAt: Date): Promise<void>
     path: "/",
     expires: expiresAt,
   });
+  (await cookies()).set(SIGNED_IN_HINT, "1", { httpOnly: false, secure: process.env.NODE_ENV === "production", sameSite: "lax", path: "/", expires: expiresAt });
 }
 
 export async function closeSession(): Promise<void> {
@@ -94,4 +96,5 @@ export async function closeSession(): Promise<void> {
   const token = store.get(SESSION_COOKIE)?.value;
   if (token) await deleteSession(await getDb(), token);
   store.delete(SESSION_COOKIE);
+  store.delete(SIGNED_IN_HINT);
 }
