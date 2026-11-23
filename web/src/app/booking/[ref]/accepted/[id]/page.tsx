@@ -48,7 +48,7 @@ async function Accepted({ params, searchParams }: Pick<PageProps<"/booking/[ref]
         <>
           <h1>{text.title}</h1>
           <p>As you accepted it for booking {booking!.ref}.</p>
-          <AcceptedWords text={text} />
+          <AcceptedWords text={text} pdfHref={`/booking/${booking!.ref}/accepted/${text.id}/pdf?t=${encodeURIComponent(token)}`} />
         </>
       ) : (
         <>

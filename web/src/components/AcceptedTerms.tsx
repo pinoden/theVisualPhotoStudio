@@ -24,11 +24,11 @@ export function AcceptedList({ accepted, hrefOf }: { accepted: AcceptedItem[]; h
  * The words accepted, as the client read them: the Policies page's as the site built them (its own HTML, made from the
  * page's blocks with everything escaped: src/lib/site/page-text.ts), or an agreement's paragraphs.
  */
-export function AcceptedWords({ text }: { text: AcceptedText }) {
+export function AcceptedWords({ text, pdfHref }: { text: AcceptedText; /** The same words as a PDF file. */ pdfHref: string }) {
   return (
     <article className="accepted-words">
       <p className="accepted-when">
-        Version {text.versionNumber}, accepted {formatInstant(new Date(text.acceptedAt))}.
+        Version {text.versionNumber}, accepted {formatInstant(new Date(text.acceptedAt))}. <a href={pdfHref}>Download as a PDF</a>
       </p>
       {text.note && <p className="notice">{text.note}</p>}
       {text.html !== null && <div className="rich-text" dangerouslySetInnerHTML={{ __html: text.html }} />}

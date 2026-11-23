@@ -1,13 +1,15 @@
 import { PDFDocument, rgb, StandardFonts, type PDFFont, type PDFPage } from "@cantoo/pdf-lib";
 import { durationLabel } from "@/lib/domain/time";
 import type { Business } from "@/lib/site/frame";
+import type { AcceptedText } from "./booking-forms";
 import { RECEIPT_STATUS_TEXT, REFUND_STATE_WORDS, type Receipt, type YearStatement } from "./receipts";
 import { formatDay, formatInstant, formatRange } from "./tz";
 
 /**
  * Receipts as PDF files: one receipt, or every receipt of a calendar year
  * behind a page that sums the year up. Drawn from the same `Receipt` the
- * screen shows, so a file and the page can never disagree.
+ * screen shows, so a file and the page can never disagree. And the policies or
+ * an agreement a client accepted at checkout, from the same words its page shows.
  *
  * The fonts are the ones every PDF reader has built in, which keeps the files
  * small and needs nothing installed on the server. They know Western European
@@ -258,6 +260,70 @@ export function yearPdf(statement: YearStatement, customer: { name: string; emai
       }
     },
     `Payments ${statement.year}`,
+    business,
+  );
+}
+
+const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", rsquo: "’", lsquo: "‘", rdquo: "”", ldquo: "“", ndash: "–", mdash: "—", hellip: "…" };
+
+/**
+ * The lines of the HTML the site builds for the Policies page (src/lib/site/page-text.ts), for a PDF: each heading,
+ * list item and paragraph a line of its own, every word of the text kept, the tags left out.
+ */
+export function acceptedLines(html: string): { kind: "heading" | "item" | "paragraph"; text: string }[] {
+  const marked = html
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<h[1-6]\b[^>]*>/gi, "\n\u0001")
+    .replace(/<li\b[^>]*>/gi, "\n\u0002")
+    .replace(/<\/(p|h[1-6]|li|ul|ol|div|section|blockquote|article|header|footer|table|tr)>/gi, "\n")
+    .replace(/<[^>]*>/g, "")
+    .replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (whole, name: string) => {
+      if (name[0] === "#") {
+        const code = name[1] === "x" || name[1] === "X" ? parseInt(name.slice(2), 16) : parseInt(name.slice(1), 10);
+        return Number.isFinite(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : whole;
+      }
+      return ENTITIES[name.toLowerCase()] ?? whole;
+    });
+  return marked
+    .split("\n")
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter((line) => line.replace(/[\u0001\u0002]/g, "").trim() !== "")
+    .map((line) =>
+      line.startsWith("\u0001")
+        ? { kind: "heading" as const, text: line.slice(1).trim() }
+        : line.startsWith("\u0002")
+          ? { kind: "item" as const, text: line.slice(1).trim() }
+          : { kind: "paragraph" as const, text: line },
+    );
+}
+
+/** The policies or an agreement as a client accepted them, with who accepted them, for which booking and when. */
+export function acceptedPdf(text: AcceptedText, booking: { ref: string; customerName: string }, business: Business): Promise<Uint8Array> {
+  return build(
+    (sheet) => {
+      letterhead(sheet, "Accepted at checkout", business);
+      sheet.text(text.title, { size: 14, bold: true });
+      sheet.text(`Version ${text.versionNumber}, accepted by ${booking.customerName} for booking ${booking.ref}, ${formatInstant(new Date(text.acceptedAt))}.`, { soft: true });
+      if (text.note) sheet.text(text.note, { soft: true });
+      sheet.space(6);
+      sheet.rule();
+      for (const paragraph of text.paragraphs ?? []) {
+        sheet.text(paragraph);
+        sheet.space(6);
+      }
+      for (const line of text.html === null ? [] : acceptedLines(text.html)) {
+        if (line.kind === "heading") {
+          sheet.space(8);
+          sheet.text(line.text, { size: 12, bold: true });
+        } else if (line.kind === "item") {
+          sheet.text(`•  ${line.text}`, { indent: 10 });
+        } else {
+          sheet.text(line.text);
+          sheet.space(4);
+        }
+      }
+    },
+    `${text.title}, version ${text.versionNumber}, ${booking.ref}`,
     business,
   );
 }

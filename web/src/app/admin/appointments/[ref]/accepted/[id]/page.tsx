@@ -45,7 +45,7 @@ async function Accepted({ params, searchParams }: Pick<PageProps<"/admin/appoint
         <p>
           As {appointment.customerName} accepted it for {appointment.ref}.
         </p>
-        <AcceptedWords text={text} />
+        <AcceptedWords text={text} pdfHref={`${page}/accepted/${text.id}/pdf`} />
         <p>
           <Link href={page}>Back to the appointment</Link>
         </p>

@@ -53,7 +53,7 @@ async function Accepted({ params }: Pick<PageProps<"/account/appointments/[ref]/
         <div className="admin-card">
           <h2>{text.title}</h2>
           <p>As you accepted it for booking {booking.ref}.</p>
-          <AcceptedWords text={text} />
+          <AcceptedWords text={text} pdfHref={`/account/appointments/${booking.ref}/accepted/${text.id}/pdf`} />
         </div>
       ) : (
         <div className="admin-card">

@@ -1113,6 +1113,9 @@ test("the owners write a seasonal question and an agreement, a client answers an
   await expect(onScreen(client.locator(".accepted-words"))).toContainText("Cancellations & Rescheduling");
   await expect(onScreen(client.locator(".accepted-words"))).toContainText("Children must be supervised by an adult at all times.");
   expect(await accessibilityProblems(client), "the policies a client accepted").toEqual([]);
+  // And as a PDF file, with the same link's key.
+  const clientPdf = await client.request.get((await client.getByRole("link", { name: "Download as a PDF" }).getAttribute("href"))!);
+  expect([clientPdf.status(), clientPdf.headers()["content-type"], (await clientPdf.body()).subarray(0, 5).toString("latin1")]).toEqual([200, "application/pdf", "%PDF-"]);
   await client.getByRole("link", { name: "Back to your booking" }).click();
   await onScreen(client.locator(".accepted-terms")).getByRole("link", { name: "Equipment terms" }).click();
   await expect(onScreen(client.locator(".accepted-words"))).toContainText("Tell us at once if anything breaks.");
@@ -1141,6 +1144,12 @@ test("the owners write a seasonal question and an agreement, a client answers an
   await forms.getByRole("link", { name: "read it" }).nth(1).click();
   await expect(page.getByRole("heading", { name: "Equipment terms", level: 1 })).toBeVisible();
   await expect(onScreen(page.locator(".admin-card"))).toContainText("Tell us at once if anything breaks.");
+  const adminPdf = await page.request.get((await page.getByRole("link", { name: "Download as a PDF" }).getAttribute("href"))!);
+  expect([adminPdf.status(), adminPdf.headers()["content-type"]]).toEqual([200, "application/pdf"]);
+  // Nobody signed out downloads it.
+  const stranger = await (await browser.newContext()).newPage();
+  expect((await stranger.request.get((await page.getByRole("link", { name: "Download as a PDF" }).getAttribute("href"))!, { maxRedirects: 0 })).status()).toBe(303);
+  await stranger.context().close();
   // Taken off again: the tests after this one book without them.
   await page.goto("/admin/forms");
   await page.locator("#questions").getByRole("row", { name: /Christmas decor/ }).getByRole("button", { name: "Take off" }).click();

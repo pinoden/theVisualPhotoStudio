@@ -19,7 +19,10 @@ import {
   type QuestionInput,
 } from "./booking-forms";
 import { agreementKey, policiesKey } from "@/lib/booking-form-keys";
+import { PDFDocument } from "@cantoo/pdf-lib";
+import { DEFAULT_FRAME } from "@/lib/site/frame";
 import { pageTextHtml } from "@/lib/site/page-text";
+import { acceptedLines, acceptedPdf } from "./receipt-pdf";
 import { toBookingViews } from "./bookings";
 import { ensureBuiltInPages, loadPublishedPage } from "./pages";
 import { createTestWorld, expectOk, NOW, type TestWorld } from "./testing";
@@ -196,6 +199,27 @@ describe("Booking Forms & Agreements (the owner's brief of 2026-11-22, items 6 a
     const [otherRow] = await world.db.select().from(bookings).where(eq(bookings.ref, other.ref));
     expect(await acceptedText(world.db, otherRow.id, policiesItem.id, NOW)).toBeNull();
     expect(await acceptedText(world.db, row.id, "not-an-id", NOW)).toBeNull();
+
+    // As a PDF file, to download (the admin brief's item 8): the words, who accepted them, for which booking.
+    const file = await acceptedPdf(words, { ref: booked.ref, customerName: "Jane Smith" }, DEFAULT_FRAME.business);
+    expect(Buffer.from(file.slice(0, 5)).toString("latin1")).toBe("%PDF-");
+    expect((await PDFDocument.load(file)).getTitle()).toBe(`Studio Policies, version 1, ${booked.ref}`);
+    const lines = acceptedLines(words.html!);
+    expect(lines[0]).toEqual({ kind: "heading", text: "Cancellations & Rescheduling" });
+    expect(lines.some((line) => line.kind === "item" && line.text === "Children must be supervised by an adult at all times.")).toBe(true);
+  });
+
+  it("reads the site's HTML of the policies as lines for a PDF, every word kept", () => {
+    expect(
+      acceptedLines('<h3>Fees &amp; Refunds</h3><p>A <strong>$20</strong> fee,<br>then none.</p><ul><li><p>One</p></li><li>Two &#8211; &rsquo;three&rsquo;</li></ul><div>Loose words</div>'),
+    ).toEqual([
+      { kind: "heading", text: "Fees & Refunds" },
+      { kind: "paragraph", text: "A $20 fee," },
+      { kind: "paragraph", text: "then none." },
+      { kind: "item", text: "One" },
+      { kind: "item", text: "Two – ’three’" },
+      { kind: "paragraph", text: "Loose words" },
+    ]);
   });
 
   it("asks nothing of a booking the studio makes for a client", async () => {
