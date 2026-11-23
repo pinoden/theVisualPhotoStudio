@@ -25,7 +25,7 @@ export default function FormsPage(props: PageProps<"/admin/forms">) {
 /** "Every studio · Rentals and photography · Dec 1, 2026 – Jan 2, 2027". */
 function appliesText(item: Applies & { startsOn?: string | null; endsOn?: string | null }, studios: CatalogStudio[]): string {
   const where = item.studioIds.length === 0 ? "Every studio" : studios.filter((studio) => item.studioIds.includes(studio.id)).map((studio) => shortStudioName(studio.name)).join(", ");
-  const what = item.forRentals && item.forPhotography ? "Rentals and photography" : item.forRentals ? "Rentals" : "Photography sessions";
+  const what = item.forRentals && item.forPhotography ? "Rentals and sessions" : item.forRentals ? "Rentals" : "Photography and content creation sessions";
   const day = (date: string) => longDateLabel(date).replace(/^\w+, /, "");
   const when = item.startsOn || item.endsOn ? ` · ${item.startsOn ? day(item.startsOn) : "Until"}${item.endsOn ? ` – ${day(item.endsOn)}` : " on"}` : "";
   return `${where} · ${what}${when}`;
@@ -50,7 +50,7 @@ function AppliesFields({ item, studios, prefix }: { item: Applies | null; studio
           <input type="checkbox" name="forRentals" value="1" id={`${prefix}-rentals`} defaultChecked={item?.forRentals ?? true} /> Studio rentals
         </label>
         <label className="avail-check">
-          <input type="checkbox" name="forPhotography" value="1" id={`${prefix}-photography`} defaultChecked={item?.forPhotography ?? true} /> Photography sessions
+          <input type="checkbox" name="forPhotography" value="1" id={`${prefix}-photography`} defaultChecked={item?.forPhotography ?? true} /> Photography and content creation sessions
         </label>
       </fieldset>
     </>
@@ -275,7 +275,7 @@ async function Forms({ searchParams }: Pick<PageProps<"/admin/forms">, "searchPa
             </label>
             <select id="preview-type" name="previewType" className="form-control" defaultValue={previewPhotography ? "photography" : "rental"}>
               <option value="rental">Studio rental</option>
-              <option value="photography">Photography session</option>
+              <option value="photography">Photography or content creation session</option>
             </select>
           </div>
           <div className="form-group">

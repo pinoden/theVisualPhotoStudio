@@ -86,7 +86,7 @@ describe("Booking Forms & Agreements (the owner's brief of 2026-11-22, items 6 a
     expect(await refusal({ kind: "essay" })).toBe("Choose the kind of question.");
     expect(await refusal({ options: ["Only one", " Only one "] })).toBe("Give at least two answers to choose from, one on each line.");
     expect(await refusal({ startsOn: "2026-12-10", endsOn: "2026-12-01" })).toBe("The last day must be on or after the first.");
-    expect(await refusal({ forRentals: false, forPhotography: false })).toBe("Choose rentals, photography sessions or both.");
+    expect(await refusal({ forRentals: false, forPhotography: false })).toBe("Choose rentals, photography and content creation sessions, or both.");
     expect(await refusal({ studioIds: ["00000000-0000-4000-8000-000000000000"] })).toBe("Unknown studio.");
   });
 

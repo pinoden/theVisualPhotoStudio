@@ -21,7 +21,7 @@ const PATHS = [
   "/admin/bookings",
   "/admin/staff",
   "/admin/prices",
-  "/admin/studios", "/admin/calendar", "/admin/calendar/new", "/admin/photography", "/book/photography",
+  "/admin/studios", "/admin/calendar", "/admin/calendar/new", "/admin/photography", "/admin/content", "/book/photography", "/book/content",
   "/admin/hours",
   "/admin/availability",
   "/admin/waitlist",

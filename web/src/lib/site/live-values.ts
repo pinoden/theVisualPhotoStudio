@@ -1,3 +1,4 @@
+import { sessionsOf } from "@/lib/domain/services";
 import { multiStudioOffer, petPolicy } from "@/lib/catalog-view";
 import { noticeHours } from "@/lib/domain/availability";
 import { formatCents } from "@/lib/domain/pricing";
@@ -25,7 +26,7 @@ export interface LiveValue {
 export function liveValues(catalog: Catalog, business: Business): LiveValue[] {
   const s = catalog.settings;
   const pets = petPolicy(catalog);
-  const sessions = catalog.photoPackages.map((entry) => entry.priceCents);
+  const sessions = sessionsOf(catalog.photoPackages, "photography").map((entry) => entry.priceCents);
   const value = (name: string, about: string, text: string): LiveValue => ({ name, about, value: text });
   return [
     value("studio name", "The studio's name, as the header and footer have it", business.name),

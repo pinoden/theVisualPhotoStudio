@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { SERVICE_WORDS } from "@/lib/domain/services";
 import Link from "next/link";
 import { connection } from "next/server";
 import { Suspense, type CSSProperties } from "react";
@@ -115,7 +116,7 @@ async function Calendar({ searchParams }: Pick<PageProps<"/admin/calendar">, "se
         (await db.select({ id: studiosTable.id, slug: studiosTable.slug, name: studiosTable.name, color: studiosTable.color }).from(studiosTable)).filter((studio) =>
           opened.studios.includes(studio.name),
         ),
-        opened.photography !== null,
+        opened.photography?.service ?? false,
       )
     : null;
   // Rescheduling inside the pop-up (item 5): `&move=<date>` shows the times free on that date, as the appointment's page does.
@@ -340,7 +341,7 @@ const shortTime = (minute: number) => minutesToLabel(minute).replace(":00", "").
 const whatAndHowLong = (entry: Entry) => `${entry.look.name} · ${hoursText(entry.endMinute - entry.startMinute)}`;
 
 const describe = (entry: Entry) =>
-  `${minutesToLabel(entry.startMinute)} – ${minutesToLabel(entry.endMinute)}, ${entry.customerName}, ${whatAndHowLong(entry)}, ${LABEL_TEXT[entry.label]}${entry.photography ? ", photography session" : ""}`;
+  `${minutesToLabel(entry.startMinute)} – ${minutesToLabel(entry.endMinute)}, ${entry.customerName}, ${whatAndHowLong(entry)}, ${LABEL_TEXT[entry.label]}${entry.photography ? `, ${SERVICE_WORDS[entry.photography].session}` : ""}`;
 
 /** An appointment as one line: its time and the client's name, in its studio's colour, with a dot for its status. */
 function AppointmentChip({ entry }: { entry: Entry }) {
@@ -426,7 +427,7 @@ function GridAppointment({ entry, gridStart, lane, span, lanes, full }: { entry:
         <span className="cal-appt-time">
           {full || span > 1 ? `${minutesToLabel(entry.startMinute)} – ${minutesToLabel(entry.endMinute)}` : shortTime(entry.startMinute)}
         </span>
-        {entry.photography && <span className="cal-tag">Photography</span>}
+        {entry.photography && <span className="cal-tag">{SERVICE_WORDS[entry.photography].name}</span>}
         {full || span > 1 ? (
           <StatusBadge label={entry.label} />
         ) : (

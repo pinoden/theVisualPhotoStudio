@@ -1,4 +1,5 @@
 import { formsOfBooking, type BookingForms } from "./booking-forms";
+import { SERVICE_WORDS, type Service } from "@/lib/domain/services";
 import { propsProblem } from "./props";
 import { and, eq, sql } from "drizzle-orm";
 import { bookingAddons, bookings, payments, photographerHolds, studioHolds } from "@/db/schema";
@@ -16,7 +17,7 @@ import {
 import { durationLabel, isIsoDate, type DayType } from "@/lib/domain/time";
 import { can, type Ability } from "@/lib/abilities";
 import type { AuthUser } from "./auth";
-import { loadDayAvailability } from "./availability";
+import { loadDayAvailability, serviceAsked, sessionServiceOf } from "./availability";
 import {
   createBooking,
   isBookingRef,
@@ -63,8 +64,8 @@ export interface Appointment {
   termsAcceptedAt: string | null;
   /** What the client answered and accepted at checkout (src/server/booking-forms.ts). */
   forms: BookingForms;
-  /** Set on a photography session: what it includes. */
-  photography: { includes: string } | null;
+  /** Set on a session (photography or content creation): what it includes, and whose it is. */
+  photography: { includes: string; service: Service } | null;
   /** Null unless the viewer may see contact details. */
   customerPhone: string | null;
   customerEmail: string | null;
@@ -290,7 +291,7 @@ const WINDOW_PROBLEM = {
  */
 export async function freeStartsFor(
   db: DbLike,
-  selection: { studioIds: string[]; date: string; durationMinutes: number; excludeBookingId?: string; withPhotographer?: boolean },
+  selection: { studioIds: string[]; date: string; durationMinutes: number; excludeBookingId?: string; withPhotographer?: boolean | Service },
   now: Date,
 ): Promise<{ ok: true; starts: number[] } | { ok: false; message: string }> {
   const catalog = await loadCatalog(db);
@@ -303,8 +304,8 @@ export async function freeStartsFor(
   const days = selection.studioIds.map((id) => day.days.find((studio) => studio.studioId === id));
   if (days.length === 0 || days.some((studio) => !studio)) return { ok: false, message: "Unknown studio." };
   if (selection.withPhotographer) {
-    if (!day.photographer) return { ok: false, message: "There is no photographer to book." };
-    days.push(day.photographer); // free for the studio and for the photographer
+    if (!day.photographer) return { ok: false, message: `There is no ${SERVICE_WORDS[serviceAsked(selection.withPhotographer) ?? "photography"].person} to book.` };
+    days.push(day.photographer); // free for the studio and for the session's person
   }
   return {
     ok: true,
@@ -365,7 +366,7 @@ export async function moveOptions(
       date,
       durationMinutes: booking.durationMinutes,
       excludeBookingId: booking.id,
-      withPhotographer: booking.photographerId !== null,
+      withPhotographer: await sessionServiceOf(db, booking.photographerId),
     },
     now,
   );
@@ -449,7 +450,7 @@ export async function moveBooking(
   const day = await loadDayAvailability(db, catalog, input.date, now, {
     asAdmin: true,
     excludeBookingId: found.id,
-    withPhotographer: found.photographerId !== null,
+    withPhotographer: await sessionServiceOf(db, found.photographerId),
   });
   if (day.problem) return refuse("invalid_time", WINDOW_PROBLEM[day.problem]);
   const studioIds = await studioIdsOf(db, found.id);
@@ -463,10 +464,11 @@ export async function moveBooking(
     return studioDay !== undefined && isStartFree(studioDay, input.startMinute, slot);
   });
   if (!free) return refuse("slot_taken", "That time is not free in the studio. Choose another.");
-  // A photography session moves with its photographer, who has to be free at the new time as well.
+  // A session moves with its person (the photographer, or the content creator), who has to be free at the new time too.
   const photographer = found.photographerId !== null ? (day.photographer ?? null) : null;
   if (found.photographerId !== null && (!photographer || !isStartFree(photographer, input.startMinute, slot))) {
-    return refuse("slot_taken", "The photographer is not free at that time. Choose another.");
+    const service = await sessionServiceOf(db, found.photographerId);
+    return refuse("slot_taken", `The ${SERVICE_WORDS[service || "photography"].person} is not free at that time. Choose another.`);
   }
 
   const studioNames = catalog.studios.filter((studio) => studioIds.includes(studio.id)).map((studio) => studio.name).join(" + ");

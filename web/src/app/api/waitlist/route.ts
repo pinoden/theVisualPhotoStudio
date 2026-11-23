@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { isService } from "@/lib/domain/services";
 import { getDb } from "@/db/client";
 import { loadCatalog } from "@/server/catalog";
 import { clientAddress, limitRate } from "@/server/rate-limit";
@@ -30,6 +31,7 @@ export async function POST(request: NextRequest) {
     {
       studioIds: Array.isArray(body.studioIds) ? body.studioIds.filter((id): id is string => typeof id === "string").slice(0, 10) : [],
       photography: body.photography === true,
+      service: isService(body.service) ? body.service : "photography",
       durationMinutes: number(body.durationMinutes),
       date: text(body.date),
       fromMinute: number(body.fromMinute),

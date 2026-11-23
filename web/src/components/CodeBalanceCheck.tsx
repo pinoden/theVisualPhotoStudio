@@ -14,6 +14,8 @@ const STATUS_TEXT: Record<CodeBalance["status"], string> = {
   usable: "Valid",
   used: "Already used",
   expired: "Expired",
+  cancelled: "Cancelled by the studio",
+  unpaid: "Never paid for",
 };
 
 /**
@@ -96,7 +98,8 @@ export function CodeBalanceCheck() {
   );
 }
 
-function BalanceCard({ balance }: { balance: CodeBalance }) {
+/** What a code is worth, as the client's check shows it; the admin's Codes page shows the same card. */
+export function BalanceCard({ balance }: { balance: CodeBalance }) {
   return (
     <div className={`code-balance-result code-balance-${balance.status}`}>
       <p className="code-balance-title">

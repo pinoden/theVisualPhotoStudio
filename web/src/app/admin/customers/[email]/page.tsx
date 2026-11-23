@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { SERVICE_WORDS } from "@/lib/domain/services";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
@@ -63,7 +64,7 @@ function Appointments({ bookings, seeMoney }: { bookings: AccountBooking[]; seeM
                 </td>
                 <td>
                   <Link href={`/admin/appointments/${booking.ref}`}>
-                    {booking.photography && "Photography session, "}
+                    {booking.photography && `${SERVICE_WORDS[booking.photography.service].Session}, `}
                     {booking.studios.map((studio) => studio.name).join(" + ")}
                   </Link>
                   <div style={{ fontSize: ".8rem" }}>

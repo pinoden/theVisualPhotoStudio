@@ -1,5 +1,6 @@
 import { and, asc, eq, gte, inArray, lt, sql } from "drizzle-orm";
-import { blocks, bookings, staffShifts, studioHolds } from "@/db/schema";
+import type { Service } from "@/lib/domain/services";
+import { blocks, bookings, photographers, staffShifts, studioHolds } from "@/db/schema";
 import { queryRows, type DbLike } from "@/db/client";
 import { can } from "@/lib/abilities";
 import { labelOf, type LabelKey } from "@/lib/domain/labels";
@@ -28,8 +29,8 @@ export interface CalendarAppointment {
   studioIds: string[];
   customerName: string;
   label: LabelKey;
-  /** A photography session: the photographer is held for it too. */
-  photography: boolean;
+  /** A session: its person is held for it too. "photography" or "content", or false for a studio rental (question 69). */
+  photography: false | Service;
 }
 
 export interface CalendarBlock {
@@ -96,6 +97,9 @@ export async function loadCalendar(
             ),
           );
 
+  // Whose session each one is, by the person it holds.
+  const people = await db.select({ id: photographers.id, service: photographers.service }).from(photographers);
+  const serviceOf = new Map(people.map((person) => [person.id, person.service] as const));
   const appointments = shown.map((row) => {
     const date = localDateOf(row.startAt);
     return {
@@ -106,7 +110,7 @@ export async function loadCalendar(
       studioIds: holds.filter((hold) => hold.bookingId === row.id && known.has(hold.studioId)).map((hold) => hold.studioId),
       customerName: row.customerName,
       label: labelOf(row),
-      photography: row.photographerId !== null,
+      photography: row.photographerId === null ? (false as const) : (serviceOf.get(row.photographerId) ?? ("photography" as const)),
     };
   });
 

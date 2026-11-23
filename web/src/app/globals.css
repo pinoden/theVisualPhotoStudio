@@ -788,9 +788,11 @@ details.faq-item[open] .faq-icon { transform: rotate(45deg); }
 .code-balance-code { overflow-wrap: anywhere; }
 .code-balance-status { font-size: .8rem; letter-spacing: .08em; text-transform: uppercase; }
 .code-balance-usable .code-balance-status { color: #2d6a2d; }
-.code-balance-used .code-balance-status, .code-balance-expired .code-balance-status { color: #8b2020; }
+.code-balance-used .code-balance-status, .code-balance-expired .code-balance-status,
+.code-balance-cancelled .code-balance-status, .code-balance-unpaid .code-balance-status { color: #8b2020; }
 .code-balance-remaining { font-family: var(--font-serif); font-size: 1.6rem; }
 .code-balance-restrictions { margin: .5rem 0 0; padding-left: 1.1rem; font-size: .85rem; color: var(--color-muted); }
+.code-uses { margin: 0; padding-left: 1.1rem; }
 
 .wizard-container {
   max-width: 820px;
@@ -1502,7 +1504,7 @@ button { font-family: inherit; }
 .account-card { margin-bottom: 0; display: flex; flex-direction: column; }
 .account-card h3 { margin-top: 0; }
 .account-next strong { color: var(--color-dark); font-size: 1.05rem; }
-.account-actions { margin: .5rem 0 0; }
+.account-actions { margin: .5rem 0 0; display: flex; flex-wrap: wrap; gap: .5rem; }
 .account-card .account-actions:last-child { margin-top: auto; padding-top: .75rem; }
 .account-small { font-size: .82rem; margin: .35rem 0 0; }
 .account-code { display: grid; gap: .35rem; padding: .75rem 0; border-top: 1px solid var(--color-border); }
@@ -1555,6 +1557,8 @@ button { font-family: inherit; }
 .past-item summary { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem 1rem; padding: .75rem 1rem; cursor: pointer; min-height: 44px; }
 .past-when { color: var(--color-dark); font-weight: 700; }
 .past-what { flex: 1 1 10rem; }
+.stamp-badge { font-size: .72rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #2d6a2d; border: 1px solid currentColor; border-radius: 999px; padding: .1rem .55rem; }
+.visit-stamp { color: #2d6a2d; font-weight: 600; margin: 0 0 .75rem; }
 .past-details { padding: 0 1rem 1rem; }
 
 /* Receipts. */
@@ -2391,6 +2395,10 @@ fieldset { min-inline-size: 0; }
 .blk-location-sign { font-size: 2.5rem; margin-bottom: .75rem; }
 .blk-location p { font-size: .9rem; }
 .blk-location .btn { margin-top: 1rem; font-size: .78rem; padding: .5rem 1.25rem; }
+/* With a picture of the map (question 74): the map on top, the address and the button under it. */
+.blk-location-with-map { flex-direction: column; justify-content: flex-start; padding: 0 0 1.5rem; gap: 1.25rem; }
+.blk-location-map { display: block; width: 100%; line-height: 0; }
+.blk-location-map img { display: block; width: 100%; height: auto; max-height: 360px; object-fit: cover; }
 .studio-card-buttons { margin-top: 1.25rem; display: flex; gap: .75rem; flex-wrap: wrap; }
 .studio-card-buttons .btn { padding: .5rem 1.25rem; font-size: .78rem; }
 .rate-card .rate-book { width: 100%; }

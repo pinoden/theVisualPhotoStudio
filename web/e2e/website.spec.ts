@@ -624,6 +624,45 @@ test("the owner writes what photographers choose a studio by and gives it a floo
   await expect(byText(page, "Studio saved.")).toBeVisible();
   await guest.reload();
   await expect(guest.locator("#blanche dl.studio-facts dt")).toHaveText(["Size", "Ceiling", "Light"]);
+
+  // Photography's photos, chosen under Admin → Photography (the owner's answer of 2026-11-23, question 73): the
+  // Photography page the site starts with shows them, in their order.
+  await page.goto("/admin/website/media");
+  await expect(page.getByLabel("Add pictures", { exact: true })).toBeEnabled();
+  await page.getByLabel("Add pictures", { exact: true }).setInputFiles([await pictureFile("newborn-session.jpg", 800, 1000, "#d8c3a5")]);
+  await expect(onScreen(page.locator(".media-sent")).locator("li.added")).toHaveCount(1);
+  const session = onScreen(page.locator(".media-card")).filter({ hasText: "newborn-session.jpg" });
+  await session.getByLabel("What the picture shows").fill("A newborn asleep in a basket, photographed in Studio Blanche");
+  await session.getByRole("button", { name: "Save" }).click();
+  await expect(byText(page, "Saved.")).toBeVisible();
+
+  await page.goto("/admin/photography");
+  const photos = page.locator("#photography-photos");
+  await expect(photos).toContainText("Shown on Professional Photography.");
+  await photos.getByRole("button", { name: "Add photos" }).click();
+  const choosing = page.getByRole("dialog", { name: "Choose from the media library" });
+  await choosing.getByRole("button", { name: /A newborn asleep in a basket/ }).click();
+  await choosing.getByRole("button", { name: /Floor plan of Studio Blanche/ }).click();
+  await choosing.getByRole("button", { name: "Use these 2 pictures" }).click();
+  await expect(byText(page, "Photos added. The website shows them now.")).toBeVisible();
+  await drawn(photos.getByRole("img", { name: /^A newborn asleep/ }));
+  await photos.getByRole("button", { name: "Move photo 2 earlier" }).click();
+  await expect(byText(page, "Order saved.")).toBeVisible();
+  await expect(photos.locator(".media-ordered .media-facts")).toHaveText([/^Floor plan of Studio Blanche/, /^A newborn asleep/]);
+  expect(await accessibilityProblems(page)).toEqual([]);
+
+  await guest.goto("/services");
+  const gallery = guest.locator(".blk-gallery img");
+  await expect(gallery).toHaveCount(2);
+  await expect(gallery.first()).toHaveAttribute("alt", /^Floor plan of Studio Blanche/);
+  await drawn(gallery.nth(1));
+  // Taken off, it leaves the page; the other stays.
+  await photos.getByRole("button", { name: "Take off photo 1" }).click();
+  await expect(byText(page, "The photo was taken off. It is still in the media library.")).toBeVisible();
+  await guest.reload();
+  await expect(gallery).toHaveCount(1);
+  await expect(gallery).toHaveAttribute("alt", /^A newborn asleep/);
+  expect(await accessibilityProblems(guest)).toEqual([]);
   await guest.context().close();
 });
 

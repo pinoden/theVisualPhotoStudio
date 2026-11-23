@@ -1,12 +1,16 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { connection } from "next/server";
 import { Suspense } from "react";
 import { getDb } from "@/db/client";
 import { formatCents } from "@/lib/domain/pricing";
 import { durationLabel } from "@/lib/domain/time";
 import { EMAIL_FIELD, PROMO_CODE_FIELD } from "@/lib/parse";
+import { BalanceCard } from "@/components/CodeBalanceCheck";
 import { listCodes } from "@/server/admin";
 import { isBookingRef } from "@/server/bookings";
+import { normalizeCode } from "@/server/promos";
+import { studioCodeCheck, type StudioCodeCheck } from "@/server/code-balance";
 import { requireOwner } from "@/server/session";
 import { formatInstant } from "@/server/tz";
 import { createCodeAction, voidCodeAction } from "../actions";
@@ -21,6 +25,16 @@ const SOURCE_LABEL: Record<string, string> = {
   reschedule: "Reschedule credit",
   manual: "Made by you",
   pet_fee: "Pet fee returned",
+  membership: "A membership",
+};
+
+const BOOKING_STATUS: Record<string, string> = {
+  confirmed: "Confirmed",
+  completed: "Completed",
+  cancelled: "Cancelled",
+  no_show: "Missed",
+  pending_payment: "Payment in progress",
+  expired: "Not completed",
 };
 
 export default function CodesPage(props: PageProps<"/admin/codes">) {
@@ -38,9 +52,45 @@ async function Codes({ searchParams }: Pick<PageProps<"/admin/codes">, "searchPa
   const codes = await listCodes(await getDb());
   const query = await searchParams;
   const bookingRef = typeof query.booking === "string" && isBookingRef(query.booking) ? query.booking : "";
+  const asked = typeof query.check === "string" ? normalizeCode(query.check) : "";
+  const checked = asked ? await studioCodeCheck(await getDb(), asked, now) : null;
 
   return (
     <AdminFrame active="/admin/codes" title="Codes" query={query}>
+      <div className="admin-card" id="code-check">
+        <h3>Check a code&rsquo;s balance</h3>
+        <p style={{ fontSize: ".875rem" }}>
+          Any code of the site: studio credit, a reschedule code, a free hour, a discount or a membership. Checking spends
+          nothing. Clients can check their own on the booking page.
+        </p>
+        <form action="/admin/codes#code-check" className="admin-form-row" style={{ marginBottom: 0 }}>
+          <div className="form-group">
+            <label className="form-label" htmlFor="code-check-code">
+              Code
+            </label>
+            <input
+              id="code-check-code"
+              name="check"
+              className="form-control"
+              defaultValue={asked}
+              autoComplete="off"
+              autoCapitalize="characters"
+              spellCheck={false}
+              maxLength={40}
+              required
+            />
+          </div>
+          <button type="submit" className="btn btn-dark btn-small">
+            Check balance
+          </button>
+        </form>
+        {asked && (
+          <div role="status" style={{ marginTop: "1rem" }}>
+            {checked ? <CheckedCode checked={checked} /> : <p className="flash flash-error">There is no code {asked}.</p>}
+          </div>
+        )}
+      </div>
+
       <div className="admin-card">
         <h3>Create a code</h3>
         <form action={createCodeAction} className="admin-form-row" style={{ marginBottom: 0 }}>
@@ -127,7 +177,7 @@ async function Codes({ searchParams }: Pick<PageProps<"/admin/codes">, "searchPa
                   <tr key={code.id}>
                     <td>
                       <strong style={{ color: "var(--color-dark)" }}>{code.code}</strong>
-                      <div style={{ fontSize: ".8rem" }}>{code.photographyOnly ? "Photography sessions" : "Studio rentals"}</div>
+                      <div style={{ fontSize: ".8rem" }}>{code.photographyOnly ? "Photography and content creation sessions" : "Studio rentals"}</div>
                       {code.note && <div style={{ fontSize: ".8rem" }}>{code.note}</div>}
                     </td>
                     <td>
@@ -161,5 +211,65 @@ async function Codes({ searchParams }: Pick<PageProps<"/admin/codes">, "searchPa
         </div>
       )}
     </AdminFrame>
+  );
+}
+
+/** The client's card for the code, then what only the studio sees: whose it is, where it came from, what it paid for. */
+function CheckedCode({ checked }: { checked: StudioCodeCheck }) {
+  return (
+    <>
+      <BalanceCard balance={checked.balance} />
+      <dl className="detail-list" style={{ marginTop: "1rem" }}>
+        <dt>Works with</dt>
+        <dd>
+          {checked.whose ? <Link href={`/admin/customers/${encodeURIComponent(checked.whose)}`}>{checked.whose}</Link> : "Any email address"}
+        </dd>
+        <dt>Origin</dt>
+        <dd>
+          {SOURCE_LABEL[checked.origin] ?? checked.origin}
+          {checked.originRef && (
+            <>
+              {", for "}
+              <Link href={`/admin/appointments/${encodeURIComponent(checked.originRef)}`}>{checked.originRef}</Link>
+            </>
+          )}
+        </dd>
+        {checked.issued && (
+          <>
+            <dt>Issued</dt>
+            <dd>{checked.issued}</dd>
+          </>
+        )}
+        <dt>Made</dt>
+        <dd>{formatInstant(new Date(checked.madeAt))}</dd>
+        {checked.cancelledAt && (
+          <>
+            <dt>Cancelled</dt>
+            <dd>{formatInstant(new Date(checked.cancelledAt))}</dd>
+          </>
+        )}
+        {checked.note && (
+          <>
+            <dt>Note</dt>
+            <dd>{checked.note}</dd>
+          </>
+        )}
+        <dt>Used for</dt>
+        <dd>
+          {checked.uses.length === 0 ? (
+            "No booking yet."
+          ) : (
+            <ul className="code-uses">
+              {checked.uses.map((use) => (
+                <li key={use.ref}>
+                  <Link href={`/admin/appointments/${encodeURIComponent(use.ref)}`}>{use.ref}</Link>, {use.customerName},{" "}
+                  {formatInstant(new Date(use.startAt))} ({BOOKING_STATUS[use.status] ?? use.status}): {use.covered}
+                </li>
+              ))}
+            </ul>
+          )}
+        </dd>
+      </dl>
+    </>
   );
 }

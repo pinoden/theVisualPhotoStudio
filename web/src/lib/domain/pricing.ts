@@ -40,12 +40,17 @@ export interface PromoDef {
 }
 
 /** Why a code that exists cannot be used on a selection. */
-export type PromoMisfit = "several_studios" | "photography" | "rental";
+export type PromoMisfit = "several_studios" | "photography" | "content" | "rental";
 
+/**
+ * A code for sessions (`photographyOnly`) is for both kinds, photography and content creation: a session moved for a
+ * code gets one, whatever its kind (question 69 in ProjectLibrary.md).
+ */
 export const PROMO_MISFIT_TEXT: Record<PromoMisfit, string> = {
   several_studios: "A free hour is for one studio. It cannot be used when several studios are booked together.",
   photography: "That code is for studio rentals. It cannot be used for a photography session.",
-  rental: "That code is for photography sessions. It cannot be used for a studio rental.",
+  content: "That code is for studio rentals. It cannot be used for a content creation session.",
+  rental: "That code is for photography and content creation sessions. It cannot be used for a studio rental.",
 };
 
 export interface QuoteInput {
@@ -63,7 +68,7 @@ export interface QuoteInput {
    * studio. The booking is then for exactly one studio, and that studio's own
    * price list is not consulted.
    */
-  photoPackage?: { priceCents: number } | null;
+  photoPackage?: { priceCents: number; service?: "photography" | "content" } | null;
   /**
    * How many extra guests (add-ons of kind `people`, in all) this booking can take: `extraGuestsAllowed`. Left out,
    * only each add-on's own `maxQuantity` limits them.
@@ -254,7 +259,7 @@ export function quote(input: QuoteInput): Quote {
   let promoMisfit: PromoMisfit | null = null;
   const promo = input.promo;
   if (promo && (promo.photographyOnly === true) !== Boolean(photoPackage)) {
-    promoMisfit = photoPackage ? "photography" : "rental";
+    promoMisfit = photoPackage ? (photoPackage.service === "content" ? "content" : "photography") : "rental";
   } else if (promo) {
     if (promo.kind === "percent") {
       if (!(promo.value > 0 && promo.value <= 100)) throw new PricingError("BAD_PROMO", "Invalid code.");

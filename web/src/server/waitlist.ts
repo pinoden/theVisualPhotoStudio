@@ -1,4 +1,5 @@
 import { and, asc, eq, gte, isNull, lt, sql } from "drizzle-orm";
+import { SERVICE_WORDS, sessionsOf, type Service } from "@/lib/domain/services";
 import type { DbLike } from "@/db/client";
 import { waitlistEntries } from "@/db/schema";
 import { studioCombinationError } from "@/lib/catalog-view";
@@ -27,6 +28,8 @@ const KEEP_DAYS = 30;
 export interface WaitlistInput {
   studioIds: string[];
   photography: boolean;
+  /** Whose session, for a session (question 69). */
+  service?: Service;
   durationMinutes: number;
   date: string;
   fromMinute: number;
@@ -43,6 +46,7 @@ export type JoinWaitlistResult =
 interface Wanted {
   studioIds: string[];
   photography: boolean;
+  service: Service;
   durationMinutes: number;
   fromMinute: number;
   toMinute: number;
@@ -72,8 +76,9 @@ export async function joinWaitlist(db: DbLike, catalog: Catalog, input: Waitlist
   if (combination) return invalid(combination);
   if (!isIsoDate(input.date) || input.date < studioToday(now)) return invalid("Choose a day from today on.");
   if (!Number.isInteger(input.durationMinutes) || input.durationMinutes <= 0) return invalid("Choose a length.");
+  const service = input.service ?? "photography";
   if (input.photography) {
-    if (studioIds.length !== 1 || !catalog.photoPackages.some((pack) => pack.studioId === studioIds[0] && pack.durationMinutes === input.durationMinutes)) {
+    if (studioIds.length !== 1 || !sessionsOf(catalog.photoPackages, service).some((pack) => pack.studioId === studioIds[0] && pack.durationMinutes === input.durationMinutes)) {
       return invalid("Choose a session this studio offers.");
     }
   } else if (!studioIds.every((id) => findPrice(id, dayTypeFor(catalog, input.date), input.durationMinutes, catalog.rules) !== null)) {
@@ -90,8 +95,8 @@ export async function joinWaitlist(db: DbLike, catalog: Catalog, input: Waitlist
   const email = normalizeEmail(input.email);
   if (!email) return invalid("Please enter a valid email address.");
 
-  const wanted = { studioIds, photography: input.photography, durationMinutes: input.durationMinutes, fromMinute, toMinute };
-  const day = await loadDayAvailability(db, catalog, input.date, now, { withPhotographer: input.photography });
+  const wanted = { studioIds, photography: input.photography, service, durationMinutes: input.durationMinutes, fromMinute, toMinute };
+  const day = await loadDayAvailability(db, catalog, input.date, now, { withPhotographer: input.photography ? service : false });
   if (day.problem) return invalid(day.problem === "too_far" ? "Bookings do not open that far ahead yet." : "Choose a day from today on.");
   const free = startsIn(day, wanted, catalog.settings.slotIncrementMinutes);
   if (free.length > 0) {
@@ -110,15 +115,15 @@ export async function joinWaitlist(db: DbLike, catalog: Catalog, input: Waitlist
 }
 
 /** "Studio Paris + Studio Dayglow", or "Photography session, Studio Blanche". */
-function whatText(catalog: Catalog, entry: { studioIds: string[]; photography: boolean }): string {
+function whatText(catalog: Catalog, entry: { studioIds: string[]; photography: boolean; service: Service }): string {
   const names = catalog.studios.filter((studio) => entry.studioIds.includes(studio.id)).map((studio) => studio.name);
-  return `${entry.photography ? "Photography session, " : ""}${names.join(" + ") || "A studio taken off the site"}`;
+  return `${entry.photography ? `${SERVICE_WORDS[entry.service].Session}, ` : ""}${names.join(" + ") || "A studio taken off the site"}`;
 }
 
 /** The booking page with the place's studios, day and length chosen. */
-function bookingLink(baseUrl: string, catalog: Catalog, entry: { studioIds: string[]; photography: boolean; day: string; durationMinutes: number }): string {
+function bookingLink(baseUrl: string, catalog: Catalog, entry: { studioIds: string[]; photography: boolean; service: Service; day: string; durationMinutes: number }): string {
   const slugs = catalog.studios.filter((studio) => entry.studioIds.includes(studio.id)).map((studio) => studio.slug);
-  return `${baseUrl}${entry.photography ? "/book/photography" : "/book"}?studio=${slugs.join(",")}&date=${entry.day}&duration=${entry.durationMinutes}`;
+  return `${baseUrl}${entry.photography ? SERVICE_WORDS[entry.service].bookPath : "/book"}?studio=${slugs.join(",")}&date=${entry.day}&duration=${entry.durationMinutes}`;
 }
 
 /**
@@ -136,8 +141,8 @@ export async function noticeWaitlist(db: DbLike, catalog: Catalog, deps: { now: 
   const days = new Map<string, DayAvailability>();
   let emailed = 0;
   for (const entry of waiting) {
-    const key = `${entry.day}|${entry.photography}`;
-    const day = days.get(key) ?? (await loadDayAvailability(db, catalog, entry.day, deps.now, { withPhotographer: entry.photography }));
+    const key = `${entry.day}|${entry.photography ? entry.service : "rental"}`;
+    const day = days.get(key) ?? (await loadDayAvailability(db, catalog, entry.day, deps.now, { withPhotographer: entry.photography ? entry.service : false }));
     days.set(key, day);
     if (startsIn(day, entry, catalog.settings.slotIncrementMinutes).length === 0) continue;
     // Marked first: a task that runs twice at once emails the place once.

@@ -41,7 +41,7 @@ export function ReceiptView({ receipt, business }: { receipt: Receipt; business:
         <dt>Studio</dt>
         <dd>
           {receipt.studios}
-          {receipt.photography && ", photography session"}
+          {receipt.photography && `, ${receipt.photography}`}
         </dd>
         <dt>Booking status</dt>
         <dd>{receipt.bookingStatus}</dd>

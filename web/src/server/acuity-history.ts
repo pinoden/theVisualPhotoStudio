@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { asc, eq, or, sql } from "drizzle-orm";
+import { and, asc, eq, or, sql } from "drizzle-orm";
 import { bookings, payments, photographers, studioHolds } from "@/db/schema";
 import { pgErrorCode, PG_UNIQUE_VIOLATION, type Db, type Tx } from "@/db/client";
 import { ACUITY_HISTORY_SOURCE, ACUITY_SOURCE, studiosOfAppointment, type AcuityAppointment } from "@/lib/acuity";
@@ -83,7 +83,7 @@ export async function importAcuityHistory(db: Db, appointments: readonly AcuityA
       const [photographer] = await tx
         .select({ id: photographers.id })
         .from(photographers)
-        .where(eq(photographers.active, true))
+        .where(and(eq(photographers.active, true), eq(photographers.service, "photography")))
         .orderBy(asc(photographers.sortOrder), asc(photographers.name))
         .limit(1);
       for (const appointment of ordered) {

@@ -28,7 +28,7 @@ export const ATTENDANT_SWITCHES = {
   staffMovesBookings: "Move a booking to a new time",
   staffCreatesBookings: "Make a booking for a client",
   staffRecordsPayments: "Record a payment taken at the studio, and email a payment link (this shows them what a booking still owes, until it is paid)",
-  staffSetsPhotographerTimes: "Set the hours the photographer works, and block their time",
+  staffSetsPhotographerTimes: "Set the hours the photographer and the content creator work, and block their time",
 } as const;
 
 /** The switches for managers. Each is a setting of the same name. */

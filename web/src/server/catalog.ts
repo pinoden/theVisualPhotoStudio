@@ -1,4 +1,5 @@
 import { asc, eq } from "drizzle-orm";
+import type { Service } from "@/lib/domain/services";
 import { addons, membershipPlans, membershipPlanStudios, photoPackages, photographers, priceRules, specialDates, studioHours, studios } from "@/db/schema";
 import { together, type DbLike } from "@/db/client";
 import type { AddonKind } from "@/lib/addon-kinds";
@@ -40,9 +41,11 @@ export interface CatalogAddon extends AddonDef {
   picture: Picture | null;
 }
 
-/** A photography session on sale: one studio, one length, one price that includes the studio. */
+/** A session on sale, photography's or content creation's: one studio, one length, one price that includes the studio. */
 export interface CatalogPhotoPackage {
   id: string;
+  /** Whose session it is (question 69). */
+  service: Service;
   studioId: string;
   durationMinutes: number;
   priceCents: number;
@@ -69,7 +72,7 @@ export interface Catalog {
   settings: Settings;
   /** date -> day type, for dates priced differently from their weekday. */
   specialDates: Record<IsoDate, DayType>;
-  /** The photography sessions on sale. Empty when there is no photographer to book. */
+  /** The sessions on sale, photography's and content creation's. A service's are left out while nobody gives them. */
   photoPackages: CatalogPhotoPackage[];
   /**
    * True when the owner has set how to get into the building. Only this fact
@@ -90,7 +93,7 @@ export async function loadCatalog(db: DbLike): Promise<Catalog> {
     () => loadSettings(db),
     () => loadAccessInstructions(db),
     () => db.select().from(photoPackages).where(eq(photoPackages.active, true)).orderBy(asc(photoPackages.durationMinutes)),
-    () => db.select({ id: photographers.id }).from(photographers).where(eq(photographers.active, true)).limit(1),
+    () => db.select({ service: photographers.service }).from(photographers).where(eq(photographers.active, true)),
     () => loadStudioPhotos(db),
     () => db.select().from(membershipPlans).where(eq(membershipPlans.active, true)).orderBy(asc(membershipPlans.sortOrder), asc(membershipPlans.createdAt)),
     () => db.select().from(membershipPlanStudios),
@@ -145,18 +148,17 @@ export async function loadCatalog(db: DbLike): Promise<Catalog> {
       })),
     settings,
     specialDates: Object.fromEntries(specialRows.map((r) => [r.day, r.dayType])),
-    photoPackages:
-      photographerRows.length === 0
-        ? []
-        : packageRows
-            .filter((row) => activeIds.has(row.studioId))
-            .map((row) => ({
-              id: row.id,
-              studioId: row.studioId,
-              durationMinutes: row.durationMinutes,
-              priceCents: row.priceCents,
-              includes: row.includes,
-            })),
+    // A service's sessions are on sale while it has someone to give them (question 69).
+    photoPackages: packageRows
+      .filter((row) => activeIds.has(row.studioId) && photographerRows.some((person) => person.service === row.service))
+      .map((row) => ({
+        id: row.id,
+        service: row.service,
+        studioId: row.studioId,
+        durationMinutes: row.durationMinutes,
+        priceCents: row.priceCents,
+        includes: row.includes,
+      })),
     accessInfoSent: access !== "",
     membershipPlans: planRows
       .map((plan) => ({

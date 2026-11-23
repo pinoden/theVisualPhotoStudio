@@ -1,5 +1,6 @@
 import { and, asc, eq, lt, sql } from "drizzle-orm";
 import { bookings, photographerHours, photographers } from "@/db/schema";
+import type { Service } from "@/lib/domain/services";
 import { queryRows, type DbLike } from "@/db/client";
 import { noticeHours, type StudioDay } from "@/lib/domain/availability";
 import { daysBetween, isIsoDate, isoWeekday, type DayType, type IsoDate } from "@/lib/domain/time";
@@ -82,9 +83,22 @@ export interface AvailabilityOptions {
    * hours, existing bookings and the gap between them apply as for anyone.
    */
   asAdmin?: boolean;
-  /** Also report the photographer's day: for a photography session, which needs both the studio and the photographer. */
-  withPhotographer?: boolean;
+  /**
+   * Also report the day of a session's person: for a session, which needs both the studio and the person. True is the
+   * photographer's; a service names whose (question 69 in ProjectLibrary.md).
+   */
+  withPhotographer?: boolean | Service;
 }
+
+/** Whose session a booking is, by the person it holds; false for a studio rental, which holds nobody. */
+export async function sessionServiceOf(db: DbLike, photographerId: string | null): Promise<Service | false> {
+  if (photographerId === null) return false;
+  const [person] = await db.select({ service: photographers.service }).from(photographers).where(eq(photographers.id, photographerId)).limit(1);
+  return person?.service ?? "photography";
+}
+
+/** The service a `withPhotographer` option asks for, or null when it asks for none. */
+export const serviceAsked = (asked: boolean | Service | undefined): Service | null => (asked === true ? "photography" : asked ? asked : null);
 
 /**
  * The hours the photographer works on a date, and the time they are already
@@ -95,11 +109,12 @@ async function loadPhotographerDay(
   catalog: Catalog,
   date: IsoDate,
   excludeBookingId: string | null,
+  service: Service,
 ): Promise<StudioDay | null> {
   const [person] = await db
     .select({ id: photographers.id })
     .from(photographers)
-    .where(eq(photographers.active, true))
+    .where(and(eq(photographers.active, true), eq(photographers.service, service)))
     .orderBy(asc(photographers.sortOrder), asc(photographers.name))
     .limit(1);
   if (!person) return null;
@@ -154,7 +169,8 @@ export async function loadDayAvailability(
   options: AvailabilityOptions = {},
 ): Promise<DayAvailability> {
   // The notice customers give: none for an administrator, and longer for a session with the photographer.
-  const minLeadHours = options.asAdmin ? 0 : noticeHours(catalog.settings, Boolean(options.withPhotographer));
+  const service = serviceAsked(options.withPhotographer);
+  const minLeadHours = options.asAdmin ? 0 : noticeHours(catalog.settings, service !== null);
   const window = bookingWindow(date, now, { ...catalog.settings, minLeadHours });
   const exclude = options.excludeBookingId ?? null;
   if (window.problem === "invalid_date") {
@@ -203,6 +219,6 @@ export async function loadDayAvailability(
     problem: window.problem,
     earliestStartMinute: window.earliestStartMinute,
     days,
-    ...(options.withPhotographer && !window.problem ? { photographer: await loadPhotographerDay(db, catalog, date, exclude) } : {}),
+    ...(service && !window.problem ? { photographer: await loadPhotographerDay(db, catalog, date, exclude, service) } : {}),
   };
 }

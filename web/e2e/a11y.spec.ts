@@ -104,6 +104,7 @@ const ADMIN_PAGES = [
   "/admin/emails",
   "/admin/emails/booking_confirmation",
   "/admin/photography",
+  "/admin/content",
   "/admin/website",
   "/admin/website/design",
   "/admin/website/navigation",

@@ -2,8 +2,12 @@ import { and, asc, eq, inArray } from "drizzle-orm";
 import { bookingEvents } from "@/db/schema";
 import type { DbLike } from "@/db/client";
 import { LABEL_TEXT } from "@/lib/domain/labels";
+import type { LoyaltyStanding } from "@/lib/domain/loyalty";
 import { isIsoDate, type IsoDate } from "@/lib/domain/time";
 import { listBookingsForEmail, type BookingView } from "./bookings";
+import type { MembershipView } from "./memberships";
+import type { CustomerCode } from "./promos";
+import type { Reward } from "./rewards";
 import { localDateOf } from "./tz";
 
 /**
@@ -128,4 +132,55 @@ export function filterPast(past: AccountBooking[], filter: PastFilter): AccountB
 /** The studios a customer has past bookings in, by name, for the filter's list. */
 export function studiosOf(bookings: AccountBooking[]): string[] {
   return [...new Set(bookings.flatMap((booking) => booking.studios.map((studio) => studio.name)))].sort();
+}
+
+/**
+ * What a client holds, at a glance (the owner's answer of 2026-11-23 on loyalty: "everything reasonable: balance,
+ * hours, etc", question 72 in ProjectLibrary.md): the free hours they can use, the credit left on their codes, the
+ * discount codes still usable, and their membership's hours. From what the account's pages read already.
+ */
+export interface AtAGlance {
+  freeHours: number;
+  /** ISO: when the free hour that ends soonest ends; null when none of them ends. */
+  firstFreeHourEnds: string | null;
+  /** Credit for studio rentals and their add-ons, in cents. */
+  creditCents: number;
+  /** Credit for photography sessions only, in cents. */
+  photoCreditCents: number;
+  discounts: number;
+  /** Membership minutes left, every membership that can still be used. */
+  membershipMinutes: number;
+}
+
+export function atAGlance(
+  rewards: Pick<Reward, "status" | "expiresAt">[],
+  codes: Pick<CustomerCode, "kind" | "value" | "photographyOnly">[],
+  memberships: Pick<MembershipView, "status" | "minutesLeft">[],
+): AtAGlance {
+  const usable = rewards.filter((reward) => reward.status === "available");
+  const ends = usable.map((reward) => reward.expiresAt).filter((end): end is string => end !== null).sort();
+  const credit = (photography: boolean) =>
+    codes.filter((code) => code.kind === "amount" && code.photographyOnly === photography).reduce((sum, code) => sum + Math.max(0, code.value), 0);
+  return {
+    freeHours: usable.length,
+    firstFreeHourEnds: ends[0] ?? null,
+    creditCents: credit(false),
+    photoCreditCents: credit(true),
+    discounts: codes.filter((code) => code.kind === "percent").length,
+    membershipMinutes: memberships.filter((membership) => membership.status !== "starting").reduce((sum, membership) => sum + Math.max(0, membership.minutesLeft), 0),
+  };
+}
+
+/** The bookings whose day gave a loyalty stamp, and those whose stamp completed a free hour (question 72). */
+export interface VisitStamps {
+  stamped: Set<string>;
+  completed: Set<string>;
+}
+
+export function visitStamps(standing: Pick<LoyaltyStanding, "days" | "milestones"> | null): VisitStamps | null {
+  if (!standing) return null;
+  return {
+    stamped: new Set(standing.days.map((entry) => entry.bookingId)),
+    completed: new Set(standing.milestones.filter((id): id is string => id !== null)),
+  };
 }

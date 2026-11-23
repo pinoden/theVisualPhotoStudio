@@ -1,4 +1,5 @@
 import { and, asc, eq, isNull, lt, lte, sql } from "drizzle-orm";
+import { SERVICE_WORDS, type Service } from "@/lib/domain/services";
 import { emailOutbox } from "@/db/schema";
 import type { DbLike } from "@/db/client";
 import { afterFee } from "@/lib/domain/policy";
@@ -226,8 +227,9 @@ function money(cents: number): string {
 /** How to get into the building, under its heading: the part `getting_in`, empty when the owners have set nothing. */
 const gettingIn = (access: string | undefined) => (access ? `Getting in:\n${access}` : "");
 
-/** A photography session in a sentence, with what it includes when that is set. */
-const sessionSentence = (includes: string) => `Photography session with our in-house photographer, studio included${includes ? `: ${includes}` : ""}.`;
+/** A session in a sentence, photography's or content creation's, with what it includes when that is set. */
+const sessionSentence = (includes: string, service: Service = "photography") =>
+  `${SERVICE_WORDS[service].Session} ${SERVICE_WORDS[service].withPerson}, studio included${includes ? `: ${includes}` : ""}.`;
 
 export function loginCodeEmail(to: string, code: string, minutes: number): QueuedEmail {
   return written("login_code", { to, kind: "login_code" }, { code, minutes: String(minutes) });
@@ -269,8 +271,9 @@ export function bookingConfirmationEmail(input: {
   cardCents: number;
   /** The studio made the booking for the client: nothing was charged, the total is paid at the studio. */
   payAtStudio?: boolean;
-  /** A photography session: what it includes. */
+  /** A session: what it includes, and whose it is (photography when not said). */
   photoIncludes?: string;
+  service?: Service;
   manageUrl: string;
   /** How to get into the building, when the owner has set it. */
   access?: string;
@@ -296,7 +299,13 @@ export function bookingConfirmationEmail(input: {
       studios: input.studios,
       when: input.when,
       duration: input.duration,
-      photography: input.photoIncludes !== undefined ? `${sessionSentence(input.photoIncludes)}\nYour edited images are delivered within 7 to 14 days.` : "",
+      // When the edited images come is photography's; content creation's is not said (question 69).
+      photography:
+        input.photoIncludes === undefined
+          ? ""
+          : (input.service ?? "photography") === "photography"
+            ? `${sessionSentence(input.photoIncludes)}\nYour edited images are delivered within 7 to 14 days.`
+            : sessionSentence(input.photoIncludes, input.service),
       payment: payment.join("\n"),
       booking_link: input.manageUrl,
       getting_in: gettingIn(input.access),
@@ -351,8 +360,9 @@ export function bookingReminderEmail(input: {
   studios: string;
   when: string;
   duration: string;
-  /** A photography session: what it includes. */
+  /** A session: what it includes, and whose it is (photography when not said). */
   photoIncludes?: string;
+  service?: Service;
   /** What is still to pay, if anything; `atStudio` for a booking the studio made, which is paid there. */
   dueCents: number;
   atStudio: boolean;
@@ -368,7 +378,7 @@ export function bookingReminderEmail(input: {
       studios: input.studios,
       when: input.when,
       duration: input.duration,
-      photography: input.photoIncludes !== undefined ? sessionSentence(input.photoIncludes) : "",
+      photography: input.photoIncludes !== undefined ? sessionSentence(input.photoIncludes, input.service) : "",
       to_pay: input.dueCents > 0 ? `${input.atStudio ? "To pay at the studio" : "Still to pay"}: ${money(input.dueCents)}` : "",
       getting_in: gettingIn(input.access),
     },
@@ -418,6 +428,35 @@ export function bookingMovedEmail(input: {
         ? `As you asked for this change, it counts as a reschedule under the rental terms: if the booking is cancelled now, it is not refunded${again}`
         : "",
       price_note: input.priceNote ?? "",
+    },
+  );
+}
+
+/** An owner changed a booking's studios, length, guests or add-ons (question 75): what it holds now, and its new price. */
+export function bookingChangedEmail(input: {
+  to: string;
+  name: string;
+  ref: string;
+  studios: string;
+  when: string;
+  duration: string;
+  addons: string;
+  /** What it held before. */
+  before: string;
+  priceNote: string;
+}): QueuedEmail {
+  return written(
+    "booking_changed",
+    { to: input.to, kind: "booking_changed" },
+    {
+      name: input.name,
+      reference: input.ref,
+      studios: input.studios,
+      when: input.when,
+      duration: input.duration,
+      addons: input.addons,
+      before: input.before,
+      price_note: input.priceNote,
     },
   );
 }

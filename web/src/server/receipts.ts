@@ -1,4 +1,5 @@
 import { durationLabel } from "@/lib/domain/time";
+import { SERVICE_WORDS } from "@/lib/domain/services";
 import { and, asc, desc, eq, inArray, notInArray } from "drizzle-orm";
 import { bookings, paymentLinks, payments, refunds } from "@/db/schema";
 import type { DbLike } from "@/db/client";
@@ -74,7 +75,8 @@ export interface Receipt {
   durationMinutes: number;
   /** The studios, by name. */
   studios: string;
-  photography: boolean;
+  /** A session's words ("photography session"), or null for a studio rental. */
+  photography: string | null;
   /** The booking's status in the customer's words: "Completed", "Cancelled". */
   bookingStatus: string;
   /** What was sold, at the prices it was sold at: studios, add-ons, then discounts and credit as negative lines. */
@@ -105,7 +107,7 @@ export interface Unpaid {
 
 function linesOf(booking: BookingView): ReceiptLine[] {
   const lines: ReceiptLine[] = booking.studios.map((studio) => ({
-    label: booking.photography ? `Photography session, ${studio.name} (studio included)` : studio.name,
+    label: booking.photography ? `${SERVICE_WORDS[booking.photography.service].Session}, ${studio.name} (studio included)` : studio.name,
     cents: studio.priceCents,
   }));
   if (booking.multiStudioDiscountCents > 0) lines.push({ label: "Discount for booking several studios", cents: -booking.multiStudioDiscountCents });
@@ -213,7 +215,7 @@ export async function loadReceipts(db: DbLike, email: string): Promise<{ receipt
       visitEnd: booking.endAt,
       durationMinutes: booking.durationMinutes,
       studios,
-      photography: booking.photography !== null,
+      photography: booking.photography ? SERVICE_WORDS[booking.photography.service].session : null,
       bookingStatus: customerStatus(booking).text,
       lines: linesOf(booking),
       totalCents: booking.totalCents + booking.chargesCents,

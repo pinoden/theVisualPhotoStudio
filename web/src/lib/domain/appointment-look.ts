@@ -44,15 +44,28 @@ export function deeper(hex: string, share = 0.35): string {
   return `#${[16, 8, 0].map((shift) => channel(shift).toString(16).padStart(2, "0")).join("")}`;
 }
 
-/** The name and colour of an appointment holding `held` (in any order), a photography session or not. */
-export function appointmentLook(held: readonly LookStudio[], photography: boolean): AppointmentLook {
+/** A colour `share` of the way to white: a lighter shade of the same colour, for a content creation session. */
+function lighter(hex: string, share = 0.4): string {
+  const match = /^#([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!match) return hex;
+  const value = parseInt(match[1], 16);
+  const channel = (shift: number) => Math.round(((value >> shift) & 255) + (255 - ((value >> shift) & 255)) * share);
+  return `#${[16, 8, 0].map((shift) => channel(shift).toString(16).padStart(2, "0")).join("")}`;
+}
+
+/**
+ * The name and colour of an appointment holding `held` (in any order): a studio rental (false), a photography session
+ * (true, or "photography") in a deeper shade, a content creation session ("content") in a lighter one (question 69).
+ */
+export function appointmentLook(held: readonly LookStudio[], photography: boolean | "photography" | "content" | null): AppointmentLook {
   const sorted = [...held].sort((a, b) => a.slug.localeCompare(b.slug));
   const known = sorted.length > 1 ? BUNDLES[sorted.map((studio) => studio.slug).join("+")] : undefined;
   const base =
     held.length === 1
       ? { name: shortStudioName(held[0].name), color: held[0].color }
       : known ?? { name: held.map((studio) => shortStudioName(studio.name)).join(" + "), color: held[0]?.color ?? "#8a7f72" };
-  return { name: base.name, color: photography ? deeper(base.color) : base.color, bundle: held.length > 1 };
+  const color = photography === "content" ? lighter(base.color) : photography ? deeper(base.color) : base.color;
+  return { name: base.name, color, bundle: held.length > 1 };
 }
 
 /**

@@ -1,4 +1,5 @@
 import { and, asc, eq, inArray, isNotNull, isNull, max, ne, sql } from "drizzle-orm";
+import { SERVICE_WORDS, type BookPath } from "@/lib/domain/services";
 import { bookingEvents, bookings, membershipMinutes, payments, promoCodes, refunds } from "@/db/schema";
 import type { Db, DbLike } from "@/db/client";
 import { labelOf } from "@/lib/domain/labels";
@@ -53,6 +54,7 @@ import { issuePromo, rescheduleCodeOf, restorePromo, spendable, takeOffReschedul
 import { loadSettings, type Settings } from "./settings";
 import { termsFor } from "./terms";
 import { formatInstant } from "./tz";
+import { sessionServiceOf } from "./availability";
 
 /**
  * Changing a booking after it was made: cancelling (with the refund the
@@ -1268,7 +1270,7 @@ export type RescheduleResult =
   | {
       ok: true;
       code: string;
-      bookPath: "/book" | "/book/photography";
+      bookPath: BookPath;
       valueCents: number;
       expiresAt: Date;
     }
@@ -1341,8 +1343,10 @@ export async function requestRescheduleCode(db: Db, ref: string, actor: Actor, d
     });
 
     const expiresAt = new Date(deps.now.getTime() + terms.creditValidDays * 86_400_000);
+    // A session's credit is for sessions of either kind; its link leads to the booking page of its own kind.
     const photographyOnly = booking.photographerId !== null;
-    const bookPath: "/book" | "/book/photography" = photographyOnly ? "/book/photography" : "/book";
+    const service = await sessionServiceOf(tx, booking.photographerId);
+    const bookPath: BookPath = service ? SERVICE_WORDS[service].bookPath : "/book";
     const issued = await issuePromo(tx, {
       kind: "amount",
       value: decision.creditCents,

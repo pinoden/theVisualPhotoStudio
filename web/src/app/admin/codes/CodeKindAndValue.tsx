@@ -23,7 +23,7 @@ export function CodeKindAndValue() {
         </label>
         <select id="code-kind" name="kind" className="form-control" value={kind} onChange={(event) => setKind(event.target.value as Kind)}>
           <option value="percent">Percent off the rental</option>
-          <option value="photo_percent">Percent off a photography session</option>
+          <option value="photo_percent">Percent off a session (photography or content creation)</option>
           <option value="amount">Credit in dollars</option>
           <option value="free_hour">One free hour (one studio)</option>
         </select>

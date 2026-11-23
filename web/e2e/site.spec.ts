@@ -418,6 +418,10 @@ test("a customer signs in, sees their booking, and turns it into a reschedule co
   const loyalty = onScreen(page.locator(".account-card", { hasText: "My Loyalty Rewards" }));
   await expect(loyalty).toContainText("0 / 5");
   await expect(loyalty).toContainText("five more stamps until your free studio hour");
+  // Her loyalty in figures (the owner's answer of 2026-11-23): nothing yet.
+  const fact = (card: typeof loyalty, term: string) => card.locator(".reward-facts div", { hasText: term }).locator("dd");
+  await expect(fact(loyalty, "Stamps collected")).toHaveText("0");
+  await expect(fact(loyalty, "Free hours to use")).toHaveText("None");
   const book = onScreen(page.locator(".account-book"));
   await expect(book.getByRole("link", { name: "Book a studio", exact: true })).toBeVisible();
   await expect(book.getByRole("link", { name: "Book a photographer", exact: true })).toBeVisible();
@@ -913,6 +917,21 @@ test("the calendar shows a day, a week and a month, one studio or all, and a boo
   await expect(page.getByRole("row", { name: /Confirmed → Rescheduled/ })).toContainText("Moved from");
   expect((await latestEmail(page, "booking_moved", bob.email)).body).toContain("New time: ");
   await shot(page, "17f-appointment-moved");
+  // "Edit" led the owner to the form that changes it (item 5; "Editing price is for owner only", 2026-11-23): an extra
+  // guest costs more, the rest is to pay, the client is emailed; taken away again, the booking is as it was.
+  await expect(page).toHaveURL(/#change$/);
+  const change = page.getByRole("form", { name: "Change the booking" });
+  await byLabel(change, "Extra guest ($5 each)").fill("1");
+  await change.getByRole("button", { name: "Save the change" }).click();
+  await expect(byText(page, /^Booking changed: \$\d+ instead of \$\d+\. Still to pay: \$5\. Record it, or email a payment link, under Payment\. The client has been emailed\.$/)).toBeVisible();
+  const changedMail = await latestEmail(page, "booking_changed", bob.email);
+  expect(changedMail.body).toContain("Add-ons and extra guests: Extra guest");
+  expect(changedMail.body).toContain("Still to pay: $5, at the studio or with a payment link we email you.");
+  expect(await accessibilityProblems(page), "the appointment's page, its booking changed").toEqual([]);
+  await expect(page.getByRole("row", { name: /Changed from Studio Blanche, 1 hour to Studio Blanche, 1 hour, Extra guest/ })).toBeVisible();
+  await byLabel(page.getByRole("form", { name: "Change the booking" }), "Extra guest ($5 each)").fill("0");
+  await page.getByRole("form", { name: "Change the booking" }).getByRole("button", { name: "Save the change" }).click();
+  await expect(byText(page, /^Booking changed: \$\d+ instead of \$\d+\. The client has been emailed\.$/)).toBeVisible();
 
   // A booking made for a client, from the calendar, with their dog: no card, and the price is paid at the studio.
   await page.goto(`/admin/calendar?view=day&date=${NEAR}`);
@@ -1053,7 +1072,7 @@ test("the owners write a seasonal question and an agreement, a client answers an
   await byLabel(page, "Kind").selectOption({ label: "Tick box" });
   await page.locator("#question-form").getByRole("checkbox", { name: "Required" }).check();
   await page.locator("#question-form").getByRole("checkbox", { name: "Studio Dayglow" }).check();
-  await page.locator("#question-form").getByRole("checkbox", { name: "Photography sessions" }).uncheck();
+  await page.locator("#question-form").getByRole("checkbox", { name: "Photography and content creation sessions" }).uncheck();
   await byLabel(page, "From (optional)").fill(addDays(day, -2));
   await byLabel(page, "Until (optional)").fill(addDays(day, 2));
   await page.getByRole("button", { name: "Add the question" }).click();
@@ -1654,6 +1673,14 @@ test("a client buys a membership, gets its code, sees it in their account and ca
   await expect(card.locator(".flash-success")).toHaveText("Your membership is cancelled. No more monthly payments will be taken, and your hours stay on your code.");
   const goodbye = await latestEmail(page, "membership_cancelled", max.email);
   expect(goodbye.body).toContain(`The hours left on your code ${code} stay yours to use: 5 hours.`);
+
+  // The account's first page and My Rewards give the hours left too (the owner's answer of 2026-11-23).
+  await page.goto("/account");
+  const usable = onScreen(page.locator(".account-card", { hasText: "Rewards you can use" }));
+  await expect(usable.locator(".reward-facts div", { hasText: "Membership hours left" }).locator("dd")).toHaveText("5 hours");
+  await expect(usable.getByRole("link", { name: "My membership" })).toHaveAttribute("href", "/account/membership");
+  await page.goto("/account/rewards");
+  await expect(onScreen(page.locator(".admin-card", { hasText: "Credit and codes" })).locator(".reward-facts div", { hasText: "Membership hours left" }).locator("dd")).toHaveText("5 hours");
 });
 
 test("the owner changes an add-on's price and a studio's guest number, and customers see both", async ({ page }) => {
@@ -1785,7 +1812,7 @@ test("a booking made with a discount code is moved without paying the discount a
     code: discountCode,
   });
   await expect(totalRow(page)).toContainText("$61.20");
-  await confirmAndGetRef(page, "Confirm & pay $61.20");
+  const discountedRef = await confirmAndGetRef(page, "Confirm & pay $61.20");
 
   // Moving it gives a code for the whole $68: the discount code is used up and checkout takes one code.
   await page.getByRole("button", { name: "Reschedule" }).click();
@@ -1808,7 +1835,31 @@ test("a booking made with a discount code is moved without paying the discount a
   });
   await expect(byText(page, "Nothing to pay: your code covers this booking. No card is needed.")).toBeVisible();
   await expect(totalRow(page)).toContainText("$0");
-  await confirmAndGetRef(page, "Confirm booking");
+  const paidByCodeRef = await confirmAndGetRef(page, "Confirm booking");
+
+  // The owner checks both codes from the admin (the owner's answer of 2026-11-23): what a client sees, and whose each
+  // is, where it came from and what it paid for.
+  await page.goto("/admin/codes");
+  const check = page.locator("#code-check");
+  await check.getByLabel("Code", { exact: true }).fill(moveCode.toLowerCase());
+  await check.getByRole("button", { name: "Check balance" }).click();
+  await expect(page).toHaveURL(new RegExp(`check=${moveCode.toLowerCase()}`));
+  const answer = check.getByRole("status");
+  for (const words of ["Reschedule code", moveCode, "Already used", "$0 remaining", bob.email, `Reschedule credit, for ${discountedRef}`, "$68", `${paidByCodeRef}, ${bob.name}`, "(Confirmed): $68"]) {
+    await expect(answer).toContainText(words);
+  }
+  await expect(answer.getByRole("link", { name: bob.email })).toBeVisible();
+  await check.getByLabel("Code", { exact: true }).fill(discountCode);
+  await check.getByRole("button", { name: "Check balance" }).click();
+  await expect(answer).toContainText("Discount code");
+  await expect(answer).toContainText("10% off");
+  await expect(answer).toContainText("Already used");
+  await expect(answer).toContainText(`${discountedRef}, ${bob.name}`);
+  await expect(answer).toContainText("(Cancelled): $6.80");
+  expect(await accessibilityProblems(page), "a code checked in the admin").toEqual([]);
+  await check.getByLabel("Code", { exact: true }).fill("NO-SUCH-CODE");
+  await check.getByRole("button", { name: "Check balance" }).click();
+  await expect(answer).toContainText("There is no code NO-SUCH-CODE.");
 });
 
 test("a free hour takes one hour off a booking of one studio, and is not for several studios", async ({ page }) => {
@@ -1891,6 +1942,9 @@ test("the account lists every reward with its status, and a code is copied with 
   }
   const spare = onScreen(page.locator("li.reward", { hasText: freeHourCodes[2] }));
   await expect(spare).toContainText("Available");
+  // One free hour is left to use, and the figures say until when (the owner's answer of 2026-11-23).
+  const figures = onScreen(page.locator(".admin-card", { hasText: "My Loyalty Rewards" })).locator(".reward-facts div", { hasText: "Free hours to use" }).locator("dd");
+  await expect(figures).toHaveText(/^1, the first until [A-Z][a-z]{2} \d{1,2}, \d{4}$/);
   await expect(spare).toContainText(/Issued/);
   await expect(spare).toContainText(/Expires/);
   await shot(page, "20a-account-rewards");
@@ -1905,6 +1959,9 @@ test("the account lists every reward with its status, and a code is copied with 
   await page.getByRole("link", { name: "Overview", exact: true }).click();
   const usable = onScreen(page.locator(".account-card", { hasText: "Rewards you can use" }));
   await expect(usable).toContainText(freeHourCodes[2]);
+  await expect(
+    onScreen(page.locator(".account-card", { hasText: "My Loyalty Rewards" })).locator(".reward-facts div", { hasText: "Free hours to use" }).locator("dd"),
+  ).toHaveText(/^1, the first until /);
   await expect(usable).not.toContainText(freeHourCodes[0]);
   await expect(onScreen(page.locator(".account-card", { hasText: "Your next appointment" }))).toContainText("upcoming appointments in all");
 });
@@ -2039,7 +2096,7 @@ test("a Studio Manager runs the calendar and looks clients up, and sees no price
   await signIn(page, MANAGER);
   await page.getByRole("link", { name: "Studio calendar" }).click();
   await expect(page.getByRole("heading", { name: "Calendar", exact: true })).toBeVisible();
-  await expect(onScreen(page.locator(".admin-nav"))).toHaveText("CalendarAvailability & Blocked TimeWaitlistCustomersDay sheetPhotography");
+  await expect(onScreen(page.locator(".admin-nav"))).toHaveText("CalendarAvailability & Blocked TimeWaitlistCustomersDay sheetPhotographyContent Creation");
 
   // She sees a day nobody assigned to her, with the client's contact details, and no price.
   await page.goto(`/admin/calendar?view=day&date=${NEAR}`);
@@ -2085,13 +2142,13 @@ test("a client without a photographer books a session, and the photographer cann
   // The third and last sign-in code of this address. Create a discount for sessions only, named by the owner: the
   // site keeps it in capitals, as it reads what a client types.
   await signIn(page, THIRD_OWNER, "/admin/codes");
-  await byLabel(page, "Kind").selectOption({ label: "Percent off a photography session" });
+  await byLabel(page, "Kind").selectOption({ label: "Percent off a session (photography or content creation)" });
   await byLabel(page, "Percent off (1 to 100)").fill("20");
   await byLabel(page, "Code (optional)").fill("photo-twenty");
   await page.getByRole("button", { name: "Create", exact: true }).click();
   const discountCode = "PHOTO-TWENTY";
   await expect(byText(page, `Code created: ${discountCode}`)).toBeVisible();
-  await expect(page.getByRole("row", { name: new RegExp(discountCode) })).toContainText("Photography sessions");
+  await expect(page.getByRole("row", { name: new RegExp(discountCode) })).toContainText("Photography and content creation sessions");
 
   // The way in is on the studio booking page.
   await page.goto("/book");
@@ -2126,7 +2183,7 @@ test("a client without a photographer books a session, and the photographer cann
   await expect(byText(page, /Photography session, Studio Blanche, 1 hour/)).toBeVisible();
   await expect(totalRow(page)).toContainText("$300");
   await shot(page, "21-photography-pay");
-  await confirmAndGetRef(page, "Confirm & pay $300");
+  const janesSession = await confirmAndGetRef(page, "Confirm & pay $300");
   await expect(byText(page, /With our in-house photographer, studio included/)).toBeVisible();
   const mail = await latestEmail(page, "booking_confirmation", jane.email);
   expect(mail.body).toContain("Photography session with our in-house photographer, studio included: 1–2 outfits, 20 edited images.");
@@ -2154,14 +2211,31 @@ test("a client without a photographer books a session, and the photographer cann
 
   // The owners block the photographer's afternoon.
   await page.goto("/admin/photography");
-  await byLabel(page, "Date").fill(PHOTO_DAY);
-  await byLabel(page, "From").fill("13:00");
-  await byLabel(page, "To").fill("16:00");
-  await byLabel(page, "Note").fill("Wedding");
-  await page.getByRole("button", { name: "Block", exact: true }).click();
+  const hoursOff = page.getByRole("form", { name: "Some hours of one day" });
+  await byLabel(hoursOff, "Date").fill(PHOTO_DAY);
+  await byLabel(hoursOff, "From").fill("13:00");
+  await byLabel(hoursOff, "To").fill("16:00");
+  await byLabel(hoursOff, "Note").fill("Wedding");
+  await hoursOff.getByRole("button", { name: "Block", exact: true }).click();
   await expect(byText(page, "Time blocked. No session can be booked in it.")).toBeVisible();
   await expect(page.getByRole("row", { name: /Wedding/ })).toContainText("1:00 PM");
+
+  // And two whole days off after it (the owner's answer of 2026-11-23): the photographer blacks out days completely.
+  const [offFrom, offTo] = [addDays(PHOTO_DAY, 1), addDays(PHOTO_DAY, 2)];
+  const daysOff = page.getByRole("form", { name: "Whole days off" });
+  await byLabel(daysOff, "First day off").fill(offFrom);
+  await byLabel(daysOff, "Last day off (empty for one day)").fill(offTo);
+  await byLabel(daysOff, "Note").fill("Holiday");
+  await daysOff.getByRole("button", { name: "Block whole days" }).click();
+  await expect(byText(page, `The photographer is off on ${longDateLabel(offFrom)} to ${longDateLabel(offTo)}: no session can be booked then.`)).toBeVisible();
+  await expect(page.getByRole("row", { name: /Holiday/ })).toContainText(`Whole days: ${longDateLabel(offFrom)} to ${longDateLabel(offTo)}`);
+  // Not over Jane's session: it is named, and nothing is blocked.
+  await byLabel(daysOff, "First day off").fill(PHOTO_DAY);
+  await daysOff.getByRole("button", { name: "Block whole days" }).click();
+  await expect(byText(page, new RegExp(`^The photographer has a session on those days: ${janesSession} \\(Jane Smith, .*\\)\\. Move or cancel it first, or leave that day out\\.$`))).toBeVisible();
+  await expect(page.getByRole("row", { name: /Whole day: / })).toHaveCount(0);
   await shot(page, "22-admin-photography");
+  expect(await accessibilityProblems(page), "the photographer's blocked time").toEqual([]);
 
   // The session is on the calendar, marked as photography.
   await page.goto(`/admin/calendar?view=day&date=${PHOTO_DAY}`);
@@ -2179,6 +2253,61 @@ test("a client without a photographer books a session, and the photographer cann
     await expect(page.getByRole("button", { name: blocked, exact: true })).toHaveCount(0);
   }
   await expect(page.getByRole("button", { name: "4:00 PM", exact: true })).toBeVisible();
+
+  // The days off are muted in the month calendar of sessions; the day after them can be chosen.
+  await page.getByRole("button", { name: "← Back" }).click();
+  const monthOf = (day: string) => new Date(`${day}T12:00:00Z`).toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+  const title = onScreen(page.locator(".month-cal-title"));
+  for (const [day, free] of [[offFrom, false], [offTo, false], [addDays(offTo, 1), true]] as const) {
+    if ((await title.innerText()) !== monthOf(day)) await page.getByRole("button", { name: "Following month" }).click();
+    await expect(title).toHaveText(monthOf(day));
+    await expect(onScreen(page.locator(".month-cal"))).toHaveAttribute("aria-busy", "false");
+    const button = page.getByRole("button", { name: free ? longDateLabel(day) : `${longDateLabel(day)}, not available`, exact: true });
+    await expect(button).toBeVisible();
+    if (free) await expect(button).toBeEnabled();
+    else await expect(button).toBeDisabled();
+  }
+
+  // Content Creation (the owner's answer of 2026-11-23, question 69): nothing of it is offered until the owners put a
+  // session on sale, under Admin → Content Creation.
+  await page.goto("/book");
+  await expect(page.getByRole("complementary", { name: "Want reels or stories made for you?" })).toHaveCount(0);
+  await page.goto("/admin/content");
+  await expect(page.locator("#sessions-on-sale")).toContainText("No content creation session is on sale yet");
+  const sale = page.getByRole("form", { name: "Put a session on sale" });
+  await byLabel(sale, "Studio").selectOption({ label: "Studio Paris" });
+  await byLabel(sale, "Length").selectOption("60");
+  await byLabel(sale, "Price ($)").fill("150");
+  await byLabel(sale, "Includes").fill("3 reels and 5 stories");
+  await sale.getByRole("button", { name: "Put on sale" }).click();
+  await expect(byText(page, "Session put on sale. Clients can book it on /book/content now.")).toBeVisible();
+  expect(await accessibilityProblems(page), "Admin → Content Creation").toEqual([]);
+
+  // A client books one on its own page, on a day the photographer is off: the content creator is not.
+  await page.goto("/book");
+  await page.getByRole("complementary", { name: "Want reels or stories made for you?" }).getByRole("link", { name: "Book Content Creation" }).click();
+  await expect(page.getByRole("heading", { name: "Book Content Creation" })).toBeVisible();
+  await pickStudio(page, "Studio Paris");
+  await next(page);
+  await byLabel(page, "Date").fill(offFrom);
+  await page.getByRole("button", { name: /1 hour · \$150/ }).click();
+  await next(page);
+  await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
+  await next(page);
+  await fillDetails(page, jane);
+  await agreeToPolicies(page);
+  await next(page);
+  await expect(byText(page, /Content creation session, Studio Paris/)).toBeVisible();
+  await expect(totalRow(page)).toContainText("$150");
+  await confirmAndGetRef(page, "Confirm & pay $150");
+  await expect(byText(page, /With our in-house content creator, studio included/)).toBeVisible();
+  const contentMail = await latestEmail(page, "booking_confirmation", jane.email);
+  expect(contentMail.body).toContain("Content creation session with our in-house content creator, studio included: 3 reels and 5 stories.");
+  expect(contentMail.body).not.toContain("edited images");
+
+  // On the calendar, marked as content creation.
+  await page.goto(`/admin/calendar?view=day&date=${offFrom}`);
+  await expect(page.getByRole("link", { name: /Jane Smith/ })).toContainText("Content Creation");
 });
 
 test("a booking whose answer is lost on the way is found when the customer presses again, and is charged once", async ({ page }) => {

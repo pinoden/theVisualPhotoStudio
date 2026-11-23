@@ -61,9 +61,9 @@ const catalog: Catalog = {
   settings: { ...DEFAULT_SETTINGS, slotIncrementMinutes: 60, multiStudioPercent: { 2: 20, 3: 22 } },
   specialDates: {},
   photoPackages: [
-    { id: "pack-b-60", studioId: B, durationMinutes: 60, priceCents: 37500, includes: "1–2 outfits, 20 edited images" },
-    { id: "pack-b-120", studioId: B, durationMinutes: 120, priceCents: 57500, includes: "2–3 outfits, 30 edited images" },
-    { id: "pack-p-60", studioId: P, durationMinutes: 60, priceCents: 31500, includes: "1–2 outfits, 20 edited images" },
+    { id: "pack-b-60", service: "photography", studioId: B, durationMinutes: 60, priceCents: 37500, includes: "1–2 outfits, 20 edited images" },
+    { id: "pack-b-120", service: "photography", studioId: B, durationMinutes: 120, priceCents: 57500, includes: "2–3 outfits, 30 edited images" },
+    { id: "pack-p-60", service: "photography", studioId: P, durationMinutes: 60, priceCents: 31500, includes: "1–2 outfits, 20 edited images" },
   ],
   accessInfoSent: false,
   membershipPlans: [],

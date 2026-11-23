@@ -45,7 +45,7 @@ describe("a receipt", () => {
       visitStart: "2026-11-18T15:00:00.000Z",
       durationMinutes: 120,
       studios: "Studio Blanche",
-      photography: false,
+      photography: null,
       bookingStatus: "Confirmed",
       lines: [{ label: "Studio Blanche", cents: 17600 }],
       totalCents: 17600,

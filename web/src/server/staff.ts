@@ -1,5 +1,6 @@
 import { and, asc, eq, gte, inArray, lt } from "drizzle-orm";
-import { bookingAddons, bookings, staffShifts, studioHolds, studios } from "@/db/schema";
+import type { Service } from "@/lib/domain/services";
+import { bookingAddons, bookings, photographers, staffShifts, studioHolds, studios } from "@/db/schema";
 import type { DbLike } from "@/db/client";
 import { can } from "@/lib/abilities";
 import { labelOf, type LabelKey } from "@/lib/domain/labels";
@@ -29,8 +30,8 @@ export interface DaySheetEntry {
   status: "confirmed" | "completed" | "no_show";
   /** The status label shown for it. */
   label: LabelKey;
-  /** A session with the photographer. */
-  photography: boolean;
+  /** A session: whose, the photographer's or the content creator's; false for a studio rental (question 69). */
+  photography: false | Service;
 }
 
 /** Dates from `from` on that a staff member is assigned to. */
@@ -91,6 +92,7 @@ export async function getDaySheet(db: DbLike, viewer: AuthUser, date: string): P
       .where(inArray(studioHolds.bookingId, ids)),
     db.select().from(bookingAddons).where(inArray(bookingAddons.bookingId, ids)),
   ]);
+  const serviceOf = new Map((await db.select({ id: photographers.id, service: photographers.service }).from(photographers)).map((person) => [person.id, person.service] as const));
 
   return {
     ok: true,
@@ -110,7 +112,7 @@ export async function getDaySheet(db: DbLike, viewer: AuthUser, date: string): P
       notes: b.notes,
       status: b.status as DaySheetEntry["status"],
       label: labelOf(b),
-      photography: b.photographerId !== null,
+      photography: b.photographerId === null ? (false as const) : (serviceOf.get(b.photographerId) ?? ("photography" as const)),
     })),
   };
 }

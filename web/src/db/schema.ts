@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm";
+import { SERVICES } from "../lib/domain/services";
 import {
   type AnyPgColumn,
   boolean,
@@ -217,12 +218,21 @@ export const studioHours = pgTable(
  * studio: one photographer cannot be in two places at once, whatever the
  * studios. The site starts with one, the in-house photographer.
  */
-export const photographers = pgTable("photographers", {
-  id: id(),
-  name: text("name").notNull(),
-  active: boolean("active").notNull().default(true),
-  sortOrder: integer("sort_order").notNull().default(0),
-});
+export const photographers = pgTable(
+  "photographers",
+  {
+    id: id(),
+    name: text("name").notNull(),
+    active: boolean("active").notNull().default(true),
+    sortOrder: integer("sort_order").notNull().default(0),
+    /**
+     * Which sessions this person gives: photography, or content creation (question 69 in ProjectLibrary.md). A
+     * booking that holds them is a session of that kind. Each lookup names the service it wants.
+     */
+    service: text("service", { enum: SERVICES }).notNull().default("photography"),
+  },
+  (t) => [check("photographers_service", sql`${t.service} in ('photography', 'content')`)],
+);
 
 /**
  * The limits of a photographer's availability: the hours they are ready to
@@ -258,8 +268,13 @@ export const photoPackages = pgTable(
     /** What the session includes, as the customer reads it: "1-2 outfits, 20 edited images". */
     includes: text("includes").notNull().default(""),
     active: boolean("active").notNull().default(true),
+    /** Photography, or content creation: whose sessions these are. */
+    service: text("service", { enum: SERVICES }).notNull().default("photography"),
   },
-  (t) => [uniqueIndex("photo_packages_studio_duration_idx").on(t.studioId, t.durationMinutes)],
+  (t) => [
+    uniqueIndex("photo_packages_service_studio_duration_idx").on(t.service, t.studioId, t.durationMinutes),
+    check("photo_packages_service", sql`${t.service} in ('photography', 'content')`),
+  ],
 );
 
 /** Price of one studio for one duration on a weekday or weekend day. */
@@ -1134,6 +1149,18 @@ export const studioPhotos = pgTable(
 );
 
 /**
+ * The photos the site shows for photography (the owners' note of 2026-11-22: "under Admin → Photography the owners
+ * should be able to add and edit photos without a deployment"; question 73 in ProjectLibrary.md): pictures of the media
+ * library, in the owners' order. A page shows them through a Gallery set to "The photos chosen under Admin → Photography".
+ */
+export const photographyPhotos = pgTable("photography_photos", {
+  mediaId: uuid("media_id")
+    .primaryKey()
+    .references(() => media.id, { onDelete: "restrict" }),
+  position: integer("position").notNull().default(0),
+});
+
+/**
  * A font of the owners' own, uploaded as files: the brand font that no
  * library has. The design can use it like a font of the library
  * (src/lib/site/fonts.ts). See src/server/fonts.ts.
@@ -1302,6 +1329,8 @@ export const waitlistEntries = pgTable(
     id: id(),
     studioIds: jsonb("studio_ids").$type<string[]>().notNull(),
     photography: boolean("photography").notNull().default(false),
+    /** Whose session, for a session: the photographer's or the content creator's (question 69). */
+    service: text("service", { enum: SERVICES }).notNull().default("photography"),
     durationMinutes: integer("duration_minutes").notNull(),
     day: date("day", { mode: "string" }).notNull(),
     /** The range of the studio's day the whole appointment should lie in, in minutes from midnight. */

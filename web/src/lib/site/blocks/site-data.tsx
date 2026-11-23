@@ -433,12 +433,24 @@ export const LocationCard = defineBlock({
   fields: {
     sign: { kind: "toggle", label: "A pin above the address", start: true },
     buttonLabel: { kind: "text", label: "Words on the button that opens the map (empty: no button)", max: 30, start: "Open in Maps" },
+    /**
+     * A picture of the map, from the media library (the owners' note 3 of 2026-11-22, and the owner's answer of
+     * 2026-11-23: a map picture first; question 74 in ProjectLibrary.md). Pressed, it opens the map. A picture, not a
+     * live map: nothing loads from another service until the visitor presses.
+     */
+    map: { kind: "picture", label: "A picture of the map (from the media library, its map's credit in it); pressed, it opens the map" },
   },
-  render: ({ sign, buttonLabel, site, editing }) => {
+  render: ({ sign, buttonLabel, map, site, editing }) => {
     const { business } = site;
     if (!business) return <EditorNote editing={editing}>{MISSING}</EditorNote>;
+    const picture = map ? site.pictures[map] : undefined;
     return (
-      <div className="blk blk-location">
+      <div className={`blk blk-location${picture ? " blk-location-with-map" : ""}`}>
+        {picture && (
+          <SiteAnchor href={business.mapsUrl} className="blk-location-map" editing={editing}>
+            <Image src={picture.url} width={picture.width} height={picture.height} alt={picture.alt} sizes="(max-width: 640px) 100vw, 560px" />
+          </SiteAnchor>
+        )}
         <div>
           {sign && (
             <div className="blk-location-sign" aria-hidden="true">
