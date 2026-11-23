@@ -224,6 +224,30 @@ test("a visitor's message reaches the owner, who can reply straight to the visit
   const request = await latestEmail(page, "contact_message", OWNER);
   expect(request.subject).toBe("Website message from Vera Visitor: After-hours booking");
   expect(request.body).toContain("x".repeat(3600));
+
+  // The owners choose the inbox the messages go to (their note of 2026-11-22: hello@), and can go back to the default.
+  await signIn(page, OWNER, "/admin/settings");
+  const inbox = onScreen(page.locator("#contact-inbox"));
+  await expect(inbox).toContainText(`Empty, so they go where the site's notices go: ${OWNER}.`);
+  await byLabel(page, "Send them to").fill("Front.Desk@Studio.test");
+  await page.getByRole("button", { name: "Save the address" }).click();
+  await expect(byText(page, "Saved. Messages from the contact form now go to front.desk@studio.test.")).toBeVisible();
+  await page.goto("/contact");
+  await byLabel(page, "Your name").fill("Vera Visitor");
+  await byLabel(page, "Email address").fill("vera.e2e@example.com");
+  await byLabel(page, "Topic").selectOption({ label: "Photography session" });
+  await byLabel(page, "Message").fill("And do you have a makeup station?");
+  await page.getByRole("button", { name: "Send Message" }).click();
+  await expect(page.getByRole("heading", { name: "Message Sent" })).toBeVisible();
+  expect((await latestEmail(page, "contact_message", "front.desk@studio.test")).body).toContain("And do you have a makeup station?");
+  await page.goto("/admin/settings");
+  await byLabel(page, "Send them to").fill("not an address");
+  await byLabel(page, "Send them to").evaluate((input: HTMLInputElement) => (input.type = "text"));
+  await page.getByRole("button", { name: "Save the address" }).click();
+  await expect(byText(page, "Not saved: that is not an email address.")).toBeVisible();
+  await byLabel(page, "Send them to").fill("");
+  await page.getByRole("button", { name: "Save the address" }).click();
+  await expect(byText(page, "Saved. Messages from the contact form go where the site's notices go.")).toBeVisible();
 });
 
 test("the booking screen can be used from the keyboard", async ({ page }) => {

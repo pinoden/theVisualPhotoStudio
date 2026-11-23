@@ -7,6 +7,7 @@ import { formText } from "@/lib/parse";
 import { sendContactMessage, type ContactField } from "@/server/contact";
 import { clientAddress, limitRate } from "@/server/rate-limit";
 import { flushEmailsSoon, ownerNotifyEmail } from "@/server/runtime";
+import { loadContactInbox } from "@/server/settings";
 import { loadBusiness } from "@/server/website";
 
 export interface ContactState {
@@ -44,7 +45,7 @@ export async function sendMessageAction(previous: ContactState, formData: FormDa
   const result = await sendContactMessage(
     db,
     { ...values, trap: formData.get("leave_blank") },
-    { ownerEmail: ownerNotifyEmail(), allowSend: async () => (await limitRate(db, { key: `contact:${address}`, ...CONTACT_LIMIT }, new Date())).allowed },
+    { ownerEmail: (await loadContactInbox(db)) || ownerNotifyEmail(), allowSend: async () => (await limitRate(db, { key: `contact:${address}`, ...CONTACT_LIMIT }, new Date())).allowed },
   );
 
   if (result.ok) {

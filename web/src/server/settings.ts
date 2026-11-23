@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { settings as settingsTable } from "@/db/schema";
 import type { DbLike } from "@/db/client";
+import { EMAIL_RULE } from "@/lib/parse";
 
 /**
  * Business rules the owner can change without a deploy. Values in the
@@ -367,6 +368,29 @@ export async function saveAccessInstructions(db: DbLike, text: string): Promise<
   await db
     .insert(settingsTable)
     .values({ key: ACCESS_KEY, value })
+    .onConflictDoUpdate({ target: settingsTable.key, set: { value } });
+  return true;
+}
+
+const CONTACT_INBOX_KEY = "contactInbox";
+
+/**
+ * Where the messages of the website's contact form go (the owners' note of 2026-11-22: `hello@`). Empty when the
+ * owners have not set it: they then go where the site's notices go (`ownerNotifyEmail`). Kept out of `Settings`, like
+ * the getting-in text: no browser needs the studio's inbox.
+ */
+export async function loadContactInbox(db: DbLike): Promise<string> {
+  const [row] = await db.select().from(settingsTable).where(eq(settingsTable.key, CONTACT_INBOX_KEY)).limit(1);
+  return typeof row?.value === "string" ? row.value : "";
+}
+
+/** Store the address; empty goes back to where the site's notices go. Returns false, changing nothing, for anything but an email address. */
+export async function saveContactInbox(db: DbLike, raw: string): Promise<boolean> {
+  const value = raw.trim().toLowerCase();
+  if (value !== "" && !(value.length <= 200 && EMAIL_RULE.test(value))) return false;
+  await db
+    .insert(settingsTable)
+    .values({ key: CONTACT_INBOX_KEY, value })
     .onConflictDoUpdate({ target: settingsTable.key, set: { value } });
   return true;
 }

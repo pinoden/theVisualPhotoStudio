@@ -42,6 +42,7 @@ import {
   MONEY_SETTING_RANGES,
   NUMBER_SETTING_RANGES,
   saveAccessInstructions,
+  saveContactInbox,
   saveSetting,
   switchLoyalty,
   type MoneySettingKey,
@@ -407,6 +408,16 @@ export async function saveSettingsAction(formData: FormData): Promise<void> {
     failed("/admin/settings", `Not saved: ${rejected.join("; ")}. Everything else was saved.`);
   }
   done("/admin/settings", "Settings saved.");
+}
+
+export async function saveContactInboxAction(formData: FormData): Promise<void> {
+  await requireOwner("/admin/settings");
+  const inbox = text(formData, "contactInbox");
+  if (!(await saveContactInbox(await getDb(), inbox))) failed("/admin/settings", "Not saved: that is not an email address.");
+  done(
+    "/admin/settings",
+    inbox.trim() === "" ? "Saved. Messages from the contact form go where the site's notices go." : `Saved. Messages from the contact form now go to ${inbox.trim().toLowerCase()}.`,
+  );
 }
 
 export async function saveAccessInstructionsAction(formData: FormData): Promise<void> {

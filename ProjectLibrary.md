@@ -434,7 +434,7 @@ Six notes added to `HANDOFF.md` on 2026-11-22, under the two briefs of the day; 
 5. In the calendar view, list the number of appointments for that day, week or month.
 6. Loyalty: Katya wants a way for clients to see that they collected loyalty.
 
-Note 2 is answered as a decision: the contact form's messages go to `hello@`. Notes 4 and 6 leave a question each (`HANDOFF.md`, the owners' table).
+Note 2 is answered as a decision: the contact form's messages go to `hello@`. **Built 2026-11-22:** Settings → "Messages from the contact form", an email address the owners set (`contactInbox`, stored beside the settings but, like the getting-in text, never sent to a browser). Empty, the messages go where the site's notices go (`ownerNotifyEmail`: `OWNER_NOTIFY_EMAIL`, else the first owner). Notes 4 and 6 leave a question each (`HANDOFF.md`, the owners' table).
 
 ### Owner decisions of 2026-11-20
 
@@ -1260,6 +1260,7 @@ Known weaknesses:
 - 2026-11-22: The owner's second brief of the day received (14 items: the menu's "Log In", the admin calendar's colours, contents, pop-up and zoom, the statuses' colours, payments and forms on each appointment, props in limited number, eight appointment types with their own settings, and a calendar of blocked time) and recorded under "Owner decisions of 2026-11-22: the admin calendar". `HANDOFF.md` carries both briefs of the day, now named "November 22 brief: booking page" and "November 22 brief: admin calendar", with the status of each item from the code, one order of work for the two, and the questions they leave in the owners' table.
 - 2026-11-22: Item 1 of the owner's admin brief built: the menu says "Log In" for the client's pages, and "My Account" once signed in (`menuLabel`, the cookie `vs_signed_in` beside the session). Migration `0054_log_in_menu` changes a stored menu and the guest information's two answers about "My Bookings" only where the original words stand; tried on copies of the local and browser-test databases (47 and 54 migrations before, 55 after; bookings and users unchanged; the FAQ and a stored menu changed with a version line each) and on a scratch one with an owners' menu of the old words, and a second run applied nothing. What the builder read into it is question 61.
 - 2026-11-22: Six notes of the owners received in `HANDOFF.md` (the front desk's iPad, the contact form's messages to `hello@`, a map by "Our location", photos under Admin → Photography, the number of appointments in the calendar, loyalty clients can see) and recorded under "Owners' notes of 2026-11-22", each with its status from the code and its place in the order of work. Vercel was read for the contact form's address (names and environments only, from a folder linked outside the repository, whose pulled variables were deleted unread): `OWNER_NOTIFY_EMAIL` is not set, so the messages go to the first address of `OWNER_EMAILS`.
+- 2026-11-22: The owners' note 2 built: Settings → "Messages from the contact form" chooses the inbox the contact form writes to (`contactInbox`), empty by default, so nothing changes until the owners set `hello@`.
 
 ### Handoff for the next coding session
 
