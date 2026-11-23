@@ -452,7 +452,7 @@ test("the admin fits a phone: the calendar in its three views, an appointment, a
   // The week on a phone is a list, day by day, with each appointment a row that can be tapped.
   const row = onScreen(page.locator(".cal-agenda li", { hasText: "Mia Mobile" }));
   await expect(row).toContainText("9:15 AM – 10:45 AM");
-  await expect(row).toContainText("Studio Paris");
+  await expect(row).toContainText("Paris · 1.5 hours");
   await expect(row).toContainText("Confirmed");
   await expectFits(page, "the calendar's week");
   await shot(page, "m-390-calendar-week");

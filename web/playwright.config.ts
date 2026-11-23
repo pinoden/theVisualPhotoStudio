@@ -90,7 +90,7 @@ export default defineConfig({
       // the eleventh for a11y.spec.ts, the twelfth for z-mobile.spec.ts's iPad, the thirteenth for the emails test of
       // site.spec.ts.
       OWNER_EMAILS:
-        "owner@studio.test,owner2@studio.test,owner3@studio.test,owner4@studio.test,owner5@studio.test,owner6@studio.test,owner7@studio.test,owner8@studio.test,owner9@studio.test,owner10@studio.test,owner11@studio.test,owner12@studio.test,owner13@studio.test,owner14@studio.test",
+        "owner@studio.test,owner2@studio.test,owner3@studio.test,owner4@studio.test,owner5@studio.test,owner6@studio.test,owner7@studio.test,owner8@studio.test,owner9@studio.test,owner10@studio.test,owner11@studio.test,owner12@studio.test,owner13@studio.test,owner14@studio.test,owner15@studio.test",
       // The whole suite books from one address, more often than the ten times a minute a visitor is allowed.
       BOOKING_REQUESTS_PER_MINUTE: "200",
       // And signs in more often than the ten codes and thirty tries a quarter of an hour one address is allowed.

@@ -1616,6 +1616,18 @@ button { font-family: inherit; }
 .cal-head .cal-studio { display: inline-flex; align-items: center; justify-content: center; gap: .35rem; }
 .cal-head .today { text-decoration: underline; text-underline-offset: .25rem; }
 .cal-axis, .cal-col { position: relative; height: calc(var(--len) * var(--ppm)); }
+/* The day's appointments, over the studios' columns (right of the hours), so that a bundle can cross from one to the next. */
+.cal-body { position: relative; }
+.cal-lanes { position: absolute; top: 0; bottom: 0; left: 3.25rem; right: 0; pointer-events: none; }
+.cal-lanes > * { pointer-events: auto; }
+.cal-count { margin: 0 0 0 .5rem; font-size: .85rem; color: var(--color-muted); }
+.cal-head-count { font-weight: 400; color: var(--color-muted); }
+.cal-zoom a { min-width: 3rem; justify-content: center; }
+.cal-key { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem 1rem; }
+.cal-key .cal-studio { display: inline-flex; align-items: center; gap: .35rem; }
+/* An appointment's page, in its studio's or bundle's colour, as on the calendar. */
+.appt-look { border-left: 4px solid var(--studio); }
+.appt-look .cal-swatch { display: inline-block; vertical-align: middle; }
 .cal-axis span {
   position: absolute;
   top: calc(var(--top) * var(--ppm));
@@ -1634,7 +1646,8 @@ button { font-family: inherit; }
   position: absolute;
   top: calc(var(--top) * var(--ppm));
   left: calc(var(--lane) / var(--lanes) * 100% + 1px);
-  width: calc(100% / var(--lanes) - 2px);
+  /* A bundle spans the lanes of its studios, side by side: one appointment over all of them. */
+  width: calc(var(--span, 1) / var(--lanes) * 100% - 2px);
   height: calc(var(--len) * var(--ppm));
   box-sizing: border-box;
   border-radius: 3px;
@@ -1654,6 +1667,7 @@ button { font-family: inherit; }
 .cal-appt-full { font-size: .78rem; }
 .cal-appt-full .cal-appt-in { padding: .3rem .45rem; gap: .15rem; }
 .cal-appt-full .cal-appt-name { font-weight: 700; }
+.cal-appt-name { font-weight: 700; }
 .cal-appt-full .status-badge { align-self: flex-start; }
 /* The buffers: hatched, above and below each appointment, in the studio's colour. */
 .cal-appt::before, .cal-appt::after {

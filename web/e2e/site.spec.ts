@@ -58,6 +58,8 @@ const FIFTH_OWNER = "owner5@studio.test";
 const EMAILS_OWNER = "owner13@studio.test";
 // This one moves a booking to a day that costs less, and refunds the difference.
 const PRICES_OWNER = "owner14@studio.test";
+/** Chooses the contact form's inbox. Each owner signs in only a few times: the site sends an address three codes in 15 minutes. */
+const INBOX_OWNER = "owner15@studio.test";
 const STAFF = "sam.e2e@studio.test";
 const MANAGER = "mia.e2e@studio.test";
 
@@ -226,7 +228,7 @@ test("a visitor's message reaches the owner, who can reply straight to the visit
   expect(request.body).toContain("x".repeat(3600));
 
   // The owners choose the inbox the messages go to (their note of 2026-11-22: hello@), and can go back to the default.
-  await signIn(page, OWNER, "/admin/settings");
+  await signIn(page, INBOX_OWNER, "/admin/settings");
   const inbox = onScreen(page.locator("#contact-inbox"));
   await expect(inbox).toContainText(`Empty, so they go where the site's notices go: ${OWNER}.`);
   await byLabel(page, "Send them to").fill("Front.Desk@Studio.test");
@@ -782,14 +784,29 @@ test("the calendar shows a day, a week and a month, one studio or all, and a boo
   await signIn(page, THIRD_OWNER, `/admin/calendar?view=day&date=${NEAR}`);
   await expect(page.getByRole("heading", { name: "Calendar", exact: true })).toBeVisible();
 
-  // The day: a column for each studio, and Bob's hour in Studio Blanche with its time and its status.
+  // The day: a column for each studio, Paris in the middle, and Bob's hour in Studio Blanche with what the owner asked
+  // each appointment to show (their admin brief of 2026-11-22): the client, the studio and length, the time and status.
   const bobs = page.getByRole("link", { name: /Bob Brown/ });
+  await expect(bobs).toContainText("Blanche · 1 hour");
   await expect(bobs).toContainText("10:00 AM – 11:00 AM");
   await expect(bobs).toContainText("Confirmed");
-  for (const studio of ["Studio Blanche", "Studio Dayglow", "Studio Paris"]) {
-    await expect(onScreen(page.locator(".cal-head")).getByText(studio)).toBeVisible();
-  }
+  await expect(onScreen(page.locator(".cal-head"))).toHaveText(/Studio Blanche.*Studio Paris.*Studio Dayglow/);
+  // And how many appointments the day holds.
+  await expect(onScreen(page.locator(".cal-count"))).toHaveText(/^\d+ appointments? this day$/);
   await shot(page, "17c-calendar-day");
+
+  // Zoom, as in Acuity: the grid is drawn larger, the lengths stay, and the other views keep it.
+  const zoom = page.getByRole("navigation", { name: "Zoom" });
+  const before = (await bobs.boundingBox())!.height;
+  await zoom.getByRole("link", { name: "0.75" }).click();
+  await expect(page).toHaveURL(/zoom=0\.75/);
+  await expect.poll(async () => (await page.getByRole("link", { name: /Bob Brown/ }).boundingBox())!.height).toBeGreaterThan(before * 1.4);
+  await expect(page.getByRole("link", { name: /Bob Brown/ })).toContainText("10:00 AM – 11:00 AM");
+  await page.getByRole("navigation", { name: "Calendar view" }).getByRole("link", { name: "Week" }).click();
+  await expect(page).toHaveURL(/view=week.*zoom=0\.75/);
+  await page.getByRole("navigation", { name: "Zoom" }).getByRole("link", { name: "0.5" }).click();
+  await expect(page).not.toHaveURL(/zoom=/);
+  await page.goto(`/admin/calendar?view=day&date=${NEAR}`);
 
   // One studio at a time, or all of them.
   const filter = page.getByRole("navigation", { name: "Studio" });
@@ -899,6 +916,37 @@ test("the calendar shows a day, a week and a month, one studio or all, and a boo
   await expect(byText(page, /was returned to the client as studio credit, code/)).toBeVisible();
   await expect(page.getByRole("link", { name: "Go to Codes" })).toHaveCount(0);
   expect((await latestEmail(page, "pet_credit", jane.email)).body).toContain("the pet fee of $40 is returned to you as studio credit");
+
+  // A bundle is one appointment, in the bundle's own colour, across both its studios (the owner's admin brief, item 2).
+  await page.goto(`/admin/calendar/new?date=${NEAR}`);
+  await page.getByRole("checkbox", { name: "Studio Dayglow" }).check();
+  await page.getByRole("checkbox", { name: "Studio Paris" }).check();
+  await byLabel(page, "Length").selectOption({ label: "1 hour" });
+  await page.getByRole("button", { name: "Show free times" }).click();
+  // The last free time of the day, out of the way of the times the tests after this one book.
+  const times = page.getByLabel("Free start times");
+  await expect(times.locator("option[value]:not([value=''])").first()).toBeAttached();
+  const last = await times.evaluate((select: HTMLSelectElement) => [...select.options].filter((option) => option.value !== "").at(-1)!.value);
+  await times.selectOption(last);
+  await page.getByLabel("Client’s name").fill("Bea Bundle");
+  await page.getByLabel("Client’s email").fill("bea.e2e@example.com");
+  await page.getByLabel("Client’s phone").fill("407-555-0143");
+  await page.getByRole("button", { name: "Book for the client" }).click();
+  await expect(page.getByRole("heading", { name: "Bea Bundle" })).toBeVisible();
+  await expect(onScreen(page.locator(".appt-look"))).toContainText("(Paris + Dayglow)");
+  await page.goto(`/admin/calendar?view=day&date=${NEAR}`);
+  const bundle = page.getByRole("link", { name: /Bea Bundle/ });
+  await expect(bundle).toHaveCount(1);
+  await expect(bundle).toContainText("Paris + Dayglow · 1 hour");
+  // It covers the Paris and Dayglow columns, side by side.
+  const [parisHead, dayglowHead] = [onScreen(page.locator(".cal-head").getByText("Studio Paris")), onScreen(page.locator(".cal-head").getByText("Studio Dayglow"))];
+  const box = (await bundle.boundingBox())!;
+  expect(box.x).toBeLessThan((await parisHead.boundingBox())!.x + 5);
+  expect(box.x + box.width).toBeGreaterThan((await dayglowHead.boundingBox())!.x);
+  await expect(onScreen(page.locator(".cal-key"))).toContainText("Paris + Dayglow");
+  await page.getByRole("navigation", { name: "Calendar view" }).getByRole("link", { name: "Week" }).click();
+  await expect(page.getByRole("link", { name: /Bea Bundle/ })).toHaveCount(1);
+  expect(await accessibilityProblems(page), "the calendar's week, with a bundle").toEqual([]);
 });
 
 test("the owner sets a weekend price and the booking screen charges it on Saturday only", async ({ page }) => {

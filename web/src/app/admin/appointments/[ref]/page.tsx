@@ -2,10 +2,12 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
-import { Suspense } from "react";
+import { Suspense, type CSSProperties } from "react";
 import { BookingSummary } from "@/components/BookingSummary";
 import { StatusBadge } from "@/components/StatusBadge";
 import { getDb } from "@/db/client";
+import { studios as studiosTable } from "@/db/schema";
+import { appointmentLook } from "@/lib/domain/appointment-look";
 import { LABEL_MEANING, LABEL_TEXT } from "@/lib/domain/labels";
 import { formatCents } from "@/lib/domain/pricing";
 import { durationLabel, isIsoDate, longDateLabel, minutesToLabel } from "@/lib/domain/time";
@@ -86,6 +88,12 @@ async function AppointmentDetails({
   const moveDate = appointment.may.move && !appointment.moveBlocked && typeof query.move === "string" && isIsoDate(query.move) ? query.move : null;
   const moveTimes = moveDate ? await moveOptions(db, viewer, ref, moveDate, now) : null;
 
+  // Its studio's or bundle's colour, as on the calendar (the owner's admin brief of 2026-11-22, item 2). Studio names are unique.
+  const allStudios = await db.select({ id: studiosTable.id, slug: studiosTable.slug, name: studiosTable.name, color: studiosTable.color }).from(studiosTable);
+  const look = appointmentLook(
+    allStudios.filter((studio) => appointment.studios.includes(studio.name)),
+    appointment.photography !== null,
+  );
   const when = formatRange(new Date(appointment.startAt), new Date(appointment.endAt));
   const day = localDateOf(new Date(appointment.startAt));
   // A payment link needs a card processor. In test mode the pretend one stands in, and says so to the client.
@@ -135,7 +143,7 @@ async function AppointmentDetails({
           </p>
         </div>
       )}
-      <div className="admin-card">
+      <div className="admin-card appt-look" style={{ "--studio": look.color } as CSSProperties}>
         <h3>
           {when.day} <StatusBadge label={appointment.label} />
         </h3>
@@ -145,7 +153,10 @@ async function AppointmentDetails({
             {when.time} ({durationLabel(appointment.durationMinutes)})
           </dd>
           <dt>Studio</dt>
-          <dd>{appointment.studios.join(" + ")}</dd>
+          <dd>
+            <span className="cal-swatch" aria-hidden="true" /> {appointment.studios.join(" + ")}
+            {look.bundle && ` (${look.name})`}
+          </dd>
           {appointment.photography && (
             <>
               <dt>Photography</dt>
