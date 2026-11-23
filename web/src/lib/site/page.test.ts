@@ -239,7 +239,7 @@ describe("the address of a page", () => {
 });
 
 describe("a video", () => {
-  it("is played by YouTube or Vimeo, from any of the addresses they give out", () => {
+  it("is played by YouTube, Vimeo or Instagram, from any of the addresses they give out", () => {
     for (const address of [
       "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
       "https://youtu.be/dQw4w9WgXcQ?t=10",
@@ -251,6 +251,11 @@ describe("a video", () => {
     }
     expect(parseVideo("https://vimeo.com/76979871")).toEqual({ service: "vimeo", id: "76979871", player: "https://player.vimeo.com/video/76979871?autoplay=1&dnt=1" });
     expect(parseVideo("https://player.vimeo.com/video/76979871?h=abc")?.id).toBe("76979871");
+    // Instagram's reels and posts (the owner's answer of 2026-11-23): its own embed, played from Instagram.
+    for (const address of ["https://www.instagram.com/reel/C9xYz_ab-12/", "https://instagram.com/reels/C9xYz_ab-12", "https://www.instagram.com/reel/C9xYz_ab-12/?igsh=abc", "https://www.instagram.com/tv/C9xYz_ab-12/"]) {
+      expect(parseVideo(address), address).toEqual({ service: "instagram", id: "C9xYz_ab-12", player: "https://www.instagram.com/reel/C9xYz_ab-12/embed/" });
+    }
+    expect(parseVideo("https://www.instagram.com/p/DAbCdEfGh1/")).toEqual({ service: "instagram", id: "DAbCdEfGh1", player: "https://www.instagram.com/p/DAbCdEfGh1/embed/" });
   });
 
   it("is nothing from anywhere else, and nothing that could be a script", () => {
@@ -263,6 +268,10 @@ describe("a video", () => {
       "https://www.youtube.com/watch?v=<script>",
       'https://www.youtube.com/embed/x"onload="alert(1)',
       "https://vimeo.com/channels/staffpicks",
+      "https://www.instagram.com/some.account/",
+      "https://www.instagram.com/stories/someone/1234567890/",
+      'https://www.instagram.com/reel/C9x"onload=1/',
+      "https://instagram.com.evil.example/reel/C9xYz_ab-12/",
       "ftp://youtu.be/dQw4w9WgXcQ",
       null,
       7,

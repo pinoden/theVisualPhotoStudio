@@ -6,7 +6,7 @@ import { VIDEO_SERVICES, type Video } from "@/lib/site/video";
 /**
  * A video on a page. Nothing is fetched from the video service until the
  * visitor presses play: until then it is a box with a button, so opening the
- * page tells YouTube or Vimeo nothing about the visitor, and costs nothing.
+ * page tells YouTube, Vimeo or Instagram nothing about the visitor, and costs nothing.
  */
 export function VideoPlayer({ video, title }: { video: Video; title: string }) {
   const [playing, setPlaying] = useState(false);

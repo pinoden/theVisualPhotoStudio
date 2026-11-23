@@ -3,7 +3,7 @@ import type { CSSProperties } from "react";
 import { PictureRow } from "@/components/site/PictureRow";
 import { VideoPlayer } from "@/components/site/VideoPlayer";
 import type { Picture as LibraryPicture } from "@/server/media";
-import { parseVideo, VIDEO_SERVICES } from "../video";
+import { parseVideo, VIDEO_SERVICE_NAMES, VIDEO_SERVICES } from "../video";
 import { cssVars, defineBlock } from "./block";
 import { EditorNote, SiteAnchor } from "./shared";
 
@@ -260,7 +260,7 @@ export const Video = defineBlock({
   label: "Video",
   group: "pictures",
   fields: {
-    address: { kind: "text", label: "Address of the video on YouTube or Vimeo", max: 300, start: "" },
+    address: { kind: "text", label: "Address of the video on YouTube, Vimeo or Instagram (a reel or a post)", max: 300, start: "" },
     title: { kind: "text", label: "What the video shows, in a few words", max: 120, start: "" },
     shape: { kind: "choice", label: "Shape", options: { wide: "Wide (16:9)", standard: "Standard (4:3)", tall: "Upright (9:16)" }, start: "wide" },
   },
@@ -269,7 +269,7 @@ export const Video = defineBlock({
     if (!video) {
       return (
         <EditorNote editing={editing}>
-          {address ? `That is not the address of a video on ${Object.values(VIDEO_SERVICES).join(" or ")}.` : "Video: paste its address in the panel."}
+          {address ? `That is not the address of a video on ${VIDEO_SERVICE_NAMES}.` : "Video: paste its address in the panel."}
         </EditorNote>
       );
     }
