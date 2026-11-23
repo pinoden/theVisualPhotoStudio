@@ -6,15 +6,17 @@ import { AccountFrame } from "@/components/AccountFrame";
 import { AcceptedList } from "@/components/AcceptedTerms";
 import { BookingSummary } from "@/components/BookingSummary";
 import { ManageBooking } from "@/components/ManageBooking";
+import { VisitStamp, VisitStampBadge } from "@/components/VisitStamp";
 import { getDb } from "@/db/client";
 import { count } from "@/lib/words";
-import { customerStatus, filterPast, loadAppointments, parsePastFilter, PAST_STATUSES, studiosOf, type AccountBooking } from "@/server/account";
+import { customerStatus, filterPast, loadAppointments, parsePastFilter, PAST_STATUSES, studiosOf, visitStamps, type AccountBooking } from "@/server/account";
 import { isUpcomingVisit } from "@/server/bookings";
+import { loyaltyStandingOf } from "@/server/loyalty";
 import { endRequestText, getManageChoices } from "@/server/manage";
 import { noticePaidLinksOf } from "@/server/pay-links";
 import { finishAfterResponse, payLinkDeps } from "@/server/runtime";
 import { requireUser } from "@/server/session";
-import { loadAccessInstructions } from "@/server/settings";
+import { loadAccessInstructions, loadSettings } from "@/server/settings";
 import { formatRange } from "@/server/tz";
 
 export const metadata: Metadata = { title: "My Appointments", robots: { index: false } };
@@ -96,6 +98,9 @@ async function Appointments({ searchParams }: Pick<PageProps<"/account/appointme
   const access = tab === "upcoming" && upcoming.some((booking) => isUpcomingVisit(booking, now)) ? await loadAccessInstructions(db) : "";
   const filter = parsePastFilter(query);
   const shown = filterPast(past, filter);
+  const settings = tab === "past" ? await loadSettings(db) : null;
+  const standing = settings?.loyaltyEnabled ? await loyaltyStandingOf(db, user.email, settings) : null;
+  const stamps = visitStamps(standing);
   const filtered = Object.keys(filter).length > 0;
 
   return (
@@ -218,9 +223,11 @@ async function Appointments({ searchParams }: Pick<PageProps<"/account/appointme
                     {booking.studios.map((studio) => studio.name).join(" + ")}
                   </span>
                   <Status booking={booking} />
+                  <VisitStampBadge bookingId={booking.id} stamps={stamps} />
                 </summary>
                 <div className="past-details">
                   <p className="appointment-ref">Reference {booking.ref}</p>
+                  <VisitStamp bookingId={booking.id} stamps={stamps} />
                   <BookingSummary booking={booking} />
                   <Moves booking={booking} />
                   <Agreed booking={booking} />

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { connection } from "next/server";
 import { Suspense } from "react";
 import { AccountFrame } from "@/components/AccountFrame";
+import { BalanceFacts } from "@/components/AtAGlance";
 import { CopyCode } from "@/components/CopyCode";
 import { RewardList } from "@/components/RewardList";
 import { StampCard } from "@/components/StampCard";
@@ -10,7 +11,9 @@ import { getDb } from "@/db/client";
 import { formatCents } from "@/lib/domain/pricing";
 import { longDateLabel } from "@/lib/domain/time";
 import { count } from "@/lib/words";
+import { atAGlance } from "@/server/account";
 import { listStampChanges, loyaltyStandingOf } from "@/server/loyalty";
+import { membershipsOf } from "@/server/memberships";
 import { listCodesForEmail } from "@/server/promos";
 import { listRewards } from "@/server/rewards";
 import { requireUser } from "@/server/session";
@@ -47,11 +50,14 @@ async function Rewards() {
   const user = await requireUser("/account/rewards");
   const db = await getDb();
   const now = new Date();
-  const [settings, rewards, codes] = await Promise.all([
+  const [settings, rewards, codes, memberships] = await Promise.all([
     loadSettings(db),
     listRewards(db, user.email, now),
     listCodesForEmail(db, user.email, now),
+    membershipsOf(db, user.email),
   ]);
+  const member = memberships.some((membership) => membership.status !== "starting");
+  const glance = atAGlance(rewards, codes, memberships);
   // After loyalty started over, the stamps are counted from that day: the changes from before it are not listed.
   const since = loyaltyStart(settings);
   const changes = await listStampChanges(db, user.email, since);
@@ -83,6 +89,13 @@ async function Rewards() {
             <div>
               <dt>Still needed</dt>
               <dd>{standing.needed}</dd>
+            </div>
+            <div>
+              <dt>Free hours to use</dt>
+              <dd>
+                {glance.freeHours === 0 ? "None" : glance.freeHours}
+                {glance.firstFreeHourEnds && `, the first until ${formatDay(new Date(glance.firstFreeHourEnds))}`}
+              </dd>
             </div>
           </dl>
 
@@ -124,10 +137,16 @@ async function Rewards() {
         )}
       </div>
 
-      {credits.length > 0 && (
+      {(credits.length > 0 || member) && (
         <div className="admin-card">
           <h3>Credit and codes</h3>
-          <p className="account-small">These are not rewards: money from a booking you moved, credit from the studio, or a discount.</p>
+          <BalanceFacts glance={glance} member={member} />
+          {member && (
+            <p className="account-small">
+              Your membership&rsquo;s hours, its code and every change to them are on <Link href="/account/membership">My Membership</Link>.
+            </p>
+          )}
+          {credits.length > 0 && <p className="account-small">These are not rewards: money from a booking you moved, credit from the studio, or a discount.</p>}
           {credits.map((code) => (
             <div className="account-code" key={code.code}>
               <strong>

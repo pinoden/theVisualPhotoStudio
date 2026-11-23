@@ -418,6 +418,10 @@ test("a customer signs in, sees their booking, and turns it into a reschedule co
   const loyalty = onScreen(page.locator(".account-card", { hasText: "My Loyalty Rewards" }));
   await expect(loyalty).toContainText("0 / 5");
   await expect(loyalty).toContainText("five more stamps until your free studio hour");
+  // Her loyalty in figures (the owner's answer of 2026-11-23): nothing yet.
+  const fact = (card: typeof loyalty, term: string) => card.locator(".reward-facts div", { hasText: term }).locator("dd");
+  await expect(fact(loyalty, "Stamps collected")).toHaveText("0");
+  await expect(fact(loyalty, "Free hours to use")).toHaveText("None");
   const book = onScreen(page.locator(".account-book"));
   await expect(book.getByRole("link", { name: "Book a studio", exact: true })).toBeVisible();
   await expect(book.getByRole("link", { name: "Book a photographer", exact: true })).toBeVisible();
@@ -1654,6 +1658,14 @@ test("a client buys a membership, gets its code, sees it in their account and ca
   await expect(card.locator(".flash-success")).toHaveText("Your membership is cancelled. No more monthly payments will be taken, and your hours stay on your code.");
   const goodbye = await latestEmail(page, "membership_cancelled", max.email);
   expect(goodbye.body).toContain(`The hours left on your code ${code} stay yours to use: 5 hours.`);
+
+  // The account's first page and My Rewards give the hours left too (the owner's answer of 2026-11-23).
+  await page.goto("/account");
+  const usable = onScreen(page.locator(".account-card", { hasText: "Rewards you can use" }));
+  await expect(usable.locator(".reward-facts div", { hasText: "Membership hours left" }).locator("dd")).toHaveText("5 hours");
+  await expect(usable.getByRole("link", { name: "My membership" })).toHaveAttribute("href", "/account/membership");
+  await page.goto("/account/rewards");
+  await expect(onScreen(page.locator(".admin-card", { hasText: "Credit and codes" })).locator(".reward-facts div", { hasText: "Membership hours left" }).locator("dd")).toHaveText("5 hours");
 });
 
 test("the owner changes an add-on's price and a studio's guest number, and customers see both", async ({ page }) => {
@@ -1915,6 +1927,9 @@ test("the account lists every reward with its status, and a code is copied with 
   }
   const spare = onScreen(page.locator("li.reward", { hasText: freeHourCodes[2] }));
   await expect(spare).toContainText("Available");
+  // One free hour is left to use, and the figures say until when (the owner's answer of 2026-11-23).
+  const figures = onScreen(page.locator(".admin-card", { hasText: "My Loyalty Rewards" })).locator(".reward-facts div", { hasText: "Free hours to use" }).locator("dd");
+  await expect(figures).toHaveText(/^1, the first until [A-Z][a-z]{2} \d{1,2}, \d{4}$/);
   await expect(spare).toContainText(/Issued/);
   await expect(spare).toContainText(/Expires/);
   await shot(page, "20a-account-rewards");
@@ -1929,6 +1944,9 @@ test("the account lists every reward with its status, and a code is copied with 
   await page.getByRole("link", { name: "Overview", exact: true }).click();
   const usable = onScreen(page.locator(".account-card", { hasText: "Rewards you can use" }));
   await expect(usable).toContainText(freeHourCodes[2]);
+  await expect(
+    onScreen(page.locator(".account-card", { hasText: "My Loyalty Rewards" })).locator(".reward-facts div", { hasText: "Free hours to use" }).locator("dd"),
+  ).toHaveText(/^1, the first until /);
   await expect(usable).not.toContainText(freeHourCodes[0]);
   await expect(onScreen(page.locator(".account-card", { hasText: "Your next appointment" }))).toContainText("upcoming appointments in all");
 });

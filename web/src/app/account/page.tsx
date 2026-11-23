@@ -3,6 +3,7 @@ import Link from "next/link";
 import { connection } from "next/server";
 import { Suspense } from "react";
 import { AccountFrame } from "@/components/AccountFrame";
+import { BalanceFacts, LoyaltyFacts } from "@/components/AtAGlance";
 import { ChangeEmailForm } from "@/components/ChangeEmailForm";
 import { CopyCode } from "@/components/CopyCode";
 import { StampCard } from "@/components/StampCard";
@@ -10,10 +11,11 @@ import { getDb } from "@/db/client";
 import { formatCents } from "@/lib/domain/pricing";
 import { durationLabel } from "@/lib/domain/time";
 import { count } from "@/lib/words";
-import { customerStatus, loadAppointments } from "@/server/account";
+import { atAGlance, customerStatus, loadAppointments } from "@/server/account";
 import { pendingEmailChange } from "@/server/email-change";
 import { getCatalog } from "@/server/cached";
 import { loyaltyStandingOf } from "@/server/loyalty";
+import { membershipsOf } from "@/server/memberships";
 import { listCodesForEmail } from "@/server/promos";
 import { listRewards } from "@/server/rewards";
 import { requireUser } from "@/server/session";
@@ -50,14 +52,17 @@ async function Overview() {
   const user = await requireUser("/account");
   const db = await getDb();
   const now = new Date();
-  const [{ upcoming }, settings, rewards, codes, catalog, waiting] = await Promise.all([
+  const [{ upcoming }, settings, rewards, codes, catalog, waiting, memberships] = await Promise.all([
     loadAppointments(db, user.email, now),
     loadSettings(db),
     listRewards(db, user.email, now),
     listCodesForEmail(db, user.email, now),
     getCatalog(),
     user.role === "customer" ? pendingEmailChange(db, user, now) : null,
+    membershipsOf(db, user.email),
   ]);
+  const member = memberships.some((membership) => membership.status !== "starting");
+  const glance = atAGlance(rewards, codes, memberships);
   const standing = settings.loyaltyEnabled ? await loyaltyStandingOf(db, user.email, settings) : null;
   const next = upcoming[0] ?? null;
   const when = next ? formatRange(new Date(next.startAt), new Date(next.endAt)) : null;
@@ -103,6 +108,7 @@ async function Overview() {
           <div className="admin-card account-card">
             <h3>My Loyalty Rewards</h3>
             <StampCard standing={standing} perReward={settings.loyaltyVisits} />
+            <LoyaltyFacts standing={standing} glance={glance} />
             <p className="account-small">
               Every {count(settings.loyaltyVisits, "visit")}, on separate days, earn one free hour in any studio.
             </p>
@@ -116,7 +122,8 @@ async function Overview() {
 
         <div className="admin-card account-card">
           <h3>Rewards you can use</h3>
-          {available.length === 0 && credits.length === 0 && <p>You have no reward or credit to use right now.</p>}
+          <BalanceFacts glance={glance} member={member} />
+          {available.length === 0 && credits.length === 0 && !member && <p>You have no reward or credit to use right now.</p>}
           {available.map((reward) => (
             <div className="account-code" key={reward.id}>
               <strong>{reward.name}</strong>
@@ -143,6 +150,11 @@ async function Overview() {
             <Link href="/account/rewards" className="btn btn-outline btn-small">
               All my rewards
             </Link>
+            {member && (
+              <Link href="/account/membership" className="btn btn-outline btn-small">
+                My membership
+              </Link>
+            )}
           </p>
         </div>
 
