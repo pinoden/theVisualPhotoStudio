@@ -1162,6 +1162,22 @@ test("one pair of angel wings is booked once for any overlapping time, and the o
   await expect(card).toContainText("Wynn Wings");
   await expect(card).toContainText("10:00 AM – 11:00 AM");
   expect(await accessibilityProblems(page), "Props & Resources").toEqual([]);
+
+  // Away that day (at the repairer's): nobody can add them then, and the owners are told whose booking still has them.
+  await byLabel(card, "First day away").fill(day);
+  await card.getByRole("button", { name: "Mark Angel wings away" }).click();
+  await expect(byText(page, new RegExp(`^Angel wings is away on ${longDateLabel(day)}: it cannot be booked then\\. A booking made before has it reserved then: VS-[0-9A-Z]{6} \\(Wynn Wings\\)\\.`))).toBeVisible();
+  const ida = await (await browser.newContext()).newPage();
+  await ida.goto(`/book?studio=paris&date=${day}&duration=60`);
+  await next(ida);
+  await next(ida);
+  await ida.getByRole("button", { name: "12:00 PM", exact: true }).click();
+  await next(ida);
+  await expect(ida.getByRole("checkbox", { name: /Angel wings/ })).toBeDisabled();
+  await expect(byText(ida, "Not available on this day.")).toBeVisible();
+  await ida.context().close();
+  await page.getByRole("button", { name: "Angel wings: available again" }).click();
+  await expect(byText(page, "Angel wings can be booked again on every day.")).toBeVisible();
   // Taken off again: the tests after this one offer every add-on.
   await page.goto("/admin/studios");
   await page.getByRole("button", { name: "Stop offering Angel wings" }).click();

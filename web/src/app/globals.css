@@ -1382,6 +1382,12 @@ button { font-family: inherit; }
 .addon-quantity .addon-count { flex: 0 0 auto; width: 4.75rem; margin-top: 0; }
 .addon-quantity label { cursor: pointer; }
 .addon-price { margin-left: auto; white-space: nowrap; color: var(--color-dark); }
+/* A prop's picture (Props & Resources): a small square beside its name, the picture cropped to fit. */
+.addon-picture { flex: 0 0 auto; width: 56px; height: 56px; object-fit: cover; border-radius: 3px; background: var(--color-ivory); }
+/* Props & Resources: a prop's picture with its button, and the days it is away. */
+.prop-picture { display: flex; flex-wrap: wrap; gap: 1rem; align-items: flex-end; margin-bottom: .75rem; }
+.prop-picture img { width: 160px; height: auto; border-radius: 3px; }
+.prop-away { margin: .5rem 0 1.25rem; }
 
 .notice {
   padding: .875rem 1.25rem;

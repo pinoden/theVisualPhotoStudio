@@ -36,6 +36,8 @@ export interface CatalogAddon extends AddonDef {
   description: string;
   /** What it is for: see ADDON_KINDS. */
   kind: AddonKind;
+  /** Its picture, when the owners chose one that is in the library (Props & Resources). */
+  picture: Picture | null;
 }
 
 /** A photography session on sale: one studio, one length, one price that includes the studio. */
@@ -97,7 +99,9 @@ export async function loadCatalog(db: DbLike): Promise<Catalog> {
   const activeIds = new Set(studioRows.map((s) => s.id));
   const facts = new Map(studioRows.map((s) => [s.id, parseStudioFacts(s.facts)]));
   const plans = [...facts.values()].map((entry) => entry.floorPlan).filter((id) => id !== "");
-  const planPictures = plans.length > 0 ? await loadPictures(db, plans) : new Map<string, Picture>();
+  // The floor plans' pictures and the add-ons', read together.
+  const pictureIds = [...plans, ...addonRows.flatMap((a) => (a.mediaId ? [a.mediaId] : []))];
+  const planPictures = pictureIds.length > 0 ? await loadPictures(db, pictureIds) : new Map<string, Picture>();
   return {
     studios: studioRows.map((s) => ({
       id: s.id,
@@ -137,6 +141,7 @@ export async function loadCatalog(db: DbLike): Promise<Catalog> {
         studioId: a.studioId,
         maxQuantity: a.maxQuantity,
         kind: a.kind,
+        picture: (a.mediaId && planPictures.get(a.mediaId)) || null,
       })),
     settings,
     specialDates: Object.fromEntries(specialRows.map((r) => [r.day, r.dayType])),

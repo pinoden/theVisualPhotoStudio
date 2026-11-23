@@ -170,7 +170,7 @@ describe("a fully booked day (the owner's admin brief of 2026-11-22, item 13)", 
 
     // The wings come back from Dee's set at 3:30, and go with the next booking that asks for them.
     expectOk(await book("Lou Lane", ["dayglow"], 15.75, 1, { addons: [{ addonId: wings, quantity: 1 }] }));
-    expect(await propsFree(world.db, localToUtc(DAY, h(15.75)), localToUtc(DAY, h(16.75)))).toEqual({ [wings]: 0 });
+    expect(await propsFree(world.db, localToUtc(DAY, h(15.75)), localToUtc(DAY, h(16.75)))).toEqual({ free: { [wings]: 0 }, away: [] });
 
     // Every email of the day went to a test address: the clients' at example.com, the owners' at studio.test.
     expect((await world.emails()).every((mail) => /@(example\.com|studio\.test)$/.test(mail.toEmail))).toBe(true);

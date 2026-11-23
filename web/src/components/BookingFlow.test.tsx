@@ -55,8 +55,8 @@ const catalog: Catalog = {
     ...rulesFor(P, { 60: 68, 120: 136 }),
   ],
   addons: [
-    { id: "addon-people", slug: "extra-guest", name: "Extra guest", description: "Beyond those included.", priceCents: 500, studioId: null, maxQuantity: 20, kind: "people" },
-    { id: "addon-pet", slug: "pet-fee", name: "Pet fee", description: "Dayglow only.", priceCents: 4000, studioId: D, maxQuantity: 1, kind: "pet" },
+    { id: "addon-people", slug: "extra-guest", name: "Extra guest", description: "Beyond those included.", priceCents: 500, studioId: null, maxQuantity: 20, kind: "people", picture: null },
+    { id: "addon-pet", slug: "pet-fee", name: "Pet fee", description: "Dayglow only.", priceCents: 4000, studioId: D, maxQuantity: 1, kind: "pet", picture: null },
   ],
   settings: { ...DEFAULT_SETTINGS, slotIncrementMinutes: 60, multiStudioPercent: { 2: 20, 3: 22 } },
   specialDates: {},
@@ -84,6 +84,8 @@ let formQuestions: { id: string; label: string; help: string; kind: string; opti
 let formAgreements: { versionId: string; number: number; title: string; body: string }[];
 /** How many of each prop the server says are free at the chosen time. */
 let propsFree: Record<string, number>;
+/** The props away on the day, as /api/props-free answers. */
+let propsAway: string[];
 let photographerBusy: [number, number][];
 let posted: Record<string, unknown>[];
 let bookingReply: { status: number; body: Record<string, unknown> };
@@ -103,6 +105,7 @@ beforeEach(() => {
   formQuestions = [];
   formAgreements = [];
   propsFree = {};
+  propsAway = [];
   availabilityAsked = "";
   photographerBusy = [];
   posted = [];
@@ -114,7 +117,7 @@ beforeEach(() => {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: string, init?: { body?: string }) => {
-      if (input.startsWith("/api/props-free")) return reply({ ok: true, free: propsFree });
+      if (input.startsWith("/api/props-free")) return reply({ ok: true, free: propsFree, away: propsAway });
       if (input.startsWith("/api/checkout-forms")) {
         formsAsked.push(input);
         return reply({ ok: true, questions: formQuestions, agreements: formAgreements });
@@ -452,7 +455,7 @@ describe("studio-first flow", () => {
   });
 
   it("offers a prop only while one is free at the chosen time (the owner's admin brief of 2026-11-22, item 10)", async () => {
-    const wings = { id: "addon-wings", slug: "angel-wings", name: "Angel wings", description: "One pair.", priceCents: 4000, studioId: null, maxQuantity: 1, kind: "other" as const };
+    const wings = { id: "addon-wings", slug: "angel-wings", name: "Angel wings", description: "One pair.", priceCents: 4000, studioId: null, maxQuantity: 1, kind: "other" as const, picture: null };
     propsFree = { "addon-wings": 0 };
     render(<BookingFlow catalog={{ ...catalog, addons: [...catalog.addons, wings] }} navigate={nav.push} />);
     await user.click(studioBox("Studio Paris"));
@@ -476,6 +479,25 @@ describe("studio-first flow", () => {
     await next();
     await user.click(await screen.findByRole("button", { name: /^Confirm & pay/ }));
     expect(posted[0]).toMatchObject({ addons: [{ addonId: "addon-wings", quantity: 1 }] });
+  });
+
+  it("shows a prop's picture beside its name, and says when it is away that day", async () => {
+    const picture = { id: "media-wings", url: "/media/media-wings/1/wings.jpg", width: 800, height: 600, alt: "A pair of white feathered angel wings", caption: "" };
+    const wings = { id: "addon-wings", slug: "angel-wings", name: "Angel wings", description: "One pair.", priceCents: 4000, studioId: null, maxQuantity: 1, kind: "other" as const, picture };
+    propsFree = { "addon-wings": 0 };
+    propsAway = ["addon-wings"];
+    render(<BookingFlow catalog={{ ...catalog, addons: [...catalog.addons, wings] }} navigate={nav.push} />);
+    await user.click(studioBox("Studio Paris"));
+    await next();
+    pickDate(WED);
+    await pickDuration("1 hr");
+    await next();
+    await pickTime("9:00 AM");
+    await next();
+    expect(await screen.findByRole("img", { name: "A pair of white feathered angel wings" })).toBeTruthy();
+    await waitFor(() => expect(screen.getByText("Not available on this day.")).toBeTruthy());
+    expect(screen.queryByText("Already reserved at this time.")).toBeNull();
+    expect((screen.getByRole("checkbox", { name: /Angel wings/ }) as HTMLInputElement).disabled).toBe(true);
   });
 
   it("shows an add-on only when its studio is booked, and charges it", async () => {

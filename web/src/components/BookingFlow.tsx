@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import { type KeyboardEvent, type UIEvent, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
@@ -200,7 +201,7 @@ export function BookingFlow({
   const [readToEnd, setReadToEnd] = useState(false);
   const policiesBox = useRef<HTMLDivElement>(null);
   /** How many of each prop are free at the chosen time (the owner's admin brief of 2026-11-22, item 10), for `key`. */
-  const [propsFreeNow, setPropsFreeNow] = useState<{ key: string; free: Record<string, number> } | null>(null);
+  const [propsFreeNow, setPropsFreeNow] = useState<{ key: string; free: Record<string, number>; away: string[] } | null>(null);
   const [codeInput, setCodeInput] = useState("");
   const [applied, setApplied] = useState<AppliedCode | null>(null);
   const [codeError, setCodeError] = useState("");
@@ -344,6 +345,10 @@ export function BookingFlow({
   const propsKey = `${date}|${start}|${duration}`;
   /** How many of a prop are free at the chosen time; undefined for an add-on with no limit, or before they are read. */
   const freeOf = (addonId: string) => (propsFreeNow && propsFreeNow.key === propsKey ? propsFreeNow.free[addonId] : undefined);
+  /** Whether a prop is away on the chosen day (marked unavailable for a while in Props & Resources). */
+  const awayOf = (addonId: string) => propsFreeNow !== null && propsFreeNow.key === propsKey && propsFreeNow.away.includes(addonId);
+  /** Why a prop cannot be taken, or fewer of it, at the chosen time. */
+  const takenText = (addonId: string) => (awayOf(addonId) ? "Not available on this day." : "Already reserved at this time.");
   const mostOf = (addon: (typeof catalog.addons)[number]) =>
     Math.min(addon.kind === "people" ? Math.min(addon.maxQuantity, guestsAllowed) : addon.maxQuantity, freeOf(addon.id) ?? Number.POSITIVE_INFINITY);
   const studioOffer = multiStudioSaving(catalog);
@@ -478,8 +483,8 @@ export function BookingFlow({
     const key = propsKey;
     try {
       const response = await fetch(`/api/props-free?date=${date}&start=${start}&duration=${duration}`, { cache: "no-store" });
-      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; free?: Record<string, number> };
-      if (response.ok && data.ok) setPropsFreeNow({ key, free: data.free ?? {} });
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; free?: Record<string, number>; away?: string[] };
+      if (response.ok && data.ok) setPropsFreeNow({ key, free: data.free ?? {}, away: data.away ?? [] });
     } catch {
       // Without the counts the add-ons are offered as usual, and the booking says if a prop is taken.
     }
@@ -1202,6 +1207,7 @@ export function BookingFlow({
                         </option>
                       ))}
                     </select>
+                    {addon.picture && <AddonPicture picture={addon.picture} />}
                     <span className="addon-text">
                       <span className="addon-head">
                         <label htmlFor={`addon-${addon.id}`}>
@@ -1213,7 +1219,7 @@ export function BookingFlow({
                       <span className="addon-description" id={`addon-${addon.id}-limit`}>
                         {freeOf(addon.id) !== undefined && freeOf(addon.id)! < addon.maxQuantity
                           ? freeOf(addon.id) === 0
-                            ? "Already reserved at this time."
+                            ? takenText(addon.id)
                             : `Up to ${freeOf(addon.id)}: the others are reserved at this time.`
                           : addon.kind !== "people"
                           ? `Up to ${addon.maxQuantity}.`
@@ -1233,6 +1239,7 @@ export function BookingFlow({
                     disabled={mostOf(addon) === 0}
                     onChange={(event) => setAddonCounts((current) => ({ ...current, [addon.id]: event.target.checked ? 1 : 0 }))}
                   />
+                  {addon.picture && <AddonPicture picture={addon.picture} />}
                   {/* The name and its price on one line, which puts the price under the name when both do not fit; the description below. */}
                   <span className="addon-text">
                     <span className="addon-head">
@@ -1240,7 +1247,7 @@ export function BookingFlow({
                       <span className="addon-price">{formatCents(addon.priceCents)}</span>
                     </span>
                     {addon.description && <span className="addon-description">{addon.description}</span>}
-                    {freeOf(addon.id) === 0 && <span className="addon-description addon-taken">Already reserved at this time.</span>}
+                    {freeOf(addon.id) === 0 && <span className="addon-description addon-taken">{takenText(addon.id)}</span>}
                   </span>
                 </label>
                 ),
@@ -1498,4 +1505,9 @@ function IntakeField({ question, value, onChange }: { question: FormQuestion; va
       )}
     </div>
   );
+}
+
+/** An add-on's picture beside its name (Props & Resources), small: the name and price stay the row's first words. */
+function AddonPicture({ picture }: { picture: NonNullable<Catalog["addons"][number]["picture"]> }) {
+  return <Image className="addon-picture" src={picture.url} width={picture.width} height={picture.height} alt={picture.alt} sizes="64px" />;
 }

@@ -307,7 +307,15 @@ export const addons = pgTable("addons", {
   kind: text("kind", { enum: ["people", "pet", "other"] }).notNull().default("other"),
   sortOrder: integer("sort_order").notNull().default(0),
   active: boolean("active").notNull().default(true),
-});
+  /** Its picture, from the media library (the admin brief of 2026-11-22, item 10: each prop with an image). */
+  mediaId: uuid("media_id").references(() => media.id, { onDelete: "restrict" }),
+  /**
+   * The days, both included, on which a prop cannot be booked (item 10: "mark unavailable for a while"), such as the
+   * angel wings away for repair. Both set or neither. Bookings made before keep it: Props & Resources lists them.
+   */
+  awayFrom: date("away_from", { mode: "string" }),
+  awayTo: date("away_to", { mode: "string" }),
+}, (t) => [check("addons_away", sql`(${t.awayFrom} is null) = (${t.awayTo} is null) and (${t.awayFrom} is null or ${t.awayFrom} <= ${t.awayTo})`)]);
 
 /** Business rules the owner can change. Defaults live in src/server/settings.ts. */
 export const settings = pgTable("settings", {

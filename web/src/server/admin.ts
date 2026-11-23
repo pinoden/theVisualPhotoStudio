@@ -590,6 +590,11 @@ export interface AdminAddon extends AddonInput {
   slug: string;
   /** False when it is no longer offered. */
   active: boolean;
+  /** Its picture's id in the media library, or null (Props & Resources). */
+  mediaId: string | null;
+  /** The days a prop is away, both included, or null (Props & Resources). */
+  awayFrom: string | null;
+  awayTo: string | null;
 }
 
 /** Every add-on, including the ones no longer offered. */
@@ -605,6 +610,9 @@ export async function listAddons(db: DbLike): Promise<AdminAddon[]> {
     studioId: row.studioId,
     stock: row.stock,
     active: row.active,
+    mediaId: row.mediaId,
+    awayFrom: row.awayFrom,
+    awayTo: row.awayTo,
   }));
 }
 
