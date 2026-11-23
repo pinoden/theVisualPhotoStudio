@@ -206,14 +206,9 @@ export function AppointmentDialog({
           ) : (
             <dl className="detail-list">
               {appointment.forms.acceptances.map((acceptance) => (
-                <FormLine key={`${acceptance.kind}-${acceptance.title}`} term={acceptance.title}>
-                  Version {acceptance.versionNumber}, accepted {formatInstant(new Date(acceptance.acceptedAt))}
-                  {acceptance.agreementVersionId && (
-                    <>
-                      {" "}
-                      (<Link href={`/admin/forms/versions/${acceptance.agreementVersionId}`}>read it</Link>)
-                    </>
-                  )}
+                <FormLine key={acceptance.id} term={acceptance.title}>
+                  Version {acceptance.versionNumber}, accepted {formatInstant(new Date(acceptance.acceptedAt))} (
+                  <Link href={`${page}/accepted/${acceptance.id}`}>read it</Link>)
                 </FormLine>
               ))}
               {appointment.forms.answers.map((answer, index) => (

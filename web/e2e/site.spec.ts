@@ -434,6 +434,12 @@ test("a customer signs in, sees their booking, and turns it into a reschedule co
   await expect(byText(page.locator("main .container-sm"), "Studio Blanche")).toHaveCount(0);
   await shot(page, "09a-account-appointments");
   expect(await accessibilityProblems(page), "My Appointments, with an appointment").toEqual([]);
+  // What Jane agreed to at checkout, to read again from her account (the November 20 brief).
+  await expect(card.locator(".accepted-terms")).toContainText(/Studio Policies, version 1, accepted/);
+  await card.getByRole("link", { name: "Studio Policies" }).click();
+  await expect(page.getByRole("heading", { name: "Studio Policies", level: 2 })).toBeVisible();
+  await expect(onScreen(page.locator(".accepted-words"))).toContainText("Cancellations & Rescheduling");
+  await page.getByRole("link", { name: "Back to My Appointments" }).click();
 
   await card.getByRole("button", { name: "Reschedule" }).click();
   await expect(byText(card, /you will get a code worth \$116\.80, valid for 90 days/)).toBeVisible();
@@ -1097,6 +1103,19 @@ test("the owners write a seasonal question and an agreement, a client answers an
   await client.getByRole("checkbox", { name: /Christmas decor/ }).check();
   await next(client);
   await confirmAndGetRef(client, /^Confirm & pay/);
+  // The client's booking lists what they agreed to, each to read again (the November 20 brief): the policies in the
+  // very words they read, live values included, and the agreement's version.
+  const agreed = onScreen(client.locator(".accepted-terms"));
+  await expect(agreed).toContainText(/Studio Policies, version 1, accepted/);
+  await expect(agreed).toContainText(/Equipment terms, version 1, accepted/);
+  await agreed.getByRole("link", { name: "Studio Policies" }).click();
+  await expect(client.getByRole("heading", { name: "Studio Policies", level: 1 })).toBeVisible();
+  await expect(onScreen(client.locator(".accepted-words"))).toContainText("Cancellations & Rescheduling");
+  await expect(onScreen(client.locator(".accepted-words"))).toContainText("Children must be supervised by an adult at all times.");
+  expect(await accessibilityProblems(client), "the policies a client accepted").toEqual([]);
+  await client.getByRole("link", { name: "Back to your booking" }).click();
+  await onScreen(client.locator(".accepted-terms")).getByRole("link", { name: "Equipment terms" }).click();
+  await expect(onScreen(client.locator(".accepted-words"))).toContainText("Tell us at once if anything breaks.");
   await client.context().close();
 
   // The appointment keeps what was accepted and answered.
@@ -1118,7 +1137,8 @@ test("the owners write a seasonal question and an agreement, a client answers an
   await page.goto(`/admin/calendar?view=day&date=${day}&studio=dayglow`);
   await page.getByRole("link", { name: /Cora Checkout/ }).click();
   await expect(forms).toContainText(/Equipment terms\s*Version 1, accepted/);
-  await forms.getByRole("link", { name: "read it" }).click();
+  // The second "read it" is the agreement's: the policies come first, as the policies step showed them.
+  await forms.getByRole("link", { name: "read it" }).nth(1).click();
   await expect(page.getByRole("heading", { name: "Equipment terms", level: 1 })).toBeVisible();
   await expect(onScreen(page.locator(".admin-card"))).toContainText("Tell us at once if anything breaks.");
   // Taken off again: the tests after this one book without them.

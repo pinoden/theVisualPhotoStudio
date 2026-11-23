@@ -1281,6 +1281,12 @@ export const bookingAcceptances = pgTable(
     agreementVersionId: uuid("agreement_version_id").references(() => agreementVersions.id, { onDelete: "restrict" }),
     versionNumber: integer("version_number").notNull(),
     acceptedAt: ts("accepted_at").notNull(),
+    /**
+     * The Policies page's words as the client read them, as HTML (since 2026-11-23): its live values, such as prices,
+     * as they were, and kept when the page's history is not. Null for an agreement, whose versions never change, and
+     * for an acceptance made before.
+     */
+    shownHtml: text("shown_html"),
   },
   (t) => [index("booking_acceptances_booking_idx").on(t.bookingId)],
 );

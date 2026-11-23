@@ -1,0 +1,1 @@
+ALTER TABLE "booking_acceptances" ADD COLUMN "shown_html" text;

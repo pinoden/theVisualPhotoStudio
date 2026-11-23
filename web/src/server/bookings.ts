@@ -48,7 +48,7 @@ import {
   type UsablePromo,
 } from "./promos";
 import { loadAccessInstructions } from "./settings";
-import { checkForms, recordForms, type CheckedForms } from "./booking-forms";
+import { acceptancesOf, checkForms, recordForms, type AcceptedItem, type CheckedForms } from "./booking-forms";
 import { propsProblem } from "./props";
 import { termsAtBooking } from "./terms";
 import { moneyKindNow, moneyKindOf, moneyKindOfCode, OTHER_MONEY_CODE } from "./test-mode";
@@ -377,7 +377,7 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
   // for a client is not: the client has not read the policies there.
   let forms: CheckedForms | null = null;
   if (!deps.madeBy) {
-    const checked = await checkForms(db, { studioIds: input.studioIds, photography: Boolean(session), date: input.date }, { accepted: input.accepted, answers: input.answers });
+    const checked = await checkForms(db, { studioIds: input.studioIds, photography: Boolean(session), date: input.date }, { accepted: input.accepted, answers: input.answers }, now);
     if (!checked.ok) return fail(checked.problem.code === "policies_changed" ? 409 : 422, checked.problem.code === "policies_changed" ? "policies_changed" : "invalid_input", checked.problem.message);
     forms = checked.forms;
   }
@@ -789,6 +789,8 @@ export interface BookingView {
    * booking's payment link was paid (`waitToEnd` in manage.ts); `at` is when they asked. Null otherwise.
    */
   endRequest: { kind: "cancel" | "reschedule"; at: string } | null;
+  /** The policies and agreements the client accepted at checkout, each to be read again (src/server/booking-forms.ts). */
+  accepted: AcceptedItem[];
 }
 
 type BookingRow = typeof bookings.$inferSelect;
@@ -798,7 +800,7 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[], now: Date =
   if (rows.length === 0) return [];
   const ids = rows.map((r) => r.id);
   const codeIds = rows.map((r) => r.promoCodeId).filter((id): id is string => id !== null);
-  const [holdRows, addonRows, codeRows, received, atStudio, throughAcuity, owed, held, charged, creditLeft, creditReturned, refunded] = await together(db, [
+  const [holdRows, addonRows, codeRows, received, atStudio, throughAcuity, owed, held, charged, creditLeft, creditReturned, refunded, accepted] = await together(db, [
     () => db
       .select({ bookingId: studioHolds.bookingId, name: studios.name, priceCents: studioHolds.priceCents, sort: studios.sortOrder })
       .from(studioHolds)
@@ -820,6 +822,7 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[], now: Date =
     () => creditLeftCentsByBooking(db, rows),
     () => creditReturnedCentsByBooking(db, ids),
     () => refundedCentsByBooking(db, ids),
+    () => acceptancesOf(db, ids),
   ]);
   return rows.map((booking) => ({
     id: booking.id,
@@ -864,6 +867,7 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[], now: Date =
     creditLeftCents: creditLeft.get(booking.id) ?? 0,
     rescheduledCount: booking.rescheduledCount,
     endRequest: booking.endRequest && booking.endRequestedAt ? { kind: booking.endRequest, at: booking.endRequestedAt.toISOString() } : null,
+    accepted: accepted.get(booking.id) ?? [],
   }));
 }
 

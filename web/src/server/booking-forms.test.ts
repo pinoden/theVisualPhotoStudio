@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { bookingAcceptances, bookingAnswers, bookings } from "@/db/schema";
 import {
+  acceptedText,
   appliesTo,
   checkoutForms,
   currentPolicies,
@@ -18,7 +19,9 @@ import {
   type QuestionInput,
 } from "./booking-forms";
 import { agreementKey, policiesKey } from "@/lib/booking-form-keys";
-import { ensureBuiltInPages } from "./pages";
+import { pageTextHtml } from "@/lib/site/page-text";
+import { toBookingViews } from "./bookings";
+import { ensureBuiltInPages, loadPublishedPage } from "./pages";
 import { createTestWorld, expectOk, NOW, type TestWorld } from "./testing";
 
 const h = (hours: number) => hours * 60;
@@ -135,7 +138,7 @@ describe("Booking Forms & Agreements (the owner's brief of 2026-11-22, items 6 a
       { label: "How many people are coming?", answer: "1–5" },
     ]);
     expect(forms.acceptances).toEqual([
-      { kind: "policies_page", title: "Studio Policies", versionNumber: 1, acceptedAt: NOW.toISOString(), siteVersionId: policies.versionId, agreementVersionId: null },
+      { id: expect.any(String), kind: "policies_page", title: "Studio Policies", versionNumber: 1, acceptedAt: NOW.toISOString(), siteVersionId: policies.versionId, agreementVersionId: null },
     ]);
 
     // Changed or deleted later, the question's words stay as the client answered them.
@@ -156,6 +159,43 @@ describe("Booking Forms & Agreements (the owner's brief of 2026-11-22, items 6 a
       ["agreement", "Equipment terms", 1],
     ]);
     expect((await world.db.select().from(bookingAnswers).where(eq(bookingAnswers.bookingId, other.id))).map((a) => a.answer)).toEqual(["6–10"]);
+  });
+
+  it("keeps the Policies page's words as the client read them, and gives each acceptance back to read again", async () => {
+    await ensureBuiltInPages(world.db, NOW);
+    const policies = (await currentPolicies(world.db))!;
+    const terms = expectOk(await saveAgreement(world.db, null, { title: "Equipment terms", draft: "Handle the lights with care.\n\nTell us of any damage.", studioIds: [], forRentals: true, forPhotography: true }));
+    await publishAgreement(world.db, terms.id, "owner@studio.test", NOW);
+    const [shown] = (await checkoutForms(world.db, { studioIds: [world.ids.blanche], photography: false, date: "2026-11-18" })).agreements;
+    const booked = expectOk(await world.book({ accepted: [policiesKey(policies.versionId), agreementKey(shown.versionId)] }));
+    const [row] = await world.db.select().from(bookings).where(eq(bookings.ref, booked.ref));
+
+    // The client's pages list what was accepted.
+    const [view] = await toBookingViews(world.db, [row], NOW);
+    expect(view.accepted.map((item) => [item.title, item.versionNumber, item.acceptedAt])).toEqual([
+      ["Studio Policies", 1, NOW.toISOString()],
+      ["Equipment terms", 1, NOW.toISOString()],
+    ]);
+    const [policiesItem, termsItem] = view.accepted;
+
+    // The policies' words are the page's as the policies step showed them then, kept with the booking.
+    const page = (await loadPublishedPage(world.db, policies.slug, NOW))!;
+    const words = (await acceptedText(world.db, row.id, policiesItem.id, NOW))!;
+    expect(words.html).toBe(pageTextHtml(page.content.blocks, page.site));
+    expect(words.html!.length).toBeGreaterThan(100);
+    expect(words.note).toBeNull();
+    // An agreement's, in its paragraphs.
+    expect(await acceptedText(world.db, row.id, termsItem.id, NOW)).toMatchObject({ title: "Equipment terms", paragraphs: ["Handle the lights with care.", "Tell us of any damage."], html: null, note: null });
+    // An acceptance from before the words were kept is shown from the page's history, and says so.
+    await world.db.update(bookingAcceptances).set({ shownHtml: null }).where(eq(bookingAcceptances.id, policiesItem.id));
+    const older = (await acceptedText(world.db, row.id, policiesItem.id, NOW))!;
+    expect(older.html).toBe(words.html);
+    expect(older.note).toMatch(/^This version was accepted before the site kept its very words/);
+    // Nobody reads one booking's acceptance through another booking.
+    const other = expectOk(await world.book({ startMinute: h(15), accepted: [policiesKey(policies.versionId), agreementKey(shown.versionId)], customer: { name: "Bob Brown", email: "bob@example.com", phone: "407-555-0101" } }));
+    const [otherRow] = await world.db.select().from(bookings).where(eq(bookings.ref, other.ref));
+    expect(await acceptedText(world.db, otherRow.id, policiesItem.id, NOW)).toBeNull();
+    expect(await acceptedText(world.db, row.id, "not-an-id", NOW)).toBeNull();
   });
 
   it("asks nothing of a booking the studio makes for a client", async () => {

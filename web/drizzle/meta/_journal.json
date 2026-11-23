@@ -428,6 +428,13 @@
       "when": 1795423378298,
       "tag": "0060_prop_picture_and_away",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1795426522707,
+      "tag": "0061_policies_text_kept",
+      "breakpoints": true
     }
   ]
 }

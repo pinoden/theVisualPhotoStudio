@@ -3,6 +3,8 @@ import type { DbLike } from "@/db/client";
 import { agreements, agreementVersions, bookingAcceptances, bookingAnswers, intakeQuestions, siteDocuments, siteVersions, studios } from "@/db/schema";
 import { agreementKey, policiesKey, type QuestionKind } from "@/lib/booking-form-keys";
 import { isIsoDate, type IsoDate } from "@/lib/domain/time";
+import { pageTextHtml } from "@/lib/site/page-text";
+import { loadPageVersion, loadPublishedPage } from "./pages";
 
 /**
  * Booking Forms & Agreements (the owner's brief of 2026-11-22, items 6 and 7, and the admin brief's item 8): the
@@ -157,7 +159,7 @@ export async function checkoutForms(db: DbLike, context: FormContext): Promise<C
 export type FormsProblem = { code: "policies_changed"; message: string } | { code: "answers"; message: string };
 
 export interface CheckedForms {
-  acceptances: { kind: "policies_page" | "agreement"; title: string; siteVersionId: string | null; agreementVersionId: string | null; versionNumber: number }[];
+  acceptances: { kind: "policies_page" | "agreement"; title: string; siteVersionId: string | null; agreementVersionId: string | null; versionNumber: number; shownHtml: string | null }[];
   answers: { questionId: string; label: string; answer: string; sortOrder: number }[];
 }
 
@@ -170,6 +172,7 @@ export async function checkForms(
   db: DbLike,
   context: FormContext,
   sent: { accepted: string[]; answers: Record<string, unknown> },
+  now: Date,
 ): Promise<{ ok: true; forms: CheckedForms } | { ok: false; problem: FormsProblem }> {
   const [forms, policies] = await Promise.all([checkoutForms(db, context), currentPolicies(db)]);
   const accepted = new Set(sent.accepted);
@@ -201,12 +204,21 @@ export async function checkForms(
     ok: true,
     forms: {
       acceptances: [
-        ...(policies ? [{ kind: "policies_page" as const, title: policies.title, siteVersionId: policies.versionId, agreementVersionId: null, versionNumber: policies.number }] : []),
-        ...forms.agreements.map((agreement) => ({ kind: "agreement" as const, title: agreement.title, siteVersionId: null, agreementVersionId: agreement.versionId, versionNumber: agreement.number })),
+        ...(policies ? [{ kind: "policies_page" as const, title: policies.title, siteVersionId: policies.versionId, agreementVersionId: null, versionNumber: policies.number, shownHtml: await policiesHtml(db, policies.slug, now) }] : []),
+        ...forms.agreements.map((agreement) => ({ kind: "agreement" as const, title: agreement.title, siteVersionId: null, agreementVersionId: agreement.versionId, versionNumber: agreement.number, shownHtml: null })),
       ],
       answers,
     },
   };
+}
+
+/**
+ * The Policies page's words as the policies step shows them (src/app/book/checkout-policies.tsx), kept with the
+ * acceptance: the page's history keeps its blocks, not the prices and other live values they read then.
+ */
+async function policiesHtml(db: DbLike, slug: string, now: Date): Promise<string | null> {
+  const page = await loadPublishedPage(db, slug, now);
+  return page ? pageTextHtml(page.content.blocks, page.site) : null;
 }
 
 /** Keep what was accepted and answered with a booking, inside the transaction that makes it. */
@@ -219,7 +231,7 @@ export async function recordForms(tx: DbLike, bookingId: string, forms: CheckedF
 
 export interface BookingForms {
   answers: { label: string; answer: string }[];
-  acceptances: { kind: "policies_page" | "agreement"; title: string; versionNumber: number; acceptedAt: string; siteVersionId: string | null; agreementVersionId: string | null }[];
+  acceptances: { id: string; kind: "policies_page" | "agreement"; title: string; versionNumber: number; acceptedAt: string; siteVersionId: string | null; agreementVersionId: string | null }[];
 }
 
 /** What a booking's client accepted and answered at checkout, for the appointment's page and pop-up. */
@@ -231,6 +243,7 @@ export async function formsOfBooking(db: DbLike, bookingId: string): Promise<Boo
   return {
     answers: answers.map((row) => ({ label: row.label, answer: row.answer })),
     acceptances: acceptances.map((row) => ({
+      id: row.id,
       kind: row.kind,
       title: row.title,
       versionNumber: row.versionNumber,
@@ -407,4 +420,66 @@ export async function agreementVersion(db: DbLike, versionId: string): Promise<{
   if (!/^[0-9a-f-]{36}$/i.test(versionId)) return null;
   const [row] = await db.select().from(agreementVersions).where(eq(agreementVersions.id, versionId)).limit(1);
   return row ? { title: row.title, number: row.number, body: row.body, publishedAt: row.publishedAt.toISOString() } : null;
+}
+
+/** One acceptance as a client's pages list it (the November 20 brief: shown in the customer's own account too). */
+export interface AcceptedItem {
+  id: string;
+  title: string;
+  versionNumber: number;
+  acceptedAt: string;
+}
+
+/** What each of these bookings' clients accepted at checkout, by booking, in the order accepted. */
+export async function acceptancesOf(db: DbLike, bookingIds: string[]): Promise<Map<string, AcceptedItem[]>> {
+  const byBooking = new Map<string, AcceptedItem[]>();
+  if (bookingIds.length === 0) return byBooking;
+  const rows = await db
+    .select({ id: bookingAcceptances.id, bookingId: bookingAcceptances.bookingId, title: bookingAcceptances.title, versionNumber: bookingAcceptances.versionNumber, acceptedAt: bookingAcceptances.acceptedAt })
+    .from(bookingAcceptances)
+    .where(inArray(bookingAcceptances.bookingId, bookingIds))
+    // As the policies step shows them: the Policies page ("policies_page") before the agreements ("agreement").
+    .orderBy(asc(bookingAcceptances.acceptedAt), desc(bookingAcceptances.kind), asc(bookingAcceptances.title));
+  for (const row of rows) {
+    byBooking.set(row.bookingId, [...(byBooking.get(row.bookingId) ?? []), { id: row.id, title: row.title, versionNumber: row.versionNumber, acceptedAt: row.acceptedAt.toISOString() }]);
+  }
+  return byBooking;
+}
+
+export interface AcceptedText extends AcceptedItem {
+  /** The Policies page's words, as HTML built by the site from the page's blocks. */
+  html: string | null;
+  /** An agreement's words, in its paragraphs. */
+  paragraphs: string[] | null;
+  /** Said above the words when they are not the very words read: an acceptance from before they were kept. */
+  note: string | null;
+}
+
+/**
+ * The words a booking's client accepted, for one of its acceptances: the client's own pages and the admin's call it
+ * once they know the booking is the viewer's to see. Null when the acceptance is not that booking's, or its words are
+ * gone (a page deleted with its history, before its words were kept).
+ */
+export async function acceptedText(db: DbLike, bookingId: string, acceptanceId: string, now: Date): Promise<AcceptedText | null> {
+  if (!/^[0-9a-f-]{36}$/i.test(acceptanceId)) return null;
+  const [row] = await db
+    .select()
+    .from(bookingAcceptances)
+    .where(and(eq(bookingAcceptances.id, acceptanceId), eq(bookingAcceptances.bookingId, bookingId)))
+    .limit(1);
+  if (!row) return null;
+  const item = { id: row.id, title: row.title, versionNumber: row.versionNumber, acceptedAt: row.acceptedAt.toISOString() };
+  if (row.kind === "agreement") {
+    const version = row.agreementVersionId ? await agreementVersion(db, row.agreementVersionId) : null;
+    return version ? { ...item, html: null, paragraphs: version.body.split(/\n{2,}/), note: null } : null;
+  }
+  if (row.shownHtml !== null) return { ...item, html: row.shownHtml, paragraphs: null, note: null };
+  const page = row.siteVersionId ? await loadPageVersion(db, row.siteVersionId, now) : null;
+  if (!page) return null;
+  return {
+    ...item,
+    html: pageTextHtml(page.content.blocks, page.site),
+    paragraphs: null,
+    note: "This version was accepted before the site kept its very words: it is shown as it reads today, its prices and other figures today's.",
+  };
 }
