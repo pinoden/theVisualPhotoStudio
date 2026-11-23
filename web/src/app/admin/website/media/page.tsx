@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import { listVideos, VIDEO_TITLE_MAX } from "@/server/videos";
+import { VideoUploader } from "@/components/media/VideoUploader";
 import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -13,7 +15,7 @@ import { requireManager } from "@/server/session";
 import { loadSettings } from "@/server/settings";
 import { AdminFrame, AdminLoading } from "../../frame";
 import { WebsiteTabs } from "../tabs";
-import { deleteMediaAction, describeMediaAction } from "./actions";
+import { deleteMediaAction, deleteVideoAction, describeMediaAction, describeVideoAction } from "./actions";
 
 export const metadata: Metadata = { title: "Pictures", robots: { index: false } };
 
@@ -47,7 +49,7 @@ async function Library({ searchParams }: Pick<PageProps<"/admin/website/media">,
   const q = typeof query.q === "string" ? query.q.slice(0, 100) : "";
   const filter: MediaFilter = query.show === "undescribed" || query.show === "unused" ? query.show : "all";
   const db = await getDb();
-  const [items, settings] = await Promise.all([listMedia(db, viewer, { q, filter }), loadSettings(db)]);
+  const [items, settings, videoItems] = await Promise.all([listMedia(db, viewer, { q, filter }), loadSettings(db), listVideos(db, viewer)]);
   if (!items) notFound();
   const here = `/admin/website/media${q || filter !== "all" ? `?${new URLSearchParams({ ...(q ? { q } : {}), ...(filter !== "all" ? { show: filter } : {}) })}` : ""}`;
 
@@ -58,6 +60,44 @@ async function Library({ searchParams }: Pick<PageProps<"/admin/website/media">,
       <div className="admin-card">
         <h3>Add pictures</h3>
         <MediaUploader />
+      </div>
+
+      <div className="admin-card" id="videos">
+        <h3>Videos</h3>
+        <VideoUploader />
+        {videoItems && videoItems.length > 0 && (
+          <ul className="video-list">
+            {videoItems.map((video) => (
+              <li key={video.id}>
+                <form action={describeVideoAction} className="admin-form-row" style={{ marginBottom: ".5rem" }}>
+                  <input type="hidden" name="id" value={video.id} />
+                  <div className="form-group" style={{ flex: "2 1 16rem" }}>
+                    <label className="form-label" htmlFor={`video-${video.id}-title`}>
+                      What {video.filename} shows
+                    </label>
+                    <input id={`video-${video.id}-title`} name="title" className="form-control" maxLength={VIDEO_TITLE_MAX} defaultValue={video.title} />
+                  </div>
+                  <button type="submit" className="btn btn-dark btn-small">
+                    Save
+                  </button>
+                </form>
+                <p className="media-facts">
+                  {size(video.size)}. Its address for a page&rsquo;s Video block: <code>{video.address}</code>.{" "}
+                  {video.shownOn.length > 0 ? `Shown on ${video.shownOn.join(" and ")}.` : "Not shown on a page yet."}{" "}
+                  <a href={video.address} target="_blank" rel="noopener noreferrer">
+                    Watch it
+                  </a>
+                </p>
+                <form action={deleteVideoAction}>
+                  <input type="hidden" name="id" value={video.id} />
+                  <button type="submit" className="btn btn-outline btn-small" aria-label={`Delete the video ${video.filename}`}>
+                    Delete
+                  </button>
+                </form>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
       <form method="get" className="admin-card admin-form-row" role="search">

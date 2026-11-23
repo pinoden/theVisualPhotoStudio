@@ -260,7 +260,12 @@ export const Video = defineBlock({
   label: "Video",
   group: "pictures",
   fields: {
-    address: { kind: "text", label: "Address of the video on YouTube, Vimeo or Instagram (a reel or a post)", max: 300, start: "" },
+    address: {
+      kind: "text",
+      label: "Address of the video on YouTube, Vimeo or Instagram (a reel or a post), or of a video of the media library (/videos/…)",
+      max: 300,
+      start: "",
+    },
     title: { kind: "text", label: "What the video shows, in a few words", max: 120, start: "" },
     shape: { kind: "choice", label: "Shape", options: { wide: "Wide (16:9)", standard: "Standard (4:3)", tall: "Upright (9:16)" }, start: "wide" },
   },
@@ -269,7 +274,7 @@ export const Video = defineBlock({
     if (!video) {
       return (
         <EditorNote editing={editing}>
-          {address ? `That is not the address of a video on ${VIDEO_SERVICE_NAMES}.` : "Video: paste its address in the panel."}
+          {address ? `That is not the address of a video on ${VIDEO_SERVICE_NAMES}, nor of one of the media library's videos.` : "Video: paste its address in the panel."}
         </EditorNote>
       );
     }
@@ -281,7 +286,7 @@ export const Video = defineBlock({
               ▶
             </span>
             <span>{title || "A video"}</span>
-            <small>It is played by {VIDEO_SERVICES[video.service]}. Visitors press play to start it.</small>
+            <small>{video.service === "file" ? "A video of the media library." : `It is played by ${VIDEO_SERVICES[video.service]}.`} Visitors press play to start it.</small>
           </div>
         ) : (
           <VideoPlayer video={video} title={title} />

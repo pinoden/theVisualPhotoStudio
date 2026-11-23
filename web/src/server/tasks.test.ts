@@ -187,6 +187,7 @@ describe("the scheduled run", () => {
       pagesRemoved: 0,
       oldRecordsDeleted: 0,
       waitlistEmailed: 0,
+      videoUploadsDropped: 0,
     });
     expect(delivered).toContain(`Booking confirmed: ${booked.ref}`);
     expect(delivered).toContain("You have earned a free hour in the studio");

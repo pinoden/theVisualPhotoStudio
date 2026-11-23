@@ -1,6 +1,7 @@
 "use server";
 
 import { updateTag } from "next/cache";
+import { deleteVideo, describeVideo } from "@/server/videos";
 import { redirect } from "next/navigation";
 import { getDb } from "@/db/client";
 import { formText } from "@/lib/parse";
@@ -55,6 +56,25 @@ export async function deleteMediaAction(formData: FormData): Promise<void> {
   const result = await deleteMedia(await getDb(), viewer, text(formData, "id"));
   if (!result.ok) failed(back(formData, LIBRARY), result.message);
   done(back(formData, LIBRARY), "The picture was deleted.");
+}
+
+// ── Videos (question 77) ─────────────────────────────────────────────────────
+
+/** Back to the library's videos, the message before the anchor so that the page reads it. */
+const toVideos = (kind: "notice" | "error", text: string): never => redirect(`${LIBRARY}?${kind}=${encodeURIComponent(text)}#videos`);
+
+export async function describeVideoAction(formData: FormData): Promise<void> {
+  const viewer = await requireManager(LIBRARY);
+  if (!(await describeVideo(await getDb(), viewer, text(formData, "id"), text(formData, "title")))) toVideos("error", "That video was not found.");
+  refresh();
+  toVideos("notice", "Saved.");
+}
+
+export async function deleteVideoAction(formData: FormData): Promise<void> {
+  const viewer = await requireManager(LIBRARY);
+  const result = await deleteVideo(await getDb(), viewer, text(formData, "id"));
+  if (!result.ok) toVideos("error", result.message);
+  toVideos("notice", "The video was deleted.");
 }
 
 /** A picture as the chooser shows it. */

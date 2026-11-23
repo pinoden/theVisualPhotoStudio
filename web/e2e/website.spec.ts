@@ -468,6 +468,32 @@ test("the owner adds pictures, describes them, puts them on a studio, replaces o
 
   await page.goto("/admin/website");
   await expect(onScreen(page.locator(".website-cards"))).toContainText("2 pictures. 1 collection.");
+
+  // A video of the library (question 77): here kept by the site itself, as no storage is set up for the tests; on the
+  // host it goes straight to Neon's. Not a picture: the pictures' count above does not change.
+  await page.goto("/admin/website/media");
+  const videos = page.locator("#videos");
+  const videoFile = videos.getByLabel("Add a video");
+  await expect(videoFile).toBeEnabled();
+  const clip = Buffer.concat([Buffer.from([0, 0, 0, 24]), Buffer.from("ftypmp42"), Buffer.alloc(4000, 7)]);
+  await videoFile.setInputFiles({ name: "Studio Tour.mp4", mimeType: "video/mp4", buffer: clip });
+  await expect(videos.getByRole("status")).toContainText("Studio Tour.mp4 was added.");
+  await byLabel(videos, "What studio-tour.mp4 shows").fill("A walk through Studio Paris");
+  await videos.getByRole("button", { name: "Save" }).click();
+  await expect(byText(page, "Saved.")).toBeVisible();
+  const videoAddress = (await page.locator("#videos code").innerText()).trim();
+  expect(videoAddress).toMatch(/^\/videos\/[0-9a-f-]{36}$/);
+  const whole = await page.request.get(videoAddress);
+  expect(whole.status()).toBe(200);
+  expect(whole.headers()["content-type"]).toBe("video/mp4");
+  expect((await whole.body()).byteLength).toBe(clip.byteLength);
+  const part = await page.request.get(videoAddress, { headers: { range: "bytes=0-11" } });
+  expect(part.status()).toBe(206);
+  expect((await part.body()).toString("latin1").slice(4)).toBe("ftypmp42");
+  expect(await accessibilityProblems(page)).toEqual([]);
+  await videos.getByRole("button", { name: "Delete the video studio-tour.mp4" }).click();
+  await expect(byText(page, "The video was deleted.")).toBeVisible();
+  expect((await page.request.get(videoAddress)).status()).toBe(404);
   await guest.context().close();
 });
 

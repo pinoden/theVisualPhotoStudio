@@ -1149,6 +1149,31 @@ export const studioPhotos = pgTable(
 );
 
 /**
+ * Video files the owners upload (the owners' note 7 of 2026-11-22: videos wherever photos are added; "let's start with
+ * files", and "Set up neon", 2026-11-23; question 77 in ProjectLibrary.md). The file itself is in Neon's object storage
+ * (the `videos` bucket) on the host, or in `site_files` where none is set up (a computer of the builder's, the tests),
+ * under `storageKey`. A page shows one through its own address on the site, `/videos/<id>`.
+ */
+export const videos = pgTable(
+  "videos",
+  {
+    id: id(),
+    storageKey: text("storage_key").notNull().unique(),
+    /** The name it was uploaded with, made safe for an address: "studio-tour.mp4". */
+    filename: text("filename").notNull(),
+    contentType: text("content_type").notNull(),
+    size: integer("size").notNull(),
+    /** What the video shows, for someone who cannot see it: the title of its player. */
+    title: text("title").notNull().default(""),
+    /** `uploading` until the browser's upload is confirmed whole; only a `ready` one is shown. */
+    status: text("status", { enum: ["uploading", "ready"] }).notNull().default("uploading"),
+    uploadedBy: text("uploaded_by").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [check("videos_status", sql`${t.status} in ('uploading', 'ready')`), check("videos_size", sql`${t.size} > 0`)],
+);
+
+/**
  * The photos the site shows for photography (the owners' note of 2026-11-22: "under Admin → Photography the owners
  * should be able to add and edit photos without a deployment"; question 73 in ProjectLibrary.md): pictures of the media
  * library, in the owners' order. A page shows them through a Gallery set to "The photos chosen under Admin → Photography".

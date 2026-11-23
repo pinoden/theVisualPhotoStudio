@@ -10,6 +10,8 @@ import { VIDEO_SERVICES, type Video } from "@/lib/site/video";
  */
 export function VideoPlayer({ video, title }: { video: Video; title: string }) {
   const [playing, setPlaying] = useState(false);
+  // A file of the media library (question 77) plays in the browser's own player, which reads nothing of it until play.
+  if (video.service === "file") return <video controls preload="none" playsInline src={video.player} aria-label={title || "Video"} />;
   const service = VIDEO_SERVICES[video.service];
   if (!playing) {
     return (
