@@ -490,6 +490,22 @@ test("the admin fits a phone: the calendar in its three views, an appointment, a
   await expectFits(page, "the calendar's day");
   expect(await tooSmallToRead(page), "the calendar's day: text too small").toEqual([]);
 
+  // Both from the phone (the owner, 2026-11-23): the agenda, two weeks as a list from the day, and back to the day's grid.
+  await page.getByRole("navigation", { name: "Calendar view" }).getByRole("link", { name: "Agenda" }).click();
+  await expect(page).toHaveURL(new RegExp(`view=agenda&date=${day}`));
+  // Mia's first appointment is on the day the agenda starts from; another of hers comes later in the two weeks.
+  const listed = onScreen(page.locator(".cal-agenda-view li", { hasText: "Mia Mobile" })).first();
+  await expect(listed).toContainText("9:15 AM – 10:45 AM");
+  await expect(onScreen(page.locator(".cal-agenda-view li", { hasText: LONG_CLIENT })).first()).toBeVisible();
+  await expect(onScreen(page.locator(".cal-count"))).toHaveText(/^\d+ appointments? in these 14 days$/);
+  await expectFits(page, "the calendar's agenda");
+  expect(await hardToTouch(page), "the calendar's agenda: hard to use by touch").toEqual([]);
+  expect(await tooSmallToRead(page), "the calendar's agenda: text too small").toEqual([]);
+  await shot(page, "m-390-calendar-agenda");
+  await page.getByRole("navigation", { name: "Calendar view" }).getByRole("link", { name: "Day" }).click();
+  await expect(page).toHaveURL(new RegExp(`view=day&date=${day}`));
+  await expect(appointment).toBeVisible();
+
   // An appointment: first over the calendar, then its page, with the label buttons and the form to move it.
   await appointment.click();
   const popup = page.getByRole("dialog", { name: /Mia Mobile/ });

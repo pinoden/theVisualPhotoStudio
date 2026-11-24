@@ -7,6 +7,8 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { getDb } from "@/db/client";
 import { studios as studiosTable } from "@/db/schema";
 import {
+  AGENDA_DAYS,
+  agendaLabel,
   BUFFER_SHOWN_MINUTES,
   CALENDAR_VIEWS,
   isCalendarView,
@@ -21,7 +23,7 @@ import {
 } from "@/lib/domain/calendar";
 import { appointmentLook, calendarColumns, hoursText, lanesOf, type AppointmentLook } from "@/lib/domain/appointment-look";
 import { LABEL_TEXT } from "@/lib/domain/labels";
-import { isIsoDate, isoWeekday, longDateLabel, minutesToLabel, type IsoDate } from "@/lib/domain/time";
+import { addDays, isIsoDate, isoWeekday, longDateLabel, minutesToLabel, type IsoDate } from "@/lib/domain/time";
 import { can } from "@/lib/abilities";
 import { studioCombinationError } from "@/lib/catalog-view";
 import { count } from "@/lib/words";
@@ -44,7 +46,7 @@ export default function CalendarPage(props: PageProps<"/admin/calendar">) {
   );
 }
 
-const VIEW_NAME: Record<CalendarView, string> = { month: "Month", week: "Week", day: "Day" };
+const VIEW_NAME: Record<CalendarView, string> = { month: "Month", week: "Week", day: "Day", agenda: "Agenda" };
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 /** How many appointments a day of the month view lists before "+2 more". */
 const MONTH_CELL_LIMIT = 4;
@@ -155,10 +157,10 @@ async function Calendar({ searchParams }: Pick<PageProps<"/admin/calendar">, "se
 
   // How many appointments the day, the week or the month holds (the owners' note of 2026-11-22), in the studios shown.
   const inSpan = entries.filter((entry) => (view === "month" ? entry.date.slice(0, 7) === date.slice(0, 7) : view === "day" ? entry.date === date : true));
-  const spanCount = `${count(inSpan.length, "appointment")} ${view === "day" ? "this day" : view === "week" ? "this week" : "this month"}`;
+  const spanCount = `${count(inSpan.length, "appointment")} ${view === "day" ? "this day" : view === "week" ? "this week" : view === "agenda" ? `in these ${AGENDA_DAYS} days` : "this month"}`;
   // The bundles of the studios shown, for the key under the grid.
   const bundles = studios.length < 2 ? [] : bundlesOf(studios);
-  const title = view === "month" ? monthLabel(date) : view === "week" ? weekLabel(date) : longDateLabel(date);
+  const title = view === "month" ? monthLabel(date) : view === "week" ? weekLabel(date) : view === "agenda" ? agendaLabel(date) : longDateLabel(date);
 
   return (
     <AdminFrame active="/admin/calendar" title="Calendar" query={query} viewer={viewer} settings={catalog.settings}>
@@ -198,7 +200,7 @@ async function Calendar({ searchParams }: Pick<PageProps<"/admin/calendar">, "se
             </Link>
           ))}
         </nav>
-        {view !== "month" && (
+        {view !== "month" && view !== "agenda" && (
           <ZoomSelect
             sizes={ZOOM_SIZES}
             current={zoom}
@@ -238,8 +240,11 @@ async function Calendar({ searchParams }: Pick<PageProps<"/admin/calendar">, "se
         <Week date={date} today={today} entries={entries} blocks={blocks} studios={studios} visible={visible} ppm={ppmOf(zoom)} dayHref={(day) => href({ view: "day", date: day })} />
       )}
       {view === "day" && <Day date={date} entries={entries} blocks={blocks} studios={studios} visible={visible.has(date)} ppm={ppmOf(zoom)} />}
+      {view === "agenda" && (
+        <Agenda days={Array.from({ length: AGENDA_DAYS }, (_, i) => addDays(date, i))} today={today} entries={entries} visible={visible} dayHref={(day) => href({ view: "day", date: day })} />
+      )}
 
-      {view !== "month" && (
+      {view !== "month" && view !== "agenda" && (
         <p className="cal-legend">
           <span className="cal-legend-buffer" aria-hidden="true" /> The {BUFFER_SHOWN_MINUTES} minutes kept free before and after
           each appointment.
@@ -528,7 +533,42 @@ function Week({
       </div>
 
       {/* The same week as a list, day by day, for a phone. */}
-      <div className="cal-agenda">
+      <AgendaList className="cal-agenda" days={days} today={today} entries={entries} visible={visible} dayHref={dayHref} />
+    </>
+  );
+}
+
+// ── Agenda ───────────────────────────────────────────────────────────────────
+
+/**
+ * The agenda (the owner, 2026-11-23: "From the phone ... both: agenda view and daily view"): two weeks from the day
+ * chosen as a list, on every screen, the days with appointments only. Day keeps its grid.
+ */
+function Agenda({ days, today, entries, visible, dayHref }: { days: IsoDate[]; today: IsoDate; entries: Entry[]; visible: Set<IsoDate>; dayHref: (day: IsoDate) => string }) {
+  const busy = days.filter((day) => visible.has(day) && entries.some((entry) => entry.date === day));
+  if (busy.length === 0) return <div className="admin-card">No appointments in these {AGENDA_DAYS} days.</div>;
+  return <AgendaList className="cal-agenda cal-agenda-view" days={busy} today={today} entries={entries} visible={visible} dayHref={dayHref} />;
+}
+
+/** Days as a list, each appointment a row that opens it over the calendar. */
+function AgendaList({
+  className,
+  days,
+  today,
+  entries,
+  visible,
+  dayHref,
+}: {
+  className: string;
+  days: IsoDate[];
+  today: IsoDate;
+  entries: Entry[];
+  visible: Set<IsoDate>;
+  dayHref: (day: IsoDate) => string;
+}) {
+  const ofDay = (day: IsoDate) => entries.filter((entry) => entry.date === day);
+  return (
+      <div className={className}>
         {days.map((day) => {
           const listed = ofDay(day);
           return (
@@ -561,7 +601,6 @@ function Week({
           );
         })}
       </div>
-    </>
   );
 }
 
