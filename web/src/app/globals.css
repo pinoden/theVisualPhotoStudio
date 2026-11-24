@@ -2422,7 +2422,8 @@ fieldset { min-inline-size: 0; }
 /* With a picture of the map (question 74): the map on top, the address and the button under it. */
 .blk-location-with-map { flex-direction: column; justify-content: flex-start; padding: 0 0 1.5rem; gap: 1.25rem; }
 .blk-location-map { display: block; width: 100%; line-height: 0; }
-.blk-location-map img { display: block; width: 100%; height: auto; max-height: 360px; object-fit: cover; }
+/* Never cropped: a map's credit (Google's, or OpenStreetMap's) stays in its corner, as the maps' terms ask. */
+.blk-location-map img { display: block; width: 100%; height: auto; max-height: 360px; object-fit: contain; }
 .studio-card-buttons { margin-top: 1.25rem; display: flex; gap: .75rem; flex-wrap: wrap; }
 .studio-card-buttons .btn { padding: .5rem 1.25rem; font-size: .78rem; }
 .rate-card .rate-book { width: 100%; }
