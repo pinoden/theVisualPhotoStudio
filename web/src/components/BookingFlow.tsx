@@ -811,7 +811,7 @@ export function BookingFlow({
       )}
       {promo && price.promoMisfit && (
         <p className="field-error" role="status" style={{ margin: ".75rem 0 0" }}>
-          {promoMisfitText(price.promoMisfit, promo)} Code {promo.code} is not used on this booking and stays yours.
+          {promoMisfitText(price.promoMisfit, promo, date ? { date, special: date in catalog.specialDates } : null)} Code {promo.code} is not used on this booking and stays yours.
         </p>
       )}
       {memberApplied && !member && (

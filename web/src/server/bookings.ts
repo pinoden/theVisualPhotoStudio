@@ -316,7 +316,7 @@ export async function quoteSelection(db: DbLike, rawInput: unknown, now: Date, p
       photoPackage: session,
     });
     // A code that exists but cannot be used on this selection is refused with the reason.
-    if (price.promoMisfit) return fail(422, "invalid_code", promoMisfitText(price.promoMisfit, promo));
+    if (price.promoMisfit) return fail(422, "invalid_code", promoMisfitText(price.promoMisfit, promo, { date: input.date, special: input.date in catalog.specialDates }));
     return {
       ok: true,
       quote: price,
@@ -440,7 +440,7 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
   const spendsMinutes = member !== null && price.membershipMinutes > 0;
   // The booking screen leaves out a code that does not fit the selection. Anything else that
   // sends one is told why, instead of being charged the full price without a word.
-  if (price.promoMisfit) return fail(422, "invalid_code", promoMisfitText(price.promoMisfit, promo));
+  if (price.promoMisfit) return fail(422, "invalid_code", promoMisfitText(price.promoMisfit, promo, { date: input.date, special: input.date in catalog.specialDates }));
   if (input.expectedTotalCents !== undefined && input.expectedTotalCents !== price.totalCents) {
     return fail(409, "price_changed", `The price is now ${formatCents(price.totalCents)}. Please review and confirm again.`);
   }

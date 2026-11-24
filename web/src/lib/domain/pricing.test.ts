@@ -309,7 +309,9 @@ describe("a code's booking days (question 80)", () => {
     expect(quote({ ...one, bookingDay: { date: "2026-12-09", special: false } })).toMatchObject({ promoDiscountCents: 880, promoMisfit: null });
     expect(quote({ ...one, dayType: "weekend", bookingDay: { date: "2026-12-12", special: false } })).toMatchObject({ promoDiscountCents: 0, promoMisfit: "day" });
     expect(quote({ ...one, bookingDay: { date: "2026-12-10", special: true } })).toMatchObject({ promoDiscountCents: 0, promoMisfit: "day" });
-    expect(promoMisfitText("day", weekdaysOnly)).toBe("That code is for bookings Monday to Friday, not on holidays. It cannot be used for a booking on that day.");
+    expect(promoMisfitText("day", weekdaysOnly, { date: "2026-12-12", special: false })).toBe(
+      "That code works only for bookings on weekdays (Monday to Friday), not on holidays. December 12, 2026 is a Saturday. Choose another date, or book without the code.",
+    );
   });
 
   it("is not checked before a day is chosen", () => {

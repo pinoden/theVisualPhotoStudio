@@ -4,7 +4,7 @@
  * The same code runs in the browser (instant preview) and on the server
  * (the only result that is ever charged).
  */
-import { promoDaysInWords, promoFitsDay, type PromoDays } from "./promo-days";
+import { promoDayMisfitText, promoFitsDay, type PromoDays } from "./promo-days";
 import type { DayType, IsoDate } from "./time";
 
 export interface PriceRule {
@@ -57,10 +57,12 @@ export const PROMO_MISFIT_TEXT: Record<PromoMisfit, string> = {
   day: "That code cannot be used for a booking on that day.",
 };
 
-/** Why a code does not fit, with the days it is for when that is why: "That code is for bookings from …". */
-export function promoMisfitText(misfit: PromoMisfit, promo: PromoDef | null | undefined): string {
-  const days = misfit === "day" ? promoDaysInWords(promo?.days) : null;
-  return days ? `That code is for ${days}. It cannot be used for a booking on that day.` : PROMO_MISFIT_TEXT[misfit];
+/**
+ * Why a code does not fit. For its days, the days it works for and why the booking's day is not one of them
+ * (`promoDayMisfitText`); `bookingDay` is the booking's, as given to `quote`.
+ */
+export function promoMisfitText(misfit: PromoMisfit, promo: PromoDef | null | undefined, bookingDay?: { date: IsoDate; special: boolean } | null): string {
+  return misfit === "day" ? promoDayMisfitText(promo?.days, bookingDay?.date ?? null, bookingDay?.special ?? false) : PROMO_MISFIT_TEXT[misfit];
 }
 
 export interface QuoteInput {

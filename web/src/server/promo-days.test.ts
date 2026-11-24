@@ -27,9 +27,12 @@ describe("a code's booking days, as a rule", () => {
   });
 
   it("says them in words, and reads what is stored with care", () => {
-    expect(promoDaysInWords({ from: "2027-01-15", until: "2027-02-15", weekdays: [], notOnSpecialDates: false })).toBe("bookings from January 15, 2027 to February 15, 2027");
-    expect(promoDaysInWords(weekdays)).toBe("bookings Monday to Friday, not on holidays");
-    expect(promoDaysInWords({ from: null, until: null, weekdays: [6, 7], notOnSpecialDates: false })).toBe("bookings Saturdays and Sundays");
+    expect(promoDaysInWords({ from: "2027-01-15", until: "2027-02-15", weekdays: [], notOnSpecialDates: false })).toBe("bookings from January 15 to February 15, 2027");
+    expect(promoDaysInWords({ from: "2026-12-20", until: "2027-01-05", weekdays: [], notOnSpecialDates: false })).toBe("bookings from December 20, 2026 to January 5, 2027");
+    expect(promoDaysInWords(weekdays)).toBe("bookings on weekdays (Monday to Friday), not on holidays");
+    expect(promoDaysInWords({ from: null, until: null, weekdays: [6, 7], notOnSpecialDates: false })).toBe("bookings on weekends (Saturday and Sunday)");
+    expect(promoDaysInWords({ from: null, until: null, weekdays: [1, 3], notOnSpecialDates: false })).toBe("bookings on Mondays and Wednesdays");
+    expect(promoDaysInWords({ from: null, until: null, weekdays: [1, 2, 3, 4], notOnSpecialDates: false })).toBe("bookings Monday to Thursday");
     expect(promoDaysInWords({ from: null, until: null, weekdays: [1, 2, 3, 4, 5, 6, 7], notOnSpecialDates: false })).toBeNull();
     expect(readPromoDays({ from: "nonsense", weekdays: [0, 3, "4", 9], notOnSpecialDates: "yes" })).toEqual({ from: null, until: null, weekdays: [3], notOnSpecialDates: false });
     expect(readPromoDays(null)).toBeNull();
@@ -55,23 +58,24 @@ describe("a code with booking days, at the studio and on the booking page", () =
 
     const fits = expectOk(await priced(FAR));
     expect(fits.quote.promoDiscountCents).toBeGreaterThan(0);
-    const why = "That code is for bookings from December 7, 2026 to December 18, 2026, Monday to Friday, not on holidays. It cannot be used for a booking on that day.";
-    expect(await priced("2026-12-10")).toMatchObject({ ok: false, code: "invalid_code", message: why }); // the holiday
-    expect(await priced("2026-12-12")).toMatchObject({ ok: false, message: why }); // a Saturday
-    expect(await priced("2026-12-21")).toMatchObject({ ok: false, message: why }); // after the last day
+    const days = "That code works only for bookings from December 7 to December 18, 2026, on weekdays (Monday to Friday), not on holidays.";
+    const then = "Choose another date, or book without the code.";
+    expect(await priced("2026-12-10")).toMatchObject({ ok: false, code: "invalid_code", message: `${days} Thursday, December 10, 2026 is a holiday. ${then}` });
+    expect(await priced("2026-12-12")).toMatchObject({ ok: false, message: `${days} December 12, 2026 is a Saturday. ${then}` });
+    expect(await priced("2026-12-21")).toMatchObject({ ok: false, message: `${days} Monday, December 21, 2026 is outside those dates. ${then}` });
 
     // The booking itself is refused so too, and the code stays unused; on its day, it is spent.
     expect(await world.book({ date: "2026-12-12", studioIds: [world.ids.paris], startMinute: h(10), durationMinutes: 60, promoCode: "WINTER-WEEK" })).toMatchObject({
       ok: false,
       code: "invalid_code",
-      message: why,
+      message: `${days} December 12, 2026 is a Saturday. ${then}`,
     });
     const booked = expectOk(await world.book({ date: FAR, studioIds: [world.ids.paris], startMinute: h(10), durationMinutes: 60, promoCode: "WINTER-WEEK" }));
     expect(booked.totalCents).toBeLessThan(expectOk(await world.book({ date: FAR, studioIds: [world.ids.blanche], startMinute: h(10), durationMinutes: 60 })).totalCents);
 
     // The owners and the client read the days.
-    expect((await listCodes(world.db)).find((code) => code.code === "WINTER-WEEK")?.days).toBe("bookings from December 7, 2026 to December 18, 2026, Monday to Friday, not on holidays");
-    expect((await studioCodeCheck(world.db, "WINTER-WEEK", NOW))?.balance.restrictions).toContain("For bookings from December 7, 2026 to December 18, 2026, Monday to Friday, not on holidays.");
+    expect((await listCodes(world.db)).find((code) => code.code === "WINTER-WEEK")?.days).toBe("bookings from December 7 to December 18, 2026, on weekdays (Monday to Friday), not on holidays");
+    expect((await studioCodeCheck(world.db, "WINTER-WEEK", NOW))?.balance.restrictions).toContain("For bookings from December 7 to December 18, 2026, on weekdays (Monday to Friday), not on holidays.");
   });
 
   it("keeps a code with every day as any day's, and refuses days that make no sense", async () => {
