@@ -1931,6 +1931,8 @@ button { font-family: inherit; }
   .cal-week { display: none; }
   .cal-agenda { display: block; }
 }
+/* The Agenda view: the same list on every screen, at a readable width on a wide one. */
+.cal-agenda.cal-agenda-view { display: block; max-width: 46rem; }
 @media (max-width: 760px) {
   .cal-title { width: 100%; margin: .25rem 0 0; font-size: 1.15rem; }
   /* A month on a phone: a dot for each appointment, and the whole day is the button that opens it. */

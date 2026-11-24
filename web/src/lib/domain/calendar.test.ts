@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { monthLabel, monthWeeks, rangeOf, shiftDate, shortDayLabel, weekDays, weekLabel, weekStart } from "./calendar";
+import { agendaLabel, monthLabel, monthWeeks, rangeOf, shiftDate, shortDayLabel, weekDays, weekLabel, weekStart } from "./calendar";
 
 describe("the calendar's weeks", () => {
   it("run from Sunday to Saturday", () => {
@@ -47,6 +47,14 @@ describe("what a view shows and where the arrows lead", () => {
     expect(shiftDate("month", "2026-11-18", 1)).toBe("2026-12-01");
     expect(shiftDate("month", "2026-01-31", 1)).toBe("2026-02-01"); // never skips the short month
     expect(shiftDate("month", "2026-01-15", -1)).toBe("2025-12-01");
+  });
+
+  it("lists two weeks from the day chosen in the agenda, and moves by two weeks", () => {
+    expect(rangeOf("agenda", "2026-11-23")).toEqual({ from: "2026-11-23", to: "2026-12-07" });
+    expect(shiftDate("agenda", "2026-11-23", 1)).toBe("2026-12-07");
+    expect(shiftDate("agenda", "2026-11-23", -1)).toBe("2026-11-09");
+    expect(agendaLabel("2026-11-23")).toBe("Nov 23 – Dec 6, 2026");
+    expect(weekLabel("2026-11-18")).toBe("Nov 15 – 21, 2026");
   });
 
   it("names what is on screen", () => {

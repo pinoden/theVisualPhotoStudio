@@ -1,11 +1,12 @@
 /**
- * Dates for the admin calendar's three views. Pure functions over ISO dates,
+ * Dates for the admin calendar's views: a month, a week, a day, and the agenda (two weeks as a list, from the day
+ * chosen; the owner's "From the phone ... I want to have both: agenda view and daily view", 2026-11-23). Pure functions over ISO dates,
  * so they need no time zone: a calendar day is a studio-local day.
  * Weeks run from Sunday to Saturday, as calendars in the United States do.
  */
 import { addDays, isoWeekday, parseIsoDate, type IsoDate } from "./time";
 
-export const CALENDAR_VIEWS = ["month", "week", "day"] as const;
+export const CALENDAR_VIEWS = ["month", "week", "day", "agenda"] as const;
 export type CalendarView = (typeof CALENDAR_VIEWS)[number];
 
 export function isCalendarView(value: unknown): value is CalendarView {
@@ -18,6 +19,9 @@ export function isCalendarView(value: unknown): value is CalendarView {
  * `bufferMinutes`), which the owner describes as 7 minutes each side.
  */
 export const BUFFER_SHOWN_MINUTES = 7;
+
+/** How many days the agenda lists, from the day chosen; its arrows move by as many. */
+export const AGENDA_DAYS = 14;
 
 /** The Sunday on or before `date`. */
 export function weekStart(date: IsoDate): IsoDate {
@@ -53,6 +57,7 @@ export function monthWeeks(date: IsoDate): IsoDate[][] {
 export function rangeOf(view: CalendarView, date: IsoDate): { from: IsoDate; to: IsoDate } {
   if (view === "day") return { from: date, to: addDays(date, 1) };
   if (view === "week") return { from: weekStart(date), to: addDays(weekStart(date), 7) };
+  if (view === "agenda") return { from: date, to: addDays(date, AGENDA_DAYS) };
   const weeks = monthWeeks(date);
   return { from: weeks[0][0], to: addDays(weeks.at(-1)![6], 1) };
 }
@@ -61,6 +66,7 @@ export function rangeOf(view: CalendarView, date: IsoDate): { from: IsoDate; to:
 export function shiftDate(view: CalendarView, date: IsoDate, steps: number): IsoDate {
   if (view === "day") return addDays(date, steps);
   if (view === "week") return addDays(date, 7 * steps);
+  if (view === "agenda") return addDays(date, AGENDA_DAYS * steps);
   return addMonths(date, steps);
 }
 
@@ -84,9 +90,17 @@ export function shortDayLabel(date: IsoDate): string {
 
 /** "Nov 15 – 21, 2026", or "Nov 29 – Dec 5, 2026" across two months. */
 export function weekLabel(date: IsoDate): string {
-  const days = weekDays(date);
-  const a = parseIsoDate(days[0])!;
-  const b = parseIsoDate(days[6])!;
+  return spanLabel(weekStart(date), addDays(weekStart(date), 6));
+}
+
+/** The agenda's two weeks from `date`: "Nov 23 – Dec 6, 2026". */
+export function agendaLabel(date: IsoDate): string {
+  return spanLabel(date, addDays(date, AGENDA_DAYS - 1));
+}
+
+function spanLabel(first: IsoDate, last: IsoDate): string {
+  const a = parseIsoDate(first)!;
+  const b = parseIsoDate(last)!;
   const month = (m: number) => MONTHS[m - 1].slice(0, 3);
   const end = a.month === b.month ? `${b.day}` : `${month(b.month)} ${b.day}`;
   return `${month(a.month)} ${a.day} – ${end}, ${b.year}`;
