@@ -19,6 +19,7 @@ import { listRewards } from "@/server/rewards";
 import { requireUser } from "@/server/session";
 import { loadSettings, loyaltyStart } from "@/server/settings";
 import { formatDay, formatInstant } from "@/server/tz";
+import { promoDaysInWords } from "@/lib/domain/promo-days";
 
 export const metadata: Metadata = { title: "My Rewards", robots: { index: false } };
 
@@ -160,6 +161,7 @@ async function Rewards() {
               </strong>
               <CopyCode code={code.code} />
               <span className="account-small">{code.expiresAt ? `Valid until ${formatDay(new Date(code.expiresAt))}` : "Does not expire"}</span>
+              {promoDaysInWords(code.days) && <span className="account-small">For {promoDaysInWords(code.days)}</span>}
             </div>
           ))}
         </div>

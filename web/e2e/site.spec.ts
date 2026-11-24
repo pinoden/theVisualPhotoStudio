@@ -45,6 +45,7 @@ const EMAIL_DAY = dateAhead(129); // and for the booking whose confirmation the 
 const MEMBER_DAY = dateAhead(143); // and for the booking a membership's hours pay for
 const REPRICE_SATURDAY = dateAhead(150, "saturday"); // and for the booking the studio moves to a day that costs less
 const REPRICE_WEEKDAY = dateAhead(164);
+const CODE_DAYS_SATURDAY = dateAhead(157, "saturday"); // a Saturday a weekdays-only code is tried on, and nothing booked
 
 const jane = { name: "Jane Smith", email: "jane.e2e@example.com", phone: "407-555-0100" };
 const bob = { name: "Bob Brown", email: "bob.e2e@example.com", phone: "407-555-0111" };
@@ -1816,6 +1817,35 @@ test("a booking made with a discount code is moved without paying the discount a
   const created = byText(page, /Code created: VS-[0-9A-Z]{4}-[0-9A-Z]{4}/);
   await expect(created).toBeVisible();
   const discountCode = /VS-[0-9A-Z]{4}-[0-9A-Z]{4}/.exec(await created.innerText())![0];
+
+  // A code for weekday bookings only, not on holidays (question 80): the list says its days.
+  await onScreen(page.locator("#code-value")).fill("15");
+  await onScreen(page.locator("#code-text")).fill("WEEKDAYS-E2E");
+  await page.getByRole("group", { name: "Days of the week" }).getByRole("checkbox", { name: "Saturday" }).uncheck();
+  await page.getByRole("group", { name: "Days of the week" }).getByRole("checkbox", { name: "Sunday" }).uncheck();
+  await page.getByRole("checkbox", { name: /^Not on holidays and special dates/ }).check();
+  await page.getByRole("button", { name: "Create", exact: true }).click();
+  await expect(byText(page, "Code created: WEEKDAYS-E2E")).toBeVisible();
+  await expect(page.getByRole("row", { name: /WEEKDAYS-E2E/ })).toContainText("For bookings on weekdays (Monday to Friday), not on holidays");
+
+  // At checkout, applied for a Saturday: not used, and the client reads which days it works for and why.
+  await page.goto("/book");
+  await pickStudio(page, "Studio Paris");
+  await next(page);
+  await byLabel(page, "Date").fill(CODE_DAYS_SATURDAY);
+  await page.getByRole("button", { name: "1 hr", exact: true }).click();
+  await next(page);
+  await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
+  await next(page);
+  await fillDetails(page, bob);
+  await byLabel(page, "Have a code?").fill("WEEKDAYS-E2E");
+  await page.getByRole("button", { name: "Apply" }).click();
+  const saturdayWords = new Date(`${CODE_DAYS_SATURDAY}T12:00:00Z`).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
+  await expect(
+    byText(page, `That code works only for bookings on weekdays (Monday to Friday), not on holidays. ${saturdayWords} is a Saturday. Choose another date, or book without the code.`),
+  ).toBeVisible();
+  await expect(byText(page, /Code WEEKDAYS-E2E \(15% off/)).toHaveCount(0);
+  await page.goto("/admin/codes");
 
   // While signed in: three free hours for Jane, for the next tests. The site sends one by itself after
   // five visits; the owner can also hand one out. A free hour is a reward, and a reward is used once.

@@ -16,7 +16,8 @@ import {
 import { extraGuestsFor, studioCombinationError } from "@/lib/catalog-view";
 import { businessDaysInWords, isStartFree, noticeHours } from "@/lib/domain/availability";
 import { labelOf, type LabelKey } from "@/lib/domain/labels";
-import { formatCents, PricingError, PROMO_MISFIT_TEXT, quote, type PromoKind, type Quote } from "@/lib/domain/pricing";
+import { formatCents, PricingError, promoMisfitText, quote, type PromoKind, type Quote } from "@/lib/domain/pricing";
+import type { PromoDays } from "@/lib/domain/promo-days";
 import { count, hoursInWords } from "@/lib/words";
 import { durationLabel, isIsoDate } from "@/lib/domain/time";
 import { loadDayAvailability, releaseExpiredHolds } from "./availability";
@@ -252,7 +253,7 @@ export type QuoteResult =
   | {
       ok: true;
       quote: Quote;
-      promo: Pick<UsablePromo, "code" | "kind" | "value" | "source" | "photographyOnly"> | null;
+      promo: (Pick<UsablePromo, "code" | "kind" | "value" | "source" | "photographyOnly"> & { days: PromoDays | null }) | null;
       /**
        * A membership's code: what is left on it, whether weekends pay the difference, and the studios its plan is for,
        * for the screen's own price (which drops the hours when other studios are chosen afterwards).
@@ -310,15 +311,16 @@ export async function quoteSelection(db: DbLike, rawInput: unknown, now: Date, p
       addonCatalog: catalog.addons,
       extraGuestsAllowed: extraGuestsFor(catalog, input.studioIds),
       promo,
+      bookingDay: { date: input.date, special: input.date in catalog.specialDates },
       membership,
       photoPackage: session,
     });
     // A code that exists but cannot be used on this selection is refused with the reason.
-    if (price.promoMisfit) return fail(422, "invalid_code", PROMO_MISFIT_TEXT[price.promoMisfit]);
+    if (price.promoMisfit) return fail(422, "invalid_code", promoMisfitText(price.promoMisfit, promo, { date: input.date, special: input.date in catalog.specialDates }));
     return {
       ok: true,
       quote: price,
-      promo: promo ? { code: promo.code, kind: promo.kind, value: promo.value, source: promo.source, photographyOnly: promo.photographyOnly } : null,
+      promo: promo ? { code: promo.code, kind: promo.kind, value: promo.value, source: promo.source, photographyOnly: promo.photographyOnly, days: promo.days ?? null } : null,
       membership: member && membership ? { code: member.code, ...membership, studioIds: member.studioIds, studioNames: member.studioNames } : null,
     };
   } catch (error) {
@@ -427,6 +429,7 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
       addonCatalog: catalog.addons,
       extraGuestsAllowed: extraGuestsFor(catalog, input.studioIds),
       promo,
+      bookingDay: { date: input.date, special: input.date in catalog.specialDates },
       membership: member ? { minutesLeft: member.minutesLeft, weekendDifference: catalog.settings.memberWeekendDifference } : null,
       photoPackage: session,
     });
@@ -437,7 +440,7 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
   const spendsMinutes = member !== null && price.membershipMinutes > 0;
   // The booking screen leaves out a code that does not fit the selection. Anything else that
   // sends one is told why, instead of being charged the full price without a word.
-  if (price.promoMisfit) return fail(422, "invalid_code", PROMO_MISFIT_TEXT[price.promoMisfit]);
+  if (price.promoMisfit) return fail(422, "invalid_code", promoMisfitText(price.promoMisfit, promo, { date: input.date, special: input.date in catalog.specialDates }));
   if (input.expectedTotalCents !== undefined && input.expectedTotalCents !== price.totalCents) {
     return fail(409, "price_changed", `The price is now ${formatCents(price.totalCents)}. Please review and confirm again.`);
   }

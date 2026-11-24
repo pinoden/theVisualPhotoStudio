@@ -18,6 +18,7 @@ import { together, type Db, type DbLike } from "@/db/client";
 import { isAdminLevel, type AdminLevel } from "@/lib/abilities";
 import { isAddonKind, type AddonKind } from "@/lib/addon-kinds";
 import type { PromoKind } from "@/lib/domain/pricing";
+import { promoDaysInWords, promoDaysProblem, readPromoDays, type PromoDays } from "@/lib/domain/promo-days";
 import { isIsoDate, type DayType, type IsoDate } from "@/lib/domain/time";
 import { PROMO_CODE_RULE } from "@/lib/parse";
 import { MANUAL_PROVIDER } from "@/lib/payment-methods";
@@ -366,6 +367,8 @@ export interface CodeView {
   expiresAt: string | null;
   voided: boolean;
   note: string;
+  /** The days a booking with it may be on, in words ("bookings from …"); null for any day. */
+  days: string | null;
 }
 
 export async function listCodes(db: DbLike, limit = 200): Promise<CodeView[]> {
@@ -383,6 +386,7 @@ export async function listCodes(db: DbLike, limit = 200): Promise<CodeView[]> {
     expiresAt: r.expiresAt ? r.expiresAt.toISOString() : null,
     voided: r.voidedAt !== null,
     note: r.note,
+    days: promoDaysInWords(readPromoDays(r.bookingDays)),
   }));
 }
 
@@ -421,7 +425,18 @@ export type CreateCodeResult = { ok: true; code: string } | { ok: false; message
  */
 export async function createManualCode(
   db: DbLike,
-  input: { kind: PromoKind; value: number; email: string | null; validDays: number; maxUses: number; note: string; photographyOnly?: boolean; code?: string },
+  input: {
+    kind: PromoKind;
+    value: number;
+    email: string | null;
+    validDays: number;
+    maxUses: number;
+    note: string;
+    photographyOnly?: boolean;
+    code?: string;
+    /** The days a booking with it may be on (question 80); left out, any day. */
+    bookingDays?: PromoDays | null;
+  },
   now: Date,
 ): Promise<CreateCodeResult> {
   if (input.kind !== "percent" && input.kind !== "amount" && input.kind !== "free_hour") {
@@ -443,6 +458,10 @@ export async function createManualCode(
     email = normalizeEmail(input.email);
     if (!email) return { ok: false, message: "Enter a valid email address, or leave it empty." };
   }
+  if (input.bookingDays) {
+    const problem = promoDaysProblem(input.bookingDays);
+    if (problem) return { ok: false, message: problem };
+  }
   const named = normalizeCode(input.code ?? "");
   if (named !== "" && !PROMO_CODE_RULE.test(named)) {
     return { ok: false, message: "A code is 3 to 30 letters, digits or hyphens, and starts and ends with a letter or a digit." };
@@ -462,6 +481,7 @@ export async function createManualCode(
     maxUses: input.kind === "amount" ? 1_000_000 : input.kind === "free_hour" ? 1 : input.maxUses,
     note: input.note.slice(0, 200),
     issuedAt: now,
+    bookingDays: input.bookingDays ?? null,
   });
   if (issued) return { ok: true, code: issued.code };
   // Cancelled and expired codes keep their text, so a name used once is taken for good.
