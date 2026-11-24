@@ -5,6 +5,7 @@ import { formatCents } from "@/lib/domain/pricing";
 import { minutesLeftOf } from "./membership-minutes";
 import { normalizeCode } from "./promos";
 import { formatDay } from "./tz";
+import { promoDaysInWords, readPromoDays } from "@/lib/domain/promo-days";
 
 /**
  * "Check Code Balance" on the booking page (the owner's brief of 2026-11-22, item 5): what a code is worth before a
@@ -92,6 +93,8 @@ function promoBalance(row: typeof promoCodes.$inferSelect, now: Date): CodeBalan
   else if (row.kind === "percent") restrictions.push("Takes its percentage off a studio rental, not off add-ons. Not for photography or content creation sessions.");
   else restrictions.push("Pays for a studio rental and its add-ons. Not for photography or content creation sessions.");
   if (row.email) restrictions.push("Works only with the email address it was sent to.");
+  const days = promoDaysInWords(readPromoDays(row.bookingDays));
+  if (days) restrictions.push(`For ${days}.`);
 
   const title =
     row.kind === "amount"

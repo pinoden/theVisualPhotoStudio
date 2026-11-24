@@ -2696,3 +2696,8 @@ fieldset { min-inline-size: 0; }
 .video-list { list-style: none; margin: 1rem 0 0; padding: 0; }
 .video-list li { border-top: 1px solid var(--color-border); padding: .75rem 0; }
 .video-uploader progress { vertical-align: middle; width: 12rem; }
+
+/* Admin → Codes: the days a booking with a code may be on (question 80). */
+.code-days { flex-basis: 100%; }
+.code-days-help { font-size: .8rem; margin: 0 0 .5rem; }
+.code-days-week { display: flex; flex-wrap: wrap; gap: .25rem 1rem; margin-bottom: .5rem; }

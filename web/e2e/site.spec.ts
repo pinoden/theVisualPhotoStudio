@@ -1817,6 +1817,16 @@ test("a booking made with a discount code is moved without paying the discount a
   await expect(created).toBeVisible();
   const discountCode = /VS-[0-9A-Z]{4}-[0-9A-Z]{4}/.exec(await created.innerText())![0];
 
+  // A code for weekday bookings only, not on holidays (question 80): the list says its days.
+  await onScreen(page.locator("#code-value")).fill("15");
+  await onScreen(page.locator("#code-text")).fill("WEEKDAYS-E2E");
+  await page.getByRole("group", { name: "Days of the week" }).getByRole("checkbox", { name: "Saturday" }).uncheck();
+  await page.getByRole("group", { name: "Days of the week" }).getByRole("checkbox", { name: "Sunday" }).uncheck();
+  await page.getByRole("checkbox", { name: /^Not on holidays and special dates/ }).check();
+  await page.getByRole("button", { name: "Create", exact: true }).click();
+  await expect(byText(page, "Code created: WEEKDAYS-E2E")).toBeVisible();
+  await expect(page.getByRole("row", { name: /WEEKDAYS-E2E/ })).toContainText("For bookings Monday to Friday, not on holidays");
+
   // While signed in: three free hours for Jane, for the next tests. The site sends one by itself after
   // five visits; the owner can also hand one out. A free hour is a reward, and a reward is used once.
   for (let made = 1; made <= 3; made++) {

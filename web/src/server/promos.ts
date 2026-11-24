@@ -3,6 +3,7 @@ import { and, eq, gt, gte, isNull, lt, or, sql } from "drizzle-orm";
 import { promoCodes } from "@/db/schema";
 import type { DbLike } from "@/db/client";
 import type { PromoDef, PromoKind } from "@/lib/domain/pricing";
+import { isLimiting, readPromoDays, type PromoDays } from "@/lib/domain/promo-days";
 
 /**
  * Codes customers enter at checkout. Three kinds:
@@ -78,6 +79,7 @@ export async function findUsablePromo(
       photographyOnly: row.photographyOnly,
       source: row.source,
       rescheduleGeneration: row.rescheduleGeneration,
+      days: readPromoDays(row.bookingDays),
     },
   };
 }
@@ -111,6 +113,7 @@ export async function listCodesForEmail(db: DbLike, email: string, now: Date): P
       photographyOnly: row.photographyOnly,
       source: row.source,
       expiresAt: row.expiresAt ? row.expiresAt.toISOString() : null,
+      days: readPromoDays(row.bookingDays),
     }));
 }
 
@@ -198,6 +201,8 @@ export interface IssuePromoInput {
   issuedAt?: Date;
   /** Its text, when an owner named it (in capitals: `normalizeCode`). Otherwise the site makes one up. */
   code?: string;
+  /** The days a booking with it may be on (question 80); left out, any day. */
+  bookingDays?: PromoDays | null;
 }
 
 const PREFIX: Record<PromoSource, string> = { loyalty: "THANKS", reschedule: "MOVE", manual: "VS", pet_fee: "PET" };
@@ -230,6 +235,7 @@ export async function issuePromo(tx: DbLike, given: IssuePromoInput): Promise<{ 
         originBookingId: input.originBookingId ?? null,
         loyaltySeq: input.loyaltySeq ?? null,
         note: input.note ?? "",
+        bookingDays: isLimiting(input.bookingDays) ? input.bookingDays : null,
         ...(input.issuedAt ? { createdAt: input.issuedAt } : {}),
       })
       .onConflictDoNothing()

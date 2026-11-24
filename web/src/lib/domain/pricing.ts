@@ -4,7 +4,8 @@
  * The same code runs in the browser (instant preview) and on the server
  * (the only result that is ever charged).
  */
-import type { DayType } from "./time";
+import { promoDaysInWords, promoFitsDay, type PromoDays } from "./promo-days";
+import type { DayType, IsoDate } from "./time";
 
 export interface PriceRule {
   studioId: string;
@@ -37,10 +38,12 @@ export interface PromoDef {
   value: number;
   /** Codes default to studio rentals. */
   photographyOnly?: boolean;
+  /** The days a booking with it may be on (promo-days.ts); none, any day. */
+  days?: PromoDays | null;
 }
 
 /** Why a code that exists cannot be used on a selection. */
-export type PromoMisfit = "several_studios" | "photography" | "content" | "rental";
+export type PromoMisfit = "several_studios" | "photography" | "content" | "rental" | "day";
 
 /**
  * A code for sessions (`photographyOnly`) is for both kinds, photography and content creation: a session moved for a
@@ -51,7 +54,14 @@ export const PROMO_MISFIT_TEXT: Record<PromoMisfit, string> = {
   photography: "That code is for studio rentals. It cannot be used for a photography session.",
   content: "That code is for studio rentals. It cannot be used for a content creation session.",
   rental: "That code is for photography and content creation sessions. It cannot be used for a studio rental.",
+  day: "That code cannot be used for a booking on that day.",
 };
+
+/** Why a code does not fit, with the days it is for when that is why: "That code is for bookings from …". */
+export function promoMisfitText(misfit: PromoMisfit, promo: PromoDef | null | undefined): string {
+  const days = misfit === "day" ? promoDaysInWords(promo?.days) : null;
+  return days ? `That code is for ${days}. It cannot be used for a booking on that day.` : PROMO_MISFIT_TEXT[misfit];
+}
 
 export interface QuoteInput {
   studioIds: string[];
@@ -63,6 +73,8 @@ export interface QuoteInput {
   addons?: AddonSelection[];
   addonCatalog?: AddonDef[];
   promo?: PromoDef | null;
+  /** The booking's day, which a code's days are checked against; and whether it is under Holidays and special dates. Left out: not checked. */
+  bookingDay?: { date: IsoDate; special: boolean } | null;
   /**
    * Set for a photography session: the package's price, which includes the
    * studio. The booking is then for exactly one studio, and that studio's own
@@ -260,6 +272,8 @@ export function quote(input: QuoteInput): Quote {
   const promo = input.promo;
   if (promo && (promo.photographyOnly === true) !== Boolean(photoPackage)) {
     promoMisfit = photoPackage ? (photoPackage.service === "content" ? "content" : "photography") : "rental";
+  } else if (promo && input.bookingDay && !promoFitsDay(promo.days, input.bookingDay.date, input.bookingDay.special)) {
+    promoMisfit = "day";
   } else if (promo) {
     if (promo.kind === "percent") {
       if (!(promo.value > 0 && promo.value <= 100)) throw new PricingError("BAD_PROMO", "Invalid code.");

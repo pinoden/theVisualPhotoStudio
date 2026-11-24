@@ -354,6 +354,11 @@ export const promoCodes = pgTable("promo_codes", {
   usedCount: integer("used_count").notNull().default(0),
   expiresAt: ts("expires_at"),
   /**
+   * The days a booking with this code may be on (question 80 in ProjectLibrary.md; `PromoDays` in
+   * src/lib/domain/promo-days.ts): `{ from, until, weekdays, notOnSpecialDates }`. Null: any day.
+   */
+  bookingDays: jsonb("booking_days"),
+  /**
    * For reschedule credits: how many times the money behind this code has
    * already been moved. A booking paid with the code inherits this count.
    */

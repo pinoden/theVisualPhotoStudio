@@ -5,9 +5,11 @@ import {
   formatCents,
   multiStudioPercentFor,
   PricingError,
+  promoMisfitText,
   quote,
   type AddonDef,
   type PriceRule,
+  type PromoDef,
 } from "./pricing";
 
 const B = "blanche";
@@ -296,5 +298,21 @@ describe("membership minutes", () => {
     expect(session).toMatchObject({ membershipMinutes: 0, membershipCents: 0, totalCents: 25000 });
     expect(code(() => quote({ ...base, studioIds: [P], dayType: "weekday", durationMinutes: 60, ...member(-1) }))).toBe("BAD_PROMO");
     expect(code(() => quote({ ...base, studioIds: [P], dayType: "weekday", durationMinutes: 60, ...member(1.5) }))).toBe("BAD_PROMO");
+  });
+});
+
+describe("a code's booking days (question 80)", () => {
+  const weekdaysOnly: PromoDef = { kind: "percent", value: 10, days: { from: null, until: null, weekdays: [1, 2, 3, 4, 5], notOnSpecialDates: true } };
+  const one = { ...base, studioIds: [B], dayType: "weekday" as const, durationMinutes: 60, promo: weekdaysOnly };
+
+  it("discounts a booking on one of its days, and none on another, saying why", () => {
+    expect(quote({ ...one, bookingDay: { date: "2026-12-09", special: false } })).toMatchObject({ promoDiscountCents: 880, promoMisfit: null });
+    expect(quote({ ...one, dayType: "weekend", bookingDay: { date: "2026-12-12", special: false } })).toMatchObject({ promoDiscountCents: 0, promoMisfit: "day" });
+    expect(quote({ ...one, bookingDay: { date: "2026-12-10", special: true } })).toMatchObject({ promoDiscountCents: 0, promoMisfit: "day" });
+    expect(promoMisfitText("day", weekdaysOnly)).toBe("That code is for bookings Monday to Friday, not on holidays. It cannot be used for a booking on that day.");
+  });
+
+  it("is not checked before a day is chosen", () => {
+    expect(quote({ ...one }).promoMisfit).toBeNull();
   });
 });

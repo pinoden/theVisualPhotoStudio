@@ -10,7 +10,7 @@ import { loadCatalog } from "@/server/catalog";
 import { dollarsToCents, formText, hhmmToMinutes, intInRange } from "@/lib/parse";
 import { ADMIN_LEVELS, ATTENDANT_SWITCH_KEYS, isAdminLevel, MANAGER_SWITCH_KEYS } from "@/lib/abilities";
 import { formatCents } from "@/lib/domain/pricing";
-import { durationLabel } from "@/lib/domain/time";
+import { durationLabel, isIsoDate } from "@/lib/domain/time";
 import {
   addStaff,
   createManualCode,
@@ -389,6 +389,12 @@ export async function createCodeAction(formData: FormData): Promise<void> {
       note: text(formData, "note"),
       photographyOnly: chosen === "photo_percent",
       code: text(formData, "code"),
+      bookingDays: {
+        from: isIsoDate(text(formData, "daysFrom")) ? text(formData, "daysFrom") : null,
+        until: isIsoDate(text(formData, "daysUntil")) ? text(formData, "daysUntil") : null,
+        weekdays: [...new Set(formData.getAll("weekday").map((value) => Number(value)))].filter((day) => Number.isInteger(day) && day >= 1 && day <= 7),
+        notOnSpecialDates: formData.get("notOnSpecialDates") === "1",
+      },
     },
     new Date(),
   );

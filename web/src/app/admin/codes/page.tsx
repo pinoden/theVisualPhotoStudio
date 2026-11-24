@@ -20,6 +20,8 @@ import { AdminFrame, AdminLoading } from "../frame";
 
 export const metadata: Metadata = { title: "Codes", robots: { index: false } };
 
+const WEEKDAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
 const SOURCE_LABEL: Record<string, string> = {
   loyalty: "Earned by visits",
   reschedule: "Reschedule credit",
@@ -125,6 +127,38 @@ async function Codes({ searchParams }: Pick<PageProps<"/admin/codes">, "searchPa
             </label>
             <input id="code-note" name="note" className="form-control" maxLength={200} />
           </div>
+          <fieldset className="admin-fieldset code-days">
+            <legend className="form-label">Booking days (optional)</legend>
+            <p className="code-days-help">
+              The days a booking with this code may be on: a season, some days of the week, not on holidays. &ldquo;Valid for&rdquo; is how long
+              clients can enter it; a client who books outside these days is told which days it is for, and keeps the code.
+            </p>
+            <div className="admin-form-row" style={{ marginBottom: ".5rem" }}>
+              <div className="form-group">
+                <label className="form-label" htmlFor="code-days-from">
+                  First booking day
+                </label>
+                <input id="code-days-from" name="daysFrom" type="date" className="form-control" />
+              </div>
+              <div className="form-group">
+                <label className="form-label" htmlFor="code-days-until">
+                  Last booking day
+                </label>
+                <input id="code-days-until" name="daysUntil" type="date" className="form-control" />
+              </div>
+            </div>
+            <div role="group" aria-label="Days of the week" className="code-days-week">
+              {WEEKDAY_NAMES.map((name, i) => (
+                <label key={name} className="admin-check">
+                  <input type="checkbox" name="weekday" value={i + 1} defaultChecked /> {name}
+                </label>
+              ))}
+            </div>
+            <label className="admin-check">
+              <input type="checkbox" name="notOnSpecialDates" value="1" /> Not on holidays and special dates (the dates under{" "}
+              <Link href="/admin/prices">Prices</Link>)
+            </label>
+          </fieldset>
           <button type="submit" className="btn btn-dark btn-small">
             Create
           </button>
@@ -178,6 +212,7 @@ async function Codes({ searchParams }: Pick<PageProps<"/admin/codes">, "searchPa
                     <td>
                       <strong style={{ color: "var(--color-dark)" }}>{code.code}</strong>
                       <div style={{ fontSize: ".8rem" }}>{code.photographyOnly ? "Photography and content creation sessions" : "Studio rentals"}</div>
+                      {code.days && <div style={{ fontSize: ".8rem" }}>For {code.days}</div>}
                       {code.note && <div style={{ fontSize: ".8rem" }}>{code.note}</div>}
                     </td>
                     <td>

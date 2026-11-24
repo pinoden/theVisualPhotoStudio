@@ -14,13 +14,14 @@ import {
   type SlotOptions,
 } from "@/lib/domain/availability";
 import { extraGuestsFor, multiStudioSaving, studioCombinationError } from "@/lib/catalog-view";
+import type { PromoDays } from "@/lib/domain/promo-days";
 import { MonthCalendar } from "./MonthCalendar";
 import { WaitlistJoin } from "./WaitlistJoin";
 import {
   bookableDurations,
   findPrice,
   formatCents,
-  PROMO_MISFIT_TEXT,
+  promoMisfitText,
   quote,
   type PromoKind,
   type Quote,
@@ -76,6 +77,8 @@ interface AppliedCode {
   kind: PromoKind;
   value: number;
   photographyOnly?: boolean;
+  /** The days a booking with it may be on (question 80); none, any day. */
+  days?: PromoDays | null;
   /** Where the code came from: "reschedule" for a moved booking's money. */
   source?: string;
   /**
@@ -395,6 +398,7 @@ export function BookingFlow({
           .map((addon) => ({ addonId: addon.id, quantity: Math.min(addonCounts[addon.id] ?? 0, mostOf(addon)) }))
           .filter((selection) => selection.quantity > 0),
         promo,
+        bookingDay: date ? { date, special: date in catalog.specialDates } : null,
         membership: member?.membership ?? null,
         photoPackage: session ? { priceCents: session.priceCents, service: session.service } : null,
       });
@@ -403,7 +407,7 @@ export function BookingFlow({
     }
     // availableAddons, guestsAllowed and mostOf are derived from studioIds and the catalog.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [studioIds, dayType, duration, rules, settings.multiStudioPercent, catalog.addons, addonCounts, promo, member, photography, session, combinationError]);
+  }, [studioIds, date, dayType, duration, rules, settings.multiStudioPercent, catalog.addons, addonCounts, promo, member, photography, session, combinationError]);
 
   const needsCard = price !== null && price.totalCents > 0;
   // The payment configuration and Square's card form, on the payment step of a booking that costs money.
@@ -807,7 +811,7 @@ export function BookingFlow({
       )}
       {promo && price.promoMisfit && (
         <p className="field-error" role="status" style={{ margin: ".75rem 0 0" }}>
-          {PROMO_MISFIT_TEXT[price.promoMisfit]} Code {promo.code} is not used on this booking and stays yours.
+          {promoMisfitText(price.promoMisfit, promo)} Code {promo.code} is not used on this booking and stays yours.
         </p>
       )}
       {memberApplied && !member && (
