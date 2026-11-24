@@ -32,6 +32,7 @@ import { requireStaff } from "@/server/session";
 import { localDateOf } from "@/server/tz";
 import { AdminFrame, AdminLoading } from "../frame";
 import { AppointmentDialog } from "./AppointmentDialog";
+import { ZoomSelect } from "./ZoomSelect";
 
 export const metadata: Metadata = { title: "Calendar", robots: { index: false } };
 
@@ -61,11 +62,19 @@ interface Entry extends CalendarAppointment {
 }
 
 /**
- * How large the time grid is drawn: a minute's height in pixels for each of the zoom buttons (the owner's admin brief
- * of 2026-11-22, item 9, as in Acuity). It changes no length and no step. 0.5 is the size the calendar had before.
+ * How large the time grid is drawn (the owner's admin brief of 2026-11-22, item 9, as in Acuity; and of 2026-11-23:
+ * "0.25; 0.5; 0.75; normal; 1.25; 1.5; 2"): each size a share of the normal one, a minute 1.15 pixels high, the size the
+ * calendar always had. It changes no length and no step. Below 0.75 an appointment says its time and client on one line.
  */
-const ZOOMS = { "0.25": 0.7, "0.5": 1.15, "0.75": 1.8 } as const;
+const NORMAL_PPM = 1.15;
+const ZOOMS = { "0.25": 0.25, "0.5": 0.5, "0.75": 0.75, "1": 1, "1.25": 1.25, "1.5": 1.5, "2": 2 } as const;
 type Zoom = keyof typeof ZOOMS;
+// In this order: an object lists keys such as "1" and "2" before the others.
+const ZOOM_ORDER: Zoom[] = ["0.25", "0.5", "0.75", "1", "1.25", "1.5", "2"];
+const ZOOM_SIZES = ZOOM_ORDER.map((value) => ({ value, label: value === "1" ? "Normal" : `${value}×` }));
+const ppmOf = (zoom: Zoom) => ZOOMS[zoom] * NORMAL_PPM;
+/** Drawn small: an appointment's time and client on one line, the rest in its pop-up. */
+const small = (ppm: number) => ppm < 0.75 * NORMAL_PPM;
 const isZoom = (value: unknown): value is Zoom => typeof value === "string" && Object.hasOwn(ZOOMS, value);
 
 /**
@@ -86,7 +95,7 @@ async function Calendar({ searchParams }: Pick<PageProps<"/admin/calendar">, "se
   const chosen = catalog.studios.find((studio) => studio.slug === query.studio);
   // Paris in the middle, so that every bundle is side by side and drawn as one appointment.
   const studios = chosen ? [chosen] : calendarColumns(catalog.studios);
-  const zoom: Zoom = isZoom(query.zoom) ? query.zoom : "0.5";
+  const zoom: Zoom = isZoom(query.zoom) ? query.zoom : "1";
 
   const span = rangeOf(view, date);
   const data = await loadCalendar(db, viewer, catalog, span);
@@ -95,7 +104,7 @@ async function Calendar({ searchParams }: Pick<PageProps<"/admin/calendar">, "se
   const href = (to: { view?: CalendarView; date?: IsoDate; studio?: string | null; zoom?: Zoom; open?: string }) => {
     const studio = to.studio === undefined ? (chosen?.slug ?? null) : to.studio;
     const scale = to.zoom ?? zoom;
-    return `/admin/calendar?view=${to.view ?? view}&date=${to.date ?? date}${studio ? `&studio=${studio}` : ""}${scale === "0.5" ? "" : `&zoom=${scale}`}${to.open ? `&open=${encodeURIComponent(to.open)}` : ""}`;
+    return `/admin/calendar?view=${to.view ?? view}&date=${to.date ?? date}${studio ? `&studio=${studio}` : ""}${scale === "1" ? "" : `&zoom=${scale}`}${to.open ? `&open=${encodeURIComponent(to.open)}` : ""}`;
   };
   // One entry for each appointment that holds a studio being shown. It keeps its bundle's name and colour when one studio is shown.
   const entries: Entry[] = data.appointments.flatMap((appointment) => {
@@ -131,7 +140,7 @@ async function Calendar({ searchParams }: Pick<PageProps<"/admin/calendar">, "se
         times: moveTimes,
         dateForm: {
           action: "/admin/calendar",
-          keep: { view, date, ...(chosen ? { studio: chosen.slug } : {}), ...(zoom === "0.5" ? {} : { zoom }), open: opened.ref },
+          keep: { view, date, ...(chosen ? { studio: chosen.slug } : {}), ...(zoom === "1" ? {} : { zoom }), open: opened.ref },
         },
         back: openedHref,
         closeHref: openedHref,
@@ -170,7 +179,7 @@ async function Calendar({ searchParams }: Pick<PageProps<"/admin/calendar">, "se
         <form method="get" className="cal-jump">
           <input type="hidden" name="view" value={view} />
           {chosen && <input type="hidden" name="studio" value={chosen.slug} />}
-          {zoom !== "0.5" && <input type="hidden" name="zoom" value={zoom} />}
+          {zoom !== "1" && <input type="hidden" name="zoom" value={zoom} />}
           <label className="visually-hidden" htmlFor="cal-date">
             Go to date
           </label>
@@ -190,19 +199,11 @@ async function Calendar({ searchParams }: Pick<PageProps<"/admin/calendar">, "se
           ))}
         </nav>
         {view !== "month" && (
-          <nav className="cal-tabs cal-zoom" aria-label="Zoom">
-            {(Object.keys(ZOOMS) as Zoom[]).map((scale) => (
-              <Link key={scale} href={href({ zoom: scale })} aria-current={scale === zoom ? "true" : undefined} title={scale === "0.5" ? "The normal size" : undefined}>
-                {scale}
-              </Link>
-            ))}
-            {/* Back to the size the calendar has before it is zoomed (the owner, 2026-11-23: no button to go back). */}
-            {zoom !== "0.5" && (
-              <Link href={href({ zoom: "0.5" })} className="cal-zoom-reset">
-                Normal size
-              </Link>
-            )}
-          </nav>
+          <ZoomSelect
+            sizes={ZOOM_SIZES}
+            current={zoom}
+            keep={{ view, date, ...(chosen ? { studio: chosen.slug } : {}), ...(typeof query.open === "string" ? { open: query.open } : {}) }}
+          />
         )}
         <nav className="cal-filter" aria-label="Studio">
           <Link href={href({ studio: null })} aria-current={chosen ? undefined : "true"} className="cal-studio">
@@ -234,9 +235,9 @@ async function Calendar({ searchParams }: Pick<PageProps<"/admin/calendar">, "se
 
       {view === "month" && <Month date={date} today={today} entries={entries} visible={visible} dayHref={(day) => href({ view: "day", date: day })} />}
       {view === "week" && (
-        <Week date={date} today={today} entries={entries} blocks={blocks} studios={studios} visible={visible} ppm={ZOOMS[zoom]} dayHref={(day) => href({ view: "day", date: day })} />
+        <Week date={date} today={today} entries={entries} blocks={blocks} studios={studios} visible={visible} ppm={ppmOf(zoom)} dayHref={(day) => href({ view: "day", date: day })} />
       )}
-      {view === "day" && <Day date={date} entries={entries} blocks={blocks} studios={studios} visible={visible.has(date)} ppm={ZOOMS[zoom]} />}
+      {view === "day" && <Day date={date} entries={entries} blocks={blocks} studios={studios} visible={visible.has(date)} ppm={ppmOf(zoom)} />}
 
       {view !== "month" && (
         <p className="cal-legend">
@@ -489,7 +490,7 @@ function Week({
   return (
     <>
       {/* The grid, for screens wide enough for seven days side by side. Each studio has its own lane in a day. */}
-      <div className="cal-grid cal-week" style={{ "--days": 7, "--buffer": BUFFER_SHOWN_MINUTES, "--ppm": `${ppm}px` } as CSSProperties}>
+      <div className={`cal-grid cal-week${small(ppm) ? " cal-small" : ""}`} style={{ "--days": 7, "--buffer": BUFFER_SHOWN_MINUTES, "--ppm": `${ppm}px` } as CSSProperties}>
         <div className="cal-head">
           <span />
           {days.map((day) => (
@@ -584,7 +585,7 @@ function Day({
   if (!visible) return null;
   const { start, end } = gridHours([date], studios, entries, blocks);
   return (
-    <div className="cal-grid cal-day" style={{ "--days": studios.length, "--buffer": BUFFER_SHOWN_MINUTES, "--ppm": `${ppm}px` } as CSSProperties}>
+    <div className={`cal-grid cal-day${small(ppm) ? " cal-small" : ""}`} style={{ "--days": studios.length, "--buffer": BUFFER_SHOWN_MINUTES, "--ppm": `${ppm}px` } as CSSProperties}>
       <div className="cal-head">
         <span />
         {studios.map((studio) => (

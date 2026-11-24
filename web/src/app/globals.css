@@ -1718,8 +1718,13 @@ button { font-family: inherit; }
 .cal-lanes > * { pointer-events: auto; }
 .cal-count { margin: 0 0 0 .5rem; font-size: .85rem; color: var(--color-muted); }
 .cal-head-count { font-weight: 400; color: var(--color-muted); }
-.cal-zoom a { min-width: 3rem; justify-content: center; }
-.cal-zoom a.cal-zoom-reset { min-width: 0; padding-left: .75rem; padding-right: .75rem; }
+.cal-zoom { display: inline-flex; align-items: center; gap: .4rem; margin: 0; }
+.cal-zoom-label { font-size: .85rem; color: var(--color-muted); }
+.cal-zoom select { width: auto; min-height: 2.5rem; padding-top: .3rem; padding-bottom: .3rem; }
+/* Small zooms (below 0.75): the client and the time on one line; the rest is in the appointment's pop-up. */
+.cal-small .cal-appt, .cal-small .cal-appt-full { font-size: .65rem; line-height: 1.15; }
+.cal-small .cal-appt-in, .cal-small .cal-appt-full .cal-appt-in { flex-direction: row; align-items: baseline; gap: .3rem; padding: 1px 3px; }
+.cal-small .cal-appt-what, .cal-small .cal-tag, .cal-small .status-badge, .cal-small .cal-dot { display: none; }
 .cal-key { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem 1rem; }
 .cal-key .cal-studio { display: inline-flex; align-items: center; gap: .35rem; }
 /* An appointment's page, in its studio's or bundle's colour, as on the calendar. */
@@ -2417,7 +2422,8 @@ fieldset { min-inline-size: 0; }
 /* With a picture of the map (question 74): the map on top, the address and the button under it. */
 .blk-location-with-map { flex-direction: column; justify-content: flex-start; padding: 0 0 1.5rem; gap: 1.25rem; }
 .blk-location-map { display: block; width: 100%; line-height: 0; }
-.blk-location-map img { display: block; width: 100%; height: auto; max-height: 360px; object-fit: cover; }
+/* Never cropped: a map's credit (Google's, or OpenStreetMap's) stays in its corner, as the maps' terms ask. */
+.blk-location-map img { display: block; width: 100%; height: auto; max-height: 360px; object-fit: contain; }
 .studio-card-buttons { margin-top: 1.25rem; display: flex; gap: .75rem; flex-wrap: wrap; }
 .studio-card-buttons .btn { padding: .5rem 1.25rem; font-size: .78rem; }
 .rate-card .rate-book { width: 100%; }
