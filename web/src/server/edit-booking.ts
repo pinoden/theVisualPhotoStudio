@@ -8,6 +8,7 @@ import { labelOf } from "@/lib/domain/labels";
 import { durationLabel } from "@/lib/domain/time";
 import type { AuthUser } from "./auth";
 import { loadDayAvailability } from "./availability";
+import { conflictsAt, loadOverrideDay, overlapping, overrideRefusal, type Conflict } from "./override";
 import { isBookingRef } from "./bookings";
 import { dayTypeFor, loadCatalog, type Catalog } from "./catalog";
 import { bookingChangedEmail, queueEmail } from "./email";
@@ -27,14 +28,15 @@ import { formatInstant, localDateOf, localMinuteOn, localToUtc } from "./tz";
  * a percent code taking its percentage again, credit paying what it paid up to the new price and what the new price no
  * longer needs going back on its code. What it owes then, or was paid beyond its new price, is settled as after a move:
  * a payment at the studio or a payment link, or a refund (the appointment's page). The time must be free in every studio
- * it holds now, inside their hours, with the gap after it, and its props free: no one passes over availability.
+ * it holds now, inside their hours, with the gap after it, and its props free, unless the owner passes over what is in
+ * the way, having read it in a pop-up (question 79; src/server/override.ts).
  */
 export interface EditInput {
   studioIds: string[];
   durationMinutes: number;
   addons: { addonId: string; quantity: number }[];
-  /** The owner passes over the opening hours (question 76). */
-  openAllDay?: boolean;
+  /** The owner's override (question 79): the keys of what the change passes over, read in the pop-up. Null: none. */
+  override?: string[] | null;
 }
 
 export type EditResult =
@@ -91,18 +93,27 @@ export async function editBooking(db: Db, viewer: AuthUser, ref: string, input: 
   }
 
   // Free at its start in every studio, for the new length, its own time left out.
-  const day = await loadDayAvailability(db, catalog, date, now, { asAdmin: true, excludeBookingId: found.id, openAllDay: Boolean(input.openAllDay) });
-  const slot = { durationMinutes: minutes, incrementMinutes: 1, earliestStartMinute: 0 };
-  const taken = studioIds.filter((id) => {
-    const studioDay = day.days.find((studio) => studio.studioId === id);
-    return !studioDay || !isStartFree(studioDay, startMinute, slot);
-  });
-  if (taken.length > 0) {
-    const names = taken.map((id) => catalog.studios.find((studio) => studio.id === id)!.name).join(" and ");
-    return refuse(
-      `${names} ${taken.length > 1 ? "are" : "is"} not free for ${durationLabel(minutes)} from ${formatInstant(found.startAt)}, with the gap after it${input.openAllDay ? "" : ", inside the opening hours"}. Choose another studio or length, or move the booking first.`,
-    );
+  // With the owner's override (question 79), what it passes over, each thing read in the pop-up.
+  let passedOver: Conflict[] = [];
+  if (input.override) {
+    passedOver = conflictsAt(await loadOverrideDay(db, catalog, { date, studioIds, excludeBookingId: found.id }), startMinute, minutes);
+    const refusal = overrideRefusal(passedOver, input.override);
+    if (refusal) return refuse(refusal);
+  } else {
+    const day = await loadDayAvailability(db, catalog, date, now, { asAdmin: true, excludeBookingId: found.id });
+    const slot = { durationMinutes: minutes, incrementMinutes: 1, earliestStartMinute: 0 };
+    const taken = studioIds.filter((id) => {
+      const studioDay = day.days.find((studio) => studio.studioId === id);
+      return !studioDay || !isStartFree(studioDay, startMinute, slot);
+    });
+    if (taken.length > 0) {
+      const names = taken.map((id) => catalog.studios.find((studio) => studio.id === id)!.name).join(" and ");
+      return refuse(
+        `${names} ${taken.length > 1 ? "are" : "is"} not free for ${durationLabel(minutes)} from ${formatInstant(found.startAt)}, with the gap after it, inside the opening hours. Choose another studio or length, or move the booking first.`,
+      );
+    }
   }
+  const overlaps = overlapping(passedOver);
 
   const [held, kept, code] = await together(db, [
     () => db.select({ studioId: studioHolds.studioId }).from(studioHolds).where(eq(studioHolds.bookingId, found.id)),
@@ -201,6 +212,7 @@ export async function editBooking(db: Db, viewer: AuthUser, ref: string, input: 
           bookingId: booking.id,
           priceCents: line.priceCents,
           occupied: sql`tstzrange(${booking.startAt.toISOString()}::timestamptz, ${occupiedEnd.toISOString()}::timestamptz, '[)')`,
+          overlapAllowed: overlaps.has(line.studioId),
         });
       }
       await tx.delete(bookingAddons).where(eq(bookingAddons.bookingId, booking.id));
@@ -227,7 +239,7 @@ export async function editBooking(db: Db, viewer: AuthUser, ref: string, input: 
         at: now,
         note: `Changed from ${before} to ${after}${nowCents === wasCents ? "; the price is the same" : `: ${formatCents(nowCents)} instead of ${formatCents(wasCents)}`}${
           codeBack ? `; ${formatCents(codeBack.cents)} went back on the code ${codeBack.code}` : ""
-        }`,
+        }${passedOver.length > 0 ? `; over: ${passedOver.map((conflict) => conflict.text).join("; ")}` : ""}`,
       });
       const money = await moneyAfter(tx, booking, priced.totalCents, now);
       await queueEmail(

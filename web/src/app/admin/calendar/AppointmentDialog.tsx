@@ -50,9 +50,9 @@ export function AppointmentDialog({
     dateForm: { action: string; keep: Record<string, string> };
     back: string;
     closeHref: string;
-    /** An owner, who may pass over the opening hours (question 76), and whether the times shown do. */
+    /** An owner, who may choose any time (question 79), and whether every start of the day is shown. */
     owner: boolean;
-    afterHours: boolean;
+    anyTime: boolean;
   } | null;
   today: string;
 }) {
@@ -108,7 +108,7 @@ export function AppointmentDialog({
               today={today}
               idPrefix="appt-move"
               owner={move.owner}
-              afterHours={move.afterHours}
+              anyTime={move.anyTime}
             />
             <p style={{ margin: ".75rem 0 0" }}>
               <Link href={move.closeHref} scroll={false}>

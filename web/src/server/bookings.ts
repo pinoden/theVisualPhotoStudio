@@ -20,6 +20,7 @@ import { formatCents, PricingError, PROMO_MISFIT_TEXT, quote, type PromoKind, ty
 import { count, hoursInWords } from "@/lib/words";
 import { durationLabel, isIsoDate } from "@/lib/domain/time";
 import { loadDayAvailability, releaseExpiredHolds } from "./availability";
+import { conflictsAt, loadOverrideDay, overlapping, overrideRefusal, type Conflict } from "./override";
 import { dayTypeFor, loadCatalog, type Catalog, type CatalogPhotoPackage } from "./catalog";
 import { bookingConfirmationEmail, queueEmail } from "./email";
 import { BY_CUSTOMER, recordEvent } from "./history";
@@ -144,8 +145,12 @@ export interface BookingDeps {
    * the kind of money the booking is (`moneyKindNow` in src/server/test-mode.ts). Left out, the name of `payments`.
    */
   processor?: string | null;
-  /** With `madeBy`, an owner's: the studios count as open all day (question 76 in ProjectLibrary.md). */
-  openAllDay?: boolean;
+  /**
+   * With `madeBy`, an owner's override (question 79 in ProjectLibrary.md): the keys of what the chosen time passes over,
+   * as the owner read them in the pop-up (src/server/override.ts). The time is then not refused for its hours, other
+   * bookings, blocked time or the person's day, so long as nothing passes over what was not read. Null: no override.
+   */
+  override?: string[] | null;
 }
 
 const REF_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
@@ -370,7 +375,6 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
   const day = await loadDayAvailability(db, catalog, input.date, now, {
     asAdmin: Boolean(deps.madeBy),
     withPhotographer: session ? input.service : false,
-    openAllDay: Boolean(deps.madeBy) && Boolean(deps.openAllDay),
   });
   if (day.problem) {
     const text = {
@@ -457,19 +461,31 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
     incrementMinutes: catalog.settings.slotIncrementMinutes,
     earliestStartMinute: day.earliestStartMinute,
   };
-  const allFree = input.studioIds.every((id) => {
-    const studioDay = day.days.find((d) => d.studioId === id);
-    return studioDay !== undefined && isStartFree(studioDay, input.startMinute, slot);
-  });
-  if (!allFree) return fail(409, "slot_taken", "That time is no longer available. Please choose another.");
-  // The photographer has to be free as well: inside their working hours, and not at another session or blocked.
   const photographer = session ? (day.photographer ?? null) : null;
   if (session && !photographer) {
     return fail(409, "slot_taken", `${words.Session}s cannot be booked online right now. Please contact the studio.`);
   }
-  if (photographer && !isStartFree(photographer, input.startMinute, slot)) {
-    return fail(409, "slot_taken", `Our ${words.person} is not free at that time. Please choose another.`);
+  // An owner's override (question 79): what the time passes over, each thing read in the pop-up; the holds that overlap
+  // another's are marked, so the database lets them.
+  const override = deps.madeBy && deps.override ? deps.override : null;
+  let passedOver: Conflict[] = [];
+  if (override) {
+    const plan = await loadOverrideDay(db, catalog, { date: input.date, studioIds: input.studioIds, service: session ? input.service : null });
+    passedOver = conflictsAt(plan, input.startMinute, input.durationMinutes);
+    const refusal = overrideRefusal(passedOver, override);
+    if (refusal) return fail(409, "slot_taken", refusal);
+  } else {
+    const allFree = input.studioIds.every((id) => {
+      const studioDay = day.days.find((d) => d.studioId === id);
+      return studioDay !== undefined && isStartFree(studioDay, input.startMinute, slot);
+    });
+    if (!allFree) return fail(409, "slot_taken", "That time is no longer available. Please choose another.");
+    // The photographer has to be free as well: inside their working hours, and not at another session or blocked.
+    if (photographer && !isStartFree(photographer, input.startMinute, slot)) {
+      return fail(409, "slot_taken", `Our ${words.person} is not free at that time. Please choose another.`);
+    }
   }
+  const overlaps = overlapping(passedOver);
 
   const chargesCard = price.totalCents > 0 && !deps.madeBy;
   if (chargesCard) {
@@ -479,7 +495,7 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
     if (!input.paymentToken) return fail(400, "payment_required", "Card details are required.");
   }
   const booked = deps.madeBy
-    ? { actor: deps.madeBy, note: "Booked in the admin for the client" }
+    ? { actor: deps.madeBy, note: `Booked in the admin for the client${passedOver.length > 0 ? `, over: ${passedOver.map((conflict) => conflict.text).join("; ")}` : ""}` }
     : { actor: BY_CUSTOMER, note: "Booked online" };
 
   const startAt = localToUtc(input.date, input.startMinute);
@@ -561,6 +577,7 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
             bookingId: row.id,
             priceCents: line.priceCents,
             occupied: sql`tstzrange(${startAt.toISOString()}::timestamptz, ${occupiedEnd.toISOString()}::timestamptz, '[)')`,
+            overlapAllowed: overlaps.has(line.studioId),
           });
         }
         if (photographer) {
@@ -571,6 +588,7 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
             photographerId: photographer.studioId,
             bookingId: row.id,
             occupied: sql`tstzrange(${startAt.toISOString()}::timestamptz, ${heldUntil.toISOString()}::timestamptz, '[)')`,
+            overlapAllowed: overlaps.has("person"),
           });
         }
         if (price.addonLines.length > 0) {

@@ -154,7 +154,8 @@ export const DEFAULT_FRAME: SiteFrame = {
     addressLine1: "7457 Aloma Ave, Suite 301",
     addressLine2: "Winter Park, FL 32792",
     phone: "(407) 663-6109",
-    mapsUrl: "https://maps.google.com/?q=7457+Aloma+Ave+Winter+Park+FL",
+    // The studio's place on Google Maps (the owner, 2026-11-23: "the studio's object on Google Maps, not the address").
+    mapsUrl: "https://maps.app.goo.gl/22xMTvm92WbL6RgY6",
     note: "By appointment only",
   },
   search: {

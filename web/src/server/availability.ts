@@ -84,16 +84,10 @@ export interface AvailabilityOptions {
   /**
    * An administrator is booking or moving. The notice period that customers
    * have to give does not apply: any time from now on can be chosen. Opening
-   * hours, existing bookings and the gap between them apply as for anyone.
+   * hours, existing bookings and the gap between them apply as for anyone; an owner passes over them only through
+   * src/server/override.ts.
    */
   asAdmin?: boolean;
-  /**
-   * An owner passes over the opening hours (the owner's answer of 2026-11-23: "Only admin may override"; question 76 in
-   * ProjectLibrary.md): every studio counts as open from midnight to midnight, on a day it is closed too. Its other
-   * bookings, the gap after each and blocked time stand as for anyone: the database refuses two holds of one studio at
-   * once. The photographer's and the content creator's hours are theirs, and stay.
-   */
-  openAllDay?: boolean;
   /**
    * Also report the day of a session's person: for a session, which needs both the studio and the person. True is the
    * photographer's; a service names whose (question 69 in ProjectLibrary.md).
@@ -208,7 +202,7 @@ export async function loadDayAvailability(
 
   const weekday = isoWeekday(date);
   const days: StudioDay[] = catalog.studios.map((studio) => {
-    const hours = options.openAllDay ? { openMinute: 0, closeMinute: 1440 } : studio.hours[weekday];
+    const hours = studio.hours[weekday];
     return {
       studioId: studio.id,
       openMinute: hours ? hours.openMinute : null,

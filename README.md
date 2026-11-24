@@ -17,8 +17,6 @@ Open http://localhost:3000. Locally the site uses an embedded database and a pre
 ## Read more
 
 - [`web/README.md`](web/README.md): running, testing and the settings for production.
-- [`HANDOFF.md`](HANDOFF.md): where the work stands now, what is next and what waits on the owners. One page.
-- [`ProjectLibrary.md`](ProjectLibrary.md): how the code is organised and, under "Rebuild decisions", what has been decided, what is still open and the known gaps.
-- [`AGENTS.md`](AGENTS.md): the rules for coding tools (Codex, Claude Code) that work on this repository.
+- The project's notes (where the work stands, the decisions, the rules for coding tools, the owners' runbook) are kept in a private repository, linked into this folder on the builder's computer.
 
 The site is not connected to a real card processor, an email service or a host yet.

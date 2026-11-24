@@ -929,7 +929,7 @@ export function BookingFlow({
             className={`mode-option${mode === "time" ? " selected" : ""}`}
             onClick={() => switchMode("time")}
           >
-            <strong>I know when I want to come</strong>
+            <strong>I want to choose the date first</strong>
             Choose a time, then see which studios are free.
           </button>
         </div>

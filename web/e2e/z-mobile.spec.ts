@@ -358,7 +358,7 @@ test("starting from the time works on a phone", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const date = dateAhead(108);
   await page.goto("/book");
-  await page.getByRole("radio", { name: /I know when I want to come/ }).click();
+  await page.getByRole("radio", { name: /I want to choose the date first/ }).click();
   await byLabel(page, "Date").fill(date);
   await page.getByRole("button", { name: "1 hr", exact: true }).click();
   await next(page);

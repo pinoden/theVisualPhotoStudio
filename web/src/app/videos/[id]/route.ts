@@ -10,13 +10,14 @@ export async function GET(request: Request, context: RouteContext<"/videos/[id]"
   const { id } = await context.params;
   const found = await videoForPlayer(await getDb(), id);
   if (!found) return new Response("Not found", { status: 404 });
-  if ("redirect" in found) return new Response(null, { status: 302, headers: { Location: found.redirect, "Cache-Control": "public, max-age=300" } });
+  // Not kept by a cache: a video deleted, or one not ready yet, is answered as it is now.
+  if ("redirect" in found) return new Response(null, { status: 302, headers: { Location: found.redirect, "Cache-Control": "no-store" } });
 
   const total = found.bytes.byteLength;
   const headers = {
     "Content-Type": found.contentType,
     "Accept-Ranges": "bytes",
-    "Cache-Control": "public, max-age=300",
+    "Cache-Control": "no-store",
     "X-Content-Type-Options": "nosniff",
     "Content-Security-Policy": "default-src 'none'; sandbox",
   };

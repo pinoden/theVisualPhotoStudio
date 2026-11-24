@@ -18,6 +18,7 @@ import { durationLabel, isIsoDate, type DayType } from "@/lib/domain/time";
 import { can, type Ability } from "@/lib/abilities";
 import type { AuthUser } from "./auth";
 import { loadDayAvailability, serviceAsked, sessionServiceOf } from "./availability";
+import { conflictsAt, everyStart, loadOverrideDay, overlapping, overrideRefusal, type Conflict } from "./override";
 import {
   createBooking,
   isBookingRef,
@@ -288,22 +289,42 @@ const WINDOW_PROBLEM = {
  * for this long. For an administrator: the customers' notice period does not
  * apply, everything else does. `excludeBookingId` leaves a booking's own time
  * out, so that it can be moved within its own day.
+ *
+ * `anyTime`, for an owner's form (question 79): every start of the day from now on instead, and under `passes` what
+ * each passes over that does (src/server/override.ts). The caller says whether the viewer is an owner.
  */
 export async function freeStartsFor(
   db: DbLike,
-  selection: { studioIds: string[]; date: string; durationMinutes: number; excludeBookingId?: string; withPhotographer?: boolean | Service; openAllDay?: boolean },
+  selection: { studioIds: string[]; date: string; durationMinutes: number; excludeBookingId?: string; withPhotographer?: boolean | Service; anyTime?: boolean },
   now: Date,
-): Promise<{ ok: true; starts: number[] } | { ok: false; message: string }> {
+): Promise<{ ok: true; starts: number[]; passes?: Record<number, string[]> } | { ok: false; message: string }> {
   const catalog = await loadCatalog(db);
   const day = await loadDayAvailability(db, catalog, selection.date, now, {
     asAdmin: true,
     excludeBookingId: selection.excludeBookingId,
     withPhotographer: selection.withPhotographer,
-    openAllDay: selection.openAllDay,
   });
   if (day.problem) return { ok: false, message: WINDOW_PROBLEM[day.problem] };
   const days = selection.studioIds.map((id) => day.days.find((studio) => studio.studioId === id));
   if (days.length === 0 || days.some((studio) => !studio)) return { ok: false, message: "Unknown studio." };
+  if (selection.anyTime) {
+    const plan = await loadOverrideDay(db, catalog, {
+      date: selection.date,
+      studioIds: selection.studioIds,
+      excludeBookingId: selection.excludeBookingId,
+      service: serviceAsked(selection.withPhotographer),
+    });
+    const every = everyStart(plan, {
+      durationMinutes: selection.durationMinutes,
+      incrementMinutes: catalog.settings.slotIncrementMinutes,
+      earliestStartMinute: day.earliestStartMinute,
+    });
+    return {
+      ok: true,
+      starts: every.map((start) => start.minute),
+      passes: Object.fromEntries(every.filter((start) => start.conflicts.length > 0).map((start) => [start.minute, start.conflicts.map((conflict) => conflict.text)])),
+    };
+  }
   if (selection.withPhotographer) {
     if (!day.photographer) return { ok: false, message: `There is no ${SERVICE_WORDS[serviceAsked(selection.withPhotographer) ?? "photography"].person} to book.` };
     days.push(day.photographer); // free for the studio and for the session's person
@@ -354,9 +375,9 @@ export async function moveOptions(
   ref: string,
   date: string,
   now: Date,
-  /** An owner's override of the opening hours (question 76): ignored for anyone else. */
-  options: { openAllDay?: boolean } = {},
-): Promise<{ ok: true; starts: number[]; price: MovePricePreview | null } | { ok: false; message: string }> {
+  /** An owner's form, which shows every start (question 79): ignored for anyone else. */
+  options: { anyTime?: boolean } = {},
+): Promise<{ ok: true; starts: number[]; passes?: Record<number, string[]>; price: MovePricePreview | null } | { ok: false; message: string }> {
   const settings = await loadSettings(db);
   if (!isBookingRef(ref) || !can(viewer, "moveBookings", settings)) return { ok: false, message: "Booking not found." };
   const [booking] = await db.select().from(bookings).where(eq(bookings.ref, ref)).limit(1);
@@ -370,7 +391,7 @@ export async function moveOptions(
       durationMinutes: booking.durationMinutes,
       excludeBookingId: booking.id,
       withPhotographer: await sessionServiceOf(db, booking.photographerId),
-      openAllDay: Boolean(options.openAllDay) && viewer.role === "owner",
+      anyTime: Boolean(options.anyTime) && viewer.role === "owner",
     },
     now,
   );
@@ -418,7 +439,13 @@ export async function moveBooking(
   db: Db,
   viewer: AuthUser,
   ref: string,
-  input: { date: string; startMinute: number; countsAsClientMove: boolean; /** An owner's override of the opening hours (question 76). */ openAllDay?: boolean },
+  input: {
+    date: string;
+    startMinute: number;
+    countsAsClientMove: boolean;
+    /** An owner's override (question 79): the keys of what the new time passes over, read in the pop-up. */
+    override?: string[] | null;
+  },
   now: Date,
 ): Promise<MoveResult> {
   const refuse = (reason: Extract<MoveResult, { ok: false }>["reason"], message: string): MoveResult => ({ ok: false, reason, message });
@@ -455,7 +482,6 @@ export async function moveBooking(
     asAdmin: true,
     excludeBookingId: found.id,
     withPhotographer: await sessionServiceOf(db, found.photographerId),
-    openAllDay: Boolean(input.openAllDay) && viewer.role === "owner",
   });
   if (day.problem) return refuse("invalid_time", WINDOW_PROBLEM[day.problem]);
   const studioIds = await studioIdsOf(db, found.id);
@@ -464,17 +490,30 @@ export async function moveBooking(
     incrementMinutes: catalog.settings.slotIncrementMinutes,
     earliestStartMinute: day.earliestStartMinute,
   };
-  const free = studioIds.every((id) => {
-    const studioDay = day.days.find((studio) => studio.studioId === id);
-    return studioDay !== undefined && isStartFree(studioDay, input.startMinute, slot);
-  });
-  if (!free) return refuse("slot_taken", "That time is not free in the studio. Choose another.");
-  // A session moves with its person (the photographer, or the content creator), who has to be free at the new time too.
   const photographer = found.photographerId !== null ? (day.photographer ?? null) : null;
-  if (found.photographerId !== null && (!photographer || !isStartFree(photographer, input.startMinute, slot))) {
-    const service = await sessionServiceOf(db, found.photographerId);
-    return refuse("slot_taken", `The ${SERVICE_WORDS[service || "photography"].person} is not free at that time. Choose another.`);
+  const service = await sessionServiceOf(db, found.photographerId);
+  // An owner's override (question 79): what the new time passes over, each thing read in the pop-up.
+  const override = viewer.role === "owner" && input.override ? input.override : null;
+  let passedOver: Conflict[] = [];
+  if (override) {
+    if (input.startMinute < day.earliestStartMinute) return refuse("invalid_time", "That time has already passed. Choose a later one.");
+    if (found.photographerId !== null && !photographer) return refuse("slot_taken", `There is no ${SERVICE_WORDS[service || "photography"].person} to move it with.`);
+    const plan = await loadOverrideDay(db, catalog, { date: input.date, studioIds, excludeBookingId: found.id, service: service || null });
+    passedOver = conflictsAt(plan, input.startMinute, found.durationMinutes);
+    const refusal = overrideRefusal(passedOver, override);
+    if (refusal) return refuse("slot_taken", refusal);
+  } else {
+    const free = studioIds.every((id) => {
+      const studioDay = day.days.find((studio) => studio.studioId === id);
+      return studioDay !== undefined && isStartFree(studioDay, input.startMinute, slot);
+    });
+    if (!free) return refuse("slot_taken", "That time is not free in the studio. Choose another.");
+    // A session moves with its person (the photographer, or the content creator), who has to be free at the new time too.
+    if (found.photographerId !== null && (!photographer || !isStartFree(photographer, input.startMinute, slot))) {
+      return refuse("slot_taken", `The ${SERVICE_WORDS[service || "photography"].person} is not free at that time. Choose another.`);
+    }
   }
+  const overlaps = overlapping(passedOver);
 
   const studioNames = catalog.studios.filter((studio) => studioIds.includes(studio.id)).map((studio) => studio.name).join(" + ");
   try {
@@ -526,6 +565,7 @@ export async function moveBooking(
           .update(studioHolds)
           .set({
             occupied: sql`tstzrange(${startAt.toISOString()}::timestamptz, ${occupiedEnd.toISOString()}::timestamptz, '[)')`,
+            overlapAllowed: overlaps.has(studioId),
             ...(priceCents !== undefined ? { priceCents } : {}),
           })
           .where(sql`${studioHolds.bookingId} = ${booking.id} and ${studioHolds.studioId} = ${studioId}`);
@@ -537,7 +577,7 @@ export async function moveBooking(
         const heldUntil = new Date(endAt.getTime() + photographer.bufferMinutes * 60_000);
         await tx
           .update(photographerHolds)
-          .set({ occupied: sql`tstzrange(${startAt.toISOString()}::timestamptz, ${heldUntil.toISOString()}::timestamptz, '[)')` })
+          .set({ occupied: sql`tstzrange(${startAt.toISOString()}::timestamptz, ${heldUntil.toISOString()}::timestamptz, '[)')`, overlapAllowed: overlaps.has("person") })
           .where(eq(photographerHolds.bookingId, booking.id));
       }
 
@@ -549,7 +589,7 @@ export async function moveBooking(
         to: "rescheduled",
         actor: viewer.email,
         at: now,
-        note: `Moved from ${was} to ${is}${clientMove ? ", at the client's request" : ""}${repriced ? repriceNote(repriced, booking) : ""}`,
+        note: `Moved from ${was} to ${is}${clientMove ? ", at the client's request" : ""}${passedOver.length > 0 ? `, over: ${passedOver.map((conflict) => conflict.text).join("; ")}` : ""}${repriced ? repriceNote(repriced, booking) : ""}`,
       });
       const priceNote = repriced?.announced
         ? movePriceText({
@@ -610,12 +650,12 @@ export async function createAdminBooking(
   viewer: AuthUser,
   input: Omit<BookingInput, "acceptTerms" | "paymentToken" | "expectedTotalCents">,
   // `processor`: the one set up now, which says what kind of money the booking is. Left out: none is set up.
-  // `openAllDay`: an owner's override of the opening hours (question 76), ignored for anyone else.
-  deps: Pick<BookingDeps, "now" | "baseUrl" | "processor" | "openAllDay">,
+  // `override`: an owner's (question 79), ignored for anyone else.
+  deps: Pick<BookingDeps, "now" | "baseUrl" | "processor" | "override">,
 ): Promise<CreateBookingResult | { ok: false; status: 403; code: "forbidden"; message: string }> {
   const settings = await loadSettings(db);
   if (!can(viewer, "createBookings", settings)) {
     return { ok: false, status: 403, code: "forbidden", message: "You cannot make bookings for clients." };
   }
-  return createBooking(db, { ...input, acceptTerms: true }, { ...deps, processor: deps.processor ?? null, payments: null, madeBy: viewer.email, openAllDay: Boolean(deps.openAllDay) && viewer.role === "owner" });
+  return createBooking(db, { ...input, acceptTerms: true }, { ...deps, processor: deps.processor ?? null, payments: null, madeBy: viewer.email, override: viewer.role === "owner" ? (deps.override ?? null) : null });
 }

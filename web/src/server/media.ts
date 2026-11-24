@@ -6,7 +6,7 @@ import { addons, media, mediaCollectionItems, mediaCollections, photographyPhoto
 import { together, type Db, type DbLike } from "@/db/client";
 import { can } from "@/lib/abilities";
 import type { AuthUser } from "./auth";
-import { fileStore } from "./files";
+import { fileStore, removeFiles } from "./files";
 import { loadSettings } from "./settings";
 
 /**
@@ -189,11 +189,10 @@ export async function replaceImage(db: Db, viewer: AuthUser, id: string, input: 
   const prepared = await prepareImage(input.bytes);
   if (!prepared.ok) return prepared;
   const fileKey = `pictures/${randomUUID()}.${prepared.ext}`;
-  return db.transaction(async (tx): Promise<MediaResult> => {
+  const outcome = await db.transaction(async (tx): Promise<{ result: MediaResult; gone?: string }> => {
     const [current] = await tx.select().from(media).where(eq(media.id, id)).for("update").limit(1);
-    if (!current) return { ok: false, message: "That picture was not found." };
-    const files = fileStore(tx);
-    await files.put(fileKey, prepared.bytes, prepared.contentType);
+    if (!current) return { result: { ok: false, message: "That picture was not found." } };
+    await fileStore(tx).put(fileKey, prepared.bytes, prepared.contentType);
     const [row] = await tx
       .update(media)
       .set({
@@ -208,9 +207,10 @@ export async function replaceImage(db: Db, viewer: AuthUser, id: string, input: 
       })
       .where(eq(media.id, id))
       .returning();
-    await files.remove(current.fileKey);
-    return { ok: true, picture: toPicture(row) };
+    return { result: { ok: true, picture: toPicture(row) }, gone: current.fileKey };
   });
+  if (outcome.gone) await removeFiles(db, [outcome.gone]);
+  return outcome.result;
 }
 
 const oneLine = (value: string, max: number) => value.replace(/\s+/g, " ").trim().slice(0, max).trim();
@@ -293,17 +293,18 @@ export type DeleteMediaResult = { ok: true } | { ok: false; message: string; use
 export async function deleteMedia(db: Db, viewer: AuthUser, id: string): Promise<DeleteMediaResult> {
   if (!(await mayUseMediaLibrary(db, viewer))) return { ok: false, message: "You cannot delete the website's pictures." };
   if (!isUuid(id)) return { ok: false, message: "That picture was not found." };
-  return db.transaction(async (tx): Promise<DeleteMediaResult> => {
+  const outcome = await db.transaction(async (tx): Promise<{ result: DeleteMediaResult; gone?: string }> => {
     const [row] = await tx.select().from(media).where(eq(media.id, id)).for("update").limit(1);
-    if (!row) return { ok: false, message: "That picture was not found." };
+    if (!row) return { result: { ok: false, message: "That picture was not found." } };
     const uses = (await mediaUses(tx, [id])).get(id) ?? [];
     if (uses.length > 0) {
-      return { ok: false, message: `This picture is shown in ${usesInWords(uses)}. Take it out there first, then delete it.`, uses };
+      return { result: { ok: false, message: `This picture is shown in ${usesInWords(uses)}. Take it out there first, then delete it.`, uses } };
     }
     await tx.delete(media).where(eq(media.id, id));
-    await fileStore(tx).remove(row.fileKey);
-    return { ok: true };
+    return { result: { ok: true }, gone: row.fileKey };
   });
+  if (outcome.gone) await removeFiles(db, [outcome.gone]);
+  return outcome.result;
 }
 
 export type MediaFilter = "all" | "undescribed" | "unused";

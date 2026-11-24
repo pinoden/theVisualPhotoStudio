@@ -122,8 +122,8 @@ async function Calendar({ searchParams }: Pick<PageProps<"/admin/calendar">, "se
   // Rescheduling inside the pop-up (item 5): `&move=<date>` shows the times free on that date, as the appointment's page does.
   const moving = opened !== null && opened.may.move && typeof query.move === "string";
   const moveDate = moving && !opened.moveBlocked && typeof query.move === "string" && isIsoDate(query.move) ? query.move : null;
-  const afterHours = viewer.role === "owner" && query.afterHours === "1";
-  const moveTimes = opened && moveDate ? await moveOptions(db, viewer, opened.ref, moveDate, new Date(), { openAllDay: afterHours }) : null;
+  const anyTime = viewer.role === "owner" && query.anyTime === "1";
+  const moveTimes = opened && moveDate ? await moveOptions(db, viewer, opened.ref, moveDate, new Date(), { anyTime }) : null;
   const openedHref = opened ? href({ open: opened.ref }) : "";
   const move = opened && moving
     ? {
@@ -136,7 +136,7 @@ async function Calendar({ searchParams }: Pick<PageProps<"/admin/calendar">, "se
         back: openedHref,
         closeHref: openedHref,
         owner: viewer.role === "owner",
-        afterHours,
+        anyTime,
       }
     : null;
   const bookAnother =
@@ -192,10 +192,16 @@ async function Calendar({ searchParams }: Pick<PageProps<"/admin/calendar">, "se
         {view !== "month" && (
           <nav className="cal-tabs cal-zoom" aria-label="Zoom">
             {(Object.keys(ZOOMS) as Zoom[]).map((scale) => (
-              <Link key={scale} href={href({ zoom: scale })} aria-current={scale === zoom ? "true" : undefined}>
+              <Link key={scale} href={href({ zoom: scale })} aria-current={scale === zoom ? "true" : undefined} title={scale === "0.5" ? "The normal size" : undefined}>
                 {scale}
               </Link>
             ))}
+            {/* Back to the size the calendar has before it is zoomed (the owner, 2026-11-23: no button to go back). */}
+            {zoom !== "0.5" && (
+              <Link href={href({ zoom: "0.5" })} className="cal-zoom-reset">
+                Normal size
+              </Link>
+            )}
           </nav>
         )}
         <nav className="cal-filter" aria-label="Studio">
