@@ -825,19 +825,23 @@ test("the calendar shows a day, a week and a month, one studio or all, and a boo
   await expect(onScreen(page.locator(".cal-count"))).toHaveText(/^\d+ appointments? this day$/);
   await shot(page, "17c-calendar-day");
 
-  // Zoom, as in Acuity: the grid is drawn larger, the lengths stay, and the other views keep it.
-  const zoom = page.getByRole("navigation", { name: "Zoom" });
+  // Zoom, as in Acuity, from a dropdown of seven sizes around Normal (the owner, 2026-11-23): the grid is drawn larger,
+  // the lengths stay, and the other views keep it.
+  const zoom = () => page.getByRole("combobox", { name: "Zoom" });
+  await expect(zoom()).toHaveValue("1");
+  expect(await zoom().locator("option").allInnerTexts()).toEqual(["0.25×", "0.5×", "0.75×", "Normal", "1.25×", "1.5×", "2×"]);
   const before = (await bobs.boundingBox())!.height;
-  await zoom.getByRole("link", { name: "0.75" }).click();
-  await expect(page).toHaveURL(/zoom=0\.75/);
+  await zoom().selectOption({ label: "1.5×" });
+  await expect(page).toHaveURL(/zoom=1\.5/);
   await expect.poll(async () => (await page.getByRole("link", { name: /Bob Brown/ }).boundingBox())!.height).toBeGreaterThan(before * 1.4);
   await expect(page.getByRole("link", { name: /Bob Brown/ })).toContainText("10:00 AM – 11:00 AM");
   await page.getByRole("navigation", { name: "Calendar view" }).getByRole("link", { name: "Week" }).click();
-  await expect(page).toHaveURL(/view=week.*zoom=0\.75/);
-  // Back to the normal size with its own button (the owner, 2026-11-23), which is not there at the normal size.
-  await page.getByRole("navigation", { name: "Zoom" }).getByRole("link", { name: "Normal size" }).click();
-  await expect(page).not.toHaveURL(/zoom=/);
-  await expect(page.getByRole("navigation", { name: "Zoom" }).getByRole("link", { name: "Normal size" })).toHaveCount(0);
+  await expect(page).toHaveURL(/view=week.*zoom=1\.5/);
+  await expect(zoom()).toHaveValue("1.5");
+  // Back to Normal from the same dropdown.
+  await zoom().selectOption({ label: "Normal" });
+  await expect(zoom()).toHaveValue("1");
+  await expect(page).toHaveURL(/view=week.*zoom=1(&|$)/);
   await page.goto(`/admin/calendar?view=day&date=${NEAR}`);
 
   // One studio at a time, or all of them.
@@ -1402,7 +1406,9 @@ test("a fully booked day: the calendar draws every appointment once and apart, a
         })),
       };
     });
-  const readable = async (where: string) => {
+  // `lines`: each appointment's name and time inside its box, not cut short. Not at the smallest sizes, where an
+  // appointment is a line of its time and client, with the rest in its pop-up and its title.
+  const readable = async (where: string, lines = true) => {
     const { columns, appointments } = await layout();
     expect(appointments.map((appointment) => appointment.name).sort(), where).toEqual(["Ada Ames", "Bea Bell", "Cy Cole", "Dee Dunn", "Eve Eng", "Fay Fox", "Gus Gray", "Hal Hunt"]);
     for (const [index, a] of appointments.entries()) {
@@ -1411,6 +1417,7 @@ test("a fully booked day: the calendar draws every appointment once and apart, a
         const oneAfterTheOther = a.box.bottom <= b.box.top + 1 || b.box.bottom <= a.box.top + 1;
         expect(sideBySide || oneAfterTheOther, `${where}: ${a.name} and ${b.name} overlap`).toBe(true);
       }
+      if (!lines) continue;
       for (const line of a.lines) expect(line.top >= a.inner.top - 1 && line.bottom <= a.inner.bottom + 1, `${where}: ${a.name}'s lines fit`).toBe(true);
       expect(a.clipped, `${where}: ${a.name}'s name and time are not cut short`).toBe(false);
     }
@@ -1424,21 +1431,28 @@ test("a fully booked day: the calendar draws every appointment once and apart, a
     expect(of("Hal Hunt").color).toBe(of("Eve Eng").color);
     return of("Ada Ames").box.bottom - of("Ada Ames").box.top;
   };
-  const normal = await readable("zoom 0.5");
+  const normal = await readable("zoom Normal");
   await shot(page, "17f-calendar-full-day");
   expect(await accessibilityProblems(page), "the calendar of a full day").toEqual([]);
-  const zoom = page.getByRole("navigation", { name: "Zoom" });
-  await zoom.getByRole("link", { name: "0.75" }).click();
-  await expect(page).toHaveURL(/zoom=0\.75/);
+  const zoom = () => page.getByRole("combobox", { name: "Zoom" });
+  await zoom().selectOption({ label: "1.5×" });
+  await expect(page).toHaveURL(/zoom=1\.5/);
   await expect.poll(async () => (await page.getByRole("link", { name: /Ada Ames/ }).boundingBox())!.height).toBeGreaterThan(normal * 1.4);
-  await readable("zoom 0.75");
-  await page.getByRole("navigation", { name: "Zoom" }).getByRole("link", { name: "0.25" }).click();
+  await readable("zoom 1.5");
+  await zoom().selectOption({ label: "2×" });
+  await expect.poll(async () => (await page.getByRole("link", { name: /Ada Ames/ }).boundingBox())!.height).toBeGreaterThan(normal * 1.9);
+  await readable("zoom 2");
+  await zoom().selectOption({ label: "0.5×" });
+  await expect.poll(async () => (await page.getByRole("link", { name: /Ada Ames/ }).boundingBox())!.height).toBeLessThan(normal * 0.6);
+  await readable("zoom 0.5", false);
+  await zoom().selectOption({ label: "0.25×" });
   await expect(page).toHaveURL(/zoom=0\.25/);
-  await expect.poll(async () => (await page.getByRole("link", { name: /Ada Ames/ }).boundingBox())!.height).toBeLessThan(normal * 0.7);
-  await readable("zoom 0.25");
+  await expect.poll(async () => (await page.getByRole("link", { name: /Ada Ames/ }).boundingBox())!.height).toBeLessThan(normal * 0.3);
+  await readable("zoom 0.25", false);
+  expect(await accessibilityProblems(page), "the calendar at its smallest").toEqual([]);
   // On an iPad held upright, too.
   await page.setViewportSize({ width: 768, height: 1024 });
-  await readable("zoom 0.25 at 768px");
+  await readable("zoom 0.25 at 768px", false);
   await page.setViewportSize({ width: 1280, height: 900 });
 
   // A press on the bundle opens it over the calendar.
