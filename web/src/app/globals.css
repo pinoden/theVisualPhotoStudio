@@ -149,6 +149,9 @@ a:hover { color: var(--color-rose-dark); }
   margin: 0; padding: 0;
 }
 .nav-links > li { display: flex; align-items: center; flex: none; }
+/* Six links and the booking button since Memberships joined the menu (2026-11-24): closer together on a narrower
+   screen, so that the menu still fits in one row down to a small laptop's or a tablet's width held sideways. */
+@media (max-width: 1240px) { .site-nav { padding: 0 1.5rem; } .nav-links { gap: 1.25rem; } }
 
 .nav-links a, .nav-more {
   font-family: var(--font-sans);
@@ -526,9 +529,13 @@ a:hover { color: var(--color-rose-dark); }
   background: none;
   border: none;
   text-align: left;
-  padding: 1.25rem 0;
+  /* Larger, and above the answers (the owner's brief of 2026-11-24, item 5: "Make the questions more visually prominent
+     than the answers"): the heading face, bigger and bolder than the answer's body text. */
+  padding: 1.4rem 0;
   font-family: var(--font-serif);
-  font-size: 1.1rem;
+  font-size: 1.5rem;
+  font-weight: 600;
+  line-height: 1.3;
   color: var(--color-dark);
   cursor: pointer;
   display: flex;
@@ -538,7 +545,8 @@ a:hover { color: var(--color-rose-dark); }
 }
 .faq-question:hover { color: var(--color-rose); }
 .faq-icon {
-  font-size: 1.2rem;
+  font-size: 1.6rem;
+  font-weight: 400;
   color: var(--color-rose);
   transition: transform .3s;
   flex-shrink: 0;
@@ -546,9 +554,10 @@ a:hover { color: var(--color-rose-dark); }
 .faq-item.open .faq-icon { transform: rotate(45deg); }
 .faq-answer {
   display: none;
-  padding: 0 0 1.25rem;
-  font-size: .925rem;
-  line-height: 1.8;
+  padding: 0 0 1.6rem;
+  font-size: 1.075rem;
+  line-height: 1.85;
+  max-width: 48rem;
 }
 .faq-item.open .faq-answer { display: block; }
 
@@ -557,11 +566,16 @@ details.faq-item > summary { list-style: none; }
 details.faq-item > summary::-webkit-details-marker { display: none; }
 details.faq-item > .faq-answer { display: block; }
 details.faq-item[open] .faq-icon { transform: rotate(45deg); }
-.faq-answer p { margin: 0 0 .6rem; }
+.faq-answer p { margin: 0 0 .9rem; }
 .faq-answer p:last-child { margin-bottom: 0; }
-.faq-answer ul { margin: 0; padding-left: 1.2rem; }
-.faq-answer li { margin-bottom: .4rem; }
-.faq-section h2 { --h2-base: 1.6rem; margin: 2.5rem 0 .5rem; }
+.faq-answer ul { margin: 0 0 .9rem; padding-left: 1.3rem; }
+.faq-answer ul:last-child { margin-bottom: 0; }
+.faq-answer li { margin-bottom: .5rem; }
+@media (max-width: 640px) {
+  .faq-question { padding: 1.15rem 0; font-size: 1.3rem; }
+  .faq-answer { font-size: 1.025rem; line-height: 1.75; }
+}
+.faq-section h2 { --h2-base: 2.1rem; margin: 3rem 0 .75rem; }
 .faq-section:first-child h2 { margin-top: 0; }
 .faq-more {
   text-align: center;
@@ -687,8 +701,20 @@ details.faq-item[open] .faq-icon { transform: rotate(45deg); }
 
 /* The booking page's month calendar (the owner's brief of 2026-11-22): the length first, then the whole month, larger,
    in the original website's tans. Only the days the length fits on can be pressed; the rest are muted. */
+/* The date step (the owner's brief of 2026-11-24, item 3): the length, then the month and, beside it on a computer and
+   below it on a phone, the start times of the day chosen. The step is wider than the others, to hold both. */
 .when-studio { display: grid; gap: .5rem 2rem; }
-@media (min-width: 900px) { .when-studio { grid-template-columns: minmax(14rem, 1fr) minmax(0, 1.6fr); align-items: start; } .month-cal-typed { grid-column: 2; } }
+.wizard-container:has(.when-studio) { max-width: 1080px; }
+@media (min-width: 900px) {
+  .when-studio { grid-template-columns: minmax(0, 1.5fr) minmax(15rem, 1fr); grid-template-areas: "length length" "day times" "typed times"; align-items: start; }
+  .when-length { grid-area: length; }
+  .when-day { grid-area: day; }
+  .when-times { grid-area: times; }
+  .when-studio .month-cal-typed { grid-area: typed; }
+}
+.when-times { min-width: 0; }
+.when-times .time-slots { margin-top: .25rem; }
+.when-times[aria-busy="true"] .time-slots { opacity: .55; }
 .month-cal { padding: 1rem; border: 1px solid var(--color-border); background: var(--color-ivory); }
 .month-cal-head { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin-bottom: .5rem; }
 .month-cal-title { margin: 0; color: var(--color-dark); font-family: var(--font-serif); font-size: 1.6rem; font-weight: 400; }
@@ -2227,6 +2253,14 @@ fieldset { min-inline-size: 0; }
 .blk-card-symbol { font-size: 2rem; margin-bottom: 1rem; color: var(--color-rose); }
 .blk-card h4 { --h4-base: 1.2rem; margin: 0 0 .5rem; }
 .blk-card p { font-size: .875rem; margin: 0; white-space: pre-line; }
+/* A card that is a link: the whole card is pressed, and shows it (the owner's brief of 2026-11-24, item 2). */
+.blk-card:has(> .blk-card-link) { position: relative; padding: 0; }
+.blk-card-link { display: block; height: 100%; padding: 1.5rem; color: inherit; text-decoration: none; border: 1px solid var(--color-border); background: color-mix(in srgb, var(--color-ivory) 70%, transparent); transition: border-color .2s, background-color .2s, transform .2s; }
+.blk-card-link:hover, .blk-card-link:focus-visible { border-color: var(--color-rose); background: color-mix(in srgb, var(--color-rose) 6%, transparent); }
+.blk-card-link:hover { transform: translateY(-2px); }
+.blk-card-link h4 { text-decoration: underline; text-decoration-color: transparent; text-underline-offset: .2em; transition: text-decoration-color .2s; }
+.blk-card-link:hover h4, .blk-card-link:focus-visible h4 { text-decoration-color: currentColor; }
+@media (prefers-reduced-motion: reduce) { .blk-card-link, .blk-card-link:hover { transition: none; transform: none; } }
 /* Reviews: what clients wrote, in their words, with their name and where they wrote it. */
 .blk-reviews { display: grid; grid-template-columns: repeat(var(--cols, 3), minmax(0, 1fr)); gap: 2rem; }
 .blk-review { display: flex; flex-direction: column; gap: .75rem; min-width: 0; margin: 0; padding: 1.75rem 1.5rem; }
@@ -2409,6 +2443,24 @@ fieldset { min-inline-size: 0; }
 .studio-floor-plan img { display: block; width: 100%; height: auto; background: #fff; border: 1px solid var(--color-border); }
 .studio-floor-plan figcaption { font-size: .8rem; margin-top: .4rem; }
 .studio-facts-fields { border: 0; padding: 0; margin: 1rem 0 0; }
+.studio-section-field { display: grid; grid-template-columns: minmax(10rem, 1fr) minmax(0, 2.5fr); gap: 0 1rem; }
+@media (max-width: 640px) { .studio-section-field { grid-template-columns: minmax(0, 1fr); } }
+/* The studios page: each studio's sections, opened by their titles, as the original website's were (brief of 2026-11-24). */
+.studio-sections { margin: 1.25rem 0 1.5rem; border-top: 1px solid var(--color-border); }
+.studio-section { border-bottom: 1px solid var(--color-border); }
+.studio-section > summary { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: .85rem 0; cursor: pointer; list-style: none; font-size: .8rem; letter-spacing: .12em; text-transform: uppercase; color: var(--color-dark); }
+.studio-section > summary::-webkit-details-marker { display: none; }
+.studio-section > summary:hover { color: var(--color-rose); }
+.studio-section > summary::after { content: "+"; font-size: 1.25rem; letter-spacing: 0; color: var(--color-rose); transition: transform .3s; }
+.studio-section[open] > summary::after { transform: rotate(45deg); }
+.studio-section-body { padding: 0 0 1rem; font-size: .95rem; line-height: 1.75; }
+.studio-section-body p { margin: 0 0 .6rem; }
+.studio-section-body ul { margin: 0 0 .6rem; padding-left: 1.1rem; }
+.studio-section-body li { margin-bottom: .25rem; }
+.studio-section-body > :last-child { margin-bottom: 0; }
+/* The text starts level with the top of its photo (the owner's brief of 2026-11-24, item 1). */
+.blk-studio-details .two-col { align-items: start; }
+.blk-studio-details .two-col > div:last-child > :first-child { margin-top: 0; }
 .studio-floor-plan-admin { margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--color-border); }
 .studio-floor-plan-admin .editor-subtitle { margin-top: 0; }
 .studio-floor-plan-admin img { display: block; max-width: 200px; height: auto; margin-bottom: .5rem; border: 1px solid var(--color-border); }
@@ -2555,6 +2607,7 @@ fieldset { min-inline-size: 0; }
 }
 .site-nav[data-folded] .nav-links { gap: .25rem; padding: 1rem 2rem 1.5rem; max-height: calc(100vh - 72px); overflow-y: auto; }
 .site-nav[data-folded] :is(.nav-links a, .nav-links button) { display: flex; align-items: center; gap: .3em; min-height: 44px; }
+.site-nav[data-folded] .site-logo { display: inline-flex; align-items: center; gap: .3em; min-height: 44px; }
 
 /* A touch screen wide enough for the whole menu, a tablet held sideways: the logo, the menu's links and the booking
    button are as easy to press as on a phone. They keep their places in the row; only their height grows. The gap is
@@ -2694,6 +2747,27 @@ fieldset { min-inline-size: 0; }
 .membership-plans .membership-plan-hours { font-weight: 600; margin-bottom: .25rem; }
 .membership-plans .membership-plan-where { font-size: .85rem; margin-bottom: .5rem; }
 .membership-plans .membership-plan-description { font-size: .85rem; }
+/* The public memberships: a card for each studio or bundle with its plans, then the benefits (brief of 2026-11-24, item 6). */
+.rates-grid.membership-plans { grid-template-columns: repeat(auto-fit, minmax(min(22rem, 100%), 1fr)); }
+.membership-group { display: flex; flex-direction: column; padding: 2rem 1.5rem; }
+.membership-group h3 { overflow-wrap: anywhere; }
+.membership-options { list-style: none; margin: 1rem 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(9rem, 100%), 1fr)); gap: 1rem; }
+.membership-option { display: flex; flex-direction: column; padding: 1rem .75rem; border: 1px solid var(--color-border); background: #fff; }
+.membership-option p { margin: 0; }
+.membership-option-price .rate-price { font-size: 2.25rem; line-height: 1.1; }
+.membership-option-hourly { font-size: .85rem; font-weight: 600; color: var(--color-dark); margin-bottom: .5rem !important; }
+.membership-option .membership-plan-description { margin: .25rem 0 .5rem; }
+.membership-option .rate-book { margin-top: auto; }
+.membership-benefits { margin-top: 1.5rem; text-align: left; }
+.membership-benefits-title { margin: 0 0 .5rem; font-size: .72rem; letter-spacing: .12em; text-transform: uppercase; color: var(--color-rose); text-align: center; }
+.membership-benefits ul { list-style: none; margin: 0; padding: 0; }
+.membership-benefits li { position: relative; padding: .3rem 0 .3rem 1.4rem; font-size: .875rem; border-bottom: 1px solid var(--color-border); }
+.membership-benefits li:last-child { border-bottom: 0; }
+.membership-benefits li::before { content: "✓"; position: absolute; left: 0; color: var(--color-rose); }
+.membership-terms-link { display: inline-block; margin-top: 1rem; font-size: .85rem; }
+/* Photography's sessions on the Rates page (brief of 2026-11-24, item 4). */
+.session-includes { display: block; font-size: .78rem; color: var(--color-muted); }
+.session-price-table td { vertical-align: top; }
 .membership-card h3 { overflow-wrap: anywhere; }
 .membership-cancel { margin-top: 1.25rem; }
 .members-not-started { margin-top: 1rem; font-size: .85rem; }

@@ -44,17 +44,20 @@ import type { Catalog } from "@/server/catalog";
 import { buyerVerification, useCardForm } from "./square-card";
 
 type Mode = "studio" | "time";
-type Step = "studios" | "when" | "time" | "details" | "policies" | "pay";
+type Step = "studios" | "when" | "details" | "policies" | "pay";
 
-/** The two booking paths are the same steps in a different order. */
+/**
+ * The two booking paths are the same steps in a different order. The day and its start times are one step (the owner's
+ * brief of 2026-11-24, item 3: "Display the available start times on the same page as the monthly calendar"): the times
+ * of the day chosen appear beside the calendar on a computer and below it on a phone, and another day is chosen there.
+ */
 const ORDER: Record<Mode, Step[]> = {
-  studio: ["studios", "when", "time", "details", "policies", "pay"],
-  time: ["when", "time", "studios", "details", "policies", "pay"],
+  studio: ["studios", "when", "details", "policies", "pay"],
+  time: ["when", "studios", "details", "policies", "pay"],
 };
 const STEP_LABEL: Record<Step, string> = {
   studios: "Studios",
-  when: "Date",
-  time: "Time",
+  when: "Date & time",
   details: "Details",
   policies: "Policies",
   pay: "Payment",
@@ -176,7 +179,8 @@ export function BookingFlow({
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const [mode, setMode] = useState<Mode>("studio");
+  // `?by=date` opens the date-first path, as the home page's "Know the time?" does (the owner's brief of 2026-11-24, item 2).
+  const [mode, setMode] = useState<Mode>(() => (!photography && searchParams.get("by") === "date" ? "time" : "studio"));
   const [stepIndex, setStepIndex] = useState(0);
   // A link can choose the studios, the day and the length: `?studio=paris,dayglow&date=…&duration=120`, as the
   // waitlist's email does (src/server/waitlist.ts).
@@ -226,6 +230,8 @@ export function BookingFlow({
   /** The latest month asked for: an answer to an earlier question is not shown over it. */
   const monthRequest = useRef(0);
   const [loadingSlots, setLoadingSlots] = useState(false);
+  /** The day whose times were asked for last (`fetchAvailability`). */
+  const askedDateRef = useRef("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   /**
@@ -415,17 +421,20 @@ export function BookingFlow({
 
   // ── Loading data ───────────────────────────────────────────────────────────
   const fetchAvailability = useCallback(async (forDate: string) => {
+    // Days are chosen one after another on the calendar: only the answer for the last one asked about is shown.
+    askedDateRef.current = forDate;
     setLoadingSlots(true);
     try {
       const response = await fetch(`/api/availability?date=${encodeURIComponent(forDate)}${photography ? `&photography=1&service=${service}` : ""}`, {
         cache: "no-store",
       });
       if (!response.ok) throw new Error();
-      setAvailability((await response.json()) as DayAvailability);
+      const answer = (await response.json()) as DayAvailability;
+      if (askedDateRef.current === forDate) setAvailability(answer);
     } catch {
-      setError("Could not load availability. Please try again.");
+      if (askedDateRef.current === forDate) setError("Could not load availability. Please try again.");
     } finally {
-      setLoadingSlots(false);
+      if (askedDateRef.current === forDate) setLoadingSlots(false);
     }
   }, [photography, service]);
 
@@ -540,7 +549,7 @@ export function BookingFlow({
     setStepIndex(index);
     // Availability is read fresh whenever the customer reaches a step that shows it.
     const target = steps[index];
-    if ((target === "time" || target === "studios") && date && (options.refetch || availability?.date !== date)) {
+    if ((target === "when" || target === "studios") && date && (options.refetch || availability?.date !== date)) {
       void fetchAvailability(date);
     }
     // The month calendar is read fresh on each arrival too: bookings change while the client looks.
@@ -587,6 +596,19 @@ export function BookingFlow({
     setStart(null);
     setAvailability(null);
     if (mode === "time") setStudioIds([]);
+    // Its times, at once, beside the calendar.
+    if (step === "when") readTimes(value);
+  }
+
+  /** The start times of a day, read for the date step. A past day, or a date still being typed, has none: said without asking. */
+  function readTimes(forDate: string) {
+    if (!isIsoDate(forDate)) return;
+    if (today && forDate < today) {
+      askedDateRef.current = forDate;
+      setLoadingSlots(false);
+      return;
+    }
+    void fetchAvailability(forDate);
   }
 
   function chooseDuration(minutes: number) {
@@ -610,8 +632,6 @@ export function BookingFlow({
       case "when":
         if (!date) return "Please select a date.";
         if (!duration) return "Please select a duration.";
-        return "";
-      case "time":
         return start === null ? "Please select a time." : "";
       case "details":
         if (name.trim().length < 2) return "Please enter your name.";
@@ -700,7 +720,7 @@ export function BookingFlow({
       }
       if (data.code === "slot_taken") {
         setStart(null);
-        go(steps.indexOf("time"), { refetch: true });
+        go(steps.indexOf("when"), { refetch: true });
       }
       // Prices and add-ons on screen came with the page. When they have
       // changed since (a new price, an add-on withdrawn, a duration no longer
@@ -912,6 +932,88 @@ export function BookingFlow({
     </div>
   );
 
+  /**
+   * The start times of the day chosen, on the date step (the owner's brief of 2026-11-24, item 3): beside the calendar on
+   * a computer, below it on a phone; choosing another day shows its times here at once.
+   */
+  const timesPanel = (
+    <section className="form-group when-times" aria-labelledby="when-times-title" aria-busy={loadingSlots || undefined}>
+      <span className="form-label" id="when-times-title">
+        {date ? `Start times, ${longDateLabel(date)}` : "Start times"}
+      </span>
+      {!date ? (
+        <p className="month-cal-wait">{mode === "studio" ? "Choose a day to see its start times." : "Choose a date to see its start times."}</p>
+      ) : today && date < today ? (
+        <div className="notice">That date has already passed.</div>
+      ) : duration <= 0 ? (
+        <p className="month-cal-wait">Choose {photography ? "a session" : "a duration"} to see the start times.</p>
+      ) : (
+        <>
+          {loadingSlots && (
+            <div style={{ textAlign: "center", padding: "1.5rem" }}>
+              <div className="spinner" />
+              <p style={{ marginTop: "1rem", fontSize: ".9rem" }}>Checking availability…</p>
+            </div>
+          )}
+          {!loadingSlots && availability && (
+            <>
+              <div className="time-slots" role="group" aria-label="Start times" onKeyDown={moveAmongTimes}>
+                {offeredTimes.map((minute) => {
+                  const freeCount = mode === "time" && grid ? studiosFreeAt(grid, minute).length : 0;
+                  return (
+                    <button
+                      type="button"
+                      key={minute}
+                      className={`time-slot-btn${start === minute ? " selected" : ""}`}
+                      aria-pressed={start === minute}
+                      tabIndex={minute === timeStop ? 0 : -1}
+                      onFocus={() => setTimeFocus(minute)}
+                      onClick={() => chooseStart(minute)}
+                    >
+                      {minutesToLabel(minute)}
+                      {mode === "time" && (
+                        <small>
+                          {freeCount} {freeCount === 1 ? "studio" : "studios"} free
+                        </small>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+              {offeredTimes.length === 0 && (
+                <div className="notice" style={{ textAlign: "center" }}>
+                  {availability.problem === "past"
+                    ? "That date has already passed."
+                    : availability.problem === "too_far"
+                      ? `Bookings open ${count(settings.maxAdvanceDays, "day")} ahead.`
+                      : firstDate && date < firstDate
+                        ? `${photography ? `${words.Session}s` : "Bookings"} are made at least ${noticeWords} ahead. Please choose a later date.`
+                        : mode === "studio" && studioIds.length > 1
+                          ? "These studios are not free together on this date. Try another day, or fewer studios."
+                          : "No times are available on this date. Please try another day."}
+                </div>
+              )}
+            </>
+          )}
+          {/* Outside the times, which are read again while it stays: it keeps what it says when they reload. */}
+          {waitlistHours && (
+            <WaitlistJoin
+              key={`${studioIds.join(",")}|${date}|${duration}`}
+              studioIds={studioIds}
+              photography={photography}
+              service={service}
+              durationMinutes={duration}
+              date={date}
+              openMinute={waitlistHours.open}
+              closeMinute={waitlistHours.close}
+              onFreeNow={() => void fetchAvailability(date)}
+            />
+          )}
+        </>
+      )}
+    </section>
+  );
+
   return (
     <div className="wizard-container" ref={topRef} style={{ scrollMarginTop: 90 }}>
       {!photography && (
@@ -1020,17 +1122,18 @@ export function BookingFlow({
       {/* ── Date and duration ── */}
       {step === "when" && (
         <div className="wizard-panel active">
-          <h3 tabIndex={-1} style={{ fontSize: "1.6rem", marginBottom: ".5rem" }}>{photography ? "Select date & session" : "Select date & duration"}</h3>
+          <h3 tabIndex={-1} style={{ fontSize: "1.6rem", marginBottom: ".5rem" }}>{photography ? "Select date, session & time" : "Select date, duration & time"}</h3>
           <p className="text-muted mb-3">
             {mode === "studio" && chosenNames ? `${chosenNames}. ` : ""}
             {leadHours > 0 || contentNotice
               ? `${photography ? "Sessions" : "Bookings"} open ${noticeWords} to ${count(settings.maxAdvanceDays, "day")} ahead.`
-              : `Bookings open up to ${count(settings.maxAdvanceDays, "day")} ahead.`}
+              : `Bookings open up to ${count(settings.maxAdvanceDays, "day")} ahead.`}{" "}
+            Times are Eastern Time.
           </p>
           {mode === "studio" ? (
             <div className="when-studio">
-              {lengthChoice}
-              <div className="form-group">
+              <div className="when-length">{lengthChoice}</div>
+              <div className="form-group when-day">
                 <span className="form-label">Day</span>
                 {duration > 0 && month ? (
                   <MonthCalendar month={month} firstMonth={firstMonth} lastMonth={lastMonth} days={shownDays} selected={date} onMonth={showMonth} onChoose={chooseDate} />
@@ -1038,16 +1141,20 @@ export function BookingFlow({
                   <p className="month-cal-wait">Choose {photography ? "a session" : "a duration"} to see the days it fits on.</p>
                 )}
               </div>
+              {timesPanel}
               <div className="month-cal-typed">
                 <p>Or type the date:</p>
                 {dateField}
               </div>
             </div>
           ) : (
-            <div className="form-grid">
-              {dateField}
-              {lengthChoice}
-            </div>
+            <>
+              <div className="form-grid">
+                {dateField}
+                {lengthChoice}
+              </div>
+              {timesPanel}
+            </>
           )}
           {mode === "studio" && price && (
             <div className="price-summary">
@@ -1074,78 +1181,6 @@ export function BookingFlow({
             </div>
           )}
           {actions(nextLabelFor("when"))}
-        </div>
-      )}
-
-      {/* ── Time ── */}
-      {step === "time" && (
-        <div className="wizard-panel active">
-          <h3 tabIndex={-1} style={{ fontSize: "1.6rem", marginBottom: ".5rem" }}>Choose a time</h3>
-          <p className="text-muted mb-3">
-            {longDateLabel(date)}, {durationLabel(duration)}
-            {mode === "studio" && chosenNames ? `, ${chosenNames}` : ""}. Times are Eastern Time.
-          </p>
-          {loadingSlots && (
-            <div style={{ textAlign: "center", padding: "3rem" }}>
-              <div className="spinner" />
-              <p style={{ marginTop: "1rem", fontSize: ".9rem" }}>Checking availability…</p>
-            </div>
-          )}
-          {!loadingSlots && availability && (
-            <>
-              <div className="time-slots" role="group" aria-label="Start times" onKeyDown={moveAmongTimes}>
-                {offeredTimes.map((minute) => {
-                  const freeCount = mode === "time" && grid ? studiosFreeAt(grid, minute).length : 0;
-                  return (
-                    <button
-                      type="button"
-                      key={minute}
-                      className={`time-slot-btn${start === minute ? " selected" : ""}`}
-                      aria-pressed={start === minute}
-                      tabIndex={minute === timeStop ? 0 : -1}
-                      onFocus={() => setTimeFocus(minute)}
-                      onClick={() => chooseStart(minute)}
-                    >
-                      {minutesToLabel(minute)}
-                      {mode === "time" && (
-                        <small>
-                          {freeCount} {freeCount === 1 ? "studio" : "studios"} free
-                        </small>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-              {offeredTimes.length === 0 && (
-                <div className="notice" style={{ textAlign: "center" }}>
-                  {availability.problem === "past"
-                    ? "That date has already passed."
-                    : availability.problem === "too_far"
-                      ? `Bookings open ${count(settings.maxAdvanceDays, "day")} ahead.`
-                      : firstDate && date < firstDate
-                        ? `${photography ? `${words.Session}s` : "Bookings"} are made at least ${noticeWords} ahead. Please choose a later date.`
-                        : mode === "studio" && studioIds.length > 1
-                          ? "These studios are not free together on this date. Try another day, or fewer studios."
-                          : "No times are available on this date. Please try another day."}
-                </div>
-              )}
-            </>
-          )}
-          {/* Outside the times, which are read again while it stays: it keeps what it says when they reload. */}
-          {waitlistHours && (
-            <WaitlistJoin
-              key={`${studioIds.join(",")}|${date}|${duration}`}
-              studioIds={studioIds}
-              photography={photography}
-              service={service}
-              durationMinutes={duration}
-              date={date}
-              openMinute={waitlistHours.open}
-              closeMinute={waitlistHours.close}
-              onFreeNow={() => void fetchAvailability(date)}
-            />
-          )}
-          {actions(nextLabelFor("time"))}
         </div>
       )}
 

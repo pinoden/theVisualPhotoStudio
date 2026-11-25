@@ -477,6 +477,27 @@
       "when": 1795481792006,
       "tag": "0067_promo_booking_days",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1795576911106,
+      "tag": "0068_three_ways_to_book",
+      "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1795577268736,
+      "tag": "0069_studio_sections",
+      "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1795577633956,
+      "tag": "0070_rates_photography",
+      "breakpoints": true
     }
   ]
 }

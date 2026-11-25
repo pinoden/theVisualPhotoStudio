@@ -267,10 +267,29 @@ describe("a studio's facts and floor plan", () => {
     expect(
       await saveStudioDetails(world.db, world.ids.blanche, {
         ...details,
-        facts: { size: "850 sq ft", ceiling: "14 ft", light: "Windows facing southeast", cyclorama: "10 × 15 ft", included: ["Paper backdrops", "C-stands"] },
+        facts: {
+          size: "850 sq ft",
+          ceiling: "14 ft",
+          light: "Windows facing southeast",
+          cyclorama: "10 × 15 ft",
+          included: ["Paper backdrops", "C-stands"],
+          // A section without a title is not kept; a text's lines are tidied, its line breaks kept.
+          sections: [
+            { title: " Furniture ", text: "- Green couch \r\n- Blue chair\n\n\n\nAll of it vintage." },
+            { title: "", text: "Nothing to show it under." },
+          ],
+        },
       }),
     ).toBe(true);
-    expect((await blanche()).facts).toEqual({ size: "850 sq ft", ceiling: "14 ft", light: "Windows facing southeast", cyclorama: "10 × 15 ft", included: ["Paper backdrops", "C-stands"], floorPlan: "" });
+    expect((await blanche()).facts).toEqual({
+      size: "850 sq ft",
+      ceiling: "14 ft",
+      light: "Windows facing southeast",
+      cyclorama: "10 × 15 ft",
+      included: ["Paper backdrops", "C-stands"],
+      floorPlan: "",
+      sections: [{ title: "Furniture", text: "- Green couch\n- Blue chair\n\nAll of it vintage." }],
+    });
   });
 
   it("take a floor plan that is described, keep it when the facts are saved again, and let it go", async () => {
@@ -283,7 +302,7 @@ describe("a studio's facts and floor plan", () => {
     expectOk(await setStudioFloorPlan(world.db, owner, world.ids.blanche, plan.id));
     expect((await blanche()).floorPlan).toMatchObject({ id: plan.id, alt: "Floor plan of Studio Blanche: 25 by 34 feet, windows on the long side" });
     // Saving the studio's text keeps the floor plan, which is chosen on its own.
-    expect(await saveStudioDetails(world.db, world.ids.blanche, { ...details, facts: { size: "850 sq ft", ceiling: "", light: "", cyclorama: "", included: [] } })).toBe(true);
+    expect(await saveStudioDetails(world.db, world.ids.blanche, { ...details, facts: { size: "850 sq ft", ceiling: "", light: "", cyclorama: "", included: [], sections: [] } })).toBe(true);
     expect((await blanche()).facts).toMatchObject({ size: "850 sq ft", floorPlan: plan.id });
     // In use, it cannot be deleted from the library.
     expect(usesInWords((await mediaUses(world.db, [plan.id])).get(plan.id)!)).toBe("the studio Studio Blanche");

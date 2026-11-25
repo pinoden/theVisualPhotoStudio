@@ -26,8 +26,8 @@ describe("the frame the site was built with", () => {
   });
 
   it("has the menu and the footer the designer made", () => {
-    expect(DEFAULT_FRAME.menu.map((item) => item.label)).toEqual(["Our Studios", "Rates", "Info", "Contact", "Log In"]);
-    expect(DEFAULT_FRAME.menu[2].children.map((link) => link.href)).toEqual(["/faq", "/services", "/policies", "/rates"]);
+    expect(DEFAULT_FRAME.menu.map((item) => item.label)).toEqual(["Our Studios", "Rates", "Memberships", "Info", "Contact", "Log In"]);
+    expect(DEFAULT_FRAME.menu[3].children.map((link) => link.href)).toEqual(["/faq", "/services", "/policies", "/rates"]);
     expect(DEFAULT_FRAME.footer.columns.map((column) => column.title)).toEqual(["Studios", "Info"]);
     expect(copyrightLine(DEFAULT_FRAME)).toBe("© The Visuals Photo Studio. All rights reserved.");
   });

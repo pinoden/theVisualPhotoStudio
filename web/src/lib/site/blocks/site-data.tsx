@@ -3,8 +3,9 @@ import { ContactForm as ContactFormView } from "@/components/ContactForm";
 import { PictureRow } from "@/components/site/PictureRow";
 import { hasWeekendPricing, hourlyFromCents, hoursLines, openingHours, priceTable } from "@/lib/catalog-view";
 import { formatCents } from "@/lib/domain/pricing";
+import { sessionsOf } from "@/lib/domain/services";
 import { durationLabel } from "@/lib/domain/time";
-import { FACT_LABELS } from "@/lib/studio-facts";
+import { FACT_LABELS, sectionParts } from "@/lib/studio-facts";
 import { telHref } from "../frame";
 import { defineBlock } from "./block";
 import { EditorNote, SiteAnchor } from "./shared";
@@ -185,6 +186,29 @@ export const StudioDetails = defineBlock({
                         </ul>
                       </>
                     )}
+                    {studio.facts.sections.length > 0 && (
+                      <div className="studio-sections">
+                        {studio.facts.sections.map((section, place) => (
+                          // Open in the editor, so that what each says can be read there.
+                          <details className="studio-section" key={place} open={editing || undefined}>
+                            <summary>{section.title}</summary>
+                            <div className="studio-section-body">
+                              {sectionParts(section.text).map((part, at) =>
+                                part.kind === "list" ? (
+                                  <ul key={at}>
+                                    {part.items.map((item, i) => (
+                                      <li key={i}>{item}</li>
+                                    ))}
+                                  </ul>
+                                ) : (
+                                  <p key={at}>{part.text}</p>
+                                ),
+                              )}
+                            </div>
+                          </details>
+                        ))}
+                      </div>
+                    )}
                     {bookLabel && (
                       <SiteAnchor href={`/book?studio=${studio.slug}`} className="btn btn-dark" editing={editing}>
                         {bookLabel} {studio.name.replace(/^Studio /, "")}
@@ -306,38 +330,174 @@ export const AddonPrices = defineBlock({
   },
 });
 
+/** Whose sessions a block lists. */
+const SESSION_SERVICES = { photography: "Photography", content: "Content creation" } as const;
+
+/**
+ * The sessions with the in-house photographer (or content creator) and their prices, a card for each studio they are
+ * in (the owner's brief of 2026-11-24, item 4: "Add pricing and package details for professional photography ... Ensure
+ * the displayed prices match the actual booking prices"). Read from the sessions on sale (Admin → Photography), so they
+ * are always what a booking costs.
+ */
+export const SessionPrices = defineBlock({
+  label: "Photography sessions and their prices",
+  group: "site",
+  fields: {
+    service: { kind: "choice", label: "Whose sessions", options: SESSION_SERVICES, start: "photography" },
+    bookLabel: { kind: "text", label: "Words on the booking button (empty: no button)", max: 30, start: "Book a Session" },
+  },
+  render: ({ service, bookLabel, site, editing }) => {
+    const catalog = site.catalog;
+    if (!catalog) return <EditorNote editing={editing}>{MISSING}</EditorNote>;
+    const sessions = sessionsOf(catalog.photoPackages, service);
+    const studios = catalog.studios.filter((studio) => sessions.some((session) => session.studioId === studio.id));
+    if (studios.length === 0) return <EditorNote editing={editing}>No {SESSION_SERVICES[service].toLowerCase()} session is on sale, so visitors see nothing here.</EditorNote>;
+    return (
+      <div className="blk rates-grid session-prices">
+        {studios.map((studio) => {
+          const own = sessions.filter((session) => session.studioId === studio.id).sort((a, b) => a.durationMinutes - b.durationMinutes);
+          return (
+            <section className="rate-card" key={studio.id} aria-label={`${SESSION_SERVICES[service]} in ${studio.name}`}>
+              <h3>{studio.name}</h3>
+              <div className="rate-unit">Sessions from</div>
+              <div className="rate-price">{formatCents(Math.min(...own.map((session) => session.priceCents)))}</div>
+              <div className="rate-unit">studio rental included</div>
+              <hr className="rate-divider" />
+              <table className="price-table session-price-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Session</th>
+                    <th scope="col">Price</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {own.map((session) => (
+                    <tr key={session.id}>
+                      <td style={{ textAlign: "left" }}>
+                        {durationLabel(session.durationMinutes)}
+                        {session.includes && <span className="session-includes">{session.includes}</span>}
+                      </td>
+                      <td>{formatCents(session.priceCents)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {bookLabel && (
+                <SiteAnchor href={`/book/${service === "content" ? "content" : "photography"}?studio=${studio.slug}`} className="btn btn-primary mt-2 rate-book" editing={editing} label={`${bookLabel}: ${studio.name}`}>
+                  {bookLabel}
+                </SiteAnchor>
+              )}
+            </section>
+          );
+        })}
+      </div>
+    );
+  },
+});
+
+/** The benefits each membership shows, as the owner's brief of 2026-11-24 (item 6) lists them; the owners change them in the page editor. */
+const MEMBERSHIP_BENEFITS = [
+  "Discounted studio rental rates.",
+  "Hours can be used on weekdays and weekends.",
+  "Members can split their hours across multiple appointments.",
+  "Unused hours roll over to the following month.",
+  "No minimum commitment.",
+  "Members can cancel their subscription at any time.",
+  "Unused hours remain available after membership cancellation.",
+].map((text) => ({ text }));
+
+const NUMBER_WORDS = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten"];
+
+/**
+ * The memberships on sale (the owner's brief of 2026-11-24, item 6): one card for each studio or bundle, with each of its
+ * plans' monthly price, hours and price an hour, and a button that buys it; then the benefits, and a link to the terms.
+ * The plans, their prices and descriptions are the owners', under Admin → Memberships.
+ */
 export const MembershipPlans = defineBlock({
   label: "Memberships on sale",
   group: "site",
   fields: {
     joinLabel: { kind: "text", label: "Words on the button that buys one", max: 30, start: "Join" },
     descriptions: { kind: "toggle", label: "Show each plan's description", start: true },
+    hourly: { kind: "toggle", label: "Show each plan's price an hour", start: true },
+    benefitsTitle: { kind: "text", label: "Heading above the benefits (empty: no heading)", max: 60, start: "Membership benefits" },
+    benefits: {
+      kind: "list",
+      label: "Benefits, on every card",
+      max: 12,
+      title: "text",
+      of: { text: { kind: "text", label: "A benefit", max: 160, start: "A benefit." } },
+      start: MEMBERSHIP_BENEFITS,
+    },
+    termsLabel: { kind: "text", label: "Words of the link to the terms (empty: no link)", max: 40, start: "Membership terms" },
+    /** Empty, the memberships page's terms: a block saved before this field had none (a link left out reads as ""). */
+    termsLink: { kind: "link", label: "Where the terms are (empty: the memberships page's terms)", start: "/memberships#terms" },
   },
-  render: ({ joinLabel, descriptions, site, editing }) => {
+  render: ({ joinLabel, descriptions, hourly, benefitsTitle, benefits, termsLabel, termsLink, site, editing }) => {
     const catalog = site.catalog;
     if (!catalog) return <EditorNote editing={editing}>{MISSING}</EditorNote>;
     if (catalog.membershipPlans.length === 0) {
       return <EditorNote editing={editing}>No membership is offered at the moment, so visitors see nothing here.</EditorNote>;
     }
-    const names = new Map(catalog.studios.map((studio) => [studio.id, studio.name]));
+    const studios = new Map(catalog.studios.map((studio) => [studio.id, studio]));
+    // The plans by the studios they are for, in the owners' order of plans; within each, the fewest hours first.
+    const groups = new Map<string, typeof catalog.membershipPlans>();
+    for (const plan of catalog.membershipPlans) {
+      const key = plan.studioIds.join(",");
+      groups.set(key, [...(groups.get(key) ?? []), plan]);
+    }
+    const shown = benefits.filter((benefit) => benefit.text !== "");
+    const nameOf = (ids: string[]) => {
+      if (ids.length === 1) return studios.get(ids[0])?.name ?? "";
+      if (ids.length > 2 && ids.length === catalog.studios.length) return `All ${(NUMBER_WORDS[ids.length] ?? String(ids.length)).toLowerCase()} studios`;
+      return ids.map((id) => (studios.get(id)?.name ?? "").replace(/^Studio /, "")).join(" + ");
+    };
     return (
       <div className="blk rates-grid membership-plans">
-        {catalog.membershipPlans.map((plan) => (
-          <div className="rate-card" key={plan.id}>
-            <h3>{plan.name}</h3>
-            <div className="rate-price">{formatCents(plan.priceCents)}</div>
-            <div className="rate-unit">a month</div>
-            <hr className="rate-divider" />
-            <p className="membership-plan-hours">{durationLabel(plan.minutes)} of studio time each month</p>
-            <p className="membership-plan-where">{plan.studioIds.map((id) => names.get(id)).join(" + ")}</p>
-            {descriptions && plan.description && <p className="membership-plan-description">{plan.description}</p>}
-            {joinLabel && (
-              <SiteAnchor href={`/book/membership?plan=${plan.id}`} className="btn btn-primary mt-2 rate-book" editing={editing}>
-                {joinLabel}
-              </SiteAnchor>
-            )}
-          </div>
-        ))}
+        {[...groups.values()].map((plans) => {
+          const ids = plans[0].studioIds;
+          const name = nameOf(ids);
+          return (
+            <section className="rate-card membership-group" key={ids.join(",")} aria-label={name}>
+              <h3>{name}</h3>
+              {ids.length > 1 && <p className="membership-plan-where">{ids.map((id) => studios.get(id)?.name).join(" + ")}</p>}
+              <ul className="membership-options">
+                {[...plans]
+                  .sort((a, b) => a.minutes - b.minutes)
+                  .map((plan) => (
+                    <li className="membership-option" key={plan.id}>
+                      <p className="membership-plan-hours">{durationLabel(plan.minutes)} a month</p>
+                      <p className="membership-option-price">
+                        <span className="rate-price">{formatCents(plan.priceCents)}</span> <span className="rate-unit">a month</span>
+                      </p>
+                      {hourly && <p className="membership-option-hourly">{formatCents(Math.round((plan.priceCents * 60) / plan.minutes))} an hour</p>}
+                      {descriptions && plan.description && <p className="membership-plan-description">{plan.description}</p>}
+                      {joinLabel && (
+                        <SiteAnchor href={`/book/membership?plan=${plan.id}`} className="btn btn-primary rate-book" editing={editing} label={`${joinLabel}: ${plan.name}`}>
+                          {joinLabel}
+                        </SiteAnchor>
+                      )}
+                    </li>
+                  ))}
+              </ul>
+              {shown.length > 0 && (
+                <div className="membership-benefits">
+                  {benefitsTitle && <p className="membership-benefits-title">{benefitsTitle}</p>}
+                  <ul>
+                    {shown.map((benefit, place) => (
+                      <li key={place}>{benefit.text}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {termsLabel && (
+                <SiteAnchor href={termsLink || "/memberships#terms"} className="membership-terms-link" editing={editing}>
+                  {termsLabel}
+                </SiteAnchor>
+              )}
+            </section>
+          );
+        })}
       </div>
     );
   },

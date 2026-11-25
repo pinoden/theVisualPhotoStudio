@@ -74,7 +74,17 @@ const STUDIOS = [
     name: "Studio Blanche",
     tagline: "A modern, all-white space with sleek design.",
     description:
-      "A bright, modern canvas for creative work. Featuring a 10×15 ft seamless white cyclorama wall, a wall-mounted paper backdrop system, large southeast-facing windows and a minimalist aesthetic designed for portraits, branding sessions and editorial work. Shoes come off or get covered here to keep the space white.",
+      "A bright, modern canvas for creative work. Featuring a white cyclorama wall, natural light, and a minimalist aesthetic designed for portraits, branding sessions, and editorial work.",
+    // The original website's studio page, in its words (the owner's brief of 2026-11-24, item 1; migration 0069).
+    sections: [
+      { title: "Furniture", text: "- Brown leather statement couch\n- Modern console with props\n- Black fabric chair\n- Black TOGO chair\n- White boucle chair\n- Metal side table\n- Large arched mirror\n- Irregular shape wall mirror\n- White side table" },
+      { title: "Paper backdrops", text: "Studio Blanche features a wall-mounted paper backdrop system with three seamless backdrops available at all times. Colors are rotated periodically, so feel free to reach out to confirm the current selection before your session." },
+      { title: "Cyclorama wall", text: "A 10×15 ft seamless white cyclorama wall offers a clean, distraction-free backdrop for editorial, branding, and commercial shoots." },
+      { title: "Window layout", text: "Large southeast-facing windows along one wall provide consistent directional natural light throughout the morning and into early afternoon." },
+      { title: "Shoe covering policy", text: "Studio Blanche is a bright, all-white space that we take pride in keeping clean for every guest. To help maintain its pristine look, we kindly ask that all visitors either remove their shoes or wear provided shoe covers while inside the studio.\nFor photos where footwear is part of the look, you may also cover the soles with painter’s tape for a seamless, unnoticeable appearance in images." },
+      { title: "Additional amenities", text: "To help your session run smoothly and comfortably, the studio includes:\n- Clothing steamer\n- Alexa speaker for music\n- Clothing rack\n- Free Wi-Fi\n- Dedicated makeup area with a makeup mirror with lights\nThere is a changing area located just before the studio entrance. Please note: if you are only booking Studio Blanche, the changing area may be shared with guests from Studio Paris." },
+      { title: "Pets", text: "Pets are not allowed in Studio Blanche." },
+    ],
     includedGuests: 6,
     extraGuests: 6,
     // hours -> dollars
@@ -91,7 +101,16 @@ const STUDIOS = [
     name: "Studio Dayglow",
     tagline: "A natural, boho-style studio with warm vibes.",
     description:
-      "A warm, natural-light studio with a boho feel. The paper backdrop on a floor stand can be switched out during your session. Dayglow is our only pet-friendly studio.",
+      "A textured, natural space filled with light. Featuring textured walls, soft drapery, and beautiful natural light, Dayglow offers a warm and organic setting for portraits, branding sessions, and creative work.",
+    // The original website's studio page, in its words (the owner's brief of 2026-11-24, item 1; migration 0069).
+    sections: [
+      { title: "Furniture", text: "- Green couch\n- Stone side table\n- Irregular shape coffee table\n- Arched mirror\n- Irregular shape fabric mirror\n- Blue chair\n- Beige TOGO chair\n- Grey plastic kids chair" },
+      { title: "Paper backdrops", text: "Studio Dayglow includes a movable floor paper backdrop stand with a selection of colors such as red, pink, white, black, and tan. Backdrops can be changed during your appointment to give you more variety within your session." },
+      { title: "Window layout", text: "Studio Dayglow features two interconnected rooms, each with its own natural light characteristics.\nRoom One faces southeast and west, receiving natural light from the morning through sunset. The dual exposure keeps the space bright and dynamic throughout the day.\nRoom Two faces west and receives direct sunlight from early afternoon (around 1-2 PM) through sunset, creating warm, glowing light ideal for golden-hour sessions." },
+      { title: "Seasonal setups", text: "Throughout the year, this studio is styled for special seasonal installations. In the past, we’ve featured Christmas and Valentine’s Day setups, transforming the space to match the season." },
+      { title: "Additional amenities", text: "To help your session run smoothly and comfortably, the studio includes:\n- Clothing steamer\n- Alexa speaker for music\n- Clothing rack\n- Free Wi-Fi\n- Dedicated makeup area with a makeup mirror with lights\n- Inflatable air mattress (available by request only)\nThere is a changing area located just before the studio entrance." },
+      { title: "Pets", text: "Studio Dayglow is our pet-friendly studio! You’re welcome to bring your furry friend along for your photoshoot.\nPets must be added to your reservation in advance, and a $40 pet fee applies.\nPlease note that Studio Blanche and Studio Paris remain pet-free." },
+    ],
     includedGuests: 6,
     extraGuests: 6,
     prices: {
@@ -107,7 +126,16 @@ const STUDIOS = [
     name: "Studio Paris",
     tagline: "A romantic space with vintage charm.",
     description:
-      "A romantic, elegant space for timeless visuals. Classic details, a white vintage couch, a fireplace mantel, gold mirrors and soft natural light from large southeast-facing windows. Styled with seasonal setups through the year.",
+      "A romantic, elegant space for timeless visuals. Featuring classic details, soft natural light, and curated furnishings, Studio Paris creates an elegant setting for portraits, branding sessions, and creative work.",
+    // The original website's studio page, in its words (the owner's brief of 2026-11-24, item 1; migration 0069).
+    sections: [
+      { title: "Furniture", text: "- White vintage couch\n- Fireplace mantel\n- Gold vintage wall mirror\n- Gold vintage floor mirror\n- Black wooden desk\n- Wall art\n- Vintage side table" },
+      { title: "Paper backdrops", text: "Ceiling-mounted paper backdrops coming soon!" },
+      { title: "Window layout", text: "Large southeast-facing windows bring in a lot of natural light from early morning through the afternoon. The space stays bright and airy, making it ideal for naturally lit portraits and lifestyle sessions." },
+      { title: "Seasonal setups", text: "Throughout the year, this studio is styled for special seasonal installations. In the past, we’ve featured Christmas and Valentine’s Day setups, transforming the space to match the season." },
+      { title: "Additional amenities", text: "To help your session run smoothly and comfortably, the studio includes:\n- Clothing steamer\n- Alexa speaker for music\n- Clothing rack\n- Free Wi-Fi\n- Dedicated makeup area with a makeup mirror with lights\nThere is a changing area located just before the studio entrance. Please note: if you are only booking Studio Paris, the changing area may be shared with guests from Studio Blanche." },
+      { title: "Pets", text: "Pets are not allowed in Studio Paris." },
+    ],
     includedGuests: 4,
     extraGuests: 4,
     prices: {
@@ -138,6 +166,7 @@ export async function seed(db: Db): Promise<boolean> {
           extraGuests: s.extraGuests,
           bufferMinutes: 15,
           color: s.color,
+          facts: { sections: s.sections },
           sortOrder: index,
         })
         .returning({ id: studios.id });
