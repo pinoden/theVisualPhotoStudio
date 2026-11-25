@@ -40,7 +40,7 @@ import { can, type Ability } from "@/lib/abilities";
 import { requireManager, requireOwner } from "@/server/session";
 import {
   ACCESS_INSTRUCTIONS_MAX,
-  BETWEEN_LENGTHS, LONGEST_BOOKINGS,
+  BETWEEN_LENGTHS, LONGEST_BOOKINGS, SHOWN_LENGTHS_MAX,
   loadSettings,
   MONEY_SETTING_RANGES,
   NUMBER_SETTING_RANGES,
@@ -271,13 +271,21 @@ export async function addBundleLengthAction(formData: FormData): Promise<void> {
   done("/admin/prices", "Duration added.");
 }
 
-/** The lengths that can be booked besides the listed ones: between them, every half hour, every hour or none, and up to how long. */
+/**
+ * The lengths that can be booked besides the listed ones (between them, every half hour, every hour or none, and up to
+ * how long), and those the booking screen shows before "More".
+ */
 export async function saveLengthsAction(formData: FormData): Promise<void> {
   await requireOwner("/admin/prices");
   const step = Number(text(formData, "betweenLengthsMinutes"));
   const longest = Number(text(formData, "longestBookingMinutes"));
   if (!BETWEEN_LENGTHS.includes(step) || !LONGEST_BOOKINGS.includes(longest)) failed("/admin/prices", "Choose from the lists.");
+  const words = text(formData, "shownLengths").split(/[\s,]+/).filter(Boolean);
+  const shown = [...new Set(words.map((hours) => (/^\d+(\.\d+)?$/.test(hours) ? Math.round(Number(hours) * 60) : NaN)))].sort((a, b) => a - b);
   const db = await getDb();
+  if (!(await saveSetting(db, "shownLengthsMinutes", shown))) {
+    failed("/admin/prices", `Enter the lengths shown first in hours, separated by commas, at most ${SHOWN_LENGTHS_MAX}: for example 1, 2, 3, 4, 6 (1.5 is an hour and a half).`);
+  }
   if (!(await saveSetting(db, "betweenLengthsMinutes", step)) || !(await saveSetting(db, "longestBookingMinutes", longest))) failed("/admin/prices", "Choose from the lists.");
   updateTag(CATALOG_TAG);
   done("/admin/prices", step === 0 ? "Only the listed lengths can be booked now." : "The lengths that can be booked are saved.");

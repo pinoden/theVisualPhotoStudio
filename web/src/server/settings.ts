@@ -44,6 +44,11 @@ export interface Settings {
    * options should be the same for every studio 1-10 hours".
    */
   longestBookingMinutes: number;
+  /**
+   * The lengths the booking screen shows as buttons, in minutes; every other length is behind "More". The owner,
+   * 2026-11-25: "remove 5 hours so 1, 2, 3, 4, 6 more".
+   */
+  shownLengthsMinutes: number[];
 
   // ── Cancelling and moving ──
   /** A cancellation at least this many hours before the start is refunded automatically. */
@@ -165,6 +170,7 @@ export const DEFAULT_SETTINGS: Settings = {
   multiStudioPercent: { 2: 20, 3: 22 },
   betweenLengthsMinutes: 30,
   longestBookingMinutes: 600, // 10 hours, the owner's answer of 2026-11-25
+  shownLengthsMinutes: [60, 120, 180, 240, 360], // 1, 2, 3, 4 and 6 hours, the owner's answer of 2026-11-25
 
   refundWindowHours: 168, // 7 days: the owner's answer of 2026-11-17, which changed the 14 days of 2026-11-15
   photoRefundWindowHours: 336, // 14 days, as on the live site and confirmed on 2026-11-17
@@ -274,6 +280,15 @@ export const BETWEEN_LENGTHS: readonly number[] = [0, 30, 60];
 /** What `longestBookingMinutes` can be: 0 (the longest listed), or 2 to 12 whole hours. */
 export const LONGEST_BOOKINGS: readonly number[] = [0, ...Array.from({ length: 11 }, (_, i) => (i + 2) * 60)];
 
+/** The most lengths the booking screen can show before "More". */
+export const SHOWN_LENGTHS_MAX = 8;
+
+/** One to `SHOWN_LENGTHS_MAX` different lengths, each a quarter of an hour to a day in quarters of an hour. */
+function shownLengthsList(v: unknown): boolean {
+  if (!Array.isArray(v) || v.length < 1 || v.length > SHOWN_LENGTHS_MAX) return false;
+  return new Set(v).size === v.length && v.every((minutes) => Number.isInteger(minutes) && minutes >= 15 && minutes <= 1440 && minutes % 15 === 0);
+}
+
 /** Which values are acceptable for each simple setting. Anything else is ignored. */
 const VALIDATORS: { [K in Exclude<keyof Settings, "multiStudioPercent">]: (v: unknown) => boolean } = {
   slotIncrementMinutes: int(NUMBER_SETTING_RANGES.slotIncrementMinutes),
@@ -284,6 +299,7 @@ const VALIDATORS: { [K in Exclude<keyof Settings, "multiStudioPercent">]: (v: un
   holdMinutes: int(NUMBER_SETTING_RANGES.holdMinutes),
   betweenLengthsMinutes: (v) => BETWEEN_LENGTHS.includes(v as number),
   longestBookingMinutes: (v) => LONGEST_BOOKINGS.includes(v as number),
+  shownLengthsMinutes: shownLengthsList,
   refundWindowHours: int(NUMBER_SETTING_RANGES.refundWindowHours),
   photoRefundWindowHours: int(NUMBER_SETTING_RANGES.photoRefundWindowHours),
   refundFeePercent: int(NUMBER_SETTING_RANGES.refundFeePercent),

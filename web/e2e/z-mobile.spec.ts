@@ -251,7 +251,7 @@ test("the booking summary keeps its words and amounts whole on the smallest phon
   for (const studio of ["Studio Blanche", "Studio Dayglow", "Studio Paris"]) await pickStudio(page, studio);
   await next(page);
   await byLabel(page, "Date").fill(dateAhead(150));
-  await page.getByRole("button", { name: "5 hr", exact: true }).click();
+  await pickLength(page, "5 hr");
   await page.getByRole("button", { name: "9:00 AM", exact: true }).click();
   await next(page);
   await fillDetails(page, mia);
