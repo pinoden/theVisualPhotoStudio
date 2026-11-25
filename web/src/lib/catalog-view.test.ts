@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_SETTINGS } from "@/server/settings";
-import { bundleName, bundleOffer, bundleTables, multiStudioOffer, multiStudioSaving, priceTable } from "./catalog-view";
+import { bookingLengths, bundleName, bundleOffer, bundleTables, multiStudioOffer, multiStudioSaving, priceTable, shownLengths } from "./catalog-view";
 import { multiStudioPercentFor } from "./domain/pricing";
 
 const offer = (table: Record<number, number>) =>
@@ -118,5 +118,32 @@ describe("the bundles with prices of their own (question 81)", () => {
       { studioId: "p", dayType: "weekend" as const, durationMinutes: 60, priceCents: 7200 },
     ];
     expect(priceTable({ rules }, "p")).toEqual([{ durationMinutes: 60, weekdayCents: 6800, weekendCents: 7200 }]);
+  });
+});
+
+describe("the lengths the booking screen shows (the owner, 2026-11-25: 6 options and \"more\")", () => {
+  const halfHours = Array.from({ length: 19 }, (_, i) => 60 + i * 30);
+
+  it("shows the first six whole hours, and the rest behind More, each shortest first", () => {
+    const { shown, more } = shownLengths([...halfHours].reverse(), 6);
+    expect(shown).toEqual([60, 120, 180, 240, 300, 360]);
+    expect(more.slice(0, 3)).toEqual([90, 150, 210]);
+    expect(more.at(-1)).toBe(600);
+    expect(shown.length + more.length).toBe(19);
+  });
+
+  it("fills up with other lengths when there are fewer than six whole hours, and has nothing behind More when all fit", () => {
+    expect(shownLengths([60, 90, 120, 150, 180, 210, 240], 6)).toEqual({ shown: [60, 90, 120, 150, 180, 240], more: [210] });
+    expect(shownLengths([60, 120], 6)).toEqual({ shown: [60, 120], more: [] });
+    expect(shownLengths([], 6)).toEqual({ shown: [], more: [] });
+  });
+
+  it("names the range every studio and bundle can be booked for", () => {
+    const row = (durationMinutes: number) => ({ studioId: "s", dayType: "weekday" as const, durationMinutes, priceCents: 100 });
+    expect(bookingLengths({ rules: halfHours.map(row), bundlePrices: [] })).toBe("1 to 10 hours");
+    expect(bookingLengths({ rules: [row(90), row(300)], bundlePrices: [] })).toBe("1.5 to 5 hours");
+    expect(bookingLengths({ rules: [row(30), row(120)], bundlePrices: [] })).toBe("30 minutes to 2 hours");
+    expect(bookingLengths({ rules: [row(60)], bundlePrices: [] })).toBe("1 hour");
+    expect(bookingLengths({ rules: [], bundlePrices: [] })).toBe("");
   });
 });

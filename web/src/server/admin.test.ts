@@ -144,9 +144,10 @@ describe("prices", () => {
   });
 
   it("adds a duration that did not exist, and removes one so it can no longer be booked", async () => {
-    expect(await world.book({ studioIds: [world.ids.paris], durationMinutes: 360 })).toMatchObject({ ok: false, code: "invalid_price" });
+    // Six hours of Paris is priced on from its longest listed length until the owners type a price: $300 for five, $55 more an hour.
+    expect(expectOk(await world.book({ studioIds: [world.ids.paris], durationMinutes: 360 })).totalCents).toBe(35500);
     expect(await savePrice(world.db, { studioId: world.ids.paris, dayType: "weekday", durationMinutes: 360, priceCents: 34000 })).toBe(true);
-    expect(expectOk(await world.book({ studioIds: [world.ids.paris], durationMinutes: 360 })).totalCents).toBe(34000);
+    expect(expectOk(await world.book({ studioIds: [world.ids.paris], durationMinutes: 360, date: FAR, startMinute: h(9) })).totalCents).toBe(34000);
 
     expect(await savePrice(world.db, { studioId: world.ids.blanche, dayType: "weekday", durationMinutes: 60, priceCents: null })).toBe(true);
     expect(await world.book({ durationMinutes: 60, startMinute: h(16) })).toMatchObject({ ok: false, code: "invalid_price" });
@@ -157,11 +158,12 @@ describe("prices", () => {
     const listOf = async () => bundleTables(await loadCatalog(world.db)).find((table) => table.studioIds.length === 2 && pair.every((id) => table.studioIds.includes(id)))?.prices.map((row) => [row.durationMinutes, row.priceCents]);
     // The owner's prices, from the seed.
     expect(await listOf()).toEqual([[60, 11500], [90, 17200], [120, 23000], [180, 32000], [240, 40000], [300, 49000]]);
-    // Six hours of the two is not sold until it has a price; the hours between five and six then follow.
-    expect(await world.book({ studioIds: pair, durationMinutes: 360 })).toMatchObject({ ok: false, code: "invalid_price" });
-    expect(await saveBundlePrice(world.db, { studioIds: pair, durationMinutes: 360, priceCents: 58000 })).toBe(true);
+    // Six hours of the two goes on rising as from four hours to five, $90 an hour, until it has a price of its own.
     expect(expectOk(await world.book({ studioIds: pair, durationMinutes: 360 })).totalCents).toBe(58000);
-    expect(expectOk(await world.book({ studioIds: [...pair].reverse(), durationMinutes: 330, date: FAR })).totalCents).toBe(53500); // between $490 and $580
+    expect(await saveBundlePrice(world.db, { studioIds: pair, durationMinutes: 360, priceCents: 56000 })).toBe(true);
+    expect(expectOk(await world.book({ studioIds: pair, durationMinutes: 360, date: FAR, startMinute: h(9) })).totalCents).toBe(56000);
+    expect(await saveBundlePrice(world.db, { studioIds: pair, durationMinutes: 360, priceCents: 58000 })).toBe(true);
+    expect(expectOk(await world.book({ studioIds: [...pair].reverse(), durationMinutes: 330, date: "2026-12-16", startMinute: h(9) })).totalCents).toBe(53500); // between $490 and $580
 
     expect(await saveBundlePrice(world.db, { studioIds: [...pair].reverse(), durationMinutes: 60, priceCents: 12000 })).toBe(true); // the same bundle, however its studios are named
     expect(await saveBundlePrice(world.db, { studioIds: pair, durationMinutes: 90, priceCents: null })).toBe(true);
@@ -169,19 +171,26 @@ describe("prices", () => {
     expect(await world.db.select().from(bundlePrices)).toHaveLength(20);
   });
 
-  it("offers the lengths between the listed ones as the owners set: every half hour, every hour, or none", async () => {
+  it("offers every studio and bundle from 1 to 10 hours, as the owners set: every half hour, every hour, or the listed lengths", async () => {
     const lengths = async (studioIds: string[]) => bookableDurations(studioIds, "weekday", (await loadCatalog(world.db)).rules, (await loadCatalog(world.db)).bundlePrices);
     const all = [world.ids.blanche, world.ids.dayglow, world.ids.paris];
-    expect(await lengths([world.ids.paris])).toEqual([60, 90, 120, 150, 180, 210, 240, 270, 300]);
-    expect((await lengths(all)).slice(0, 5)).toEqual([60, 90, 120, 150, 180]);
-    expect((await lengths(all)).at(-1)).toBe(600);
+    const halfHours = Array.from({ length: 19 }, (_, i) => 60 + i * 30);
+    // The owner, 2026-11-25: "Times options should be the same for every studio 1-10 hours".
+    for (const studioIds of [[world.ids.paris], [world.ids.dayglow], [world.ids.blanche], [world.ids.paris, world.ids.dayglow], [world.ids.blanche, world.ids.paris], all]) {
+      expect(await lengths(studioIds)).toEqual(halfHours);
+    }
     expect(await saveSetting(world.db, "betweenLengthsMinutes", 60)).toBe(true);
-    expect(await lengths([world.ids.paris])).toEqual([60, 90, 120, 180, 240, 300]);
+    expect(await lengths([world.ids.paris])).toEqual([60, 90, 120, 180, 240, 300, 360, 420, 480, 540, 600]);
     expect(await lengths(all)).toEqual([60, 120, 180, 240, 300, 360, 420, 480, 540, 600]);
+    expect(await saveSetting(world.db, "longestBookingMinutes", 480)).toBe(true);
+    expect(await lengths([world.ids.paris])).toEqual([60, 90, 120, 180, 240, 300, 360, 420, 480]);
+    expect((await lengths(all)).at(-1)).toBe(600); // a listed length is always sold
     expect(await saveSetting(world.db, "betweenLengthsMinutes", 0)).toBe(true);
     expect(await lengths(all)).toEqual([60, 120, 180, 240, 300, 600]);
+    expect(await lengths([world.ids.paris])).toEqual([60, 90, 120, 180, 240, 300]);
     expect(await saveSetting(world.db, "betweenLengthsMinutes", 45)).toBe(false);
-    expect((await loadSettings(world.db)).betweenLengthsMinutes).toBe(0);
+    expect(await saveSetting(world.db, "longestBookingMinutes", 450)).toBe(false);
+    expect(await loadSettings(world.db)).toMatchObject({ betweenLengthsMinutes: 0, longestBookingMinutes: 480 });
   });
 
   it("refuses a bundle's price that makes no sense", async () => {

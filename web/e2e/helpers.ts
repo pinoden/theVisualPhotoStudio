@@ -325,6 +325,14 @@ export async function confirmAndGetRef(page: Page, buttonName: RegExp | string):
   return (await onScreen(page.locator(".booking-ref")).first().innerText()).trim();
 }
 
+/** Choose a length, "2 hr": from the six buttons, or from behind "More" (the owner, 2026-11-25). */
+export async function pickLength(page: Page, label: string): Promise<void> {
+  const button = page.getByRole("button", { name: label, exact: true });
+  await expect(page.locator(".duration-btn").first()).toBeVisible();
+  if (!(await button.isVisible())) await page.getByRole("button", { name: "More", exact: true }).click();
+  await button.click();
+}
+
 /** The whole studio-first flow up to the payment step. */
 export async function bookStudioFirstToPayment(
   page: Page,
@@ -343,7 +351,7 @@ export async function bookStudioFirstToPayment(
   for (const studio of options.studios) await pickStudio(page, studio);
   await next(page);
   await byLabel(page, "Date").fill(options.date);
-  await page.getByRole("button", { name: options.duration, exact: true }).click();
+  await pickLength(page, options.duration);
   await page.getByRole("button", { name: options.time, exact: true }).click();
   await next(page);
   await fillDetails(page, options.customer);

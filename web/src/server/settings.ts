@@ -38,6 +38,12 @@ export interface Settings {
    * reading (question 83 in ProjectLibrary.md).
    */
   betweenLengthsMinutes: number;
+  /**
+   * How long every studio and bundle can be booked for, in minutes: the lengths past the longest one listed, at the same
+   * steps, are priced on from it (`betweenLengths`). 0: no longer than the longest listed. The owner, 2026-11-25: "Times
+   * options should be the same for every studio 1-10 hours".
+   */
+  longestBookingMinutes: number;
 
   // ── Cancelling and moving ──
   /** A cancellation at least this many hours before the start is refunded automatically. */
@@ -158,6 +164,7 @@ export const DEFAULT_SETTINGS: Settings = {
   holdMinutes: 10,
   multiStudioPercent: { 2: 20, 3: 22 },
   betweenLengthsMinutes: 30,
+  longestBookingMinutes: 600, // 10 hours, the owner's answer of 2026-11-25
 
   refundWindowHours: 168, // 7 days: the owner's answer of 2026-11-17, which changed the 14 days of 2026-11-15
   photoRefundWindowHours: 336, // 14 days, as on the live site and confirmed on 2026-11-17
@@ -264,6 +271,9 @@ function discountTable(v: unknown): Record<number, number> | null {
 /** What `betweenLengthsMinutes` can be: none, every half hour, every hour. */
 export const BETWEEN_LENGTHS: readonly number[] = [0, 30, 60];
 
+/** What `longestBookingMinutes` can be: 0 (the longest listed), or 2 to 12 whole hours. */
+export const LONGEST_BOOKINGS: readonly number[] = [0, ...Array.from({ length: 11 }, (_, i) => (i + 2) * 60)];
+
 /** Which values are acceptable for each simple setting. Anything else is ignored. */
 const VALIDATORS: { [K in Exclude<keyof Settings, "multiStudioPercent">]: (v: unknown) => boolean } = {
   slotIncrementMinutes: int(NUMBER_SETTING_RANGES.slotIncrementMinutes),
@@ -273,6 +283,7 @@ const VALIDATORS: { [K in Exclude<keyof Settings, "multiStudioPercent">]: (v: un
   contentNoticeBusinessDays: int(NUMBER_SETTING_RANGES.contentNoticeBusinessDays),
   holdMinutes: int(NUMBER_SETTING_RANGES.holdMinutes),
   betweenLengthsMinutes: (v) => BETWEEN_LENGTHS.includes(v as number),
+  longestBookingMinutes: (v) => LONGEST_BOOKINGS.includes(v as number),
   refundWindowHours: int(NUMBER_SETTING_RANGES.refundWindowHours),
   photoRefundWindowHours: int(NUMBER_SETTING_RANGES.photoRefundWindowHours),
   refundFeePercent: int(NUMBER_SETTING_RANGES.refundFeePercent),

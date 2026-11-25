@@ -139,6 +139,7 @@ export async function loadCatalog(db: DbLike): Promise<Catalog> {
           priceCents: r.priceCents,
         })),
       settings.betweenLengthsMinutes,
+      settings.longestBookingMinutes,
     ),
     bundlePrices: bundlePricesWithBetween(
       bundleRows
@@ -147,6 +148,7 @@ export async function loadCatalog(db: DbLike): Promise<Catalog> {
         // The studios in the site's order, as everything that names a bundle lists them.
         .map(({ key, row }) => ({ studioIds: studioRows.filter((s) => key.includes(s.id)).map((s) => s.id), durationMinutes: row.durationMinutes, priceCents: row.priceCents })),
       settings.betweenLengthsMinutes,
+      settings.longestBookingMinutes,
     ),
     addons: addonRows
       .filter((a) => a.studioId === null || activeIds.has(a.studioId))

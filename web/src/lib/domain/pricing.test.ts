@@ -423,7 +423,23 @@ describe("the lengths between the listed ones (question 83)", () => {
     expect(betweenLengths(list, 7.5)).toEqual([]);
   });
 
-  it("never reach below the shortest listed length or above the longest", () => {
+  it("go on past the longest listed length, up to the longest booking, rising as between the last two (the owner, 2026-11-25)", () => {
+    // $320 for 3 hours, $490 for 5: $85 an hour more up to 10 hours.
+    const past = betweenLengths(list, 30, 600).filter((row) => row.durationMinutes > 300);
+    expect(past.map((row) => row.durationMinutes)).toEqual([330, 360, 390, 420, 450, 480, 510, 540, 570, 600]);
+    expect(past[0]).toEqual({ durationMinutes: 330, priceCents: 53300 }); // $532.50, to a whole dollar
+    expect(past.at(-1)).toEqual({ durationMinutes: 600, priceCents: 91500 });
+    expect(betweenLengths(list, 60, 600).map((row) => row.durationMinutes)).toEqual([240, 360, 420, 480, 540, 600]);
+    // Dayglow on weekdays: $350 for 5 hours, $540 for 8: $63.33 an hour, so 10 hours is $667.
+    expect(betweenLengths([{ durationMinutes: 300, priceCents: 35000 }, { durationMinutes: 480, priceCents: 54000 }], 30, 600).at(-1)).toEqual({ durationMinutes: 600, priceCents: 66700 });
+    // One length listed: its price per hour.
+    expect(betweenLengths([{ durationMinutes: 60, priceCents: 10000 }], 60, 180)).toEqual([{ durationMinutes: 120, priceCents: 20000 }, { durationMinutes: 180, priceCents: 30000 }]);
+    // Nothing more than a longest booking shorter than the list; nothing from an empty list.
+    expect(betweenLengths(list, 30, 240)).toEqual(betweenLengths(list, 30));
+    expect(betweenLengths([], 30, 600)).toEqual([]);
+  });
+
+  it("never reach below the shortest listed length, nor above the longest without a longest booking", () => {
     const made = betweenLengths([{ durationMinutes: 300, priceCents: 80000 }, { durationMinutes: 600, priceCents: 150000 }], 30);
     expect(made[0]).toEqual({ durationMinutes: 330, priceCents: 87000 });
     expect(made.at(-1)).toEqual({ durationMinutes: 570, priceCents: 143000 });

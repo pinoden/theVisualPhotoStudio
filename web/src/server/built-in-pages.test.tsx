@@ -150,7 +150,7 @@ describe("the pages the website was built with", () => {
     expect(rates).toMatch(/Paris \+ Dayglow.*\$115.*per hour.*1\.5 hours.*\$172.*5 hours.*\$490.*Up to 10 guests included/);
     expect(rates).toMatch(/All three studios.*\$180.*10 hours.*\$1,500.*Up to 16 guests included/);
     expect(rates).not.toContain("2.5 hours"); // a length between is booked, not listed
-    expect(rates).toContain("Need a different length? The lengths between the ones listed can be booked too");
+    expect(rates).toContain("Need a different length? Every studio and bundle can be booked for 1 to 10 hours");
     expect(rates).toContain("Add-ons");
 
     const home = await words("");

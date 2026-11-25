@@ -12,7 +12,7 @@ export interface PriceRule {
   dayType: DayType;
   durationMinutes: number;
   priceCents: number;
-  /** Worked out between two listed lengths (`withBetween`), not typed in by the owners: the price lists leave it out. */
+  /** Worked out from the listed lengths (`betweenLengths`), not typed in by the owners: the price lists leave it out. */
   between?: true;
 }
 
@@ -232,39 +232,55 @@ export function studioPriceLines(studios: readonly { name: string; priceCents: n
 }
 
 /**
- * The lengths between the listed ones, each priced on the straight line between its two neighbours and rounded to a
- * whole dollar: with 2 hours at $230 and 3 hours at $320, 2.5 hours is $275. `stepMinutes` is the owners' setting
- * (`betweenLengthsMinutes`): every half hour, every hour, or 0 for none. Nothing shorter than the shortest listed
- * length or longer than the longest: the owners list a longer one to sell it. A rule built on the builder's reading
- * (question 83 in ProjectLibrary.md).
+ * The lengths the owners did not list that can be booked, each priced on the straight line through the listed ones and
+ * rounded to a whole dollar. `stepMinutes` is the owners' setting (`betweenLengthsMinutes`): every half hour, every
+ * hour, or 0 for the listed lengths only.
+ *
+ * - Between two listed lengths, between their prices: with 2 hours at $230 and 3 hours at $320, 2.5 hours is $275.
+ * - Past the longest listed length, up to `longestMinutes` (the owners' setting `longestBookingMinutes`), the last two
+ *   listed lengths' rise goes on: with 4 hours at $400 and 5 at $490, 6 hours is $580. With one length listed, its
+ *   price per hour. The owner, 2026-11-25: "Times options should be the same for every studio 1-10 hours".
+ * - Nothing shorter than the shortest listed length.
+ *
+ * How such a length is priced is the builder's reading (question 83 in ProjectLibrary.md). A duration the owners list
+ * always costs what they typed, and is sold even when it is longer than `longestMinutes`.
  */
-export function betweenLengths(listed: readonly { durationMinutes: number; priceCents: number }[], stepMinutes: number): { durationMinutes: number; priceCents: number }[] {
-  if (!(Number.isInteger(stepMinutes) && stepMinutes > 0)) return [];
+export function betweenLengths(
+  listed: readonly { durationMinutes: number; priceCents: number }[],
+  stepMinutes: number,
+  longestMinutes = 0,
+): { durationMinutes: number; priceCents: number }[] {
+  if (!(Number.isInteger(stepMinutes) && stepMinutes > 0) || listed.length === 0) return [];
   const sorted = [...listed].sort((a, b) => a.durationMinutes - b.durationMinutes);
   const out: { durationMinutes: number; priceCents: number }[] = [];
+  const onLine = (from: { durationMinutes: number; priceCents: number }, perMinute: number, minutes: number) =>
+    out.push({ durationMinutes: minutes, priceCents: Math.round((from.priceCents + perMinute * (minutes - from.durationMinutes)) / 100) * 100 });
+  const firstAfter = (minutes: number) => (Math.floor(minutes / stepMinutes) + 1) * stepMinutes;
   for (let i = 0; i + 1 < sorted.length; i++) {
     const [from, to] = [sorted[i], sorted[i + 1]];
-    for (let minutes = (Math.floor(from.durationMinutes / stepMinutes) + 1) * stepMinutes; minutes < to.durationMinutes; minutes += stepMinutes) {
-      const exact = from.priceCents + ((to.priceCents - from.priceCents) * (minutes - from.durationMinutes)) / (to.durationMinutes - from.durationMinutes);
-      out.push({ durationMinutes: minutes, priceCents: Math.round(exact / 100) * 100 });
-    }
+    const perMinute = (to.priceCents - from.priceCents) / (to.durationMinutes - from.durationMinutes);
+    for (let minutes = firstAfter(from.durationMinutes); minutes < to.durationMinutes; minutes += stepMinutes) onLine(from, perMinute, minutes);
   }
+  const last = sorted[sorted.length - 1];
+  const before = sorted.length > 1 ? sorted[sorted.length - 2] : { durationMinutes: 0, priceCents: 0 };
+  const rise = (last.priceCents - before.priceCents) / (last.durationMinutes - before.durationMinutes);
+  for (let minutes = firstAfter(last.durationMinutes); minutes <= longestMinutes; minutes += stepMinutes) onLine(last, rise, minutes);
   return out;
 }
 
-/** The studios' price rules with the lengths between the listed ones (`betweenLengths`), for each studio and kind of day. */
-export function rulesWithBetween(rules: readonly PriceRule[], stepMinutes: number): PriceRule[] {
+/** The studios' price rules with the lengths the owners did not list (`betweenLengths`), for each studio and kind of day. */
+export function rulesWithBetween(rules: readonly PriceRule[], stepMinutes: number, longestMinutes = 0): PriceRule[] {
   const out = [...rules];
   const groups = new Map<string, PriceRule[]>();
   for (const rule of rules) groups.set(`${rule.studioId} ${rule.dayType}`, [...(groups.get(`${rule.studioId} ${rule.dayType}`) ?? []), rule]);
   for (const group of groups.values()) {
-    for (const made of betweenLengths(group, stepMinutes)) out.push({ studioId: group[0].studioId, dayType: group[0].dayType, ...made, between: true });
+    for (const made of betweenLengths(group, stepMinutes, longestMinutes)) out.push({ studioId: group[0].studioId, dayType: group[0].dayType, ...made, between: true });
   }
   return out;
 }
 
 /** The same for the bundles' prices, each bundle's list by itself. */
-export function bundlePricesWithBetween(bundlePrices: readonly BundlePrice[], stepMinutes: number): BundlePrice[] {
+export function bundlePricesWithBetween(bundlePrices: readonly BundlePrice[], stepMinutes: number, longestMinutes = 0): BundlePrice[] {
   const out = [...bundlePrices];
   const groups = new Map<string, BundlePrice[]>();
   for (const price of bundlePrices) {
@@ -272,7 +288,7 @@ export function bundlePricesWithBetween(bundlePrices: readonly BundlePrice[], st
     groups.set(key, [...(groups.get(key) ?? []), price]);
   }
   for (const group of groups.values()) {
-    for (const made of betweenLengths(group, stepMinutes)) out.push({ studioIds: group[0].studioIds, ...made, between: true });
+    for (const made of betweenLengths(group, stepMinutes, longestMinutes)) out.push({ studioIds: group[0].studioIds, ...made, between: true });
   }
   return out;
 }

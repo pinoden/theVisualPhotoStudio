@@ -1,7 +1,7 @@
 import { appointmentLook } from "@/lib/domain/appointment-look";
 import type { Catalog, CatalogStudio } from "@/server/catalog";
 import { extraGuestsAllowed, formatCents, multiStudioPercentFor } from "@/lib/domain/pricing";
-import { weekdayName, minutesToLabel } from "@/lib/domain/time";
+import { durationLabel, weekdayName, minutesToLabel } from "@/lib/domain/time";
 
 /** Blanche and Dayglow can be reserved together as part of the three-studio bundle. */
 export function studioCombinationError(studios: readonly Pick<CatalogStudio, "id" | "slug">[], studioIds: readonly string[]): string | null {
@@ -78,6 +78,36 @@ export function bundleTables(catalog: Pick<Catalog, "studios" | "bundlePrices">)
   }
   for (const table of tables.values()) table.prices.sort((a, b) => a.durationMinutes - b.durationMinutes);
   return [...tables.values()].sort((a, b) => a.studioIds.length - b.studioIds.length || a.prices[0].priceCents - b.prices[0].priceCents);
+}
+
+/**
+ * The lengths every studio and bundle can be booked for, in words: "1 to 10 hours". From the shortest any of them
+ * takes to the longest. Empty without prices.
+ */
+export function bookingLengths(catalog: Pick<Catalog, "rules" | "bundlePrices">): string {
+  const all = [...catalog.rules, ...catalog.bundlePrices].map((row) => row.durationMinutes);
+  if (all.length === 0) return "";
+  const [shortest, longest] = [Math.min(...all), Math.max(...all)];
+  if (shortest === longest) return durationLabel(shortest);
+  const last = durationLabel(longest);
+  const first = durationLabel(shortest);
+  // "1 to 10 hours" rather than "1 hour to 10 hours".
+  return shortest % 30 === 0 && shortest >= 60 && longest % 30 === 0 ? `${shortest / 60} to ${last}` : `${first} to ${last}`;
+}
+
+/** How many lengths the booking screen shows as buttons before "More". */
+export const SHOWN_LENGTHS = 6;
+
+/**
+ * The lengths the booking screen shows at first, and those behind "More": the shortest `count` whole hours, then the
+ * shortest of the others when there are fewer whole hours. With every half hour from 1 to 10 hours, 1 to 6 hours are
+ * shown and 1.5, 2.5 … 10 hours are behind "More". Both shortest first.
+ */
+export function shownLengths(durations: readonly number[], count: number): { shown: number[]; more: number[] } {
+  const sorted = [...durations].sort((a, b) => a - b);
+  const wholeFirst = [...sorted.filter((minutes) => minutes % 60 === 0), ...sorted.filter((minutes) => minutes % 60 !== 0)];
+  const shown = new Set(wholeFirst.slice(0, count));
+  return { shown: sorted.filter((minutes) => shown.has(minutes)), more: sorted.filter((minutes) => !shown.has(minutes)) };
 }
 
 /**

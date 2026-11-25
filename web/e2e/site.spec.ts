@@ -1126,8 +1126,9 @@ test("the owner sets a weekend price and the booking screen charges it on Saturd
   await expect(page.locator(".rates-grid:not(.session-prices, .bundle-prices) > .rate-card", { hasText: "Studio Blanche" }).getByRole("row", { name: /1 hour/ })).toContainText("$120");
 });
 
-test("the bundles have prices of their own, the same every day, which the owner changes; a length between the listed ones is priced between them", async ({ page }) => {
-  // The owner's brief of 2026-11-24, item 4, and answers of 2026-11-25 (questions 81 and 83 in ProjectLibrary.md).
+test("the bundles have prices of their own, the same every day, which the owner changes; every studio and bundle is booked from 1 to 10 hours, six lengths shown and the rest behind More", async ({ page }) => {
+  // The owner's brief of 2026-11-24, item 4, and answers of 2026-11-25 (questions 81 and 83 in ProjectLibrary.md):
+  // "Times options should be the same for every studio 1-10 hours with displaying 6 options and \"more\"".
   await page.goto("/rates");
   await expect(page.getByRole("heading", { name: "Studio Bundles" })).toBeVisible();
   await expect(page.locator(".rates-grid.bundle-prices > .rate-card")).toHaveCount(3);
@@ -1135,7 +1136,7 @@ test("the bundles have prices of their own, the same every day, which the owner 
   await expect(pair.getByRole("row", { name: /^1\.5 hours/ })).toContainText("$172");
   await expect(pair.getByRole("row")).toHaveCount(6);
   await expect(page.getByRole("region", { name: "All three studios" }).getByRole("row", { name: /^10 hours/ })).toContainText("$1,500");
-  await expect(byText(page, /^Need a different length\?/)).toBeVisible();
+  await expect(byText(page, /^Need a different length\? Every studio and bundle can be booked for 1 to 10 hours:/)).toBeVisible();
   await shot(page, "17b-rates-bundles");
   expect(await accessibilityProblems(page), "the Rates page, with the bundles' prices").toEqual([]);
 
@@ -1151,46 +1152,56 @@ test("the bundles have prices of their own, the same every day, which the owner 
   await byLabel(page, "Date").fill(FAR);
   await expect(totalRow(page)).toContainText("$230");
   await expect(byText(page, "Studio Dayglow + Studio Paris, 2 hours")).toBeVisible();
-  // Two and a half hours is in the list under the buttons, at the price between two hours ($230) and three ($320).
+  // Six lengths, 1 to 6 hours; two and a half hours is behind More, at the price between two hours ($230) and three
+  // ($320). Ten hours goes on from five ($490) as four to five rose: $90 an hour.
+  await expect(page.locator(".duration-grid .duration-btn:not(.duration-more)")).toHaveText(["1 hr", "2 hr", "3 hr", "4 hr", "5 hr", "6 hr"]);
   await expect(page.getByRole("button", { name: "2.5 hr", exact: true })).toHaveCount(0);
-  await page.getByLabel("Another length").selectOption({ label: "2.5 hours" });
+  await page.getByRole("button", { name: "More", exact: true }).click();
+  await expect(page.locator(".duration-grid .duration-btn:not(.duration-more)")).toHaveCount(19);
+  await page.getByRole("button", { name: "10 hr", exact: true }).click();
+  await expect(totalRow(page)).toContainText("$940");
+  await page.getByRole("button", { name: "2.5 hr", exact: true }).click();
   await expect(totalRow(page)).toContainText("$275");
   await shot(page, "17c-book-length-between");
   expect(await accessibilityProblems(page), "the booking page, with a length between").toEqual([]);
 
-  // The owner gives the bundle a six-hour price, and sells only the listed lengths. (An owner of this test's own: the
+  // The owner gives the bundle a six-hour price of its own, under the $580 worked out, and sells only the listed lengths. (An owner of this test's own: the
   // first has had the three sign-in codes an address may ask for in 15 minutes by now, in a fast run.)
   await signIn(page, PRICES_OWNER, "/admin/prices");
   const card = page.locator(".admin-card", { has: page.getByRole("heading", { name: "Paris + Dayglow", exact: true }) });
   await expect(card.getByLabel("Paris + Dayglow 1 hour price")).toHaveValue("115");
   await card.getByLabel("Add a duration (minutes)").fill("360");
-  await card.getByLabel("Price ($)", { exact: true }).fill("580");
+  await card.getByLabel("Price ($)", { exact: true }).fill("560");
   await card.getByRole("button", { name: "Add", exact: true }).click();
   await expect(byText(page, "Duration added.")).toBeVisible();
-  await expect(card.getByLabel("Paris + Dayglow 6 hours price")).toHaveValue("580");
-  await byLabel(page, "Lengths between the listed ones").selectOption({ label: "Cannot be booked: only the durations listed" });
-  await page.locator("form", { has: page.getByLabel("Lengths between the listed ones") }).getByRole("button", { name: "Save", exact: true }).click();
+  await expect(card.getByLabel("Paris + Dayglow 6 hours price")).toHaveValue("560");
+  await byLabel(page, "Lengths besides the listed ones").selectOption({ label: "Cannot be booked: only the durations listed" });
+  await page.locator("form", { has: page.getByLabel("Lengths besides the listed ones") }).getByRole("button", { name: "Save", exact: true }).click();
   await expect(byText(page, "Only the listed lengths can be booked now.")).toBeVisible();
   await shot(page, "17d-admin-bundle-prices");
   expect(await accessibilityProblems(page), "the admin's prices, with the bundles").toEqual([]);
 
   await page.goto("/rates");
-  await expect(page.getByRole("region", { name: "Paris + Dayglow" }).getByRole("row", { name: /^6 hours/ })).toContainText("$580");
+  await expect(page.getByRole("region", { name: "Paris + Dayglow" }).getByRole("row", { name: /^6 hours/ })).toContainText("$560");
   await expect(byText(page, /^Need a different length\?/)).toHaveCount(0);
+  // Only the seven listed lengths now: six whole hours shown, an hour and a half behind More.
   await page.goto("/book?studio=dayglow,paris");
   await next(page);
-  await expect(page.getByRole("button", { name: "6 hr", exact: true })).toBeVisible();
-  await expect(page.getByLabel("Another length")).toHaveCount(0);
+  await page.getByRole("button", { name: "6 hr", exact: true }).click();
+  await expect(totalRow(page)).toContainText("$560");
+  await page.getByRole("button", { name: "More", exact: true }).click();
+  await expect(page.locator(".duration-grid .duration-btn:not(.duration-more)")).toHaveText(["1 hr", "2 hr", "3 hr", "4 hr", "5 hr", "6 hr", "1.5 hr"]);
 
-  // Back as it was, for the tests that follow: the owner's list, and every half hour between.
+  // Back as it was, for the tests that follow: the owner's list, and every half hour up to 10 hours.
   await page.goto("/admin/prices");
   await card.getByLabel("Paris + Dayglow 6 hours price").fill("");
   await card.getByRole("button", { name: "Save Paris + Dayglow prices" }).click();
   await expect(byText(page, "Bundle prices saved.")).toBeVisible();
   await expect(card.getByLabel("Paris + Dayglow 6 hours price")).toHaveCount(0);
-  await byLabel(page, "Lengths between the listed ones").selectOption({ label: "Can be booked, every half hour" });
-  await page.locator("form", { has: page.getByLabel("Lengths between the listed ones") }).getByRole("button", { name: "Save", exact: true }).click();
-  await expect(byText(page, "The lengths between the listed ones can be booked now.")).toBeVisible();
+  await byLabel(page, "Lengths besides the listed ones").selectOption({ label: "Can be booked, every half hour" });
+  await expect(byLabel(page, "Every studio and bundle up to")).toHaveValue("600");
+  await page.locator("form", { has: page.getByLabel("Lengths besides the listed ones") }).getByRole("button", { name: "Save", exact: true }).click();
+  await expect(byText(page, "The lengths that can be booked are saved.")).toBeVisible();
 });
 
 test("the owners write a seasonal question and an agreement, a client answers and accepts them, and the booking keeps them", async ({ page, browser }) => {

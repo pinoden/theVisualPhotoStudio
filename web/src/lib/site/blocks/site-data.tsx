@@ -245,17 +245,17 @@ export const StudioDetails = defineBlock({
   },
 });
 
-const BETWEEN_NOTE = "Need a different length? The lengths between the ones listed can be booked too, for a studio or a bundle: the booking page shows each one's price.";
+const BETWEEN_NOTE = "Need a different length? Every studio and bundle can be booked for {booking lengths}: the booking page shows the price of each.";
 
 export const RateCards = defineBlock({
   label: "Prices of the studios",
   group: "site",
   fields: {
     bookLabel: { kind: "text", label: "Words on the booking button", max: 30, start: "Book Now" },
-    /** Shown only while the owners sell the lengths between the listed ones (Admin → Prices). */
+    /** Shown only while the owners sell lengths besides the listed ones (Admin → Prices). */
     betweenNote: {
       kind: "text",
-      label: "A line under the prices, while lengths between the listed ones can be booked (empty: none)",
+      label: "A line under the prices, while lengths besides the listed ones can be booked (empty: none)",
       max: 240,
       start: BETWEEN_NOTE,
     },
@@ -307,7 +307,7 @@ export const RateCards = defineBlock({
             </div>
           );
         })}
-        {betweenNote && catalog.settings.betweenLengthsMinutes > 0 && <p className="rates-note">{betweenNote}</p>}
+        {betweenNote && [...catalog.rules, ...catalog.bundlePrices].some((row) => row.between) && <p className="rates-note">{betweenNote}</p>}
       </div>
     );
   },
