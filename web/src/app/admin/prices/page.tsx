@@ -75,6 +75,18 @@ async function Prices({ searchParams }: Pick<PageProps<"/admin/prices">, "search
               <option value={0}>The longest duration each one lists</option>
             </select>
           </div>
+          <div className="form-group">
+            <label className="form-label" htmlFor="shown-lengths">
+              Shown before &ldquo;More&rdquo; (hours)
+            </label>
+            <input
+              id="shown-lengths"
+              name="shownLengths"
+              className="form-control"
+              defaultValue={catalog.settings.shownLengthsMinutes.map((minutes) => minutes / 60).join(", ")}
+              aria-describedby="shown-lengths-help"
+            />
+          </div>
           <button type="submit" className="btn btn-dark btn-small">
             Save
           </button>
@@ -85,6 +97,10 @@ async function Prices({ searchParams }: Pick<PageProps<"/admin/prices">, "search
           listed, the price goes on rising as it rose between the last two: with 4 hours at $400 and 5 hours at $490, 6
           hours costs $580. Nothing is shorter than the shortest duration listed. A duration you list always costs what you
           typed.
+        </p>
+        <p id="shown-lengths-help" style={{ fontSize: ".8rem", margin: ".5rem 0 0" }}>
+          The booking screen shows the lengths above as buttons, those a studio or bundle can be booked for, and every
+          other length behind &ldquo;More&rdquo;.
         </p>
       </div>
 

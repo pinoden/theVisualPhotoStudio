@@ -13,7 +13,7 @@ import {
   studiosFreeAt,
   type SlotOptions,
 } from "@/lib/domain/availability";
-import { bundleOffer, extraGuestsFor, multiStudioSaving, SHOWN_LENGTHS, shownLengths, studioCombinationError } from "@/lib/catalog-view";
+import { bundleOffer, extraGuestsFor, multiStudioSaving, shownLengths, studioCombinationError } from "@/lib/catalog-view";
 import type { PromoDays } from "@/lib/domain/promo-days";
 import { MonthCalendar } from "./MonthCalendar";
 import { WaitlistJoin } from "./WaitlistJoin";
@@ -306,10 +306,11 @@ export function BookingFlow({
   /** The chosen studios' own price list together, when the owners gave them one: the same on every day. */
   const together = useMemo(() => (photography ? [] : bundleList(studioIds, bundlePrices)), [photography, studioIds, bundlePrices]);
   /**
-   * Six lengths as buttons, and the rest behind "More" (the owner, 2026-11-25: "Times options should be the same for
-   * every studio 1-10 hours with displaying 6 options and \"more\""): `shownLengths`.
+   * The owners' first lengths as buttons, and the rest behind "More" (the owner, 2026-11-25: "remove 5 hours so 1, 2, 3,
+   * 4, 6 more"): `shownLengths`.
    */
-  const { shown: shownDurations, more: moreDurations } = useMemo(() => shownLengths(durations, SHOWN_LENGTHS), [durations]);
+  const firstShown = catalog.settings.shownLengthsMinutes;
+  const { shown: shownDurations, more: moreDurations } = useMemo(() => shownLengths(durations, firstShown), [durations, firstShown]);
   /** A chosen duration stops counting once the current selection no longer offers it. */
   const duration = durations.includes(durationChoice) ? durationChoice : 0;
   /** A length chosen from behind "More" keeps them shown. */

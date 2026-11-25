@@ -1046,19 +1046,19 @@ describe("bundles with prices of their own, and the lengths between (the owner's
     expect(posted[0]).toMatchObject({ studioIds: [B, P], durationMinutes: 60, expectedTotalCents: 14000 });
   });
 
-  it("shows six lengths and the rest behind More (the owner, 2026-11-25)", async () => {
+  it("shows 1, 2, 3, 4 and 6 hours, and the rest behind More (the owner, 2026-11-25)", async () => {
     render(<BookingFlow catalog={{ ...withBundle, rules: rulesWithBetween(catalog.rules, 30), bundlePrices: bundlePricesWithBetween(bundlePrices, 60) }} navigate={nav.push} />);
     await user.click(studioBox("Studio Blanche"));
     await next();
     pickDate(WED);
     const labels = () => screen.getAllByRole("button", { name: / hr$/ }).map((button) => button.textContent);
-    expect(labels()).toEqual(["1 hr", "2 hr", "3 hr", "4 hr", "5 hr", "6 hr"]);
+    expect(labels()).toEqual(["1 hr", "2 hr", "3 hr", "4 hr", "6 hr"]);
     const more = screen.getByRole("button", { name: "More" });
     expect(more.getAttribute("aria-expanded")).toBe("false");
     await user.click(more);
     expect(more.getAttribute("aria-expanded")).toBe("true");
-    // The six first, then every other half hour from 1 to 10 hours, shortest first.
-    expect(labels().slice(6, 9)).toEqual(["1.5 hr", "2.5 hr", "3.5 hr"]);
+    // Those first, then every other half hour from 1 to 10 hours, five hours among them, shortest first.
+    expect(labels().slice(5, 10)).toEqual(["1.5 hr", "2.5 hr", "3.5 hr", "4.5 hr", "5 hr"]);
     expect(labels()).toHaveLength(19);
     expect(labels().at(-1)).toBe("10 hr");
 
@@ -1069,7 +1069,7 @@ describe("bundles with prices of their own, and the lengths between (the owner's
     expect(screen.queryByRole("button", { name: /^(More|Fewer)$/ })).toBeNull();
     await pickDuration("2 hr");
     await user.click(screen.getByRole("button", { name: "Fewer" }));
-    expect(labels()).toEqual(["1 hr", "2 hr", "3 hr", "4 hr", "5 hr", "6 hr"]);
+    expect(labels()).toEqual(["1 hr", "2 hr", "3 hr", "4 hr", "6 hr"]);
   });
 
   it("offers a studio at a length it is sold for only in a bundle, and says so when it is chosen alone", async () => {

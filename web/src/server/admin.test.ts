@@ -190,6 +190,13 @@ describe("prices", () => {
     expect(await lengths([world.ids.paris])).toEqual([60, 90, 120, 180, 240, 300]);
     expect(await saveSetting(world.db, "betweenLengthsMinutes", 45)).toBe(false);
     expect(await saveSetting(world.db, "longestBookingMinutes", 450)).toBe(false);
+    // The lengths shown before "More": a list of different lengths, in quarters of an hour.
+    expect((await loadSettings(world.db)).shownLengthsMinutes).toEqual([60, 120, 180, 240, 360]);
+    expect(await saveSetting(world.db, "shownLengthsMinutes", [60, 90, 120])).toBe(true);
+    for (const wrong of [[], [60, 60], [50], [0], [1500], "60", Array.from({ length: 9 }, (_, i) => (i + 1) * 60)]) {
+      expect(await saveSetting(world.db, "shownLengthsMinutes", wrong)).toBe(false);
+    }
+    expect((await loadSettings(world.db)).shownLengthsMinutes).toEqual([60, 90, 120]);
     expect(await loadSettings(world.db)).toMatchObject({ betweenLengthsMinutes: 0, longestBookingMinutes: 480 });
   });
 

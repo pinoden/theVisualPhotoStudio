@@ -121,21 +121,26 @@ describe("the bundles with prices of their own (question 81)", () => {
   });
 });
 
-describe("the lengths the booking screen shows (the owner, 2026-11-25: 6 options and \"more\")", () => {
+describe("the lengths the booking screen shows (the owner, 2026-11-25: \"1, 2, 3, 4, 6 more\")", () => {
   const halfHours = Array.from({ length: 19 }, (_, i) => 60 + i * 30);
+  const first = DEFAULT_SETTINGS.shownLengthsMinutes;
 
-  it("shows the first six whole hours, and the rest behind More, each shortest first", () => {
-    const { shown, more } = shownLengths([...halfHours].reverse(), 6);
-    expect(shown).toEqual([60, 120, 180, 240, 300, 360]);
-    expect(more.slice(0, 3)).toEqual([90, 150, 210]);
+  it("shows the owners' first lengths, and the rest behind More, each shortest first", () => {
+    expect(first).toEqual([60, 120, 180, 240, 360]);
+    const { shown, more } = shownLengths([...halfHours].reverse(), first);
+    expect(shown).toEqual([60, 120, 180, 240, 360]);
+    expect(more.slice(0, 5)).toEqual([90, 150, 210, 270, 300]); // five hours among them
     expect(more.at(-1)).toBe(600);
     expect(shown.length + more.length).toBe(19);
   });
 
-  it("fills up with other lengths when there are fewer than six whole hours, and has nothing behind More when all fit", () => {
-    expect(shownLengths([60, 90, 120, 150, 180, 210, 240], 6)).toEqual({ shown: [60, 90, 120, 150, 180, 240], more: [210] });
-    expect(shownLengths([60, 120], 6)).toEqual({ shown: [60, 120], more: [] });
-    expect(shownLengths([], 6)).toEqual({ shown: [], more: [] });
+  it("shows those of them the selection offers, its own when it offers none, and nothing behind More when all are shown", () => {
+    expect(shownLengths([60, 90, 120, 300, 330, 600], first)).toEqual({ shown: [60, 120], more: [90, 300, 330, 600] });
+    expect(shownLengths([60, 120, 600], first)).toEqual({ shown: [60, 120, 600], more: [] }); // no more than five: all shown
+    // Paris + Dayglow with only its listed lengths: 1.5 and 5 hours behind More.
+    expect(shownLengths([60, 90, 120, 180, 240, 300, 360], first)).toEqual({ shown: [60, 120, 180, 240, 360], more: [90, 300] });
+    expect(shownLengths([90, 150, 300, 420, 450, 480, 510], first)).toEqual({ shown: [90, 150, 300, 420, 480], more: [450, 510] });
+    expect(shownLengths([], first)).toEqual({ shown: [], more: [] });
   });
 
   it("names the range every studio and bundle can be booked for", () => {

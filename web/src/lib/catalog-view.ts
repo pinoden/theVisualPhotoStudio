@@ -95,18 +95,18 @@ export function bookingLengths(catalog: Pick<Catalog, "rules" | "bundlePrices">)
   return shortest % 30 === 0 && shortest >= 60 && longest % 30 === 0 ? `${shortest / 60} to ${last}` : `${first} to ${last}`;
 }
 
-/** How many lengths the booking screen shows as buttons before "More". */
-export const SHOWN_LENGTHS = 6;
-
 /**
- * The lengths the booking screen shows at first, and those behind "More": the shortest `count` whole hours, then the
- * shortest of the others when there are fewer whole hours. With every half hour from 1 to 10 hours, 1 to 6 hours are
- * shown and 1.5, 2.5 … 10 hours are behind "More". Both shortest first.
+ * The lengths the booking screen shows at first, and those behind "More": the owners' list (`shownLengthsMinutes`, 1,
+ * 2, 3, 4 and 6 hours as it starts), those of them the selection offers. When it offers none of them, as many of its
+ * own, the shortest whole hours first. A selection with no more lengths than the list has shows them all, without
+ * "More". Both shortest first.
  */
-export function shownLengths(durations: readonly number[], count: number): { shown: number[]; more: number[] } {
+export function shownLengths(durations: readonly number[], firstShown: readonly number[]): { shown: number[]; more: number[] } {
   const sorted = [...durations].sort((a, b) => a - b);
+  if (sorted.length <= firstShown.length) return { shown: sorted, more: [] };
   const wholeFirst = [...sorted.filter((minutes) => minutes % 60 === 0), ...sorted.filter((minutes) => minutes % 60 !== 0)];
-  const shown = new Set(wholeFirst.slice(0, count));
+  const listed = sorted.filter((minutes) => firstShown.includes(minutes));
+  const shown = new Set(listed.length > 0 ? listed : wholeFirst.slice(0, Math.max(firstShown.length, 1)));
   return { shown: sorted.filter((minutes) => shown.has(minutes)), more: sorted.filter((minutes) => !shown.has(minutes)) };
 }
 
