@@ -209,7 +209,6 @@ for (const [index, size] of BOOKING_SIZES.entries()) {
     await byLabel(page, "Date").fill(date);
     await page.getByRole("button", { name: "1.5 hr", exact: true }).click();
     await step("date");
-    await next(page);
 
     // Every start time is a button that can be tapped: a quarter of an hour apart.
     await expect(page.getByRole("button", { name: "9:15 AM", exact: true })).toBeVisible();
@@ -252,7 +251,6 @@ test("the booking summary keeps its words and amounts whole on the smallest phon
   await next(page);
   await byLabel(page, "Date").fill(dateAhead(150));
   await page.getByRole("button", { name: "5 hr", exact: true }).click();
-  await next(page);
   await page.getByRole("button", { name: "9:00 AM", exact: true }).click();
   await next(page);
   await fillDetails(page, mia);
@@ -297,7 +295,6 @@ test("a photographer can be booked on a phone", async ({ page }) => {
   await expectFits(page, "the session step");
   await shot(page, "m-375-session");
   expect(await hardToTouch(page), "the session step: hard to use by touch").toEqual([]);
-  await next(page);
   await page.getByRole("button", { name: "1:00 PM", exact: true }).click();
   await next(page);
   await fillDetails(page, mia);
@@ -361,7 +358,6 @@ test("starting from the time works on a phone", async ({ page }) => {
   await page.getByRole("radio", { name: /I want to choose the date first/ }).click();
   await byLabel(page, "Date").fill(date);
   await page.getByRole("button", { name: "1 hr", exact: true }).click();
-  await next(page);
   await page.getByRole("button", { name: /^10:00 AM/ }).click();
   await expectFits(page, "the time step, starting from the time");
   expect(await hardToTouch(page), "the time step: hard to use by touch").toEqual([]);

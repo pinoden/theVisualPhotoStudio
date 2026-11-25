@@ -344,7 +344,6 @@ export async function bookStudioFirstToPayment(
   await next(page);
   await byLabel(page, "Date").fill(options.date);
   await page.getByRole("button", { name: options.duration, exact: true }).click();
-  await next(page);
   await page.getByRole("button", { name: options.time, exact: true }).click();
   await next(page);
   await fillDetails(page, options.customer);

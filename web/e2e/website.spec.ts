@@ -1043,7 +1043,7 @@ test("the website's own pages are edited like any other: the home page keeps its
   await shot(page, "52-admin-built-in-page");
   // Before it could leave the website, the editor says what links to it.
   await page.locator("summary", { hasText: "Delete this page" }).click();
-  await expect(onScreen(page.locator(".media-delete"))).toContainText("Links lead here from the menu (Info, Photography) and the footer (Photography).");
+  await expect(onScreen(page.locator(".media-delete"))).toContainText("Links lead here from the menu (Info, Photography), the footer (Photography) and the page “Rates”.");
 
   // Its words change like those of any page.
   await canvas.locator(".page-banner h1").click();

@@ -94,6 +94,8 @@ export const Cards = defineBlock({
         symbol: { kind: "text", label: "A sign above it", max: 4, start: "✦" },
         title: { kind: "text", label: "Title", max: 80, start: "A title" },
         text: { kind: "text", label: "Text", max: 400, start: "A sentence or two.", lines: true },
+        /** The whole card is the link (the owner's brief of 2026-11-24, item 2: "fully clickable"). */
+        link: { kind: "link", label: "Where pressing the card leads (optional)", start: "" },
       },
       start: [{}, {}, {}],
     },
@@ -106,19 +108,33 @@ export const Cards = defineBlock({
       <div className={`blk blk-cards blk-cards-${look}`} style={{ "--cols": columns, ...(columnsPhone === null ? {} : { "--cols-phone": columnsPhone }) } as React.CSSProperties}>
         {cards.map((card, index) => (
           <div className="blk-card" key={index}>
-            {card.symbol && (
-              <div className="blk-card-symbol" aria-hidden="true">
-                {card.symbol}
-              </div>
+            {card.link ? (
+              <SiteAnchor href={card.link} editing={editing} className="blk-card-link">
+                <CardInside card={card} />
+              </SiteAnchor>
+            ) : (
+              <CardInside card={card} />
             )}
-            {card.title && <h4>{card.title}</h4>}
-            {card.text && <p>{card.text}</p>}
           </div>
         ))}
       </div>
     );
   },
 });
+
+function CardInside({ card }: { card: { symbol: string; title: string; text: string } }) {
+  return (
+    <>
+      {card.symbol && (
+        <div className="blk-card-symbol" aria-hidden="true">
+          {card.symbol}
+        </div>
+      )}
+      {card.title && <h4>{card.title}</h4>}
+      {card.text && <p>{card.text}</p>}
+    </>
+  );
+}
 
 export const Questions = defineBlock({
   label: "Questions and answers",

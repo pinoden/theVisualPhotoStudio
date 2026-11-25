@@ -169,6 +169,8 @@ export const DEFAULT_FRAME: SiteFrame = {
   menu: [
     { label: "Our Studios", href: "/studios", children: [] },
     { label: "Rates", href: "/rates", children: [] },
+    // In the main menu (the owner's brief of 2026-11-24, item 6: "include it in the main navigation").
+    { label: "Memberships", href: "/memberships", children: [] },
     {
       label: "Info",
       href: "",
@@ -200,6 +202,7 @@ export const DEFAULT_FRAME: SiteFrame = {
         title: "Info",
         links: [
           { label: "Rates", href: "/rates" },
+          { label: "Memberships", href: "/memberships" },
           { label: "Photography", href: "/services" },
           { label: "Guest Information", href: "/faq" },
           { label: "Policies", href: "/policies" },

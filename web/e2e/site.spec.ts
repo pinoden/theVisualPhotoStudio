@@ -100,13 +100,15 @@ test("public pages show the studios and the live price list", async ({ page }) =
 
   await page.goto("/rates");
   await expect(page.getByRole("heading", { name: "Studio Rates" })).toBeVisible();
-  const blanche = page.locator(".rate-card", { hasText: "Studio Blanche" });
+  // The studios' rental prices, not photography's sessions further down (brief of 2026-11-24).
+  const rentals = page.locator(".rates-grid:not(.session-prices) > .rate-card");
+  const blanche = rentals.filter({ hasText: "Studio Blanche" });
   await expect(blanche.getByRole("columnheader", { name: /Mon–Fri/i })).toBeVisible();
   await expect(blanche.getByRole("columnheader", { name: /Sat–Sun/i })).toBeVisible();
   await expect(blanche.getByRole("row", { name: /1\.5 hours/ })).toContainText("$142.50");
   await expect(blanche.getByRole("row", { name: /4 hours/ })).toContainText("$320");
   await expect(blanche.getByRole("row", { name: /4 hours/ })).toContainText("$345");
-  await expect(page.locator(".rate-card", { hasText: "Studio Dayglow" }).getByRole("row", { name: /8 hours/ })).toContainText("$540");
+  await expect(rentals.filter({ hasText: "Studio Dayglow" }).getByRole("row", { name: /8 hours/ })).toContainText("$540");
   await shot(page, "02-rates");
 
   await page.goto("/policies");
@@ -273,7 +275,39 @@ test("the booking screen can be used from the keyboard", async ({ page }) => {
   // from the top of the page again, and a screen reader says where the customer is now.
   await page.getByRole("button", { name: /^Next/ }).focus();
   await page.keyboard.press("Enter");
-  await expect(page.getByRole("heading", { name: "Select date & duration" })).toBeFocused();
+  await expect(page.getByRole("heading", { name: "Select date, duration & time" })).toBeFocused();
+});
+
+test("the website fixes of 2026-11-24: three ways to book, the studios' sections, photography's prices, memberships in the menu", async ({ page }) => {
+  // Home: "Three Ways to Book", each card a link to its way (migration 0068 on a stored home page).
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Three Ways to Book" })).toBeVisible();
+  const knowTime = page.getByRole("link", { name: /Know the time\?/ });
+  await expect(knowTime).toHaveAttribute("href", "/book?by=date");
+  await knowTime.click();
+  await page.waitForURL((url) => url.pathname === "/book" && url.searchParams.get("by") === "date");
+  await expect(page.getByRole("radio", { name: /I want to choose the date first/ })).toHaveAttribute("aria-checked", "true");
+  await page.goto("/");
+  const moreSpace = page.getByRole("link", { name: /Need more space\?/ });
+  await expect(moreSpace).toHaveAttribute("href", "/book?studio=paris");
+  await moreSpace.click();
+  await page.waitForURL((url) => url.pathname === "/book" && url.searchParams.get("studio") === "paris");
+  await expect(page.getByRole("checkbox", { name: /Studio Paris/ })).toBeChecked();
+
+  // The studios: the original website's sections, each opened by its title (migration 0069).
+  await page.goto("/studios");
+  const blanche = page.locator("section#blanche");
+  await expect(blanche.getByText("Brown leather statement couch")).toBeHidden();
+  await blanche.locator("summary", { hasText: "Furniture" }).click();
+  await expect(blanche.getByText("Brown leather statement couch")).toBeVisible();
+  await expect(page.locator("section#dayglow summary", { hasText: "Pets" })).toBeVisible();
+
+  // Rates: photography's sessions, as booking prices them (migration 0070), and Memberships in the main menu.
+  await page.goto("/rates");
+  const paris = page.getByRole("region", { name: "Photography in Studio Paris" });
+  await expect(paris).toContainText("$315");
+  await expect(paris.getByRole("link", { name: "Book a Session: Studio Paris" })).toHaveAttribute("href", "/book/photography?studio=paris");
+  await expect(page.locator(".site-nav").getByRole("link", { name: "Memberships", exact: true })).toHaveAttribute("href", "/memberships");
 });
 
 test("every page starts with a link that skips the menu", async ({ page, browserName }) => {
@@ -325,7 +359,6 @@ test("books two studios together, starting from the studios", async ({ page }) =
   expect(await accessibilityProblems(page), "the month calendar").toEqual([]);
   // ($78 + $68) less the 20% two-studio discount
   await expect(totalRow(page)).toContainText("$116.80");
-  await next(page);
 
   await expect(page.getByRole("button", { name: "10:00 AM", exact: true })).toBeVisible();
   await shot(page, "04-times-studio-first");
@@ -367,7 +400,6 @@ test("a taken time is no longer offered, nor any time within 15 minutes of it", 
   await next(page);
   await byLabel(page, "Date").fill(NEAR);
   await page.getByRole("button", { name: "1 hr", exact: true }).click();
-  await next(page);
   await expect(page.getByRole("button", { name: "12:00 PM", exact: true })).toBeVisible();
   // Dayglow is booked from 10:00 to 11:00. An hour that overlaps it is not offered.
   for (const taken of ["9:15 AM", "10:00 AM", "10:45 AM"]) {
@@ -386,7 +418,6 @@ test("starting from the time shows which studios are free, and books one", async
   await page.getByRole("radio", { name: /I want to choose the date first/ }).click();
   await byLabel(page, "Date").fill(NEAR);
   await page.getByRole("button", { name: "1 hr", exact: true }).click();
-  await next(page);
 
   // Dayglow and Paris are booked at 10:00, so only Blanche is free then.
   await expect(page.getByRole("button", { name: /^10:00 AM/ })).toContainText("1 studio free");
@@ -567,7 +598,6 @@ test("the released time is bookable again, and the code pays for a new booking w
   await next(page);
   await byLabel(page, "Date").fill(LATER);
   await page.getByRole("button", { name: "1 hr", exact: true }).click();
-  await next(page);
   await page.getByRole("button", { name: "9:00 AM", exact: true }).click();
   await next(page);
   await fillDetails(page, jane);
@@ -590,7 +620,6 @@ test("a code only works for the person it was sent to", async ({ page }) => {
   await next(page);
   await byLabel(page, "Date").fill(LATER);
   await page.getByRole("button", { name: "1 hr", exact: true }).click();
-  await next(page);
   await page.getByRole("button", { name: "9:00 AM", exact: true }).click();
   await next(page);
   await fillDetails(page, bob);
@@ -1094,7 +1123,7 @@ test("the owner sets a weekend price and the booking screen charges it on Saturd
   await expect(totalRow(page)).toContainText("$88");
 
   await page.goto("/rates");
-  await expect(page.locator(".rate-card", { hasText: "Studio Blanche" }).getByRole("row", { name: /1 hour/ })).toContainText("$120");
+  await expect(page.locator(".rates-grid:not(.session-prices) > .rate-card", { hasText: "Studio Blanche" }).getByRole("row", { name: /1 hour/ })).toContainText("$120");
 });
 
 test("the owners write a seasonal question and an agreement, a client answers and accepts them, and the booking keeps them", async ({ page, browser }) => {
@@ -1143,7 +1172,6 @@ test("the owners write a seasonal question and an agreement, a client answers an
   await next(client);
   await client.getByRole("button", { name: "1 hr", exact: true }).click();
   await byLabel(client, "Date").fill(day);
-  await next(client);
   await client.getByRole("button", { name: "10:00 AM", exact: true }).click();
   await next(client);
   await fillDetails(client, { name: "Cora Checkout", email: "cora.e2e@example.com", phone: "407-555-0144" });
@@ -1236,7 +1264,6 @@ test("one pair of angel wings is booked once for any overlapping time, and the o
   await next(pia);
   await pia.getByRole("button", { name: "1 hr", exact: true }).click();
   await byLabel(pia, "Date").fill(day);
-  await next(pia);
   await pia.getByRole("button", { name: "10:00 AM", exact: true }).click();
   await next(pia);
   await expect(pia.getByRole("checkbox", { name: /Angel wings/ })).toBeDisabled();
@@ -1261,7 +1288,6 @@ test("one pair of angel wings is booked once for any overlapping time, and the o
   await expect(byText(page, new RegExp(`^Angel wings is away on ${longDateLabel(day)}: it cannot be booked then\\. A booking made before has it reserved then: VS-[0-9A-Z]{6} \\(Wynn Wings\\)\\.`))).toBeVisible();
   const ida = await (await browser.newContext()).newPage();
   await ida.goto(`/book?studio=paris&date=${day}&duration=60`);
-  await next(ida);
   await next(ida);
   await ida.getByRole("button", { name: "12:00 PM", exact: true }).click();
   await next(ida);
@@ -1290,7 +1316,6 @@ test("a client joins the waitlist for a time that is taken, and the owners see a
   await next(hal);
   await hal.getByRole("button", { name: "2 hr", exact: true }).click();
   await byLabel(hal, "Date").fill(day);
-  await next(hal);
   await expect(hal.getByRole("button", { name: "1:00 PM", exact: true })).toBeVisible();
   await expect(hal.getByRole("button", { name: "10:00 AM", exact: true })).toHaveCount(0);
   await hal.getByRole("button", { name: "Join the waitlist" }).click();
@@ -1531,7 +1556,6 @@ test("the owner cancels a booking with a full refund and blocks a morning", asyn
   await next(page);
   await byLabel(page, "Date").fill(NEAR);
   await page.getByRole("button", { name: "1 hr", exact: true }).click();
-  await next(page);
   await expect(page.getByRole("button", { name: "12:00 PM", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "10:00 AM", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "11:30 AM", exact: true })).toHaveCount(0);
@@ -1638,10 +1662,16 @@ test("a client buys a membership, gets its code, sees it in their account and ca
   await page.goto("/studio-memberships");
   await page.waitForURL((url) => url.pathname === "/memberships");
   await expect(page.getByRole("heading", { name: "Studio Memberships" })).toBeVisible();
-  const plan = page.locator(".rate-card", { hasText: "Studio Paris, 5 hours a month" });
+  // A card for each studio or bundle, with its plans, the price an hour, the benefits and the terms (brief of 2026-11-24).
+  const paris = page.getByRole("region", { name: "Studio Paris" });
+  await expect(paris).toContainText("Membership benefits");
+  await expect(paris).toContainText("Unused hours remain available after membership cancellation.");
+  await expect(paris.getByRole("link", { name: "Membership terms" })).toHaveAttribute("href", "/memberships#terms");
+  await expect(page.getByRole("region", { name: "All three studios" })).toContainText("$780");
+  const plan = paris.locator(".membership-option", { hasText: "5 hours a month" });
   await expect(plan).toContainText("$300");
-  await expect(plan).toContainText("5 hours of studio time each month");
-  await plan.getByRole("link", { name: "Join" }).click();
+  await expect(plan).toContainText("$60 an hour");
+  await plan.getByRole("link", { name: "Join: Studio Paris, 5 hours a month" }).click();
 
   await expect(page.getByRole("heading", { name: "Studio Paris, 5 hours a month" })).toBeVisible();
   await byLabel(page, "Full name *").fill(max.name);
@@ -1671,7 +1701,6 @@ test("a client buys a membership, gets its code, sees it in their account and ca
     }
     await pickStudio(page, from);
     await pickStudio(page, to);
-    await next(page);
     await next(page);
     await page.getByRole("button", { name: "11:00 AM", exact: true }).click();
     await next(page);
@@ -1763,7 +1792,7 @@ test("the owner changes an add-on's price and a studio's guest number, and custo
 
   await page.goto("/rates");
   await expect(page.getByRole("row", { name: /Pet fee/ })).toContainText("$45");
-  await expect(page.locator(".rate-card", { hasText: "Studio Paris" })).toContainText("Up to 5 guests included.");
+  await expect(page.locator(".rates-grid:not(.session-prices) > .rate-card", { hasText: "Studio Paris" })).toContainText("Up to 5 guests included.");
   await page.goto("/faq");
   const pets = page.locator("details.faq-item", { hasText: "Can I bring my pet?" });
   await pets.locator("summary").click();
@@ -1790,7 +1819,6 @@ test("the owner changes an add-on's price and a studio's guest number, and custo
   await next(shop);
   await byLabel(shop, "Date").fill(WITHDRAWN_DAY);
   await shop.getByRole("button", { name: "1 hr", exact: true }).click();
-  await next(shop);
   await shop.getByRole("button", { name: "11:00 AM", exact: true }).click();
   await next(shop);
   await fillDetails(shop, bob);
@@ -1848,7 +1876,6 @@ test("a booking made with a discount code is moved without paying the discount a
   await next(page);
   await byLabel(page, "Date").fill(CODE_DAYS_SATURDAY);
   await page.getByRole("button", { name: "1 hr", exact: true }).click();
-  await next(page);
   await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
   await next(page);
   await fillDetails(page, bob);
@@ -1945,7 +1972,6 @@ test("a free hour takes one hour off a booking of one studio, and is not for sev
   await next(page);
   await byLabel(page, "Date").fill(FREE_HOUR_DAY);
   await page.getByRole("button", { name: "1 hr", exact: true }).click();
-  await next(page);
   await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
   await next(page);
   await fillDetails(page, jane);
@@ -1976,7 +2002,6 @@ test("a free hour takes one hour off a booking of one studio, and is not for sev
   await next(page);
   await byLabel(page, "Date").fill(FREE_HOUR_DAY);
   await page.getByRole("button", { name: "1 hr", exact: true }).click();
-  await next(page);
   await page.getByRole("button", { name: "2:00 PM", exact: true }).click();
   await next(page);
   await fillDetails(page, jane);
@@ -2245,7 +2270,6 @@ test("a client without a photographer books a session, and the photographer cann
   const oneHour = page.getByRole("button", { name: /1 hour · \$375/ });
   await expect(oneHour).toContainText("Studio included. 1–2 outfits, 20 edited images.");
   await oneHour.click();
-  await next(page);
   await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
   await next(page);
   await fillDetails(page, jane);
@@ -2269,7 +2293,6 @@ test("a client without a photographer books a session, and the photographer cann
   await next(page);
   await byLabel(page, "Date").fill(PHOTO_DAY);
   await page.getByRole("button", { name: /1 hour · \$315/ }).click();
-  await next(page);
   await expect(page.getByRole("button", { name: "11:15 AM", exact: true })).toBeVisible();
   for (const taken of ["9:15 AM", "10:00 AM", "11:00 AM"]) {
     await expect(page.getByRole("button", { name: taken, exact: true })).toHaveCount(0);
@@ -2281,7 +2304,6 @@ test("a client without a photographer books a session, and the photographer cann
   await next(page);
   await byLabel(page, "Date").fill(PHOTO_DAY);
   await page.getByRole("button", { name: "1 hr", exact: true }).click();
-  await next(page);
   await expect(page.getByRole("button", { name: "10:00 AM", exact: true })).toBeVisible();
 
   // The owners block the photographer's afternoon.
@@ -2322,15 +2344,14 @@ test("a client without a photographer books a session, and the photographer cann
   await next(page);
   await byLabel(page, "Date").fill(PHOTO_DAY);
   await page.getByRole("button", { name: /1 hour · \$315/ }).click();
-  await next(page);
   await expect(page.getByRole("button", { name: "11:45 AM", exact: true })).toBeVisible();
   for (const blocked of ["1:00 PM", "2:30 PM", "3:45 PM"]) {
     await expect(page.getByRole("button", { name: blocked, exact: true })).toHaveCount(0);
   }
   await expect(page.getByRole("button", { name: "4:00 PM", exact: true })).toBeVisible();
 
-  // The days off are muted in the month calendar of sessions; the day after them can be chosen.
-  await page.getByRole("button", { name: "← Back" }).click();
+  // The days off are muted in the month calendar of sessions, on the same step as the times; the day after them can be
+  // chosen.
   const monthOf = (day: string) => new Date(`${day}T12:00:00Z`).toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
   const title = onScreen(page.locator(".month-cal-title"));
   for (const [day, free] of [[offFrom, false], [offTo, false], [addDays(offTo, 1), true]] as const) {
@@ -2366,7 +2387,6 @@ test("a client without a photographer books a session, and the photographer cann
   await next(page);
   await byLabel(page, "Date").fill(offFrom);
   await page.getByRole("button", { name: /1 hour · \$150/ }).click();
-  await next(page);
   await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
   await next(page);
   await fillDetails(page, jane);

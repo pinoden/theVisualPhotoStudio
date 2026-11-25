@@ -51,7 +51,6 @@ test("every step of a booking can be used with a screen reader and a keyboard", 
   await byLabel(page, "Date").fill(dateAhead(73));
   await page.getByRole("button", { name: "2 hr", exact: true }).click();
   await check("choosing the date and the length");
-  await next(page);
   await page.getByRole("button", { name: "11:00 AM", exact: true }).click();
   await check("choosing the time");
   await next(page);

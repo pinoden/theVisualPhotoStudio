@@ -50,7 +50,7 @@ import {
 } from "@/server/settings";
 import { settingLabel } from "./settings/fields";
 import { addStudioPhotos, moveStudioPhoto, removeStudioPhoto, setStudioFloorPlan } from "@/server/studio-photos";
-import { includedList } from "@/lib/studio-facts";
+import { includedList, sectionList } from "@/lib/studio-facts";
 
 /**
  * Everything the owners can change. Every action starts with `requireOwner`:
@@ -490,6 +490,8 @@ export async function saveStudioDetailsAction(formData: FormData): Promise<void>
       light: text(formData, "light"),
       cyclorama: text(formData, "cyclorama"),
       included: includedList(formText(formData.get("included"))),
+      // The sections' titles and texts, row by row (the studios page's form keeps them in pairs).
+      sections: sectionList(formData.getAll("sectionTitle").map((title, index) => ({ title: formText(title), text: formText(formData.getAll("sectionText")[index] ?? "") }))),
     },
   });
   if (!saved) {

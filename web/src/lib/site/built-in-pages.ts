@@ -84,12 +84,12 @@ function home(): BuiltInPage {
         b("Section", {
           background: "card",
           content: [
-            b("Heading", { eyebrow: "How Booking Works", text: "Two Ways to Book", line: true }),
+            b("Heading", { eyebrow: "How Booking Works", text: "Three Ways to Book", line: true }),
             b("Cards", {
               cards: [
-                { symbol: "✦", title: "Know the studio?", text: "Pick one or more studios and see every time they are free together." },
-                { symbol: "✦", title: "Know the time?", text: "Pick a date and time and see which studios are free then." },
-                { symbol: "✦", title: "Need more space?", text: "Book Paris with Blanche, Paris with Dayglow or all three studios together." },
+                { symbol: "✦", title: "Know the studio?", text: "Pick one or more studios and see every time they are free together.", link: "/book" },
+                { symbol: "✦", title: "Know the time?", text: "Pick a date and time and see which studios are free then.", link: "/book?by=date" },
+                { symbol: "✦", title: "Need more space?", text: "Book Paris with Blanche, Paris with Dayglow or all three studios together.", link: "/book?studio=paris" },
               ],
             }),
           ],
@@ -174,6 +174,24 @@ function rates(): BuiltInPage {
           width: "narrow",
           when: "add-ons",
           content: [b("Heading", { eyebrow: "Extras", text: "Add-ons", line: true }), b("AddonPrices")],
+        }),
+        // Photography's sessions and prices (the owner's brief of 2026-11-24, item 4), from the sessions on sale. Last, so
+        // that the blocks before keep their ids (migration 0070 adds the same to a stored page).
+        b("Section", {
+          background: "card",
+          when: "photography",
+          anchor: "photography",
+          content: [
+            b("Heading", { eyebrow: "Services", text: "Professional Photography", line: true }),
+            b("Text", {
+              text: centred(
+                "Every package comes with the rental of the studio space, and each session is shot with a professional camera. Final images are delivered within 7 to 14 days.",
+              ),
+              width: "narrow",
+            }),
+            b("SessionPrices", { service: "photography", bookLabel: "Book a Session" }),
+            b("Buttons", { buttons: [button("More About Photography", "/services", "outline")] }),
+          ],
         }),
       ],
     },

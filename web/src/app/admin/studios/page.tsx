@@ -343,6 +343,46 @@ async function StudiosAndAddons({ searchParams }: Pick<PageProps<"/admin/studios
                 />
               </div>
             </fieldset>
+            {/* The studio's sections (the owner's brief of 2026-11-24, item 1): those written, and three empty ones to add more. */}
+            <fieldset className="studio-facts-fields studio-sections-fields">
+              <legend className="form-label">More about the studio, in sections (shown on the studios page, each opened by its title)</legend>
+              <p className="avail-hint">
+                A section without a title is not shown, so empty a title to remove its section. In the text, start a line
+                with &ldquo;- &rdquo; to make it a point of a list.
+              </p>
+              {[...studio.facts.sections, ...Array.from({ length: 3 }, () => ({ title: "", text: "" }))]
+                .slice(0, STUDIO_FACT_LIMITS.sections)
+                .map((section, index) => (
+                  <div className="studio-section-field" key={index}>
+                    <div className="form-group">
+                      <label className="form-label" htmlFor={`studio-${studio.slug}-section-${index}-title`}>
+                        Section {index + 1}: title
+                      </label>
+                      <input
+                        id={`studio-${studio.slug}-section-${index}-title`}
+                        name="sectionTitle"
+                        className="form-control"
+                        maxLength={STUDIO_FACT_LIMITS.sectionTitle}
+                        placeholder={index === 0 ? "Furniture" : index === 1 ? "Window layout" : ""}
+                        defaultValue={section.title}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label" htmlFor={`studio-${studio.slug}-section-${index}-text`}>
+                        Section {index + 1}: text
+                      </label>
+                      <textarea
+                        id={`studio-${studio.slug}-section-${index}-text`}
+                        name="sectionText"
+                        className="form-control"
+                        rows={4}
+                        maxLength={STUDIO_FACT_LIMITS.sectionText}
+                        defaultValue={section.text}
+                      />
+                    </div>
+                  </div>
+                ))}
+            </fieldset>
             <div className="admin-form-row">
               <button type="submit" className="btn btn-dark btn-small">
                 Save {studio.name}

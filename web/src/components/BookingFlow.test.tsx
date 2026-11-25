@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -226,7 +226,6 @@ describe("studio-first flow", () => {
     await pickDuration("1 hr");
     // ($88 + $68) less the 20% two-studio discount
     expect(screen.getByText("Estimated total").nextElementSibling?.textContent).toBe("$124.80");
-    await next();
 
     await pickTime("10:00 AM");
     await next();
@@ -297,7 +296,6 @@ describe("studio-first flow", () => {
     await next();
     pickDate(WED);
     await pickDuration("1 hr");
-    await next();
     await pickTime("9:00 AM");
     await next();
     await typeDetails();
@@ -343,7 +341,6 @@ describe("studio-first flow", () => {
     await next();
     pickDate(WED);
     await pickDuration("1 hr");
-    await next();
     await pickTime("9:00 AM");
     await next();
     await fillDetails();
@@ -432,7 +429,6 @@ describe("studio-first flow", () => {
     await next();
     expect(screen.getByRole("alert").textContent).toBe("Please select a duration.");
     await pickDuration("2 hr");
-    await next();
     await screen.findByRole("button", { name: "9:00 AM" });
     await next();
     expect(screen.getByRole("alert").textContent).toBe("Please select a time.");
@@ -462,7 +458,6 @@ describe("studio-first flow", () => {
     await next();
     pickDate(WED);
     await pickDuration("1 hr");
-    await next();
     await pickTime("9:00 AM");
     await next();
     const box = (await screen.findByRole("checkbox", { name: /Angel wings/ })) as HTMLInputElement;
@@ -491,7 +486,6 @@ describe("studio-first flow", () => {
     await next();
     pickDate(WED);
     await pickDuration("1 hr");
-    await next();
     await pickTime("9:00 AM");
     await next();
     expect(await screen.findByRole("img", { name: "A pair of white feathered angel wings" })).toBeTruthy();
@@ -506,7 +500,6 @@ describe("studio-first flow", () => {
     await next();
     pickDate(WED);
     await pickDuration("1 hr");
-    await next();
     await pickTime("9:00 AM");
     await next();
     await user.click(screen.getByRole("checkbox", { name: /Pet fee/ }));
@@ -522,7 +515,6 @@ describe("studio-first flow", () => {
     await next();
     pickDate(WED);
     await pickDuration("1 hr");
-    await next();
     await pickTime("9:00 AM");
     await next();
     expect(screen.queryByRole("checkbox", { name: /Pet fee/ })).toBeNull();
@@ -535,7 +527,6 @@ describe("studio-first flow", () => {
     await next();
     pickDate(WED);
     await pickDuration("1 hr");
-    await next();
     await pickTime("9:00 AM");
     await next();
     const guests = screen.getByRole("combobox", { name: "Extra guest" }) as HTMLSelectElement;
@@ -558,7 +549,6 @@ describe("studio-first flow", () => {
     await next();
     pickDate(WED);
     await pickDuration("1 hr");
-    await next();
     await pickTime("9:00 AM");
     await next();
     await fillDetails();
@@ -581,7 +571,6 @@ describe("studio-first flow", () => {
     await next();
     pickDate(WED);
     await pickDuration("1 hr");
-    await next();
     await pickTime("9:00 AM");
     await next();
     await fillDetails();
@@ -599,7 +588,6 @@ describe("studio-first flow", () => {
     await next();
     pickDate(WED);
     await pickDuration("1 hr");
-    await next();
     await pickTime("9:00 AM");
     await next();
     await fillDetails();
@@ -626,7 +614,6 @@ describe("studio-first flow", () => {
     await next();
     pickDate(WED);
     await pickDuration("1 hr");
-    await next();
     await pickTime("9:00 AM");
     await next();
     await typeDetails();
@@ -640,9 +627,7 @@ describe("studio-first flow", () => {
     // Back to the studios, to add a second one: the free hour is for one studio only.
     await back();
     await back();
-    await back();
     await user.click(studioBox("Studio Blanche"));
-    await next();
     await next();
     await pickTime("9:00 AM");
     await next();
@@ -667,16 +652,14 @@ describe("studio-first flow", () => {
     await user.click(studioBox("Studio Paris"));
     await next();
     // The button that was pressed is gone with its step: the focus is on the new step's heading, not lost.
-    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Select date & duration" }));
+    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Select date, duration & time" }));
     pickDate(WED);
     await pickDuration("1 hr");
-    await next();
-    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Choose a time" }));
     await pickTime("9:00 AM");
     await next();
     expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Your details" }));
     await user.click(screen.getByRole("button", { name: /Back/ }));
-    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Choose a time" }));
+    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Select date, duration & time" }));
     await next();
 
     await typeDetails();
@@ -693,14 +676,13 @@ describe("studio-first flow", () => {
     await next();
     pickDate(WED);
     await pickDuration("1 hr");
-    await next();
     const group = await screen.findByRole("group", { name: "Start times" });
     const times = within(group).getAllByRole("button");
     const stops = () => times.filter((button) => button.tabIndex === 0);
     expect(times.length).toBeGreaterThan(3);
-    // From the step's heading, which has the focus, Tab reaches the first time, and no other.
+    // The times are one stop of the keyboard, the first of them (they share the step with the calendar since 2026-11-24).
     expect(stops()).toEqual([times[0]]);
-    await user.tab();
+    act(() => times[0].focus());
     expect(document.activeElement).toBe(times[0]);
     await user.keyboard("{ArrowRight}{ArrowRight}");
     expect(document.activeElement).toBe(times[2]);
@@ -729,7 +711,6 @@ describe("studio-first flow", () => {
     await next();
     pickDate(WED);
     await pickDuration("1 hr");
-    await next();
     await pickTime("9:00 AM");
     await next();
     await fillDetails();
@@ -754,7 +735,6 @@ describe("studio-first flow", () => {
     await next();
     pickDate(WED);
     await pickDuration("1 hr");
-    await next();
     await pickTime("9:00 AM");
     await next();
     await fillDetails();
@@ -782,7 +762,6 @@ describe("studio-first flow", () => {
     await next();
     pickDate(WED);
     await pickDuration("1 hr");
-    await next();
     await pickTime("9:00 AM");
     await next();
     await fillDetails();
@@ -800,7 +779,6 @@ describe("time-first flow", () => {
     await user.click(screen.getByRole("radio", { name: /I want to choose the date first/ }));
     pickDate(WED);
     await pickDuration("1 hr");
-    await next();
     await pickTime("10:00 AM");
     await next();
 
@@ -884,7 +862,6 @@ describe("time-first flow", () => {
     await user.click(screen.getByRole("radio", { name: /I want to choose the date first/ }));
     pickDate(WED);
     await pickDuration("1 hr");
-    await next();
     await pickTime("9:00 AM");
     await next();
     await user.click(studioBox("Studio Paris"));
@@ -969,7 +946,6 @@ describe("the photography flow", () => {
     await next();
     pickDate(WED);
     await user.click(screen.getByRole("button", { name: /2 hours · \$575/ }));
-    await next();
     expect(await screen.findByText("No times are available on this date. Please try another day.")).toBeTruthy();
   });
 
@@ -979,7 +955,6 @@ describe("the photography flow", () => {
     await next();
     pickDate(WED);
     await pickDuration("1 hr");
-    await next();
     await pickTime("9:00 AM");
     expect(availabilityAsked).not.toContain("photography");
     await next();
@@ -987,5 +962,49 @@ describe("the photography flow", () => {
     await next();
     await user.click(await screen.findByRole("button", { name: "Confirm & pay $68" }));
     expect(posted[0]).toMatchObject({ photography: false, expectedTotalCents: 6800 });
+  });
+});
+
+/** The owner's brief of 2026-11-24, item 3: the start times on the same step as the month calendar. */
+describe("the day and its times, on one step", () => {
+  it("shows the chosen day's start times beside the calendar, and another day's at once, with no going back", async () => {
+    render(<BookingFlow catalog={catalog} navigate={nav.push} />);
+    await user.click(studioBox("Studio Paris"));
+    await next();
+    await pickDuration("1 hr");
+    expect(screen.getByText("Choose a day to see its start times.")).toBeTruthy();
+    pickDate(WED);
+    expect(await screen.findByText("Start times, Wednesday, January 9, 2030")).toBeTruthy();
+    expect(await screen.findByRole("button", { name: /^9:00 AM/ })).toBeTruthy(); // a weekday opens at 9
+    // Another day, on the same step: its times replace the first day's, and the time chosen is let go.
+    await pickTime("10:00 AM");
+    pickDate(SAT);
+    expect(await screen.findByText("Start times, Saturday, January 12, 2030")).toBeTruthy();
+    expect(await screen.findByRole("button", { name: /^8:00 AM/ })).toBeTruthy(); // a weekend day at 8
+    expect(availabilityAsked).toContain(`date=${SAT}`);
+    expect(screen.getByRole("heading", { name: "Select date, duration & time" })).toBeTruthy();
+    await next();
+    expect(screen.getByRole("alert").textContent).toBe("Please select a time.");
+    await pickTime("8:00 AM");
+    await next();
+    expect(screen.getByRole("heading", { name: "Your details" })).toBeTruthy();
+  });
+
+  it("says a past day has passed without asking the server", async () => {
+    render(<BookingFlow catalog={catalog} navigate={nav.push} />);
+    await user.click(studioBox("Studio Paris"));
+    await next();
+    await pickDuration("1 hr");
+    const calls = availabilityCalls;
+    pickDate("2001-01-03");
+    expect(await screen.findByText("That date has already passed.")).toBeTruthy();
+    expect(availabilityCalls).toBe(calls);
+  });
+
+  it("opens on the date-first path from a link with ?by=date, as the home page's \"Know the time?\" does", () => {
+    nav.search = "by=date";
+    render(<BookingFlow catalog={catalog} navigate={nav.push} />);
+    expect(screen.getByRole("radio", { name: /I want to choose the date first/ }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("heading", { name: "Select date, duration & time" })).toBeTruthy();
   });
 });
