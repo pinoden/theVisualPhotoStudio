@@ -2,6 +2,7 @@ import { and, asc, desc, eq, gte, inArray, lt, ne, sql } from "drizzle-orm";
 import {
   addons,
   bookings,
+  bundlePrices,
   loyaltyLedger,
   payments,
   priceRules,
@@ -17,7 +18,7 @@ import {
 import { together, type Db, type DbLike } from "@/db/client";
 import { isAdminLevel, type AdminLevel } from "@/lib/abilities";
 import { isAddonKind, type AddonKind } from "@/lib/addon-kinds";
-import type { PromoKind } from "@/lib/domain/pricing";
+import { bundleKey, type PromoKind } from "@/lib/domain/pricing";
 import { promoDaysInWords, promoDaysProblem, readPromoDays, type PromoDays } from "@/lib/domain/promo-days";
 import { isIsoDate, type DayType, type IsoDate } from "@/lib/domain/time";
 import { PROMO_CODE_RULE } from "@/lib/parse";
@@ -170,6 +171,33 @@ export async function savePrice(
     });
   return true;
 }
+
+/**
+ * The price of studios booked together for one length, the same on every day (`bundle_prices`); null takes that length
+ * off the bundle's list. The studios are two or more that exist, each once. Whether they may be booked together at all
+ * is the booking's rule (`studioCombinationError`), which the page that calls this follows.
+ */
+export async function saveBundlePrice(db: DbLike, input: { studioIds: string[]; durationMinutes: number; priceCents: number | null }): Promise<boolean> {
+  const { studioIds, durationMinutes, priceCents } = input;
+  if (studioIds.length < 2 || new Set(studioIds).size !== studioIds.length || !studioIds.every((id) => UUID_RULE.test(id))) return false;
+  if (!Number.isInteger(durationMinutes) || durationMinutes < 15 || durationMinutes > 1440 || durationMinutes % 15 !== 0) return false;
+  const found = await db.select({ id: studios.id }).from(studios).where(inArray(studios.id, studioIds));
+  if (found.length !== studioIds.length) return false;
+  const studioKey = bundleKey(studioIds);
+
+  if (priceCents === null) {
+    await db.delete(bundlePrices).where(and(eq(bundlePrices.studioKey, studioKey), eq(bundlePrices.durationMinutes, durationMinutes)));
+    return true;
+  }
+  if (!Number.isInteger(priceCents) || priceCents < 0 || priceCents > PRICE_MAX_CENTS) return false;
+  await db
+    .insert(bundlePrices)
+    .values({ studioKey, durationMinutes, priceCents })
+    .onConflictDoUpdate({ target: [bundlePrices.studioKey, bundlePrices.durationMinutes], set: { priceCents } });
+  return true;
+}
+
+const UUID_RULE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /** Price a date as a weekend or weekday regardless of the calendar, or clear that (dayType null). */
 export async function setSpecialDate(db: DbLike, day: string, dayType: DayType | null, note = ""): Promise<boolean> {

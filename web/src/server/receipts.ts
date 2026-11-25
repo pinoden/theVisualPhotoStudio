@@ -1,3 +1,4 @@
+import { studioPriceLines } from "@/lib/domain/pricing";
 import { durationLabel } from "@/lib/domain/time";
 import { SERVICE_WORDS } from "@/lib/domain/services";
 import { and, asc, desc, eq, inArray, notInArray } from "drizzle-orm";
@@ -106,7 +107,7 @@ export interface Unpaid {
 }
 
 function linesOf(booking: BookingView): ReceiptLine[] {
-  const lines: ReceiptLine[] = booking.studios.map((studio) => ({
+  const lines: ReceiptLine[] = studioPriceLines(booking.studios, booking.multiStudioDiscountCents).map((studio) => ({
     label: booking.photography ? `${SERVICE_WORDS[booking.photography.service].Session}, ${studio.name} (studio included)` : studio.name,
     cents: studio.priceCents,
   }));

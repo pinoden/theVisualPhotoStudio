@@ -36,6 +36,7 @@ const catalog: Catalog = {
     studio(P, "paris", "Studio Paris"),
   ],
   rules: [],
+  bundlePrices: [],
   addons: [],
   settings: DEFAULT_SETTINGS,
   specialDates: {},
@@ -104,5 +105,41 @@ describe("the website fixes of 2026-11-24", () => {
     // A block saved before the terms' link existed leads to the memberships page's terms.
     expect(paris).toContain('<a class="membership-terms-link" href="/memberships#terms">Membership terms</a>');
     expect(drawn([block("MembershipPlans", { hourly: false, benefits: [], termsLabel: "" })])).not.toMatch(/an hour|membership-benefits|membership-terms-link/);
+  });
+});
+
+describe("the bundles' prices (the brief's item 4; the owner's answers of 2026-11-25)", () => {
+  const bundlePrices = [
+    { studioIds: [B, D, P], durationMinutes: 60, priceCents: 18000 },
+    { studioIds: [D, P], durationMinutes: 120, priceCents: 23000 },
+    { studioIds: [D, P], durationMinutes: 60, priceCents: 11500 },
+    { studioIds: [D, P], durationMinutes: 90, priceCents: 17300, between: true as const },
+  ];
+  const withBundles = { ...site, catalog: { ...catalog, bundlePrices } } as SiteContext;
+  const draw = (blocks: StoredBlock[], context: SiteContext = withBundles) => renderToStaticMarkup(<PageBlocks blocks={blocks} site={context} />);
+
+  it("are a card for each bundle, with the lengths the owners list, the guests included and a button that books it", () => {
+    const html = draw([block("BundlePrices")]);
+    const cards = html.match(/<section class="rate-card" aria-label="([^"]+)"/g)?.map((tag) => /aria-label="([^"]+)"/.exec(tag)![1]);
+    expect(cards).toEqual(["Paris + Dayglow", "All three studios"]);
+    const two = html.slice(0, html.indexOf('aria-label="All three studios"'));
+    expect(two).toContain('<div class="rate-price">$115</div><div class="rate-unit">per hour</div>');
+    expect(two).toMatch(/<td[^>]*>1 hour<\/td><td>\$115<\/td>.*<td[^>]*>2 hours<\/td><td>\$230<\/td>/);
+    expect(two).not.toContain("1.5 hours"); // a length between is booked, not listed
+    expect(two).toContain("Up to 12 guests included."); // six each
+    expect(two).toContain('href="/book?studio=dayglow,paris"');
+    expect(two).toContain('aria-label="Book Now: Paris + Dayglow"');
+  });
+
+  it("show visitors nothing while no bundle has prices", () => {
+    expect(draw([block("BundlePrices")], site)).toBe("");
+  });
+
+  it("say under the studios' prices that the lengths between can be booked, while the owners sell them", () => {
+    const note = "Need a different length? The lengths between the ones listed can be booked too";
+    expect(draw([block("RateCards")])).toContain(`<p class="rates-note">${note}`);
+    const listedOnly = { ...site, catalog: { ...catalog, settings: { ...DEFAULT_SETTINGS, betweenLengthsMinutes: 0 } } } as SiteContext;
+    expect(draw([block("RateCards")], listedOnly)).not.toContain("rates-note");
+    expect(draw([block("RateCards", { betweenNote: "" })])).not.toContain("rates-note");
   });
 });

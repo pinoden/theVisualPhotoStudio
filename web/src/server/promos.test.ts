@@ -221,7 +221,7 @@ describe("checking a code before paying", () => {
 
   it("prices a selection without a code, and refuses selections that have no price", async () => {
     expect(expectOk(await quoteSelection(world.db, selection(), NOW)).quote.totalCents).toBe(17600);
-    expect(await quoteSelection(world.db, { ...selection(), durationMinutes: 150 }, NOW)).toMatchObject({ ok: false, code: "invalid_price" });
+    expect(await quoteSelection(world.db, { ...selection(), durationMinutes: 75 }, NOW)).toMatchObject({ ok: false, code: "invalid_price" });
     expect(await quoteSelection(world.db, { ...selection(), date: "2026-02-30" }, NOW)).toMatchObject({ ok: false, code: "invalid_input" });
     expect(await quoteSelection(world.db, { studioIds: [] }, NOW)).toMatchObject({ ok: false, code: "invalid_input" });
   });

@@ -33,6 +33,7 @@ export const CONDITIONS = {
   "getting in": { yes: "how to get in is written under Settings", no: "how to get in is not written yet" },
   photography: { yes: "a photography session can be booked", no: "no photography session can be booked" },
   "several studios offer": { yes: "booking several studios together costs less", no: "booking several studios together costs the same" },
+  "bundle prices": { yes: "bundles have prices of their own", no: "no bundle has prices of its own" },
 } as const;
 
 export type ConditionName = keyof typeof CONDITIONS;
@@ -54,6 +55,7 @@ export function conditionsOf(catalog: Catalog): Record<ConditionName, boolean> {
     "getting in": catalog.accessInfoSent,
     photography: sessionsOf(catalog.photoPackages, "photography").length > 0,
     "several studios offer": multiStudioOffer(catalog) !== "",
+    "bundle prices": catalog.bundlePrices.length > 0,
   };
 }
 

@@ -498,6 +498,20 @@
       "when": 1795577633956,
       "tag": "0070_rates_photography",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1795587774655,
+      "tag": "0071_bundle_prices",
+      "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1795587797939,
+      "tag": "0072_rates_bundles",
+      "breakpoints": true
     }
   ]
 }

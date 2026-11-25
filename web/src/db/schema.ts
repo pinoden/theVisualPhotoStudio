@@ -292,6 +292,27 @@ export const priceRules = pgTable(
   (t) => [uniqueIndex("price_rules_unique").on(t.studioId, t.dayType, t.durationMinutes)],
 );
 
+/**
+ * The owners' prices for studios booked together, one for each length, the same on every day (the owner's brief of
+ * 2026-11-24 and answers of 2026-11-25; question 81 in ProjectLibrary.md). `studioKey` names the studios: their ids,
+ * sorted, joined by "+" (`bundleKey` in src/lib/domain/pricing.ts). Studios with a row here are a bundle with a price list
+ * of its own; those without pay their own prices less the discount by number (`multiStudioPercent`).
+ */
+export const bundlePrices = pgTable(
+  "bundle_prices",
+  {
+    id: id(),
+    studioKey: text("studio_key").notNull(),
+    durationMinutes: integer("duration_minutes").notNull(),
+    priceCents: integer("price_cents").notNull(),
+  },
+  (t) => [
+    uniqueIndex("bundle_prices_unique").on(t.studioKey, t.durationMinutes),
+    check("bundle_prices_minutes", sql`${t.durationMinutes} > 0`),
+    check("bundle_prices_price", sql`${t.priceCents} >= 0`),
+  ],
+);
+
 /** Dates priced as a different day type than the calendar says (holidays). */
 export const specialDates = pgTable("special_dates", {
   day: date("day", { mode: "string" }).primaryKey(),

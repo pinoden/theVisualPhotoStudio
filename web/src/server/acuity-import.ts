@@ -4,7 +4,7 @@ import { bookings, payments, photographerHolds, photographers, studioHolds, stud
 import { pgErrorCode, PG_EXCLUSION_VIOLATION, PG_UNIQUE_VIOLATION, type Db, type DbLike, type Tx } from "@/db/client";
 import { ACUITY_HISTORY_SOURCE, ACUITY_SOURCE, studiosOfAppointment, type AcuityAppointment } from "@/lib/acuity";
 import { studioCombinationError } from "@/lib/catalog-view";
-import { findPrice, formatCents } from "@/lib/domain/pricing";
+import { findPrice, formatCents, shareOf } from "@/lib/domain/pricing";
 import { minutesToLabel } from "@/lib/domain/time";
 import { formText } from "@/lib/parse";
 import { ACUITY_METHOD, MANUAL_PROVIDER } from "@/lib/payment-methods";
@@ -317,16 +317,6 @@ async function importOne(tx: Tx, appointment: AcuityAppointment, { catalog, phot
       throw error;
     }
   }
-}
-
-/** `total` shared in proportion to `weights` (a null or zero one: evenly), in whole cents that add up to it. */
-export function shareOf(total: number, weights: readonly (number | null)[]): number[] {
-  const usable = weights.every((weight) => weight !== null && weight > 0);
-  const base = usable ? (weights as number[]) : weights.map(() => 1);
-  const sum = base.reduce((all, weight) => all + weight, 0);
-  const shares = base.map((weight) => Math.floor((total * weight) / sum));
-  shares[0] += total - shares.reduce((all, share) => all + share, 0);
-  return shares;
 }
 
 /** What holds the studios or the photographer for an appointment that could not be held: for the report. */

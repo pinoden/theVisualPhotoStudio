@@ -13,13 +13,16 @@ import {
   studiosFreeAt,
   type SlotOptions,
 } from "@/lib/domain/availability";
-import { extraGuestsFor, multiStudioSaving, studioCombinationError } from "@/lib/catalog-view";
+import { bundleOffer, extraGuestsFor, multiStudioSaving, studioCombinationError } from "@/lib/catalog-view";
 import type { PromoDays } from "@/lib/domain/promo-days";
 import { MonthCalendar } from "./MonthCalendar";
 import { WaitlistJoin } from "./WaitlistJoin";
 import {
   bookableDurations,
+  bundleList,
   findPrice,
+  studioPriceLines,
+  unpriced,
   formatCents,
   promoMisfitText,
   quote,
@@ -254,7 +257,7 @@ export function BookingFlow({
 
   const steps = ORDER[mode];
   const step = steps[stepIndex];
-  const { settings, rules } = catalog;
+  const { settings, rules, bundlePrices } = catalog;
 
   const dayType: DayType = date ? (catalog.specialDates[date] ?? defaultDayType(date)) : "weekday";
   /**
@@ -290,12 +293,27 @@ export function BookingFlow({
     if (mode === "studio") {
       // The length is chosen before the day: every length the studios are priced for on some kind of day. Once a day is
       // chosen, those of its kind of day, which the month calendar only offers days for.
-      if (date) return bookableDurations(studioIds, dayType, rules);
-      return [...new Set([...bookableDurations(studioIds, "weekday", rules), ...bookableDurations(studioIds, "weekend", rules)])].sort((a, b) => a - b);
+      if (date) return bookableDurations(studioIds, dayType, rules, bundlePrices);
+      return [...new Set([...bookableDurations(studioIds, "weekday", rules, bundlePrices), ...bookableDurations(studioIds, "weekend", rules, bundlePrices)])].sort((a, b) => a - b);
     }
-    const all = new Set(rules.filter((r) => r.dayType === dayType).map((r) => r.durationMinutes));
+    // The time first: every length a studio or a bundle is priced for on that kind of day.
+    const all = new Set([...rules.filter((r) => r.dayType === dayType), ...bundlePrices].map((r) => r.durationMinutes));
     return [...all].sort((a, b) => a - b);
-  }, [photography, packages, mode, studioIds, date, dayType, rules]);
+  }, [photography, packages, mode, studioIds, date, dayType, rules, bundlePrices]);
+
+  /** The chosen studios' own price list together, when the owners gave them one: the same on every day. */
+  const together = useMemo(() => (photography ? [] : bundleList(studioIds, bundlePrices)), [photography, studioIds, bundlePrices]);
+  /**
+   * The lengths the price lists name, which the buttons offer. The lengths between them (the owners' setting,
+   * `betweenLengthsMinutes`) are in a list under the buttons, so that the buttons stay few.
+   */
+  const listedDurations = useMemo(() => {
+    if (photography) return durations;
+    const rows = mode === "studio" ? (together.length > 0 ? together : rules.filter((r) => studioIds.includes(r.studioId))) : [...rules, ...bundlePrices];
+    const listed = new Set(rows.filter((r) => !r.between).map((r) => r.durationMinutes));
+    return durations.filter((minutes) => listed.has(minutes));
+  }, [photography, durations, mode, together, rules, bundlePrices, studioIds]);
+  const otherDurations = useMemo(() => durations.filter((minutes) => !listedDurations.includes(minutes)), [durations, listedDurations]);
 
   /** A chosen duration stops counting once the current selection no longer offers it. */
   const duration = durations.includes(durationChoice) ? durationChoice : 0;
@@ -314,10 +332,13 @@ export function BookingFlow({
     [availability, duration, settings.slotIncrementMinutes],
   );
 
-  /** Studios that have a price for the chosen duration on this kind of day. */
+  /** Studios that have a price for the chosen duration on this kind of day: their own, or one with other studios. */
   const pricedStudioIds = useMemo(
-    () => catalog.studios.filter((s) => findPrice(s.id, dayType, duration, rules) !== null).map((s) => s.id),
-    [catalog.studios, dayType, duration, rules],
+    () =>
+      catalog.studios
+        .filter((s) => findPrice(s.id, dayType, duration, rules) !== null || bundlePrices.some((price) => price.durationMinutes === duration && price.studioIds.includes(s.id)))
+        .map((s) => s.id),
+    [catalog.studios, dayType, duration, rules, bundlePrices],
   );
 
   const grid = useMemo(() => {
@@ -374,7 +395,7 @@ export function BookingFlow({
   const takenText = (addonId: string) => (awayOf(addonId) ? "Not available on this day." : "Already reserved at this time.");
   const mostOf = (addon: (typeof catalog.addons)[number]) =>
     Math.min(addon.kind === "people" ? Math.min(addon.maxQuantity, guestsAllowed) : addon.maxQuantity, freeOf(addon.id) ?? Number.POSITIVE_INFINITY);
-  const studioOffer = multiStudioSaving(catalog);
+  const studioOffer = multiStudioSaving(catalog) || bundleOffer(catalog);
   const combinationError = studioCombinationError(catalog.studios, studioIds);
 
   // A code is tied to an email address, so it stops applying if the address changes.
@@ -396,6 +417,7 @@ export function BookingFlow({
         dayType,
         durationMinutes: duration,
         rules,
+        bundlePrices,
         multiStudioPercent: settings.multiStudioPercent,
         addonCatalog: catalog.addons,
         extraGuestsAllowed: guestsAllowed,
@@ -413,7 +435,7 @@ export function BookingFlow({
     }
     // availableAddons, guestsAllowed and mostOf are derived from studioIds and the catalog.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [studioIds, date, dayType, duration, rules, settings.multiStudioPercent, catalog.addons, addonCounts, promo, member, photography, session, combinationError]);
+  }, [studioIds, date, dayType, duration, rules, bundlePrices, settings.multiStudioPercent, catalog.addons, addonCounts, promo, member, photography, session, combinationError]);
 
   const needsCard = price !== null && price.totalCents > 0;
   // The payment configuration and Square's card form, on the payment step of a booking that costs money.
@@ -628,7 +650,13 @@ export function BookingFlow({
   function validate(current: Step): string {
     switch (current) {
       case "studios":
-        return studioIds.length === 0 ? "Please select at least one studio." : (combinationError ?? "");
+        if (studioIds.length === 0) return "Please select at least one studio.";
+        if (combinationError) return combinationError;
+        // The time first: the length was chosen before the studios, and not every studio or bundle is sold for it.
+        if (!photography && mode === "time" && duration > 0 && unpriced(studioIds, dayType, duration, rules, bundlePrices)) {
+          return `${chosenNames} ${studioIds.length > 1 ? "are not offered together" : "is not offered by itself"} for ${durationLabel(duration)}. Choose other studios, or go back and choose another length.`;
+        }
+        return "";
       case "when":
         if (!date) return "Please select a date.";
         if (!duration) return "Please select a duration.";
@@ -759,6 +787,9 @@ export function BookingFlow({
   const studioName = (id: string) => catalog.studios.find((s) => s.id === id)?.name ?? "";
   const chosenNames = studioIds.map(studioName).join(" + ");
 
+  // Studios with one price together are one line (`studioPriceLines`).
+  const studioLines = price ? studioPriceLines(price.studioLines.map((line) => ({ name: studioName(line.studioId), priceCents: line.priceCents })), price.multiStudioDiscountCents) : [];
+
   const summary = price && start !== null && (
     <div className="price-summary">
       <div className="price-row">
@@ -767,11 +798,11 @@ export function BookingFlow({
           {longDateLabel(date)}, {minutesToLabel(start)} – {minutesToLabel(start + duration)}
         </span>
       </div>
-      {price.studioLines.map((line) => (
-        <div className="price-row" key={line.studioId}>
+      {studioLines.map((line) => (
+        <div className="price-row" key={line.name}>
           <span>
             {session && `${words.Session}, `}
-            {studioName(line.studioId)}, {durationLabel(duration)}
+            {line.name}, {durationLabel(duration)}
             {session && (
               <>
                 <br />
@@ -916,7 +947,7 @@ export function BookingFlow({
     <div className="form-group">
       <span className="form-label">Duration</span>
       <div className="duration-grid">
-        {durations.map((minutes) => (
+        {listedDurations.map((minutes) => (
           <button
             type="button"
             key={minutes}
@@ -929,6 +960,23 @@ export function BookingFlow({
         ))}
         {durations.length === 0 && <p style={{ fontSize: ".85rem" }}>No durations are offered for this selection.</p>}
       </div>
+      {otherDurations.length > 0 && (
+        <select
+          className={`form-control duration-other${otherDurations.includes(duration) ? " selected" : ""}`}
+          aria-label="Another length"
+          value={otherDurations.includes(duration) ? String(duration) : ""}
+          onChange={(event) => {
+            if (event.target.value) chooseDuration(Number(event.target.value));
+          }}
+        >
+          <option value="">Another length…</option>
+          {otherDurations.map((minutes) => (
+            <option key={minutes} value={minutes}>
+              {durationLabel(minutes)}
+            </option>
+          ))}
+        </select>
+      )}
     </div>
   );
 
@@ -1104,7 +1152,9 @@ export function BookingFlow({
                         : unavailable
                           ? "Not available at this time"
                           : cents === null
-                            ? ""
+                            ? mode === "time" && pricedStudioIds.includes(studio.id)
+                              ? `For ${durationLabel(duration)}, in a bundle only`
+                              : ""
                             : mode === "time"
                               ? `${formatCents(cents)} for ${durationLabel(duration)}`
                               : `From ${formatCents(cents)} / hour`}
@@ -1114,7 +1164,13 @@ export function BookingFlow({
               );
             })}
           </div>
-          {!photography && studioOffer && <p style={{ fontSize: ".85rem" }}>{studioOffer}.</p>}
+          {!photography && together.length > 0 && price && mode === "time" ? (
+            <p style={{ fontSize: ".85rem" }} role="status">
+              {chosenNames} together: {formatCents(price.studiosSubtotalCents)} for {durationLabel(duration)}.
+            </p>
+          ) : (
+            !photography && studioOffer && <p style={{ fontSize: ".85rem" }}>{studioOffer}.</p>
+          )}
           {actions(nextLabelFor("studios"))}
         </div>
       )}
@@ -1158,12 +1214,13 @@ export function BookingFlow({
           )}
           {mode === "studio" && price && (
             <div className="price-summary">
-              {price.studioLines.map((line) => (
-                <div className="price-row" key={line.studioId}>
+              {studioLines.map((line) => (
+                <div className="price-row" key={line.name}>
                   <span>
                     {session && `${words.Session}, `}
-                    {studioName(line.studioId)}, {durationLabel(duration)}
-                    {date && !session ? ` (${dayType})` : ""}
+                    {line.name}, {durationLabel(duration)}
+                    {/* A bundle's own prices are the same on every day. */}
+                    {date && !session && together.length === 0 ? ` (${dayType})` : ""}
                   </span>
                   <span>{formatCents(line.priceCents)}</span>
                 </div>

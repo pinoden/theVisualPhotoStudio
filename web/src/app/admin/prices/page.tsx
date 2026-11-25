@@ -2,13 +2,13 @@ import type { Metadata } from "next";
 import { connection } from "next/server";
 import { Suspense } from "react";
 import { getDb } from "@/db/client";
-import { priceTable } from "@/lib/catalog-view";
+import { bundleName, bundleTables, priceTable, studioCombinationError } from "@/lib/catalog-view";
 import { durationLabel, longDateLabel } from "@/lib/domain/time";
 import { centsToInput, PRICE_FIELD } from "@/lib/parse";
 import { loadCatalog } from "@/server/catalog";
 import { requireOwner } from "@/server/session";
 import { localDateOf } from "@/server/tz";
-import { addDurationAction, saveDiscountAction, savePricesAction, specialDateAction } from "../actions";
+import { addBundleLengthAction, addDurationAction, saveBetweenLengthsAction, saveBundlePricesAction, saveDiscountAction, savePricesAction, specialDateAction } from "../actions";
 import { AdminFrame, AdminLoading } from "../frame";
 
 export const metadata: Metadata = { title: "Prices", robots: { index: false } };
@@ -30,6 +30,15 @@ async function Prices({ searchParams }: Pick<PageProps<"/admin/prices">, "search
   const special = Object.entries(catalog.specialDates)
     .filter(([day]) => day >= today)
     .sort(([a], [b]) => (a < b ? -1 : 1));
+  // The studios that can be booked together: every two or more of them the booking screen takes, the fewest first.
+  const tables = bundleTables(catalog);
+  const bundles = catalog.studios
+    .reduce<string[][]>((sets, studio) => [...sets, ...sets.map((set) => [...set, studio.id])], [[]])
+    .filter((ids) => ids.length > 1 && !studioCombinationError(catalog.studios, ids))
+    .map((ids) => ({ ids, name: bundleName(catalog, ids), prices: tables.find((table) => table.studioIds.length === ids.length && ids.every((id) => table.studioIds.includes(id)))?.prices ?? [] }))
+    // As the Rates page lists them: the fewest studios first, then the cheapest; one without prices after those with.
+    .sort((a, b) => a.ids.length - b.ids.length || (a.prices[0]?.priceCents ?? Infinity) - (b.prices[0]?.priceCents ?? Infinity));
+  const between = catalog.settings.betweenLengthsMinutes;
 
   return (
     <AdminFrame active="/admin/prices" title="Prices" query={await searchParams}>
@@ -37,8 +46,29 @@ async function Prices({ searchParams }: Pick<PageProps<"/admin/prices">, "search
         <h3>How prices work</h3>
         <p style={{ fontSize: ".875rem", margin: 0 }}>
           Each studio has a price for every duration it offers, once for Monday to Friday and once for Saturday and
-          Sunday. A customer can only book the durations listed. Clear a price to stop offering that duration on that
-          kind of day.
+          Sunday. Studios booked together have a price list of their own, further down, the same on every day. Clear a
+          price to take that duration off the list.
+        </p>
+        <form action={saveBetweenLengthsAction} className="admin-form-row" style={{ marginTop: "1rem", marginBottom: 0 }}>
+          <div className="form-group">
+            <label className="form-label" htmlFor="between-lengths">
+              Lengths between the listed ones
+            </label>
+            <select id="between-lengths" name="betweenLengthsMinutes" className="form-control" defaultValue={between}>
+              <option value={30}>Can be booked, every half hour</option>
+              <option value={60}>Can be booked, every whole hour</option>
+              <option value={0}>Cannot be booked: only the durations listed</option>
+            </select>
+          </div>
+          <button type="submit" className="btn btn-dark btn-small">
+            Save
+          </button>
+        </form>
+        <p style={{ fontSize: ".8rem", margin: ".75rem 0 0" }}>
+          A length in between is priced between its two neighbours and rounded to a whole dollar: with 2 hours at $230 and
+          3 hours at $320, 2.5 hours costs $275. Nothing shorter than the shortest duration listed or longer than the
+          longest can be booked: to sell a longer booking, add its duration. A duration you list always costs what you
+          typed.
         </p>
       </div>
 
@@ -115,8 +145,76 @@ async function Prices({ searchParams }: Pick<PageProps<"/admin/prices">, "search
         </div>
       ))}
 
+      {bundles.map((bundle) => (
+        <div className="admin-card" key={bundle.ids.join("+")}>
+          <h3>{bundle.name}</h3>
+          <p style={{ fontSize: ".875rem" }}>
+            {bundle.ids.map((id) => catalog.studios.find((studio) => studio.id === id)?.name).join(" + ")}, booked together.{" "}
+            {bundle.prices.length > 0
+              ? "One price for each duration, the same on every day of the week."
+              : "No prices of their own yet: together they cost each studio's own price, less the discount below. Add a duration to give them a price list."}
+          </p>
+          {bundle.prices.length > 0 && (
+            <form action={saveBundlePricesAction}>
+              <input type="hidden" name="studioIds" value={bundle.ids.join(",")} />
+              <div className="data-table-wrap">
+                <table className="data-table" style={{ maxWidth: 360 }}>
+                  <thead>
+                    <tr>
+                      <th>Duration</th>
+                      <th>Price ($)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {bundle.prices.map((row) => (
+                      <tr key={row.durationMinutes}>
+                        <td>{durationLabel(row.durationMinutes)}</td>
+                        <td>
+                          <input
+                            name={`price:${row.durationMinutes}`}
+                            className="price-input"
+                            {...PRICE_FIELD}
+                            aria-label={`${bundle.name} ${durationLabel(row.durationMinutes)} price`}
+                            defaultValue={centsToInput(row.priceCents)}
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <button type="submit" className="btn btn-dark btn-small" style={{ marginTop: "1rem" }}>
+                Save {bundle.name} prices
+              </button>
+            </form>
+          )}
+          <form action={addBundleLengthAction} className="admin-form-row" style={{ marginTop: "1.5rem", marginBottom: 0 }}>
+            <input type="hidden" name="studioIds" value={bundle.ids.join(",")} />
+            <div className="form-group">
+              <label className="form-label" htmlFor={`minutes-${bundle.ids.join("-")}`}>
+                Add a duration (minutes)
+              </label>
+              <input id={`minutes-${bundle.ids.join("-")}`} name="minutes" className="form-control" type="number" min={15} max={1440} step={15} placeholder="360" required />
+            </div>
+            <div className="form-group">
+              <label className="form-label" htmlFor={`price-${bundle.ids.join("-")}`}>
+                Price ($)
+              </label>
+              <input id={`price-${bundle.ids.join("-")}`} name="price" className="form-control" {...PRICE_FIELD} required />
+            </div>
+            <button type="submit" className="btn btn-outline btn-small">
+              Add
+            </button>
+          </form>
+        </div>
+      ))}
+
       <div className="admin-card">
-        <h3>Booking several studios together</h3>
+        <h3>Studios together without prices of their own</h3>
+        <p style={{ fontSize: ".875rem" }}>
+          Taken off the studios&rsquo; own prices when studios are booked together that have no price list above.
+          {bundles.length > 0 && bundles.every((bundle) => bundle.prices.length > 0) ? " Every bundle has one now, so this is not used." : ""}
+        </p>
         <form action={saveDiscountAction} className="admin-form-row" style={{ marginBottom: 0 }}>
           <div className="form-group">
             <label className="form-label" htmlFor="discount-two">

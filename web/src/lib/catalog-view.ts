@@ -1,5 +1,6 @@
+import { appointmentLook } from "@/lib/domain/appointment-look";
 import type { Catalog, CatalogStudio } from "@/server/catalog";
-import { extraGuestsAllowed, multiStudioPercentFor } from "@/lib/domain/pricing";
+import { extraGuestsAllowed, formatCents, multiStudioPercentFor } from "@/lib/domain/pricing";
 import { weekdayName, minutesToLabel } from "@/lib/domain/time";
 
 /** Blanche and Dayglow can be reserved together as part of the three-studio bundle. */
@@ -29,18 +30,64 @@ export function hourlyFromCents(catalog: Catalog, studioId: string): number | nu
   return prices.length > 0 ? Math.min(...prices) : null;
 }
 
-/** Price rows for a studio: one per duration, with weekday and weekend prices. */
+/**
+ * Price rows for a studio: one per duration the owners list, with weekday and weekend prices. The lengths between
+ * (`between`) are left out: they are worked out from these.
+ */
 export function priceTable(
-  catalog: Catalog,
+  catalog: Pick<Catalog, "rules">,
   studioId: string,
 ): { durationMinutes: number; weekdayCents: number | null; weekendCents: number | null }[] {
-  const rules = catalog.rules.filter((r) => r.studioId === studioId);
+  const rules = catalog.rules.filter((r) => r.studioId === studioId && !r.between);
   const durations = [...new Set(rules.map((r) => r.durationMinutes))].sort((a, b) => a - b);
   return durations.map((durationMinutes) => ({
     durationMinutes,
     weekdayCents: rules.find((r) => r.durationMinutes === durationMinutes && r.dayType === "weekday")?.priceCents ?? null,
     weekendCents: rules.find((r) => r.durationMinutes === durationMinutes && r.dayType === "weekend")?.priceCents ?? null,
   }));
+}
+
+/**
+ * What studios booked together are called: "All three studios" for every studio of three or more, else the calendar's
+ * name for them, which is the owner's for the bundles they named ("Paris + Dayglow", "Paris + Blanche":
+ * `appointmentLook`). One studio, its name.
+ */
+export function bundleName(catalog: Pick<Catalog, "studios">, studioIds: readonly string[]): string {
+  const held = studioIds.flatMap((id) => catalog.studios.find((studio) => studio.id === id) ?? []);
+  if (held.length === 1) return held[0].name;
+  if (held.length > 2 && held.length === catalog.studios.length) return `All ${inWords(held.length)} studios`;
+  return appointmentLook(held, false).name;
+}
+
+/** A bundle with prices of its own: the prices the owners list, shortest first (the lengths between are left out). */
+export interface BundleTable {
+  studioIds: string[];
+  name: string;
+  prices: { durationMinutes: number; priceCents: number }[];
+}
+
+/** The bundles with prices of their own: the fewest studios first, then the lowest price for the shortest length. */
+export function bundleTables(catalog: Pick<Catalog, "studios" | "bundlePrices">): BundleTable[] {
+  const tables = new Map<string, BundleTable>();
+  for (const price of catalog.bundlePrices) {
+    if (price.between) continue;
+    const key = price.studioIds.join("+");
+    const table = tables.get(key) ?? { studioIds: price.studioIds, name: bundleName(catalog, price.studioIds), prices: [] };
+    table.prices.push({ durationMinutes: price.durationMinutes, priceCents: price.priceCents });
+    tables.set(key, table);
+  }
+  for (const table of tables.values()) table.prices.sort((a, b) => a.durationMinutes - b.durationMinutes);
+  return [...tables.values()].sort((a, b) => a.studioIds.length - b.studioIds.length || a.prices[0].priceCents - b.prices[0].priceCents);
+}
+
+/**
+ * The booking page's sentence about the bundles that have prices of their own: "Bundle prices: Paris + Dayglow from
+ * $115, Paris + Blanche from $140, all three studios from $180". It stands where "Save 20% when booking two studios…"
+ * stood while a bundle was a percentage off (question 81 (c)). Empty when no bundle has prices.
+ */
+export function bundleOffer(catalog: Pick<Catalog, "studios" | "bundlePrices">): string {
+  const parts = bundleTables(catalog).map((table) => `${table.name.replace(/^All /, "all ")} from ${formatCents(Math.min(...table.prices.map((price) => price.priceCents)))}`);
+  return parts.length > 0 ? `Bundle prices: ${parts.join(", ")}` : "";
 }
 
 const NUMBER_WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"];
@@ -52,7 +99,9 @@ const inWords = (n: number) => NUMBER_WORDS[n] ?? String(n);
  * number of studios the site offers, so it never speaks of more studios than can be booked, and asks the pricing
  * function what each number gets, as `multiStudioOffer` does. Empty when no discount is set or the site has one studio.
  */
-export function multiStudioSaving(catalog: Pick<Catalog, "settings" | "studios">): string {
+export function multiStudioSaving(catalog: Pick<Catalog, "settings" | "studios" | "bundlePrices">): string {
+  // Bundles with prices of their own are not a percentage off anything: `bundleOffer` speaks for them.
+  if (catalog.bundlePrices.length > 0) return "";
   const table = catalog.settings.multiStudioPercent;
   const runs: { from: number; to: number; percent: number }[] = [];
   for (let n = 2; n <= catalog.studios.length; n++) {
@@ -90,7 +139,9 @@ export function hasWeekendPricing(catalog: Catalog): boolean {
  * sentence cannot promise more than is charged. With 15% for two and 0% for
  * three it says "15% off when you book exactly 2", never "2 or more".
  */
-export function multiStudioOffer(catalog: Pick<Catalog, "settings">): string {
+export function multiStudioOffer(catalog: Pick<Catalog, "settings" | "bundlePrices">): string {
+  // As `multiStudioSaving`: with prices for the bundles, the pages show those (the block "Prices of the bundles").
+  if (catalog.bundlePrices.length > 0) return "";
   const table = catalog.settings.multiStudioPercent;
   const highest = Math.max(2, ...Object.keys(table).map(Number).filter((n) => Number.isInteger(n) && n >= 2));
   // Runs of studio counts that get the same percentage. The last one goes on for any larger number.

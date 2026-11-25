@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
-import { addons, membershipPlans, membershipPlanStudios, photoPackages, photographerHours, photographers, priceRules, studioHours, studios } from "./schema";
+import { bundleKey } from "../lib/domain/pricing";
+import { addons, bundlePrices, membershipPlans, membershipPlanStudios, photoPackages, photographerHours, photographers, priceRules, studioHours, studios } from "./schema";
 import type { Db } from "./client";
 
 /**
@@ -14,6 +15,17 @@ const h = (hours: number) => Math.round(hours * 60);
  * The single studios' words are the live site's (its scheduling page, read 2026-11-18). Migration
  * `0042_membership_plans` gives a database that already has the studios the same plans.
  */
+/**
+ * The bundles' prices, from the studio's Acuity Scheduling (the owner's brief of 2026-11-24, item 4): hours -> dollars,
+ * before sales tax, the same on every day (the owner, 2026-11-25). `studioKey` is `bundleKey`'s. Migration 0071 gives the same to a database that has
+ * the three studios. The owners change them under Admin → Prices.
+ */
+const STARTING_BUNDLE_PRICES: readonly { studios: readonly ("blanche" | "dayglow" | "paris")[]; prices: Record<number, number> }[] = [
+  { studios: ["paris", "dayglow"], prices: { 1: 115, 1.5: 172, 2: 230, 3: 320, 4: 400, 5: 490 } },
+  { studios: ["blanche", "paris"], prices: { 1: 140, 1.5: 190, 2: 245, 3: 340, 4: 455, 5: 550, 6: 640, 8: 800 } },
+  { studios: ["blanche", "dayglow", "paris"], prices: { 1: 180, 2: 340, 3: 545, 4: 670, 5: 800, 10: 1500 } },
+];
+
 export const STARTING_PLANS: readonly { studios: readonly ("blanche" | "dayglow" | "paris")[]; name: string; hours: number; dollars: number; description: string }[] = [
   { studios: ["dayglow"], name: "Studio Dayglow, 5 hours a month", hours: 5, dollars: 330, description: "Get creative in Studio Dayglow, the perfect space for vibrant, high-energy shoots." },
   {
@@ -255,6 +267,16 @@ export async function seed(db: Db): Promise<boolean> {
         sortOrder: 2,
       },
     ]);
+
+    await tx.insert(bundlePrices).values(
+      STARTING_BUNDLE_PRICES.flatMap((bundle) =>
+        Object.entries(bundle.prices).map(([hours, dollars]) => ({
+          studioKey: bundleKey(bundle.studios.map((slug) => ids[slug])),
+          durationMinutes: h(Number(hours)),
+          priceCents: dollars * 100,
+        })),
+      ),
+    );
 
     for (const [index, plan] of STARTING_PLANS.entries()) {
       const [row] = await tx
