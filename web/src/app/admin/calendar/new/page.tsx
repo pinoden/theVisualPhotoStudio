@@ -64,8 +64,8 @@ async function NewBooking({ searchParams }: Pick<PageProps<"/admin/calendar/new"
   // The lengths on sale: for the chosen studios on that kind of day, or every length while nothing is chosen.
   const lengths =
     studioIds.length > 0
-      ? bookableDurations(studioIds, dayType, catalog.rules)
-      : [...new Set(catalog.rules.map((rule) => rule.durationMinutes))].sort((a, b) => a - b);
+      ? bookableDurations(studioIds, dayType, catalog.rules, catalog.bundlePrices)
+      : [...new Set([...catalog.rules, ...catalog.bundlePrices].map((rule) => rule.durationMinutes))].sort((a, b) => a - b);
   const duration = lengths.find((minutes) => String(minutes) === query.duration) ?? null;
 
   const combinationError = studioCombinationError(catalog.studios, studioIds);
@@ -89,6 +89,7 @@ async function NewBooking({ searchParams }: Pick<PageProps<"/admin/calendar/new"
         dayType,
         durationMinutes: duration,
         rules: catalog.rules,
+        bundlePrices: catalog.bundlePrices,
         multiStudioPercent: catalog.settings.multiStudioPercent,
       }).totalCents;
     } catch (error) {

@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { bundlePricesWithBetween, rulesWithBetween } from "@/lib/domain/pricing";
 import { defaultDayType, isoWeekday } from "@/lib/domain/time";
 import { NO_FACTS } from "@/lib/studio-facts";
 import type { Catalog } from "@/server/catalog";
@@ -54,6 +55,7 @@ const catalog: Catalog = {
     ...rulesFor(D, { 60: 78, 120: 156 }),
     ...rulesFor(P, { 60: 68, 120: 136 }),
   ],
+  bundlePrices: [],
   addons: [
     { id: "addon-people", slug: "extra-guest", name: "Extra guest", description: "Beyond those included.", priceCents: 500, studioId: null, maxQuantity: 20, kind: "people", picture: null },
     { id: "addon-pet", slug: "pet-fee", name: "Pet fee", description: "Dayglow only.", priceCents: 4000, studioId: D, maxQuantity: 1, kind: "pet", picture: null },
@@ -1006,5 +1008,80 @@ describe("the day and its times, on one step", () => {
     render(<BookingFlow catalog={catalog} navigate={nav.push} />);
     expect(screen.getByRole("radio", { name: /I want to choose the date first/ }).getAttribute("aria-checked")).toBe("true");
     expect(screen.getByRole("heading", { name: "Select date, duration & time" })).toBeTruthy();
+  });
+});
+
+describe("bundles with prices of their own, and the lengths between (the owner's answers of 2026-11-25)", () => {
+  // Blanche and Paris together have a list of their own, with a length neither studio is sold for alone.
+  const bundlePrices = [
+    { studioIds: [B, P], durationMinutes: 60, priceCents: 14000 },
+    { studioIds: [B, P], durationMinutes: 120, priceCents: 24500 },
+    { studioIds: [B, P], durationMinutes: 360, priceCents: 64000 },
+  ];
+  const withBundle: Catalog = { ...catalog, bundlePrices };
+
+  it("offers a bundle its own lengths and charges its own price, on one line, with no percentage", async () => {
+    render(<BookingFlow catalog={withBundle} navigate={nav.push} />);
+    // The sentence under the studios names the bundles' prices, not a percentage off.
+    expect(screen.getByText(/^Bundle prices/).textContent).toBe("Bundle prices: Paris + Blanche from $140.");
+    expect(screen.queryByText(/^Save /)).toBeNull();
+
+    await user.click(studioBox("Studio Blanche"));
+    await user.click(studioBox("Studio Paris"));
+    await next();
+    pickDate(WED);
+    expect(screen.getAllByRole("button", { name: / hr$/ }).map((button) => button.textContent)).toEqual(["1 hr", "2 hr", "6 hr"]);
+    await pickDuration("1 hr");
+    expect(screen.getByText("Estimated total").nextElementSibling?.textContent).toBe("$140");
+    // One line for the bundle, the same on any day: no kind of day, and nothing taken off.
+    expect(screen.getByText("Studio Blanche + Studio Paris, 1 hour")).toBeTruthy();
+    expect(screen.queryByText(/Multi-studio discount/)).toBeNull();
+
+    await pickTime("10:00 AM");
+    await next();
+    await fillDetails();
+    await next();
+    await user.click(await screen.findByRole("button", { name: "Confirm & pay $140" }));
+    await waitFor(() => expect(posted).toHaveLength(1));
+    expect(posted[0]).toMatchObject({ studioIds: [B, P], durationMinutes: 60, expectedTotalCents: 14000 });
+  });
+
+  it("keeps the buttons to the listed lengths, and offers the lengths between in a list under them", async () => {
+    render(<BookingFlow catalog={{ ...withBundle, rules: rulesWithBetween(catalog.rules, 30), bundlePrices: bundlePricesWithBetween(bundlePrices, 60) }} navigate={nav.push} />);
+    await user.click(studioBox("Studio Blanche"));
+    await next();
+    pickDate(WED);
+    expect(screen.getAllByRole("button", { name: / hr$/ }).map((button) => button.textContent)).toEqual(["1 hr", "2 hr", "10 hr"]);
+    const other = screen.getByRole("combobox", { name: "Another length" }) as HTMLSelectElement;
+    expect([...other.options].map((option) => option.textContent).slice(0, 4)).toEqual(["Another length…", "1.5 hours", "2.5 hours", "3 hours"]);
+    expect(other.options).toHaveLength(1 + 1 + 15); // the prompt, 1.5 hours, and every half hour from 2.5 to 9.5
+
+    // Two and a half hours of Blanche: between $176 for two hours and $720 for ten.
+    await user.selectOptions(other, "2.5 hours");
+    expect(screen.getByText("Estimated total").nextElementSibling?.textContent).toBe("$210");
+    expect(screen.getByText("Studio Blanche, 2.5 hours (weekday)")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "2 hr" }).getAttribute("aria-pressed")).toBe("false");
+    // A listed length again: the list goes back to its prompt.
+    await pickDuration("2 hr");
+    expect(other.value).toBe("");
+  });
+
+  it("offers a studio at a length it is sold for only in a bundle, and says so when it is chosen alone", async () => {
+    render(<BookingFlow catalog={withBundle} navigate={nav.push} />);
+    await user.click(screen.getByRole("radio", { name: /I want to choose the date first/ }));
+    pickDate(WED);
+    await pickDuration("6 hr"); // only Blanche and Paris together have a six-hour price
+    await pickTime("9:00 AM");
+    await next();
+    expect((studioBox("Studio Dayglow") as HTMLInputElement).disabled).toBe(true);
+    expect(studioBox("Studio Blanche").closest("label")!.textContent).toContain("For 6 hours, in a bundle only");
+
+    await user.click(studioBox("Studio Blanche"));
+    await next();
+    expect(screen.getByRole("alert").textContent).toContain("Studio Blanche is not offered by itself for 6 hours.");
+    await user.click(studioBox("Studio Paris"));
+    expect(screen.getByRole("status").textContent).toBe("Studio Blanche + Studio Paris together: $640 for 6 hours.");
+    await next();
+    expect(await screen.findByLabelText("Full name *")).toBeTruthy();
   });
 });

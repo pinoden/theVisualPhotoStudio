@@ -12,6 +12,21 @@ export interface PriceRule {
   dayType: DayType;
   durationMinutes: number;
   priceCents: number;
+  /** Worked out between two listed lengths (`withBetween`), not typed in by the owners: the price lists leave it out. */
+  between?: true;
+}
+
+/**
+ * The owners' price for studios booked together, for one length: the same on every day (the owner's answers of
+ * 2026-11-25, question 81 in ProjectLibrary.md). The studios that have such prices are a bundle with a price list of
+ * its own, and a booking of exactly those studios costs what the list says, whatever each studio costs alone.
+ */
+export interface BundlePrice {
+  studioIds: string[];
+  durationMinutes: number;
+  priceCents: number;
+  /** As a rule's. */
+  between?: true;
 }
 
 export interface AddonDef {
@@ -70,7 +85,9 @@ export interface QuoteInput {
   dayType: DayType;
   durationMinutes: number;
   rules: PriceRule[];
-  /** Discount percent by number of studios booked together, e.g. { 2: 20, 3: 22 }. */
+  /** The prices of studios booked together. Studios that have none together pay their own prices, less the discount below. */
+  bundlePrices: BundlePrice[];
+  /** Discount percent by number of studios booked together, e.g. { 2: 20, 3: 22 }: for studios without prices together. */
   multiStudioPercent: Record<number, number>;
   addons?: AddonSelection[];
   addonCatalog?: AddonDef[];
@@ -116,6 +133,10 @@ export function extraGuestsAllowed(studios: { includedGuests: number; extraGuest
 }
 
 export interface Quote {
+  /**
+   * Each studio's price. For studios with a price together (`BundlePrice`), each one's share of it (`shareOf`), which
+   * no summary shows: they show the studios on one line (`studioPriceLines`).
+   */
   studioLines: { studioId: string; priceCents: number }[];
   studiosSubtotalCents: number;
   multiStudioPercent: number;
@@ -176,9 +197,94 @@ export function multiStudioPercentFor(count: number, table: Record<number, numbe
   return best;
 }
 
-/** Durations that have a price for every selected studio on that day type. */
-export function bookableDurations(studioIds: string[], dayType: DayType, rules: PriceRule[]): number[] {
+/** How the table of bundle prices names studios booked together: their ids, sorted, joined by "+". */
+export function bundleKey(studioIds: readonly string[]): string {
+  return [...studioIds].sort().join("+");
+}
+
+/** The price list of exactly these studios booked together. Empty for one studio, and for studios the owners gave none. */
+export function bundleList(studioIds: readonly string[], bundlePrices: readonly BundlePrice[]): BundlePrice[] {
+  if (studioIds.length < 2) return [];
+  return bundlePrices.filter((price) => price.studioIds.length === studioIds.length && price.studioIds.every((id) => studioIds.includes(id)));
+}
+
+/**
+ * A total shared by weights, in whole cents that add up to it: the first takes what rounding leaves. Evenly when a
+ * weight is missing. It gives each studio of a bundle its part of the bundle's price.
+ */
+export function shareOf(total: number, weights: readonly (number | null)[]): number[] {
+  const usable = weights.every((weight) => weight !== null && weight > 0);
+  const base = usable ? (weights as number[]) : weights.map(() => 1);
+  const sum = base.reduce((all, weight) => all + weight, 0);
+  const shares = base.map((weight) => Math.floor((total * weight) / sum));
+  shares[0] += total - shares.reduce((all, share) => all + share, 0);
+  return shares;
+}
+
+/**
+ * The lines a summary shows for a booking's studios. Studios booked together at one price (nothing taken off for
+ * booking several) are one line, "Studio Paris + Studio Dayglow": each one's part of that price is bookkeeping, not a
+ * price anyone was quoted. With a discount for several studios, each studio's own price, and the discount follows.
+ */
+export function studioPriceLines(studios: readonly { name: string; priceCents: number }[], multiStudioDiscountCents: number): { name: string; priceCents: number }[] {
+  if (studios.length < 2 || multiStudioDiscountCents > 0) return studios.map(({ name, priceCents }) => ({ name, priceCents }));
+  return [{ name: studios.map((studio) => studio.name).join(" + "), priceCents: studios.reduce((sum, studio) => sum + studio.priceCents, 0) }];
+}
+
+/**
+ * The lengths between the listed ones, each priced on the straight line between its two neighbours and rounded to a
+ * whole dollar: with 2 hours at $230 and 3 hours at $320, 2.5 hours is $275. `stepMinutes` is the owners' setting
+ * (`betweenLengthsMinutes`): every half hour, every hour, or 0 for none. Nothing shorter than the shortest listed
+ * length or longer than the longest: the owners list a longer one to sell it. A rule built on the builder's reading
+ * (question 83 in ProjectLibrary.md).
+ */
+export function betweenLengths(listed: readonly { durationMinutes: number; priceCents: number }[], stepMinutes: number): { durationMinutes: number; priceCents: number }[] {
+  if (!(Number.isInteger(stepMinutes) && stepMinutes > 0)) return [];
+  const sorted = [...listed].sort((a, b) => a.durationMinutes - b.durationMinutes);
+  const out: { durationMinutes: number; priceCents: number }[] = [];
+  for (let i = 0; i + 1 < sorted.length; i++) {
+    const [from, to] = [sorted[i], sorted[i + 1]];
+    for (let minutes = (Math.floor(from.durationMinutes / stepMinutes) + 1) * stepMinutes; minutes < to.durationMinutes; minutes += stepMinutes) {
+      const exact = from.priceCents + ((to.priceCents - from.priceCents) * (minutes - from.durationMinutes)) / (to.durationMinutes - from.durationMinutes);
+      out.push({ durationMinutes: minutes, priceCents: Math.round(exact / 100) * 100 });
+    }
+  }
+  return out;
+}
+
+/** The studios' price rules with the lengths between the listed ones (`betweenLengths`), for each studio and kind of day. */
+export function rulesWithBetween(rules: readonly PriceRule[], stepMinutes: number): PriceRule[] {
+  const out = [...rules];
+  const groups = new Map<string, PriceRule[]>();
+  for (const rule of rules) groups.set(`${rule.studioId} ${rule.dayType}`, [...(groups.get(`${rule.studioId} ${rule.dayType}`) ?? []), rule]);
+  for (const group of groups.values()) {
+    for (const made of betweenLengths(group, stepMinutes)) out.push({ studioId: group[0].studioId, dayType: group[0].dayType, ...made, between: true });
+  }
+  return out;
+}
+
+/** The same for the bundles' prices, each bundle's list by itself. */
+export function bundlePricesWithBetween(bundlePrices: readonly BundlePrice[], stepMinutes: number): BundlePrice[] {
+  const out = [...bundlePrices];
+  const groups = new Map<string, BundlePrice[]>();
+  for (const price of bundlePrices) {
+    const key = bundleKey(price.studioIds);
+    groups.set(key, [...(groups.get(key) ?? []), price]);
+  }
+  for (const group of groups.values()) {
+    for (const made of betweenLengths(group, stepMinutes)) out.push({ studioIds: group[0].studioIds, ...made, between: true });
+  }
+  return out;
+}
+
+/**
+ * The lengths these studios can be booked for on that kind of day: a bundle's own list when the owners gave it one,
+ * else the lengths every chosen studio has a price for.
+ */
+export function bookableDurations(studioIds: string[], dayType: DayType, rules: PriceRule[], bundlePrices: readonly BundlePrice[]): number[] {
   if (studioIds.length === 0) return [];
+  const together = bundleList(studioIds, bundlePrices);
+  if (together.length > 0) return together.map((price) => price.durationMinutes).sort((a, b) => a - b);
   const perStudio = studioIds.map(
     (id) =>
       new Set(
@@ -201,6 +307,23 @@ export function findPrice(
   return rule ? rule.priceCents : null;
 }
 
+/**
+ * What stops these studios being priced for that length on that kind of day, or null when they have a price: the
+ * bundle's list has no such length (`together`), or these studios have none of their own.
+ */
+export function unpriced(
+  studioIds: readonly string[],
+  dayType: DayType,
+  durationMinutes: number,
+  rules: PriceRule[],
+  bundlePrices: readonly BundlePrice[],
+): { studioIds: string[]; together: boolean } | null {
+  const together = bundleList(studioIds, bundlePrices);
+  if (together.length > 0) return together.some((price) => price.durationMinutes === durationMinutes) ? null : { studioIds: [...studioIds], together: true };
+  const missing = studioIds.filter((id) => findPrice(id, dayType, durationMinutes, rules) === null);
+  return missing.length > 0 ? { studioIds: missing, together: false } : null;
+}
+
 export function quote(input: QuoteInput): Quote {
   const { studioIds, dayType, durationMinutes, rules } = input;
   if (studioIds.length === 0) throw new PricingError("NO_STUDIOS", "Select at least one studio.");
@@ -215,17 +338,28 @@ export function quote(input: QuoteInput): Quote {
       throw new PricingError("BAD_PACKAGE", "That photography session is not offered.");
     }
   }
-  const studioLines = studioIds.map((studioId) => {
-    // A session's price includes the studio, so the studio's own price list is not consulted.
-    const priceCents = photoPackage ? photoPackage.priceCents : findPrice(studioId, dayType, durationMinutes, rules);
-    if (priceCents === null) {
-      throw new PricingError("NO_PRICE", "That duration is not offered for the selected studios.");
-    }
-    return { studioId, priceCents };
-  });
+  // Studios with a price list together cost what it says, on any day, and nothing more comes off for booking several.
+  const together = photoPackage ? [] : bundleList(studioIds, input.bundlePrices);
+  const own = (studioId: string) => findPrice(studioId, dayType, durationMinutes, rules);
+  let studioLines: Quote["studioLines"];
+  if (together.length > 0) {
+    const listed = together.find((price) => price.durationMinutes === durationMinutes);
+    if (!listed) throw new PricingError("NO_PRICE", "That duration is not offered for the selected studios.");
+    const shares = shareOf(listed.priceCents, studioIds.map(own));
+    studioLines = studioIds.map((studioId, index) => ({ studioId, priceCents: shares[index] }));
+  } else {
+    studioLines = studioIds.map((studioId) => {
+      // A session's price includes the studio, so the studio's own price list is not consulted.
+      const priceCents = photoPackage ? photoPackage.priceCents : own(studioId);
+      if (priceCents === null) {
+        throw new PricingError("NO_PRICE", "That duration is not offered for the selected studios.");
+      }
+      return { studioId, priceCents };
+    });
+  }
   const studiosSubtotalCents = studioLines.reduce((sum, l) => sum + l.priceCents, 0);
 
-  const multiStudioPercent = multiStudioPercentFor(studioIds.length, input.multiStudioPercent);
+  const multiStudioPercent = together.length > 0 ? 0 : multiStudioPercentFor(studioIds.length, input.multiStudioPercent);
   const multiStudioDiscountCents = percentOf(studiosSubtotalCents, multiStudioPercent);
   const studiosNetCents = studiosSubtotalCents - multiStudioDiscountCents;
 
@@ -309,7 +443,8 @@ export function quote(input: QuoteInput): Quote {
     if (!(Number.isInteger(membership.minutesLeft) && membership.minutesLeft >= 0)) throw new PricingError("BAD_PROMO", "Invalid code.");
     membershipMinutes = Math.min(membership.minutesLeft, durationMinutes);
     let basisCents = studiosNetCents;
-    if (membership.weekendDifference && dayType === "weekend") {
+    // A bundle with prices together costs the same on every day, so its weekend time has no weekday price to differ from.
+    if (membership.weekendDifference && dayType === "weekend" && together.length === 0) {
       const weekday = studioLines.map((line) => findPrice(line.studioId, "weekday", durationMinutes, rules));
       if (weekday.every((cents) => cents !== null)) {
         const subtotal = weekday.reduce((sum: number, cents) => sum + cents!, 0);

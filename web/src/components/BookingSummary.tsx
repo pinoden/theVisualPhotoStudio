@@ -1,4 +1,4 @@
-import { formatCents } from "@/lib/domain/pricing";
+import { formatCents, studioPriceLines } from "@/lib/domain/pricing";
 import { SERVICE_WORDS } from "@/lib/domain/services";
 import { durationLabel } from "@/lib/domain/time";
 import { listInWords } from "@/lib/words";
@@ -63,7 +63,7 @@ export function BookingSummary({ booking }: { booking: BookingView }) {
           {when.time} ({durationLabel(booking.durationMinutes)})
         </strong>
       </div>
-      {booking.studios.map((studio) => (
+      {studioPriceLines(booking.studios, booking.multiStudioDiscountCents).map((studio) => (
         <div className="price-row" key={studio.name}>
           <span>
             {booking.photography && `${SERVICE_WORDS[booking.photography.service].Session}, `}

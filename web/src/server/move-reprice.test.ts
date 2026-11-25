@@ -170,6 +170,8 @@ describe("moving a booking to a day of the other kind", () => {
   });
 
   it("refuses a day with no price for the booking's length, and changes nothing where both kinds are priced alike", async () => {
+    // Only the listed lengths: with the lengths between on sale, two hours would be priced between its neighbours.
+    expect(await saveSetting(world.db, "betweenLengthsMinutes", 0)).toBe(true);
     const { ref } = expectOk(await world.book({ date: FAR }));
     await setPrice("blanche", "weekend", 120, null);
     const why = "Studio Blanche has no weekend price for 2 hours under Prices, so the booking cannot be priced for that day. Add the price first, or choose a weekday.";

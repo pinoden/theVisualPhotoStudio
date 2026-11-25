@@ -1,9 +1,9 @@
 import { asc, eq } from "drizzle-orm";
 import type { Service } from "@/lib/domain/services";
-import { addons, membershipPlans, membershipPlanStudios, photoPackages, photographers, priceRules, specialDates, studioHours, studios } from "@/db/schema";
+import { addons, bundlePrices, membershipPlans, membershipPlanStudios, photoPackages, photographers, priceRules, specialDates, studioHours, studios } from "@/db/schema";
 import { together, type DbLike } from "@/db/client";
 import type { AddonKind } from "@/lib/addon-kinds";
-import type { AddonDef, PriceRule } from "@/lib/domain/pricing";
+import { bundlePricesWithBetween, rulesWithBetween, type AddonDef, type BundlePrice, type PriceRule } from "@/lib/domain/pricing";
 import { defaultDayType, type DayType, type IsoDate } from "@/lib/domain/time";
 import { parseStudioFacts, type StudioFacts } from "@/lib/studio-facts";
 import { loadPictures, type Picture } from "./media";
@@ -67,7 +67,10 @@ export interface CatalogMembershipPlan {
 /** Everything public about what can be booked. Safe to send to the browser. */
 export interface Catalog {
   studios: CatalogStudio[];
+  /** The studios' prices, and with them the lengths between the listed ones the owners sell (`between`). */
   rules: PriceRule[];
+  /** The prices of studios booked together, likewise: each bundle whose every studio is open. */
+  bundlePrices: BundlePrice[];
   addons: CatalogAddon[];
   settings: Settings;
   /** date -> day type, for dates priced differently from their weekday. */
@@ -84,7 +87,7 @@ export interface Catalog {
 }
 
 export async function loadCatalog(db: DbLike): Promise<Catalog> {
-  const [studioRows, hourRows, ruleRows, addonRows, specialRows, settings, access, packageRows, photographerRows, photos, planRows, planStudioRows] = await together(db, [
+  const [studioRows, hourRows, ruleRows, addonRows, specialRows, settings, access, packageRows, photographerRows, photos, planRows, planStudioRows, bundleRows] = await together(db, [
     () => db.select().from(studios).where(eq(studios.active, true)).orderBy(asc(studios.sortOrder), asc(studios.name)),
     () => db.select().from(studioHours),
     () => db.select().from(priceRules),
@@ -97,6 +100,7 @@ export async function loadCatalog(db: DbLike): Promise<Catalog> {
     () => loadStudioPhotos(db),
     () => db.select().from(membershipPlans).where(eq(membershipPlans.active, true)).orderBy(asc(membershipPlans.sortOrder), asc(membershipPlans.createdAt)),
     () => db.select().from(membershipPlanStudios),
+    () => db.select().from(bundlePrices),
   ]);
 
   const activeIds = new Set(studioRows.map((s) => s.id));
@@ -125,14 +129,25 @@ export async function loadCatalog(db: DbLike): Promise<Catalog> {
       facts: facts.get(s.id)!,
       floorPlan: planPictures.get(facts.get(s.id)!.floorPlan) ?? null,
     })),
-    rules: ruleRows
-      .filter((r) => activeIds.has(r.studioId))
-      .map((r) => ({
-        studioId: r.studioId,
-        dayType: r.dayType,
-        durationMinutes: r.durationMinutes,
-        priceCents: r.priceCents,
-      })),
+    rules: rulesWithBetween(
+      ruleRows
+        .filter((r) => activeIds.has(r.studioId))
+        .map((r) => ({
+          studioId: r.studioId,
+          dayType: r.dayType,
+          durationMinutes: r.durationMinutes,
+          priceCents: r.priceCents,
+        })),
+      settings.betweenLengthsMinutes,
+    ),
+    bundlePrices: bundlePricesWithBetween(
+      bundleRows
+        .map((row) => ({ key: row.studioKey.split("+"), row }))
+        .filter(({ key }) => key.length > 1 && key.every((id) => activeIds.has(id)))
+        // The studios in the site's order, as everything that names a bundle lists them.
+        .map(({ key, row }) => ({ studioIds: studioRows.filter((s) => key.includes(s.id)).map((s) => s.id), durationMinutes: row.durationMinutes, priceCents: row.priceCents })),
+      settings.betweenLengthsMinutes,
+    ),
     addons: addonRows
       .filter((a) => a.studioId === null || activeIds.has(a.studioId))
       .map((a) => ({

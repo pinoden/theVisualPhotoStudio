@@ -29,8 +29,15 @@ export interface Settings {
   contentNoticeBusinessDays: number;
   /** Minutes an unpaid booking keeps its slot while the card is charged. */
   holdMinutes: number;
-  /** Discount percent by number of studios booked together. */
+  /** Discount percent by number of studios booked together: for studios without prices together (`bundle_prices`). */
   multiStudioPercent: Record<number, number>;
+  /**
+   * The lengths between the listed ones that can be booked, each priced between its two neighbours (`betweenLengths`
+   * in pricing.ts): every 30 minutes, every 60, or 0 for the listed lengths only. The owner, 2026-11-25: "any studio
+   * and a bundle can be booked for any amount of hours over 1 hour"; how such a length is priced is the builder's
+   * reading (question 83 in ProjectLibrary.md).
+   */
+  betweenLengthsMinutes: number;
 
   // ── Cancelling and moving ──
   /** A cancellation at least this many hours before the start is refunded automatically. */
@@ -150,6 +157,7 @@ export const DEFAULT_SETTINGS: Settings = {
   contentNoticeBusinessDays: 3, // the owner's answer of 2026-11-23
   holdMinutes: 10,
   multiStudioPercent: { 2: 20, 3: 22 },
+  betweenLengthsMinutes: 30,
 
   refundWindowHours: 168, // 7 days: the owner's answer of 2026-11-17, which changed the 14 days of 2026-11-15
   photoRefundWindowHours: 336, // 14 days, as on the live site and confirmed on 2026-11-17
@@ -253,6 +261,9 @@ function discountTable(v: unknown): Record<number, number> | null {
   return table;
 }
 
+/** What `betweenLengthsMinutes` can be: none, every half hour, every hour. */
+export const BETWEEN_LENGTHS: readonly number[] = [0, 30, 60];
+
 /** Which values are acceptable for each simple setting. Anything else is ignored. */
 const VALIDATORS: { [K in Exclude<keyof Settings, "multiStudioPercent">]: (v: unknown) => boolean } = {
   slotIncrementMinutes: int(NUMBER_SETTING_RANGES.slotIncrementMinutes),
@@ -261,6 +272,7 @@ const VALIDATORS: { [K in Exclude<keyof Settings, "multiStudioPercent">]: (v: un
   photoMinLeadHours: int(NUMBER_SETTING_RANGES.photoMinLeadHours),
   contentNoticeBusinessDays: int(NUMBER_SETTING_RANGES.contentNoticeBusinessDays),
   holdMinutes: int(NUMBER_SETTING_RANGES.holdMinutes),
+  betweenLengthsMinutes: (v) => BETWEEN_LENGTHS.includes(v as number),
   refundWindowHours: int(NUMBER_SETTING_RANGES.refundWindowHours),
   photoRefundWindowHours: int(NUMBER_SETTING_RANGES.photoRefundWindowHours),
   refundFeePercent: int(NUMBER_SETTING_RANGES.refundFeePercent),

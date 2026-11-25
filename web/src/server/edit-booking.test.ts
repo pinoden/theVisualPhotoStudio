@@ -43,7 +43,7 @@ describe("an owner changes a booking", () => {
     expect(changed.nowCents).toBe(after.totalCents);
     expect(changed.owedCents).toBe(after.totalCents - before.totalCents); // paid by card before: the rest is owed
     expect(after).toMatchObject({ durationMinutes: 120, endAt: new Date(before.startAt.getTime() + 120 * 60_000), addonsCents: 4000 });
-    expect(after.multiStudioDiscountCents).toBeGreaterThan(0); // two studios together
+    expect(after).toMatchObject({ studiosSubtotalCents: 23000, multiStudioDiscountCents: 0 }); // the bundle's own price for two hours
     expect(await heldBy(before.id)).toEqual([world.ids.dayglow, world.ids.paris].sort());
     expect(await world.db.select({ name: bookingAddons.name, quantity: bookingAddons.quantity, unitCents: bookingAddons.unitCents }).from(bookingAddons).where(eq(bookingAddons.bookingId, before.id))).toEqual([{ name: "Pet fee", quantity: 1, unitCents: 4000 }]);
 

@@ -2,7 +2,7 @@ import type { DbLike } from "@/db/client";
 import { sessionsOf, type Service } from "@/lib/domain/services";
 import { studioCombinationError } from "@/lib/catalog-view";
 import { combinedStarts, type StudioDay } from "@/lib/domain/availability";
-import { findPrice } from "@/lib/domain/pricing";
+import { unpriced } from "@/lib/domain/pricing";
 import { isIsoDate, type IsoDate } from "@/lib/domain/time";
 import { loadDayAvailability } from "./availability";
 import { dayTypeFor, type Catalog } from "./catalog";
@@ -54,7 +54,7 @@ export async function loadMonthFits(db: DbLike, catalog: Catalog, input: MonthFi
   const days: Record<IsoDate, boolean> = {};
   for (const date of dates) {
     const dayType = dayTypeFor(catalog, date);
-    const priced = input.photography || ids.every((id) => findPrice(id, dayType, input.durationMinutes, catalog.rules) !== null);
+    const priced = input.photography || unpriced(ids, dayType, input.durationMinutes, catalog.rules, catalog.bundlePrices) === null;
     if (!priced) {
       days[date] = false;
       continue;

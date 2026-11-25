@@ -4,6 +4,7 @@ import { createMemoryDb, pgErrorCode, type Db } from "@/db/client";
 import { seed } from "@/db/seed";
 import {
   bookings,
+  bundlePrices,
   emailOutbox,
   payments,
   priceRules,
@@ -117,19 +118,35 @@ describe("creating a booking", () => {
     expect(await db.select().from(studioHolds)).toHaveLength(0);
 
     const result = await book({ studioIds: [ids.blanche, ids.paris], durationMinutes: 60 });
-    expect(result).toMatchObject({ ok: true, totalCents: 12480 }); // ($88 + $68) less 20%
+    expect(result).toMatchObject({ ok: true, totalCents: 14000 }); // the bundle's own price for an hour, not $88 + $68
     const holds = await db.select().from(studioHolds);
     expect(holds.map((x) => x.studioId).sort()).toEqual([ids.blanche, ids.paris].sort());
     expect(holds.every((x) => x.active)).toBe(true);
 
     const dayglowAndParis = await book({ studioIds: [ids.dayglow, ids.paris], durationMinutes: 60, startMinute: h(12) });
-    expect(dayglowAndParis).toMatchObject({ ok: true, totalCents: 11680 }); // ($78 + $68) less 20%
+    expect(dayglowAndParis).toMatchObject({ ok: true, totalCents: 11500 });
     const all = await book({ studioIds: [ids.blanche, ids.dayglow, ids.paris], durationMinutes: 60, startMinute: h(14) });
-    expect(all).toMatchObject({ ok: true, totalCents: 23400 - Math.round(23400 * 0.22) });
+    expect(all).toMatchObject({ ok: true, totalCents: 18000 });
+    // Each studio's hold keeps its part of the bundle's price, shared as the studios' own prices share it, to the cent.
+    const [bundle] = await db.select().from(bookings).where(eq(bookings.ref, (result as { ref: string }).ref));
+    expect(bundle).toMatchObject({ studiosSubtotalCents: 14000, multiStudioDiscountCents: 0, totalCents: 14000 });
+    const parts = (await db.select().from(studioHolds).where(eq(studioHolds.bookingId, bundle.id))).map((hold) => hold.priceCents).sort((a, b) => a - b);
+    expect(parts).toEqual([6102, 7898]); // $140 as $68 and $88 share it
+  });
+
+  it("charges a bundle its own price on a weekend too, and only for the lengths its list has or lies between", async () => {
+    const saturday = { studioIds: [ids.dayglow, ids.paris], date: "2026-11-21", startMinute: h(12) };
+    expect(await book({ ...saturday, durationMinutes: 120 })).toMatchObject({ ok: true, totalCents: 23000 }); // as on a weekday
+    // Two and a half hours, between $230 for two and $320 for three.
+    expect(await quoteSelection(db, { ...saturday, durationMinutes: 150 }, NOW)).toMatchObject({ ok: true, quote: { studiosSubtotalCents: 27500, totalCents: 27500 } });
+    // Its list ends at five hours: six are not sold, whatever the studios cost alone.
+    expect(await quoteSelection(db, { ...saturday, durationMinutes: 360 }, NOW)).toMatchObject({ ok: false, code: "invalid_price" });
   });
 
   it("uses the owner's discount setting", async () => {
     await db.insert(settings).values({ key: "multiStudioPercent", value: { 2: 10 } });
+    // The discount is for studios without prices together: these two have none once their list is taken away.
+    await db.delete(bundlePrices);
     const result = await book({ studioIds: [ids.blanche, ids.paris], durationMinutes: 60 });
     expect(result).toMatchObject({ ok: true, totalCents: 15600 - 1560 });
   });
@@ -515,7 +532,7 @@ describe("bad input is refused", () => {
   const cases: [string, Partial<BookingInput>, string][] = [
     ["negative duration", { durationMinutes: -60 }, "invalid_input"],
     ["six-minute booking", { durationMinutes: 6 }, "invalid_price"],
-    ["duration with no price", { durationMinutes: 150 }, "invalid_price"],
+    ["duration with no price", { durationMinutes: 75 }, "invalid_price"],
     ["fractional duration", { durationMinutes: 60.5 }, "invalid_input"],
     ["date in the past", { date: "2026-11-10" }, "not_bookable_date"],
     ["impossible date", { date: "2026-02-30" }, "not_bookable_date"],

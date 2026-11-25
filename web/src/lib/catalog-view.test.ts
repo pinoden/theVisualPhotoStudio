@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_SETTINGS } from "@/server/settings";
-import { multiStudioOffer, multiStudioSaving } from "./catalog-view";
+import { bundleName, bundleOffer, bundleTables, multiStudioOffer, multiStudioSaving, priceTable } from "./catalog-view";
 import { multiStudioPercentFor } from "./domain/pricing";
 
 const offer = (table: Record<number, number>) =>
-  multiStudioOffer({ settings: { ...DEFAULT_SETTINGS, multiStudioPercent: table } });
+  multiStudioOffer({ settings: { ...DEFAULT_SETTINGS, multiStudioPercent: table }, bundlePrices: [] });
 
 describe("the sentence about booking several studios", () => {
   it("names each discount, and says 'or more' for the last one", () => {
@@ -46,7 +46,7 @@ describe("the sentence about booking several studios", () => {
 describe("the booking page's sentence about several studios (the owner's words of 2026-11-22)", () => {
   const studios = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `s${i}` })) as never;
   const saving = (table: Record<number, number>, n = 3) =>
-    multiStudioSaving({ settings: { ...DEFAULT_SETTINGS, multiStudioPercent: table }, studios: studios(n) });
+    multiStudioSaving({ settings: { ...DEFAULT_SETTINGS, multiStudioPercent: table }, studios: studios(n), bundlePrices: [] });
 
   it("says the numbers of studios in words, up to the studios the site has", () => {
     expect(saving({ 2: 20, 3: 22 })).toBe("Save 20% when booking two studios and 22% when booking three studios");
@@ -65,8 +65,58 @@ describe("the booking page's sentence about several studios (the owner's words o
   });
 
   it("follows the default discount", () => {
-    expect(multiStudioSaving({ settings: DEFAULT_SETTINGS, studios: studios(3) })).toBe(
+    expect(multiStudioSaving({ settings: DEFAULT_SETTINGS, studios: studios(3), bundlePrices: [] })).toBe(
       "Save 20% when booking two studios and 22% when booking three studios",
     );
+  });
+});
+
+describe("the bundles with prices of their own (question 81)", () => {
+  const studios = [
+    { id: "b", slug: "blanche", name: "Studio Blanche", color: "#111111" },
+    { id: "d", slug: "dayglow", name: "Studio Dayglow", color: "#222222" },
+    { id: "p", slug: "paris", name: "Studio Paris", color: "#333333" },
+  ] as never;
+  const price = (studioIds: string[], durationMinutes: number, dollars: number, between?: true) => ({ studioIds, durationMinutes, priceCents: dollars * 100, ...(between ? { between } : {}) });
+  const bundlePrices = [
+    price(["b", "d", "p"], 600, 1500),
+    price(["b", "d", "p"], 60, 180),
+    price(["b", "p"], 120, 245),
+    price(["b", "p"], 60, 140),
+    price(["b", "p"], 90, 193, true),
+    price(["d", "p"], 60, 115),
+  ];
+  const catalog = { studios, bundlePrices, settings: DEFAULT_SETTINGS };
+
+  it("are named in the owner's words, and all the studios together in words", () => {
+    expect(bundleName(catalog, ["d", "p"])).toBe("Paris + Dayglow");
+    expect(bundleName(catalog, ["b", "p"])).toBe("Paris + Blanche");
+    expect(bundleName(catalog, ["b", "d"])).toBe("Blanche + Dayglow"); // not one the owner named: its studios, in order
+    expect(bundleName(catalog, ["b", "d", "p"])).toBe("All three studios");
+    expect(bundleName(catalog, ["p"])).toBe("Studio Paris");
+  });
+
+  it("are listed the fewest studios first, then the cheapest, with the listed lengths only, shortest first", () => {
+    expect(bundleTables(catalog)).toEqual([
+      { studioIds: ["d", "p"], name: "Paris + Dayglow", prices: [{ durationMinutes: 60, priceCents: 11500 }] },
+      { studioIds: ["b", "p"], name: "Paris + Blanche", prices: [{ durationMinutes: 60, priceCents: 14000 }, { durationMinutes: 120, priceCents: 24500 }] },
+      { studioIds: ["b", "d", "p"], name: "All three studios", prices: [{ durationMinutes: 60, priceCents: 18000 }, { durationMinutes: 600, priceCents: 150000 }] },
+    ]);
+  });
+
+  it("are what the booking page says in place of a percentage, which no page promises any more", () => {
+    expect(bundleOffer(catalog)).toBe("Bundle prices: Paris + Dayglow from $115, Paris + Blanche from $140, all three studios from $180");
+    expect(multiStudioSaving(catalog)).toBe("");
+    expect(multiStudioOffer(catalog)).toBe("");
+    expect(bundleOffer({ studios, bundlePrices: [] })).toBe("");
+  });
+
+  it("leave the lengths between out of a studio's price list too", () => {
+    const rules = [
+      { studioId: "p", dayType: "weekday" as const, durationMinutes: 60, priceCents: 6800 },
+      { studioId: "p", dayType: "weekday" as const, durationMinutes: 90, priceCents: 10200, between: true as const },
+      { studioId: "p", dayType: "weekend" as const, durationMinutes: 60, priceCents: 7200 },
+    ];
+    expect(priceTable({ rules }, "p")).toEqual([{ durationMinutes: 60, weekdayCents: 6800, weekendCents: 7200 }]);
   });
 });

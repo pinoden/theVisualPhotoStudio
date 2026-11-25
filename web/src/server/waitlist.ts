@@ -4,7 +4,7 @@ import type { DbLike } from "@/db/client";
 import { waitlistEntries } from "@/db/schema";
 import { studioCombinationError } from "@/lib/catalog-view";
 import { combinedStarts, type StudioDay } from "@/lib/domain/availability";
-import { findPrice } from "@/lib/domain/pricing";
+import { unpriced } from "@/lib/domain/pricing";
 import { addDays, durationLabel, isIsoDate, longDateLabel, minutesToLabel, studioToday, type IsoDate } from "@/lib/domain/time";
 import { normalizeEmail } from "./auth";
 import { loadDayAvailability, type DayAvailability } from "./availability";
@@ -81,7 +81,7 @@ export async function joinWaitlist(db: DbLike, catalog: Catalog, input: Waitlist
     if (studioIds.length !== 1 || !sessionsOf(catalog.photoPackages, service).some((pack) => pack.studioId === studioIds[0] && pack.durationMinutes === input.durationMinutes)) {
       return invalid("Choose a session this studio offers.");
     }
-  } else if (!studioIds.every((id) => findPrice(id, dayTypeFor(catalog, input.date), input.durationMinutes, catalog.rules) !== null)) {
+  } else if (unpriced(studioIds, dayTypeFor(catalog, input.date), input.durationMinutes, catalog.rules, catalog.bundlePrices) !== null) {
     return invalid("That length is not offered on that day.");
   }
   const { fromMinute, toMinute } = input;

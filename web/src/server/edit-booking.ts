@@ -3,7 +3,7 @@ import { bookingAddons, bookings, promoCodes, studioHolds } from "@/db/schema";
 import { PG_EXCLUSION_VIOLATION, pgErrorCode, together, type Db, type DbLike } from "@/db/client";
 import { extraGuestsFor, studioCombinationError } from "@/lib/catalog-view";
 import { isStartFree } from "@/lib/domain/availability";
-import { findPrice, formatCents, PricingError, PROMO_MISFIT_TEXT, quote, type PromoDef, type Quote } from "@/lib/domain/pricing";
+import { formatCents, PricingError, PROMO_MISFIT_TEXT, quote, unpriced, type PromoDef, type Quote } from "@/lib/domain/pricing";
 import { labelOf } from "@/lib/domain/labels";
 import { durationLabel } from "@/lib/domain/time";
 import type { AuthUser } from "./auth";
@@ -86,10 +86,14 @@ export async function editBooking(db: Db, viewer: AuthUser, ref: string, input: 
   if (endAt.getTime() - found.startAt.getTime() !== minutes * 60_000) return refuse("That length would cross the hour the clocks change. Choose another, or move the booking first.");
   // The kind of day it is priced as, as a move compares it (reprice.ts).
   const dayType = found.pricedAs ?? dayTypeFor(catalog, date);
-  const unpriced = studioIds.filter((id) => findPrice(id, dayType, minutes, catalog.rules) === null);
-  if (unpriced.length > 0) {
-    const names = unpriced.map((id) => catalog.studios.find((studio) => studio.id === id)!.name).join(" and ");
-    return refuse(`${names} ${unpriced.length > 1 ? "have" : "has"} no ${dayType} price for ${durationLabel(minutes)} under Prices.`);
+  const gap = unpriced(studioIds, dayType, minutes, catalog.rules, catalog.bundlePrices);
+  if (gap) {
+    const names = gap.studioIds.map((id) => catalog.studios.find((studio) => studio.id === id)!.name).join(" and ");
+    return refuse(
+      gap.together
+        ? `${names} have no price together for ${durationLabel(minutes)} under Prices.`
+        : `${names} ${gap.studioIds.length > 1 ? "have" : "has"} no ${dayType} price for ${durationLabel(minutes)} under Prices.`,
+    );
   }
 
   // Free at its start in every studio, for the new length, its own time left out.
@@ -155,6 +159,7 @@ export async function editBooking(db: Db, viewer: AuthUser, ref: string, input: 
       dayType,
       durationMinutes: minutes,
       rules: catalog.rules,
+      bundlePrices: catalog.bundlePrices,
       multiStudioPercent: catalog.settings.multiStudioPercent,
       addons: wanted,
       addonCatalog: addonCatalog as NonNullable<(typeof addonCatalog)[number]>[],
@@ -320,7 +325,7 @@ export async function editOptions(db: DbLike, viewer: AuthUser, ref: string, now
     () => db.select().from(bookingAddons).where(eq(bookingAddons.bookingId, booking.id)),
   ]);
   const dayType = booking.pricedAs ?? dayTypeFor(catalog, localDateOf(booking.startAt));
-  const lengths = [...new Set([...catalog.rules.filter((rule) => rule.dayType === dayType).map((rule) => rule.durationMinutes), booking.durationMinutes])].sort((a, b) => a - b);
+  const lengths = [...new Set([...catalog.rules.filter((rule) => rule.dayType === dayType).map((rule) => rule.durationMinutes), ...catalog.bundlePrices.map((price) => price.durationMinutes), booking.durationMinutes])].sort((a, b) => a - b);
   const offered = catalog.addons.map((addon) => ({
     id: addon.id,
     name: addon.name,

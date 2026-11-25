@@ -2783,3 +2783,11 @@ fieldset { min-inline-size: 0; }
 .code-days { flex-basis: 100%; }
 .code-days-help { font-size: .8rem; margin: 0 0 .5rem; }
 .code-days-week { display: flex; flex-wrap: wrap; gap: .25rem 1rem; margin-bottom: .5rem; }
+
+/* ── The bundles' prices, and the lengths between the listed ones (the owner's answers of 2026-11-25) ── */
+.rates-grid.bundle-prices { grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); }
+/* The line under the studios' prices spans the grid. */
+.rates-grid > .rates-note { grid-column: 1 / -1; text-align: center; font-size: .9rem; margin: .5rem auto 0; max-width: 46rem; }
+/* The booking screen's list of the lengths between the buttons'. */
+.duration-other { width: auto; min-width: 12rem; max-width: 100%; margin: -.25rem 0 1rem; min-height: 44px; }
+.duration-other.selected { border-color: var(--color-rose); box-shadow: inset 0 0 0 1px var(--color-rose); }

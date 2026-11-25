@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { PageBlocks } from "@/components/site/PageBlocks";
-import { addons, photoPackages, settings, siteDocuments, siteVersions } from "@/db/schema";
+import { addons, bundlePrices, photoPackages, settings, siteDocuments, siteVersions } from "@/db/schema";
 import { builtInPages } from "@/lib/site/built-in-pages";
 import { CONDITIONS } from "@/lib/site/conditions";
 import { liveValues } from "@/lib/site/live-values";
@@ -112,7 +112,8 @@ describe("the pages the website was built with", () => {
     expect(faq).toContain("You can move a booking once free of charge. Moving it again costs $20 each time, which is taken off the code.");
     expect(faq).not.toContain("A booking can be moved once.");
     expect(faq).toContain("The code is valid for 90 days.");
-    expect(faq).toContain("You get 20% off when you book 2, 22% off when you book 3 or more.");
+    // The bundles have prices of their own, so no percentage is promised (question 81).
+    expect(faq).not.toContain("You get");
     expect(faq).toContain("Pets are welcome in Studio Dayglow only. The other studios and all common areas are pet-free.");
     expect(faq).not.toContain("Pets are welcome in every studio.");
     expect(faq).toContain("A pet fee of $40 applies per reservation");
@@ -141,14 +142,30 @@ describe("the pages the website was built with", () => {
     expect(services).toContain("Book a Photographer");
     expect(services).not.toContain("Ask About a Session");
 
+    // The bundles' own prices, each bundle's listed lengths (the owner's brief of 2026-11-24, item 4); the section
+    // that says a percentage off is not shown while they have them.
     const rates = await words("rates");
-    expect(rates).toContain("Book Studio Bundles");
+    expect(rates).toContain("Studio Bundles");
+    expect(rates).not.toContain("Book Studio Bundles");
+    expect(rates).toMatch(/Paris \+ Dayglow.*\$115.*per hour.*1\.5 hours.*\$172.*5 hours.*\$490.*Up to 10 guests included/);
+    expect(rates).toMatch(/All three studios.*\$180.*10 hours.*\$1,500.*Up to 16 guests included/);
+    expect(rates).not.toContain("2.5 hours"); // a length between is booked, not listed
+    expect(rates).toContain("Need a different length? The lengths between the ones listed can be booked too");
     expect(rates).toContain("Add-ons");
 
     const home = await words("");
     expect(home).toContain("Where Every Frame Tells a Story");
     expect(home).toContain("Studio Blanche");
     expect(home).toContain("(407) 663-6109");
+  });
+
+  it("say the percentage off for several studios while no bundle has prices of its own", async () => {
+    await world.db.delete(bundlePrices);
+    expect(await words("faq")).toContain("You get 20% off when you book 2, 22% off when you book 3 or more.");
+    const rates = await words("rates");
+    expect(rates).toContain("Book Studio Bundles");
+    expect(rates).toContain("20% off when you book 2, 22% off when you book 3 or more.");
+    expect(rates).not.toContain("Up to 10 guests included");
   });
 
   it("say that a booking can be moved once, and name no fee, while the owners set none", async () => {

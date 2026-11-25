@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { PDFDocument } from "@cantoo/pdf-lib";
 import { eq } from "drizzle-orm";
-import { addons, bookings, payments, priceRules, refunds } from "@/db/schema";
+import { addons, bookings, bundlePrices, payments, priceRules, refunds } from "@/db/schema";
 import { DEFAULT_FRAME } from "@/lib/site/frame";
 import { createAdminBooking } from "./appointments";
 import type { AuthUser } from "./auth";
@@ -72,7 +72,14 @@ describe("a receipt", () => {
     expect(await getReceipt(world.db, JANE, booked.ref)).toEqual(before);
   });
 
+  it("shows studios booked together at one price as one line", async () => {
+    const bundle = expectOk(await world.book({ date: FAR, studioIds: [world.ids.blanche, world.ids.paris], durationMinutes: 60 }));
+    expect((await getReceipt(world.db, JANE, bundle.ref))!.lines).toEqual([{ label: "Studio Blanche + Studio Paris", cents: 14000 }]);
+  });
+
   it("lists a discount, several studios, and money moved from an earlier booking as lines of their own", async () => {
+    // Studios without prices together: each costs its own price, and the discount for several follows.
+    await world.db.delete(bundlePrices);
     const bundle = expectOk(await world.book({ date: FAR, studioIds: [world.ids.blanche, world.ids.paris], durationMinutes: 60 }));
     expect((await getReceipt(world.db, JANE, bundle.ref))!.lines).toEqual([
       { label: "Studio Blanche", cents: 8800 },

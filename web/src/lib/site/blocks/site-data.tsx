@@ -1,7 +1,7 @@
 import Image from "next/image";
 import { ContactForm as ContactFormView } from "@/components/ContactForm";
 import { PictureRow } from "@/components/site/PictureRow";
-import { hasWeekendPricing, hourlyFromCents, hoursLines, openingHours, priceTable } from "@/lib/catalog-view";
+import { bundleName, bundleTables, hasWeekendPricing, hourlyFromCents, hoursLines, openingHours, priceTable } from "@/lib/catalog-view";
 import { formatCents } from "@/lib/domain/pricing";
 import { sessionsOf } from "@/lib/domain/services";
 import { durationLabel } from "@/lib/domain/time";
@@ -245,13 +245,22 @@ export const StudioDetails = defineBlock({
   },
 });
 
+const BETWEEN_NOTE = "Need a different length? The lengths between the ones listed can be booked too, for a studio or a bundle: the booking page shows each one's price.";
+
 export const RateCards = defineBlock({
   label: "Prices of the studios",
   group: "site",
   fields: {
     bookLabel: { kind: "text", label: "Words on the booking button", max: 30, start: "Book Now" },
+    /** Shown only while the owners sell the lengths between the listed ones (Admin → Prices). */
+    betweenNote: {
+      kind: "text",
+      label: "A line under the prices, while lengths between the listed ones can be booked (empty: none)",
+      max: 240,
+      start: BETWEEN_NOTE,
+    },
   },
-  render: ({ bookLabel, site, editing }) => {
+  render: ({ bookLabel, betweenNote, site, editing }) => {
     const catalog = site.catalog;
     if (!catalog) return <EditorNote editing={editing}>{MISSING}</EditorNote>;
     const weekend = hasWeekendPricing(catalog);
@@ -296,6 +305,72 @@ export const RateCards = defineBlock({
                 </SiteAnchor>
               )}
             </div>
+          );
+        })}
+        {betweenNote && catalog.settings.betweenLengthsMinutes > 0 && <p className="rates-note">{betweenNote}</p>}
+      </div>
+    );
+  },
+});
+
+/**
+ * The bundles' prices (the owner's brief of 2026-11-24, item 4, and answers of 2026-11-25): a card for each bundle the
+ * owners gave prices of its own under Admin → Prices, with the price of each length they list. A bundle costs the same
+ * on every day, so there is one column. Nothing while no bundle has prices: a bundle is then a percentage off the
+ * studios' prices, which the pages say in words (`{several studios offer}`).
+ */
+export const BundlePrices = defineBlock({
+  label: "Prices of the bundles",
+  group: "site",
+  fields: {
+    bookLabel: { kind: "text", label: "Words on the booking button", max: 30, start: "Book Now" },
+  },
+  render: ({ bookLabel, site, editing }) => {
+    const catalog = site.catalog;
+    if (!catalog) return <EditorNote editing={editing}>{MISSING}</EditorNote>;
+    const tables = bundleTables(catalog);
+    if (tables.length === 0) {
+      return <EditorNote editing={editing}>No bundle has prices of its own under Admin → Prices, so visitors see nothing here.</EditorNote>;
+    }
+    const studios = new Map(catalog.studios.map((studio) => [studio.id, studio]));
+    return (
+      <div className="blk rates-grid bundle-prices">
+        {tables.map((table) => {
+          const members = table.studioIds.flatMap((id) => studios.get(id) ?? []);
+          const hour = table.prices.find((price) => price.durationMinutes === 60);
+          const guests = members.reduce((sum, studio) => sum + studio.includedGuests, 0);
+          return (
+            <section className="rate-card" key={table.studioIds.join("+")} aria-label={table.name}>
+              <h3>{table.name}</h3>
+              {hour && (
+                <>
+                  <div className="rate-price">{formatCents(hour.priceCents)}</div>
+                  <div className="rate-unit">per hour</div>
+                </>
+              )}
+              <hr className="rate-divider" />
+              <table className="price-table">
+                <tbody>
+                  {table.prices.map((price) => (
+                    <tr key={price.durationMinutes}>
+                      <td style={{ textAlign: "left" }}>{durationLabel(price.durationMinutes)}</td>
+                      <td>{formatCents(price.priceCents)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p style={{ fontSize: ".8rem", marginTop: "1rem" }}>Up to {guests} guests included.</p>
+              {bookLabel && (
+                <SiteAnchor
+                  href={`/book?studio=${members.map((studio) => studio.slug).join(",")}`}
+                  className="btn btn-primary mt-2 rate-book"
+                  editing={editing}
+                  label={`${bookLabel}: ${table.name}`}
+                >
+                  {bookLabel}
+                </SiteAnchor>
+              )}
+            </section>
           );
         })}
       </div>
@@ -406,8 +481,6 @@ const MEMBERSHIP_BENEFITS = [
   "Unused hours remain available after membership cancellation.",
 ].map((text) => ({ text }));
 
-const NUMBER_WORDS = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten"];
-
 /**
  * The memberships on sale (the owner's brief of 2026-11-24, item 6): one card for each studio or bundle, with each of its
  * plans' monthly price, hours and price an hour, and a button that buys it; then the benefits, and a link to the terms.
@@ -447,11 +520,7 @@ export const MembershipPlans = defineBlock({
       groups.set(key, [...(groups.get(key) ?? []), plan]);
     }
     const shown = benefits.filter((benefit) => benefit.text !== "");
-    const nameOf = (ids: string[]) => {
-      if (ids.length === 1) return studios.get(ids[0])?.name ?? "";
-      if (ids.length > 2 && ids.length === catalog.studios.length) return `All ${(NUMBER_WORDS[ids.length] ?? String(ids.length)).toLowerCase()} studios`;
-      return ids.map((id) => (studios.get(id)?.name ?? "").replace(/^Studio /, "")).join(" + ");
-    };
+    const nameOf = (ids: string[]) => bundleName(catalog, ids);
     return (
       <div className="blk rates-grid membership-plans">
         {[...groups.values()].map((plans) => {

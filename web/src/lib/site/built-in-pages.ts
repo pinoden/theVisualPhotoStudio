@@ -144,13 +144,7 @@ function studios(): BuiltInPage {
 
 function rates(): BuiltInPage {
   const b = maker("rates");
-  return {
-    key: "rates",
-    slug: "rates",
-    title: "Rates",
-    content: {
-      meta: META,
-      blocks: [
+  const blocks = [
         b("Banner", {
           eyebrow: "Transparent Pricing",
           title: "Studio Rates",
@@ -193,9 +187,28 @@ function rates(): BuiltInPage {
             b("Buttons", { buttons: [button("More About Photography", "/services", "outline")] }),
           ],
         }),
+  ];
+  // The bundles' prices (the owner's brief of 2026-11-24, item 4, and answers of 2026-11-25), after the studios' own.
+  // Made last, so that the blocks before keep their ids, and put in its place (migration 0072 does the same to a stored
+  // page). Shown while a bundle has prices of its own; the section below it speaks while a bundle is a percentage off.
+  blocks.splice(
+    2,
+    0,
+    b("Section", {
+      background: "card",
+      when: "bundle prices",
+      anchor: "bundles",
+      content: [
+        b("Heading", { eyebrow: "Several Studios", text: "Studio Bundles", line: true }),
+        b("Text", {
+          text: centred("Book Paris with Blanche, Paris with Dayglow or all three. Each studio is reserved for the whole session. Bundle prices are the same on weekdays and weekends."),
+          width: "narrow",
+        }),
+        b("BundlePrices", { bookLabel: "Book Now" }),
       ],
-    },
-  };
+    }),
+  );
+  return { key: "rates", slug: "rates", title: "Rates", content: { meta: META, blocks } };
 }
 
 function services(): BuiltInPage {

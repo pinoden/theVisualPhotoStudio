@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { bookingAddons, bookings, promoCodes, studioHolds } from "@/db/schema";
 import { together, type DbLike } from "@/db/client";
 import { durationLabel, type DayType, type IsoDate } from "@/lib/domain/time";
-import { findPrice, formatCents, PricingError, quote, type PromoDef, type Quote } from "@/lib/domain/pricing";
+import { formatCents, PricingError, quote, unpriced, type PromoDef, type Quote } from "@/lib/domain/pricing";
 import { dayTypeFor, type Catalog } from "./catalog";
 import { creditName, type PromoSource } from "./promos";
 import { localDateOf } from "./tz";
@@ -71,12 +71,16 @@ export async function priceOnNewDay(db: DbLike, booking: BookingRow, date: IsoDa
     () => (codeId ? db.select().from(promoCodes).where(eq(promoCodes.id, codeId)).limit(1) : Promise.resolve([])),
   ]);
   const studioIds = holds.map((hold) => hold.studioId).sort();
-  const missing = studioIds.filter((id) => findPrice(id, dayType, booking.durationMinutes, catalog.rules) === null);
-  if (missing.length > 0) {
-    const names = missing.map((id) => catalog.studios.find((studio) => studio.id === id)?.name ?? "One of its studios").join(" and ");
+  const gap = unpriced(studioIds, dayType, booking.durationMinutes, catalog.rules, catalog.bundlePrices);
+  if (gap) {
+    const names = gap.studioIds.map((id) => catalog.studios.find((studio) => studio.id === id)?.name ?? "One of its studios").join(" and ");
+    // Studios with prices together cost the same on every day, so no other kind of day would help.
+    if (gap.together) {
+      return { kind: "refused", message: `${names} have no price together for ${durationLabel(booking.durationMinutes)} under Prices, so the booking cannot be priced. Add the price first.` };
+    }
     return {
       kind: "refused",
-      message: `${names} ${missing.length > 1 ? "have" : "has"} no ${KIND_WORDS[dayType]} price for ${durationLabel(booking.durationMinutes)} under Prices, so the booking cannot be priced for that day. Add the price first, or choose a ${KIND_WORDS[dayType === "weekend" ? "weekday" : "weekend"]}.`,
+      message: `${names} ${gap.studioIds.length > 1 ? "have" : "has"} no ${KIND_WORDS[dayType]} price for ${durationLabel(booking.durationMinutes)} under Prices, so the booking cannot be priced for that day. Add the price first, or choose a ${KIND_WORDS[dayType === "weekend" ? "weekday" : "weekend"]}.`,
     };
   }
 
@@ -100,6 +104,7 @@ export async function priceOnNewDay(db: DbLike, booking: BookingRow, date: IsoDa
       dayType,
       durationMinutes: booking.durationMinutes,
       rules: catalog.rules,
+      bundlePrices: catalog.bundlePrices,
       multiStudioPercent: catalog.settings.multiStudioPercent,
       // At the prices they were booked at: an add-on costs the same any day.
       addons: addonRows.map((row) => ({ addonId: row.addonId, quantity: row.quantity })),

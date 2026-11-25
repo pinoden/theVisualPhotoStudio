@@ -58,7 +58,7 @@ const THIRD_OWNER = "owner3@studio.test";
 const FIFTH_OWNER = "owner5@studio.test";
 // This one rewords an email, changes a membership plan and gives a member an hour.
 const EMAILS_OWNER = "owner13@studio.test";
-// This one moves a booking to a day that costs less, and refunds the difference.
+// This one changes a bundle's prices, and later moves a booking to a day that costs less and refunds the difference.
 const PRICES_OWNER = "owner14@studio.test";
 /** Chooses the contact form's inbox. Each owner signs in only a few times: the site sends an address three codes in 15 minutes. */
 const INBOX_OWNER = "owner15@studio.test";
@@ -101,7 +101,7 @@ test("public pages show the studios and the live price list", async ({ page }) =
   await page.goto("/rates");
   await expect(page.getByRole("heading", { name: "Studio Rates" })).toBeVisible();
   // The studios' rental prices, not photography's sessions further down (brief of 2026-11-24).
-  const rentals = page.locator(".rates-grid:not(.session-prices) > .rate-card");
+  const rentals = page.locator(".rates-grid:not(.session-prices, .bundle-prices) > .rate-card");
   const blanche = rentals.filter({ hasText: "Studio Blanche" });
   await expect(blanche.getByRole("columnheader", { name: /Mon–Fri/i })).toBeVisible();
   await expect(blanche.getByRole("columnheader", { name: /Sat–Sun/i })).toBeVisible();
@@ -357,8 +357,8 @@ test("books two studios together, starting from the studios", async ({ page }) =
   await expect(page.getByRole("heading", { name: new Date(`${NEAR}T12:00:00Z`).toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" }) })).toBeVisible();
   await shot(page, "03b-month-calendar");
   expect(await accessibilityProblems(page), "the month calendar").toEqual([]);
-  // ($78 + $68) less the 20% two-studio discount
-  await expect(totalRow(page)).toContainText("$116.80");
+  // The bundle's own price for an hour (the owner's brief of 2026-11-24, item 4), not the two studios' prices.
+  await expect(totalRow(page)).toContainText("$115");
 
   await expect(page.getByRole("button", { name: "10:00 AM", exact: true })).toBeVisible();
   await shot(page, "04-times-studio-first");
@@ -380,12 +380,12 @@ test("books two studios together, starting from the studios", async ({ page }) =
   await next(page);
 
   await expect(byText(page, /No card processor is connected/)).toBeVisible();
-  const ref = await confirmAndGetRef(page, "Confirm & pay $116.80");
+  const ref = await confirmAndGetRef(page, "Confirm & pay $115");
   expect(ref).toMatch(/^VS-[0-9A-Z]{6}$/);
   const card = page.locator(".confirmation-card");
-  await expect(card.getByText("Studio Paris", { exact: true })).toBeVisible();
-  await expect(card.getByText("Studio Dayglow", { exact: true })).toBeVisible();
-  await expect(totalRow(card)).toContainText("$116.80");
+  // The two studios at the bundle's price, on one line.
+  await expect(card.getByText("Studio Dayglow + Studio Paris", { exact: true })).toBeVisible();
+  await expect(totalRow(card)).toContainText("$115");
   await shot(page, "06-confirmation");
   expect(await accessibilityProblems(page), "the client's booking page").toEqual([]);
 
@@ -478,9 +478,9 @@ test("a customer signs in, sees their booking, and turns it into a reschedule co
   await page.getByRole("link", { name: "Back to My Appointments" }).click();
 
   await card.getByRole("button", { name: "Reschedule" }).click();
-  await expect(byText(card, /you will get a code worth \$116\.80, valid for 90 days/)).toBeVisible();
+  await expect(byText(card, /you will get a code worth \$115, valid for 90 days/)).toBeVisible();
   await card.getByRole("button", { name: "Yes, release it and send my code" }).click();
-  await expect(byText(card, /Your code is worth \$116\.80/)).toBeVisible();
+  await expect(byText(card, /Your code is worth \$115/)).toBeVisible();
   rescheduleCode = (await card.locator(".booking-ref").innerText()).trim();
   expect(rescheduleCode).toMatch(/^MOVE-[0-9A-Z]{4}-[0-9A-Z]{4}$/);
   await shot(page, "10-reschedule-code");
@@ -507,7 +507,7 @@ test("a customer signs in, sees their booking, and turns it into a reschedule co
   await page.getByRole("link", { name: "My Rewards", exact: true }).click();
   await expect(page.getByRole("heading", { name: "My Rewards", level: 1 })).toBeVisible();
   await expect(byText(page, rescheduleCode)).toBeVisible();
-  await expect(byText(page, "$116.80 credit from a rescheduled booking")).toBeVisible();
+  await expect(byText(page, "$115 credit from a rescheduled booking")).toBeVisible();
   await expect(byText(page, /You have not earned a reward yet\. Your first free studio hour comes with your 5th stamp\./)).toBeVisible();
   expect(await accessibilityProblems(page), "My Rewards, with credit").toEqual([]);
 
@@ -516,14 +516,14 @@ test("a customer signs in, sees their booking, and turns it into a reschedule co
   await expect(page.getByRole("heading", { name: "Receipts & Payments", level: 1 })).toBeVisible();
   const year = todayInStudio().slice(0, 4);
   const summary = onScreen(page.locator(".admin-card", { hasText: `Your payments in ${year}` }));
-  await expect(summary).toContainText("$116.80");
+  await expect(summary).toContainText("$115");
   await shot(page, "10a-account-receipts");
   expect(await accessibilityProblems(page), "Receipts & Payments, with a payment").toEqual([]);
   await page.getByRole("link", { name: "View", exact: true }).click();
   const receipt = onScreen(page.locator("article.receipt"));
-  await expect(receipt).toContainText("Studio Dayglow");
-  await expect(receipt).toContainText("Discount for booking several studios");
-  await expect(receipt).toContainText("-$29.20");
+  await expect(receipt).toContainText("Studio Dayglow + Studio Paris");
+  await expect(receipt).not.toContainText("Discount for booking several studios");
+  await expect(receipt).toContainText("$115");
   await expect(receipt).toContainText("Card, online");
   await expect(receipt).toContainText("Released for rescheduling");
   await shot(page, "10b-account-receipt");
@@ -548,7 +548,7 @@ test("the released time is bookable again, and the code pays for a new booking w
   await page.getByRole("button", { name: "Check balance" }).click();
   const balance = onScreen(page.locator(".code-balance-result"));
   await expect(balance).toContainText(`Reschedule code · ${rescheduleCode}`);
-  await expect(balance).toContainText("$116.80 remaining");
+  await expect(balance).toContainText("$115 remaining");
   await expect(balance).toContainText(/Valid until [A-Z][a-z]{2} \d{1,2}, \d{4}/);
   await expect(balance).toContainText("Works only with the email address it was sent to.");
   await shot(page, "11-code-balance");
@@ -1123,7 +1123,74 @@ test("the owner sets a weekend price and the booking screen charges it on Saturd
   await expect(totalRow(page)).toContainText("$88");
 
   await page.goto("/rates");
-  await expect(page.locator(".rates-grid:not(.session-prices) > .rate-card", { hasText: "Studio Blanche" }).getByRole("row", { name: /1 hour/ })).toContainText("$120");
+  await expect(page.locator(".rates-grid:not(.session-prices, .bundle-prices) > .rate-card", { hasText: "Studio Blanche" }).getByRole("row", { name: /1 hour/ })).toContainText("$120");
+});
+
+test("the bundles have prices of their own, the same every day, which the owner changes; a length between the listed ones is priced between them", async ({ page }) => {
+  // The owner's brief of 2026-11-24, item 4, and answers of 2026-11-25 (questions 81 and 83 in ProjectLibrary.md).
+  await page.goto("/rates");
+  await expect(page.getByRole("heading", { name: "Studio Bundles" })).toBeVisible();
+  await expect(page.locator(".rates-grid.bundle-prices > .rate-card")).toHaveCount(3);
+  const pair = page.getByRole("region", { name: "Paris + Dayglow" });
+  await expect(pair.getByRole("row", { name: /^1\.5 hours/ })).toContainText("$172");
+  await expect(pair.getByRole("row")).toHaveCount(6);
+  await expect(page.getByRole("region", { name: "All three studios" }).getByRole("row", { name: /^10 hours/ })).toContainText("$1,500");
+  await expect(byText(page, /^Need a different length\?/)).toBeVisible();
+  await shot(page, "17b-rates-bundles");
+  expect(await accessibilityProblems(page), "the Rates page, with the bundles' prices").toEqual([]);
+
+  // The card's button opens the booking with its studios chosen. A Saturday costs what a weekday does.
+  await pair.getByRole("link", { name: "Book Now: Paris + Dayglow" }).click();
+  await page.waitForURL(/\/book\?studio=/);
+  await expect(page.locator("label.studio-option input:checked")).toHaveCount(2);
+  await expect(byText(page, /^Bundle prices: Paris \+ Dayglow from \$115, Paris \+ Blanche from \$140, all three studios from \$180\.$/)).toBeVisible();
+  await next(page);
+  await page.getByRole("button", { name: "2 hr", exact: true }).click();
+  await byLabel(page, "Date").fill(SATURDAY);
+  await expect(totalRow(page)).toContainText("$230");
+  await byLabel(page, "Date").fill(FAR);
+  await expect(totalRow(page)).toContainText("$230");
+  await expect(byText(page, "Studio Dayglow + Studio Paris, 2 hours")).toBeVisible();
+  // Two and a half hours is in the list under the buttons, at the price between two hours ($230) and three ($320).
+  await expect(page.getByRole("button", { name: "2.5 hr", exact: true })).toHaveCount(0);
+  await page.getByLabel("Another length").selectOption({ label: "2.5 hours" });
+  await expect(totalRow(page)).toContainText("$275");
+  await shot(page, "17c-book-length-between");
+  expect(await accessibilityProblems(page), "the booking page, with a length between").toEqual([]);
+
+  // The owner gives the bundle a six-hour price, and sells only the listed lengths. (An owner of this test's own: the
+  // first has had the three sign-in codes an address may ask for in 15 minutes by now, in a fast run.)
+  await signIn(page, PRICES_OWNER, "/admin/prices");
+  const card = page.locator(".admin-card", { has: page.getByRole("heading", { name: "Paris + Dayglow", exact: true }) });
+  await expect(card.getByLabel("Paris + Dayglow 1 hour price")).toHaveValue("115");
+  await card.getByLabel("Add a duration (minutes)").fill("360");
+  await card.getByLabel("Price ($)", { exact: true }).fill("580");
+  await card.getByRole("button", { name: "Add", exact: true }).click();
+  await expect(byText(page, "Duration added.")).toBeVisible();
+  await expect(card.getByLabel("Paris + Dayglow 6 hours price")).toHaveValue("580");
+  await byLabel(page, "Lengths between the listed ones").selectOption({ label: "Cannot be booked: only the durations listed" });
+  await page.locator("form", { has: page.getByLabel("Lengths between the listed ones") }).getByRole("button", { name: "Save", exact: true }).click();
+  await expect(byText(page, "Only the listed lengths can be booked now.")).toBeVisible();
+  await shot(page, "17d-admin-bundle-prices");
+  expect(await accessibilityProblems(page), "the admin's prices, with the bundles").toEqual([]);
+
+  await page.goto("/rates");
+  await expect(page.getByRole("region", { name: "Paris + Dayglow" }).getByRole("row", { name: /^6 hours/ })).toContainText("$580");
+  await expect(byText(page, /^Need a different length\?/)).toHaveCount(0);
+  await page.goto("/book?studio=dayglow,paris");
+  await next(page);
+  await expect(page.getByRole("button", { name: "6 hr", exact: true })).toBeVisible();
+  await expect(page.getByLabel("Another length")).toHaveCount(0);
+
+  // Back as it was, for the tests that follow: the owner's list, and every half hour between.
+  await page.goto("/admin/prices");
+  await card.getByLabel("Paris + Dayglow 6 hours price").fill("");
+  await card.getByRole("button", { name: "Save Paris + Dayglow prices" }).click();
+  await expect(byText(page, "Bundle prices saved.")).toBeVisible();
+  await expect(card.getByLabel("Paris + Dayglow 6 hours price")).toHaveCount(0);
+  await byLabel(page, "Lengths between the listed ones").selectOption({ label: "Can be booked, every half hour" });
+  await page.locator("form", { has: page.getByLabel("Lengths between the listed ones") }).getByRole("button", { name: "Save", exact: true }).click();
+  await expect(byText(page, "The lengths between the listed ones can be booked now.")).toBeVisible();
 });
 
 test("the owners write a seasonal question and an agreement, a client answers and accepts them, and the booking keeps them", async ({ page, browser }) => {
@@ -1792,7 +1859,7 @@ test("the owner changes an add-on's price and a studio's guest number, and custo
 
   await page.goto("/rates");
   await expect(page.getByRole("row", { name: /Pet fee/ })).toContainText("$45");
-  await expect(page.locator(".rates-grid:not(.session-prices) > .rate-card", { hasText: "Studio Paris" })).toContainText("Up to 5 guests included.");
+  await expect(page.locator(".rates-grid:not(.session-prices, .bundle-prices) > .rate-card", { hasText: "Studio Paris" })).toContainText("Up to 5 guests included.");
   await page.goto("/faq");
   const pets = page.locator("details.faq-item", { hasText: "Can I bring my pet?" });
   await pets.locator("summary").click();
@@ -2083,7 +2150,7 @@ test("the owners look a customer up, see what they paid, and correct their stamp
   // Everything she paid this year, added up, with a receipt for each booking; and the file of the year.
   const year = todayInStudio().slice(0, 4);
   const payments = onScreen(page.locator("#payments"));
-  await expect(payments).toContainText(`${year}: $346.80 paid, $64.60 refunded`);
+  await expect(payments).toContainText(`${year}: $345.00 paid, $64.60 refunded`);
   await expect(payments.locator(".receipt-list li")).toHaveCount(4);
   const janesPage = `/admin/customers/${encodeURIComponent(jane.email)}`;
   const file = await page.request.get(`${janesPage}/receipts/year/${year}/pdf`);

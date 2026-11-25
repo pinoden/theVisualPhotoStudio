@@ -6,6 +6,7 @@ import { getDb } from "@/db/client";
 import { isAddonKind } from "@/lib/addon-kinds";
 import { count } from "@/lib/words";
 import { createBlocks, removeBlocks, updateBlocks, type BlockPlan } from "@/server/blocked-time";
+import { studioCombinationError } from "@/lib/catalog-view";
 import { loadCatalog } from "@/server/catalog";
 import { dollarsToCents, formText, hhmmToMinutes, intInRange } from "@/lib/parse";
 import { ADMIN_LEVELS, ATTENDANT_SWITCH_KEYS, isAdminLevel, MANAGER_SWITCH_KEYS } from "@/lib/abilities";
@@ -17,6 +18,7 @@ import {
   PRICE_MAX_CENTS,
   removeStaff,
   saveAddon,
+  saveBundlePrice,
   savePrice,
   saveStudioDetails,
   setStudioActive,
@@ -38,6 +40,7 @@ import { can, type Ability } from "@/lib/abilities";
 import { requireManager, requireOwner } from "@/server/session";
 import {
   ACCESS_INSTRUCTIONS_MAX,
+  BETWEEN_LENGTHS,
   loadSettings,
   MONEY_SETTING_RANGES,
   NUMBER_SETTING_RANGES,
@@ -214,6 +217,67 @@ export async function saveDiscountAction(formData: FormData): Promise<void> {
   await saveSetting(await getDb(), "multiStudioPercent", { 2: two, 3: three });
   updateTag(CATALOG_TAG);
   done("/admin/prices", "Multi-studio discount saved.");
+}
+
+/** The studios a bundle's form is for: the ids it carries, when those studios may be booked together. */
+async function bundleOfForm(formData: FormData): Promise<string[]> {
+  const studioIds = text(formData, "studioIds").split(",").filter(Boolean);
+  const catalog = await loadCatalog(await getDb());
+  if (studioIds.length < 2 || !studioIds.every((id) => catalog.studios.some((studio) => studio.id === id)) || studioCombinationError(catalog.studios, studioIds)) {
+    failed("/admin/prices", "Those studios cannot be booked together.");
+  }
+  return studioIds;
+}
+
+/** A bundle's prices, one for each length of its list; a price cleared takes that length off the list. */
+export async function saveBundlePricesAction(formData: FormData): Promise<void> {
+  await requireOwner("/admin/prices");
+  const studioIds = await bundleOfForm(formData);
+  const changes: { durationMinutes: number; priceCents: number | null }[] = [];
+  for (const [name, value] of formData.entries()) {
+    const match = /^price:(\d+)$/.exec(name);
+    if (!match || typeof value !== "string") continue;
+    const priceCents = value.trim() === "" ? null : dollarsToCents(value);
+    if (value.trim() !== "" && priceCents === null) failed("/admin/prices", `"${value}" is not a valid price.`);
+    if (priceCents !== null && priceCents > PRICE_MAX_CENTS) {
+      failed("/admin/prices", `Not saved: the price for ${durationLabel(Number(match[1]))} is more than ${formatCents(PRICE_MAX_CENTS)}, the most a price can be. Nothing was changed.`);
+    }
+    changes.push({ durationMinutes: Number(match[1]), priceCents });
+  }
+  const db = await getDb();
+  let saved = true;
+  try {
+    await db.transaction(async (tx) => {
+      for (const change of changes) if (!(await saveBundlePrice(tx, { studioIds, ...change }))) throw new Error("A price was refused.");
+    });
+  } catch {
+    saved = false;
+  }
+  if (!saved) failed("/admin/prices", "The prices could not be saved, and none was changed. Check that each is an amount in dollars.");
+  updateTag(CATALOG_TAG);
+  done("/admin/prices", "Bundle prices saved.");
+}
+
+export async function addBundleLengthAction(formData: FormData): Promise<void> {
+  await requireOwner("/admin/prices");
+  const studioIds = await bundleOfForm(formData);
+  const minutes = intInRange(text(formData, "minutes"), 15, 1440);
+  if (minutes === null || minutes % 15 !== 0) failed("/admin/prices", "Enter the duration in minutes, from 15 to 1440, in steps of 15: 90 is an hour and a half.");
+  const price = dollarsToCents(text(formData, "price"));
+  if (price === null) failed("/admin/prices", "Enter the price as an amount in dollars, for example 230 or 172.50.");
+  if (price > PRICE_MAX_CENTS) failed("/admin/prices", `A price can be at most ${formatCents(PRICE_MAX_CENTS)}.`);
+  if (!(await saveBundlePrice(await getDb(), { studioIds, durationMinutes: minutes, priceCents: price }))) failed("/admin/prices", "That duration could not be added.");
+  updateTag(CATALOG_TAG);
+  done("/admin/prices", "Duration added.");
+}
+
+/** Whether the lengths between the listed ones can be booked: every half hour, every hour, or not. */
+export async function saveBetweenLengthsAction(formData: FormData): Promise<void> {
+  await requireOwner("/admin/prices");
+  const minutes = Number(text(formData, "betweenLengthsMinutes"));
+  if (!BETWEEN_LENGTHS.includes(minutes) || !(await saveSetting(await getDb(), "betweenLengthsMinutes", minutes))) failed("/admin/prices", "Choose one of the three.");
+  updateTag(CATALOG_TAG);
+  done("/admin/prices", minutes === 0 ? "Only the listed lengths can be booked now." : "The lengths between the listed ones can be booked now.");
 }
 
 export async function specialDateAction(formData: FormData): Promise<void> {
