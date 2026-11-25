@@ -1,5 +1,5 @@
 import { sessionsOf } from "@/lib/domain/services";
-import { multiStudioOffer, petPolicy } from "@/lib/catalog-view";
+import { bookingLengths, multiStudioOffer, petPolicy } from "@/lib/catalog-view";
 import { noticeHours } from "@/lib/domain/availability";
 import { formatCents } from "@/lib/domain/pricing";
 import { count, hoursInWords, hoursWithDays, listInWords } from "@/lib/words";
@@ -54,6 +54,7 @@ export function liveValues(catalog: Catalog, business: Business): LiveValue[] {
     ),
     value("pet studios", "The studios that welcome pets", listInWords(pets.studios)),
     value("included guests", "The guests each studio's price includes", listInWords(catalog.studios.map((studio) => `${studio.name} up to ${studio.includedGuests}`))),
+    value("booking lengths", "How long a studio or a bundle can be booked for: 1 to 10 hours", bookingLengths(catalog)),
     value("several studios offer", "The discount for booking several studios together", multiStudioOffer(catalog)),
   ];
 }

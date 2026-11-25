@@ -7,8 +7,9 @@ import { durationLabel, longDateLabel } from "@/lib/domain/time";
 import { centsToInput, PRICE_FIELD } from "@/lib/parse";
 import { loadCatalog } from "@/server/catalog";
 import { requireOwner } from "@/server/session";
+import { LONGEST_BOOKINGS } from "@/server/settings";
 import { localDateOf } from "@/server/tz";
-import { addBundleLengthAction, addDurationAction, saveBetweenLengthsAction, saveBundlePricesAction, saveDiscountAction, savePricesAction, specialDateAction } from "../actions";
+import { addBundleLengthAction, addDurationAction, saveLengthsAction, saveBundlePricesAction, saveDiscountAction, savePricesAction, specialDateAction } from "../actions";
 import { AdminFrame, AdminLoading } from "../frame";
 
 export const metadata: Metadata = { title: "Prices", robots: { index: false } };
@@ -39,6 +40,7 @@ async function Prices({ searchParams }: Pick<PageProps<"/admin/prices">, "search
     // As the Rates page lists them: the fewest studios first, then the cheapest; one without prices after those with.
     .sort((a, b) => a.ids.length - b.ids.length || (a.prices[0]?.priceCents ?? Infinity) - (b.prices[0]?.priceCents ?? Infinity));
   const between = catalog.settings.betweenLengthsMinutes;
+  const longest = catalog.settings.longestBookingMinutes;
 
   return (
     <AdminFrame active="/admin/prices" title="Prices" query={await searchParams}>
@@ -49,10 +51,10 @@ async function Prices({ searchParams }: Pick<PageProps<"/admin/prices">, "search
           Sunday. Studios booked together have a price list of their own, further down, the same on every day. Clear a
           price to take that duration off the list.
         </p>
-        <form action={saveBetweenLengthsAction} className="admin-form-row" style={{ marginTop: "1rem", marginBottom: 0 }}>
+        <form action={saveLengthsAction} className="admin-form-row" style={{ marginTop: "1rem", marginBottom: 0 }}>
           <div className="form-group">
             <label className="form-label" htmlFor="between-lengths">
-              Lengths between the listed ones
+              Lengths besides the listed ones
             </label>
             <select id="between-lengths" name="betweenLengthsMinutes" className="form-control" defaultValue={between}>
               <option value={30}>Can be booked, every half hour</option>
@@ -60,14 +62,28 @@ async function Prices({ searchParams }: Pick<PageProps<"/admin/prices">, "search
               <option value={0}>Cannot be booked: only the durations listed</option>
             </select>
           </div>
+          <div className="form-group">
+            <label className="form-label" htmlFor="longest-booking">
+              Every studio and bundle up to
+            </label>
+            <select id="longest-booking" name="longestBookingMinutes" className="form-control" defaultValue={longest}>
+              {LONGEST_BOOKINGS.filter((minutes) => minutes > 0).map((minutes) => (
+                <option key={minutes} value={minutes}>
+                  {durationLabel(minutes)}
+                </option>
+              ))}
+              <option value={0}>The longest duration each one lists</option>
+            </select>
+          </div>
           <button type="submit" className="btn btn-dark btn-small">
             Save
           </button>
         </form>
         <p style={{ fontSize: ".8rem", margin: ".75rem 0 0" }}>
-          A length in between is priced between its two neighbours and rounded to a whole dollar: with 2 hours at $230 and
-          3 hours at $320, 2.5 hours costs $275. Nothing shorter than the shortest duration listed or longer than the
-          longest can be booked: to sell a longer booking, add its duration. A duration you list always costs what you
+          A length you did not list is priced from the ones you did, and rounded to a whole dollar. Between two durations,
+          between their prices: with 2 hours at $230 and 3 hours at $320, 2.5 hours costs $275. Past the longest duration
+          listed, the price goes on rising as it rose between the last two: with 4 hours at $400 and 5 hours at $490, 6
+          hours costs $580. Nothing is shorter than the shortest duration listed. A duration you list always costs what you
           typed.
         </p>
       </div>

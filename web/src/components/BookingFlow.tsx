@@ -13,7 +13,7 @@ import {
   studiosFreeAt,
   type SlotOptions,
 } from "@/lib/domain/availability";
-import { bundleOffer, extraGuestsFor, multiStudioSaving, studioCombinationError } from "@/lib/catalog-view";
+import { bundleOffer, extraGuestsFor, multiStudioSaving, SHOWN_LENGTHS, shownLengths, studioCombinationError } from "@/lib/catalog-view";
 import type { PromoDays } from "@/lib/domain/promo-days";
 import { MonthCalendar } from "./MonthCalendar";
 import { WaitlistJoin } from "./WaitlistJoin";
@@ -185,6 +185,8 @@ export function BookingFlow({
   // `?by=date` opens the date-first path, as the home page's "Know the time?" does (the owner's brief of 2026-11-24, item 2).
   const [mode, setMode] = useState<Mode>(() => (!photography && searchParams.get("by") === "date" ? "time" : "studio"));
   const [stepIndex, setStepIndex] = useState(0);
+  /** Whether the lengths behind "More" are shown. */
+  const [moreLengths, setMoreLengths] = useState(false);
   // A link can choose the studios, the day and the length: `?studio=paris,dayglow&date=…&duration=120`, as the
   // waitlist's email does (src/server/waitlist.ts).
   const [studioIds, setStudioIds] = useState<string[]>(() => {
@@ -304,19 +306,15 @@ export function BookingFlow({
   /** The chosen studios' own price list together, when the owners gave them one: the same on every day. */
   const together = useMemo(() => (photography ? [] : bundleList(studioIds, bundlePrices)), [photography, studioIds, bundlePrices]);
   /**
-   * The lengths the price lists name, which the buttons offer. The lengths between them (the owners' setting,
-   * `betweenLengthsMinutes`) are in a list under the buttons, so that the buttons stay few.
+   * Six lengths as buttons, and the rest behind "More" (the owner, 2026-11-25: "Times options should be the same for
+   * every studio 1-10 hours with displaying 6 options and \"more\""): `shownLengths`.
    */
-  const listedDurations = useMemo(() => {
-    if (photography) return durations;
-    const rows = mode === "studio" ? (together.length > 0 ? together : rules.filter((r) => studioIds.includes(r.studioId))) : [...rules, ...bundlePrices];
-    const listed = new Set(rows.filter((r) => !r.between).map((r) => r.durationMinutes));
-    return durations.filter((minutes) => listed.has(minutes));
-  }, [photography, durations, mode, together, rules, bundlePrices, studioIds]);
-  const otherDurations = useMemo(() => durations.filter((minutes) => !listedDurations.includes(minutes)), [durations, listedDurations]);
-
+  const { shown: shownDurations, more: moreDurations } = useMemo(() => shownLengths(durations, SHOWN_LENGTHS), [durations]);
   /** A chosen duration stops counting once the current selection no longer offers it. */
   const duration = durations.includes(durationChoice) ? durationChoice : 0;
+  /** A length chosen from behind "More" keeps them shown. */
+  const moreChosen = moreDurations.includes(duration);
+  const moreOpen = moreLengths || moreChosen;
   const shownDays = monthDays && monthDays.key === monthKeyOf(month, duration) ? monthDays.days : null;
   const session = photography ? (packages.find((p) => p.durationMinutes === duration) ?? null) : null;
 
@@ -947,7 +945,7 @@ export function BookingFlow({
     <div className="form-group">
       <span className="form-label">Duration</span>
       <div className="duration-grid">
-        {listedDurations.map((minutes) => (
+        {[...shownDurations, ...(moreOpen ? moreDurations : [])].map((minutes) => (
           <button
             type="button"
             key={minutes}
@@ -958,25 +956,13 @@ export function BookingFlow({
             {durationLabel(minutes).replace(" hours", " hr").replace(" hour", " hr").replace(/ minutes?/, " min")}
           </button>
         ))}
+        {moreDurations.length > 0 && !moreChosen && (
+          <button type="button" className="duration-btn duration-more" aria-expanded={moreOpen} onClick={() => setMoreLengths(!moreOpen)}>
+            {moreOpen ? "Fewer" : "More"}
+          </button>
+        )}
         {durations.length === 0 && <p style={{ fontSize: ".85rem" }}>No durations are offered for this selection.</p>}
       </div>
-      {otherDurations.length > 0 && (
-        <select
-          className={`form-control duration-other${otherDurations.includes(duration) ? " selected" : ""}`}
-          aria-label="Another length"
-          value={otherDurations.includes(duration) ? String(duration) : ""}
-          onChange={(event) => {
-            if (event.target.value) chooseDuration(Number(event.target.value));
-          }}
-        >
-          <option value="">Another length…</option>
-          {otherDurations.map((minutes) => (
-            <option key={minutes} value={minutes}>
-              {durationLabel(minutes)}
-            </option>
-          ))}
-        </select>
-      )}
     </div>
   );
 

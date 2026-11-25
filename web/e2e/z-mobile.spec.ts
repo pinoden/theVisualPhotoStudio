@@ -15,6 +15,7 @@ import {
   signIn,
   totalRow,
   watchBrowser,
+  pickLength,
 } from "./helpers";
 import {
   brokenWords as brokenWordsIn,
@@ -207,7 +208,7 @@ for (const [index, size] of BOOKING_SIZES.entries()) {
     await next(page);
 
     await byLabel(page, "Date").fill(date);
-    await page.getByRole("button", { name: "1.5 hr", exact: true }).click();
+    await pickLength(page, "1.5 hr");
     await step("date");
 
     // Every start time is a button that can be tapped: a quarter of an hour apart.

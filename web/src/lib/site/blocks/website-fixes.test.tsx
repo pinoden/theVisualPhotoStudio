@@ -135,10 +135,10 @@ describe("the bundles' prices (the brief's item 4; the owner's answers of 2026-1
     expect(draw([block("BundlePrices")], site)).toBe("");
   });
 
-  it("say under the studios' prices that the lengths between can be booked, while the owners sell them", () => {
-    const note = "Need a different length? The lengths between the ones listed can be booked too";
+  it("say under the studios' prices that other lengths can be booked, while the owners sell them", () => {
+    const note = "Need a different length? Every studio and bundle can be booked for {booking lengths}";
     expect(draw([block("RateCards")])).toContain(`<p class="rates-note">${note}`);
-    const listedOnly = { ...site, catalog: { ...catalog, settings: { ...DEFAULT_SETTINGS, betweenLengthsMinutes: 0 } } } as SiteContext;
+    const listedOnly = { ...site, catalog: { ...catalog, rules: catalog.rules.filter((rule) => !rule.between), bundlePrices: catalog.bundlePrices.filter((price) => !price.between) } } as SiteContext;
     expect(draw([block("RateCards")], listedOnly)).not.toContain("rates-note");
     expect(draw([block("RateCards", { betweenNote: "" })])).not.toContain("rates-note");
   });

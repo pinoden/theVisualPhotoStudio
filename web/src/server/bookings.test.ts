@@ -134,13 +134,14 @@ describe("creating a booking", () => {
     expect(parts).toEqual([6102, 7898]); // $140 as $68 and $88 share it
   });
 
-  it("charges a bundle its own price on a weekend too, and only for the lengths its list has or lies between", async () => {
+  it("charges a bundle its own price on a weekend too, and for lengths it does not list a price worked out from its list", async () => {
     const saturday = { studioIds: [ids.dayglow, ids.paris], date: "2026-11-21", startMinute: h(12) };
     expect(await book({ ...saturday, durationMinutes: 120 })).toMatchObject({ ok: true, totalCents: 23000 }); // as on a weekday
     // Two and a half hours, between $230 for two and $320 for three.
     expect(await quoteSelection(db, { ...saturday, durationMinutes: 150 }, NOW)).toMatchObject({ ok: true, quote: { studiosSubtotalCents: 27500, totalCents: 27500 } });
-    // Its list ends at five hours: six are not sold, whatever the studios cost alone.
-    expect(await quoteSelection(db, { ...saturday, durationMinutes: 360 }, NOW)).toMatchObject({ ok: false, code: "invalid_price" });
+    // Its list ends at five hours ($490, $90 more than four): six are $580, whatever the studios cost alone; eleven are not sold.
+    expect(await quoteSelection(db, { ...saturday, durationMinutes: 360 }, NOW)).toMatchObject({ ok: true, quote: { studiosSubtotalCents: 58000, totalCents: 58000 } });
+    expect(await quoteSelection(db, { ...saturday, startMinute: h(8), durationMinutes: 660 }, NOW)).toMatchObject({ ok: false, code: "invalid_price" });
   });
 
   it("uses the owner's discount setting", async () => {

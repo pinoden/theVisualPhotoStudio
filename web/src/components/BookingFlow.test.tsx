@@ -1046,24 +1046,30 @@ describe("bundles with prices of their own, and the lengths between (the owner's
     expect(posted[0]).toMatchObject({ studioIds: [B, P], durationMinutes: 60, expectedTotalCents: 14000 });
   });
 
-  it("keeps the buttons to the listed lengths, and offers the lengths between in a list under them", async () => {
+  it("shows six lengths and the rest behind More (the owner, 2026-11-25)", async () => {
     render(<BookingFlow catalog={{ ...withBundle, rules: rulesWithBetween(catalog.rules, 30), bundlePrices: bundlePricesWithBetween(bundlePrices, 60) }} navigate={nav.push} />);
     await user.click(studioBox("Studio Blanche"));
     await next();
     pickDate(WED);
-    expect(screen.getAllByRole("button", { name: / hr$/ }).map((button) => button.textContent)).toEqual(["1 hr", "2 hr", "10 hr"]);
-    const other = screen.getByRole("combobox", { name: "Another length" }) as HTMLSelectElement;
-    expect([...other.options].map((option) => option.textContent).slice(0, 4)).toEqual(["Another length…", "1.5 hours", "2.5 hours", "3 hours"]);
-    expect(other.options).toHaveLength(1 + 1 + 15); // the prompt, 1.5 hours, and every half hour from 2.5 to 9.5
+    const labels = () => screen.getAllByRole("button", { name: / hr$/ }).map((button) => button.textContent);
+    expect(labels()).toEqual(["1 hr", "2 hr", "3 hr", "4 hr", "5 hr", "6 hr"]);
+    const more = screen.getByRole("button", { name: "More" });
+    expect(more.getAttribute("aria-expanded")).toBe("false");
+    await user.click(more);
+    expect(more.getAttribute("aria-expanded")).toBe("true");
+    // The six first, then every other half hour from 1 to 10 hours, shortest first.
+    expect(labels().slice(6, 9)).toEqual(["1.5 hr", "2.5 hr", "3.5 hr"]);
+    expect(labels()).toHaveLength(19);
+    expect(labels().at(-1)).toBe("10 hr");
 
-    // Two and a half hours of Blanche: between $176 for two hours and $720 for ten.
-    await user.selectOptions(other, "2.5 hours");
+    // Two and a half hours of Blanche: between $176 for two hours and $720 for ten. Chosen, it keeps the others shown.
+    await pickDuration("2.5 hr");
     expect(screen.getByText("Estimated total").nextElementSibling?.textContent).toBe("$210");
     expect(screen.getByText("Studio Blanche, 2.5 hours (weekday)")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "2 hr" }).getAttribute("aria-pressed")).toBe("false");
-    // A listed length again: the list goes back to its prompt.
+    expect(screen.queryByRole("button", { name: /^(More|Fewer)$/ })).toBeNull();
     await pickDuration("2 hr");
-    expect(other.value).toBe("");
+    await user.click(screen.getByRole("button", { name: "Fewer" }));
+    expect(labels()).toEqual(["1 hr", "2 hr", "3 hr", "4 hr", "5 hr", "6 hr"]);
   });
 
   it("offers a studio at a length it is sold for only in a bundle, and says so when it is chosen alone", async () => {
