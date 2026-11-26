@@ -1072,6 +1072,27 @@ describe("bundles with prices of their own, and the lengths between (the owner's
     expect(labels()).toEqual(["1 hr", "2 hr", "3 hr", "4 hr", "6 hr"]);
   });
 
+  it("adds the owners' sales tax as a line of its own, and sends the total with it (the owner, 2026-11-20)", async () => {
+    render(<BookingFlow catalog={{ ...catalog, settings: { ...catalog.settings, salesTaxBasisPoints: 650 } }} navigate={nav.push} />);
+    await user.click(studioBox("Studio Blanche"));
+    await next();
+    pickDate(WED);
+    await pickDuration("2 hr");
+    // $176, and 6.5% of it.
+    expect(screen.getByText("Sales tax (6.5%)").nextElementSibling?.textContent).toBe("$11.44");
+    expect(screen.getByText("Estimated total").nextElementSibling?.textContent).toBe("$187.44");
+  });
+
+  it("shows no tax line while the owners charge none", async () => {
+    render(<BookingFlow catalog={catalog} navigate={nav.push} />);
+    await user.click(studioBox("Studio Blanche"));
+    await next();
+    pickDate(WED);
+    await pickDuration("2 hr");
+    expect(screen.queryByText(/Sales tax/)).toBeNull();
+    expect(screen.getByText("Estimated total").nextElementSibling?.textContent).toBe("$176");
+  });
+
   it("offers a studio at a length it is sold for only in a bundle, and says so when it is chosen alone", async () => {
     render(<BookingFlow catalog={withBundle} navigate={nav.push} />);
     await user.click(screen.getByRole("radio", { name: /I want to choose the date first/ }));

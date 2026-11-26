@@ -91,6 +91,11 @@ function mayAct(booking: BookingRow, actor: Actor): boolean {
 
 export { netCardPaidCents } from "./money";
 
+/** A discount off the studio price, with the sales tax it saved, when the booking's studio price is taxed. */
+function withTaxOn(discountCents: number, booking: Pick<BookingRow, "taxBasisPoints" | "taxStudio">): number {
+  return booking.taxStudio ? discountCents + Math.round((discountCents * booking.taxBasisPoints) / 10_000) : discountCents;
+}
+
 async function factsFor(db: DbLike, booking: BookingRow): Promise<BookingFacts> {
   const petFeeCents = await petFeeCentsOf(db, booking.id);
   const [code] = booking.promoCodeId
@@ -106,8 +111,10 @@ async function factsFor(db: DbLike, booking: BookingRow): Promise<BookingFacts> 
     madeWithRescheduleCode: code?.source === "reschedule",
     cardPaidCents: await netCardPaidCents(db, booking.id),
     creditAppliedCents: booking.creditAppliedCents,
-    // promoDiscountCents holds whatever the code took off: for a credit code that is the credit itself.
-    discountCents: booking.promoDiscountCents - booking.creditAppliedCents,
+    // promoDiscountCents holds whatever the code took off: for a credit code that is the credit itself. A discount came
+    // off the studio price before sales tax, so it saved its tax too: a reschedule code carries both, or the same
+    // booking at a new time, taxed on its whole price and paid with the code, would owe the tax on the discount.
+    discountCents: withTaxOn(booking.promoDiscountCents - booking.creditAppliedCents, booking),
     petFeeCents,
     petCreditGiven: petFeeCents > 0 && (await petCreditOf(db, booking.id)) !== null,
     paidAtStudioCents: await paidAtStudioCents(db, booking.id),

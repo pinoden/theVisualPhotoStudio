@@ -55,6 +55,52 @@ export interface PromoDef {
   photographyOnly?: boolean;
   /** The days a booking with it may be on (promo-days.ts); none, any day. */
   days?: PromoDays | null;
+  /**
+   * An amount that is a discount, not money paid before: it comes off the price before sales tax, as a percent code
+   * does. Left out, an amount is credit (a reschedule code, studio credit), which pays the total, tax included.
+   */
+  beforeTax?: boolean;
+}
+
+/**
+ * Sales tax, added on top of the prices (the owner's decision of 2026-11-20: "Prices exclude sales tax. Show a separate
+ * line at checkout and on receipts", at 6.5% until the accountant confirms the rate and what it applies to). What it
+ * applies to is the builder's reading until then (question 84 in ProjectLibrary.md): the price after discounts and
+ * membership hours, rounded to a cent; credit pays the total, tax included.
+ */
+export interface TaxRule {
+  /** The rate in hundredths of a percent: 650 is 6.5%. 0: no tax. */
+  basisPoints: number;
+  /** Whether the studio part of the price is taxed: the studios' time, or a session's price. */
+  studio: boolean;
+  /** Whether what is chosen with the booking is taxed: add-ons, extra guests, fees. */
+  addons: boolean;
+}
+
+/** The highest rate the owners can set: 20%. */
+export const TAX_BASIS_POINTS_MAX = 2000;
+
+/** The owners' tax settings as they apply to one booking: a rental, or a session (photography, content creation). */
+export function taxRuleFor(
+  settings: { salesTaxBasisPoints: number; taxStudioTime: boolean; taxSessions: boolean; taxAddons: boolean },
+  session: boolean,
+): TaxRule {
+  return { basisPoints: settings.salesTaxBasisPoints, studio: session ? settings.taxSessions : settings.taxStudioTime, addons: settings.taxAddons };
+}
+
+/** The rule kept with a booking (`bookings.tax_*`): the one it was made under, which a move or a change prices it by again. */
+export function taxRuleOf(booking: { taxBasisPoints: number; taxStudio: boolean; taxAddons: boolean }): TaxRule {
+  return { basisPoints: booking.taxBasisPoints, studio: booking.taxStudio, addons: booking.taxAddons };
+}
+
+/** "6.5%", "7%", "6.75%". */
+export function taxPercent(basisPoints: number): string {
+  return `${Number((basisPoints / 100).toFixed(2))}%`;
+}
+
+/** The tax line's label: "Sales tax (6.5%)". */
+export function taxLabel(basisPoints: number): string {
+  return `Sales tax (${taxPercent(basisPoints)})`;
 }
 
 /** Why a code that exists cannot be used on a selection. */
@@ -111,6 +157,8 @@ export interface QuoteInput {
    * photography session: the server sees to both.
    */
   membership?: { minutesLeft: number; weekendDifference: boolean } | null;
+  /** The sales tax to add. Left out, or at a rate of 0: none. */
+  tax?: TaxRule | null;
 }
 
 /** The most guests in all for studios booked together, by how many: the owners' settings (10 for two, 20 for three). */
@@ -143,6 +191,10 @@ export interface Quote {
   multiStudioDiscountCents: number;
   addonLines: { addonId: string; name: string; quantity: number; unitCents: number; totalCents: number }[];
   addonsCents: number;
+  /**
+   * What the code takes off or pays. A discount (a percent code, a free hour) comes off the price before tax. Credit (an
+   * amount) pays the total, so it can be more than the prices add up to: it pays the tax too.
+   */
   promoDiscountCents: number;
   /**
    * Set when a code was given that cannot be used on this selection. The
@@ -153,6 +205,10 @@ export interface Quote {
   membershipMinutes: number;
   /** The part of the studio price those minutes pay. */
   membershipCents: number;
+  /** The sales tax, and the rate it was worked out at (0 when none applies). Part of `totalCents`. */
+  taxCents: number;
+  taxBasisPoints: number;
+  /** What is left to pay: the prices, less discounts and membership hours, plus tax, less credit. */
   totalCents: number;
 }
 
@@ -165,7 +221,8 @@ export type PricingErrorCode =
   | "BAD_QUANTITY"
   | "TOO_MANY_GUESTS"
   | "BAD_PROMO"
-  | "BAD_PACKAGE";
+  | "BAD_PACKAGE"
+  | "BAD_TAX";
 
 export class PricingError extends Error {
   constructor(
@@ -242,7 +299,7 @@ export function studioPriceLines(studios: readonly { name: string; priceCents: n
  *   price per hour. The owner, 2026-11-25: "Times options should be the same for every studio 1-10 hours".
  * - Nothing shorter than the shortest listed length.
  *
- * How such a length is priced is the builder's reading (question 83 in ProjectLibrary.md). A duration the owners list
+ * How such a length is priced the owner approved on 2026-11-25 ("OK on prices"; question 83 in ProjectLibrary.md). A duration the owners list
  * always costs what they typed, and is sold even when it is longer than `longestMinutes`.
  */
 export function betweenLengths(
@@ -419,7 +476,9 @@ export function quote(input: QuoteInput): Quote {
   // can pay for the entire booking, including add-ons, within its scope.
   // A free hour takes the price of one hour of one studio off: it is not for
   // several studios booked together, and it does not pay for add-ons.
-  let promoDiscountCents = 0;
+  // A discount comes off the price before tax. Credit is money paid before: it pays the total, tax included.
+  let discountCents = 0;
+  let creditCents = 0;
   let promoMisfit: PromoMisfit | null = null;
   const promo = input.promo;
   if (promo && (promo.photographyOnly === true) !== Boolean(photoPackage)) {
@@ -429,10 +488,11 @@ export function quote(input: QuoteInput): Quote {
   } else if (promo) {
     if (promo.kind === "percent") {
       if (!(promo.value > 0 && promo.value <= 100)) throw new PricingError("BAD_PROMO", "Invalid code.");
-      promoDiscountCents = percentOf(studiosNetCents, promo.value);
+      discountCents = percentOf(studiosNetCents, promo.value);
     } else if (promo.kind === "amount") {
       if (!(Number.isInteger(promo.value) && promo.value > 0)) throw new PricingError("BAD_PROMO", "Invalid code.");
-      promoDiscountCents = Math.min(promo.value, studiosNetCents + addonsCents);
+      if (promo.beforeTax) discountCents = Math.min(promo.value, studiosNetCents + addonsCents);
+      else creditCents = promo.value;
     } else {
       if (!(Number.isInteger(promo.value) && promo.value > 0)) throw new PricingError("BAD_PROMO", "Invalid code.");
       if (studioLines.length !== 1) {
@@ -443,7 +503,7 @@ export function quote(input: QuoteInput): Quote {
         // not sold for exactly that long, the same share of this booking's price.
         const listed = findPrice(line.studioId, dayType, promo.value, rules);
         const worth = listed ?? Math.round((line.priceCents * promo.value) / durationMinutes);
-        promoDiscountCents = Math.min(worth, line.priceCents);
+        discountCents = Math.min(worth, line.priceCents);
       }
     }
   }
@@ -467,8 +527,18 @@ export function quote(input: QuoteInput): Quote {
         basisCents = subtotal - percentOf(subtotal, multiStudioPercent);
       }
     }
-    membershipCents = Math.min(studiosNetCents - promoDiscountCents, Math.round((basisCents * membershipMinutes) / durationMinutes));
+    membershipCents = Math.min(Math.max(0, studiosNetCents - discountCents), Math.round((basisCents * membershipMinutes) / durationMinutes));
   }
+
+  // What is left of each part after discounts and membership hours: a discount comes off the studio price first.
+  const offStudioCents = Math.min(discountCents, studiosNetCents);
+  const studioPartCents = studiosNetCents - offStudioCents - membershipCents;
+  const addonsPartCents = addonsCents - (discountCents - offStudioCents);
+  const tax = input.tax && input.tax.basisPoints > 0 ? input.tax : null;
+  if (tax && !(Number.isInteger(tax.basisPoints) && tax.basisPoints <= TAX_BASIS_POINTS_MAX)) throw new PricingError("BAD_TAX", "The sales tax rate is not valid.");
+  const taxCents = tax ? Math.round((((tax.studio ? studioPartCents : 0) + (tax.addons ? addonsPartCents : 0)) * tax.basisPoints) / 10_000) : 0;
+  const beforeCreditCents = studioPartCents + addonsPartCents + taxCents;
+  creditCents = Math.min(creditCents, beforeCreditCents);
 
   return {
     studioLines,
@@ -477,11 +547,13 @@ export function quote(input: QuoteInput): Quote {
     multiStudioDiscountCents,
     addonLines,
     addonsCents,
-    promoDiscountCents,
+    promoDiscountCents: discountCents + creditCents,
     promoMisfit,
     membershipMinutes,
     membershipCents,
-    totalCents: studiosNetCents + addonsCents - promoDiscountCents - membershipCents,
+    taxCents,
+    taxBasisPoints: tax ? tax.basisPoints : 0,
+    totalCents: beforeCreditCents - creditCents,
   };
 }
 

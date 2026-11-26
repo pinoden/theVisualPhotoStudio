@@ -3,7 +3,7 @@ import { bookingAddons, bookings, promoCodes, studioHolds } from "@/db/schema";
 import { PG_EXCLUSION_VIOLATION, pgErrorCode, together, type Db, type DbLike } from "@/db/client";
 import { extraGuestsFor, studioCombinationError } from "@/lib/catalog-view";
 import { isStartFree } from "@/lib/domain/availability";
-import { formatCents, PricingError, PROMO_MISFIT_TEXT, quote, unpriced, type PromoDef, type Quote } from "@/lib/domain/pricing";
+import { formatCents, PricingError, PROMO_MISFIT_TEXT, quote, taxRuleOf, unpriced, type PromoDef, type Quote } from "@/lib/domain/pricing";
 import { labelOf } from "@/lib/domain/labels";
 import { durationLabel } from "@/lib/domain/time";
 import type { AuthUser } from "./auth";
@@ -151,7 +151,7 @@ export async function editBooking(db: Db, viewer: AuthUser, ref: string, input: 
         ? { kind: "amount", value: found.creditAppliedCents }
         : usedCode && usedCode.kind !== "amount"
           ? { kind: usedCode.kind, value: usedCode.value, photographyOnly: usedCode.photographyOnly }
-          : { kind: "amount", value: found.promoDiscountCents };
+          : { kind: "amount", value: found.promoDiscountCents, beforeTax: true };
   let priced: Quote;
   try {
     priced = quote({
@@ -165,6 +165,8 @@ export async function editBooking(db: Db, viewer: AuthUser, ref: string, input: 
       addonCatalog: addonCatalog as NonNullable<(typeof addonCatalog)[number]>[],
       extraGuestsAllowed: extraGuestsFor(catalog, studioIds),
       promo,
+      // The tax rule it was made under: a booking from before tax stays without.
+      tax: taxRuleOf(found),
     });
   } catch (error) {
     if (error instanceof PricingError) return refuse(error.message);
@@ -203,6 +205,7 @@ export async function editBooking(db: Db, viewer: AuthUser, ref: string, input: 
           addonsCents: priced.addonsCents,
           promoDiscountCents: priced.promoDiscountCents,
           creditAppliedCents,
+          taxCents: priced.taxCents,
           totalCents: priced.totalCents,
         })
         .where(eq(bookings.id, booking.id));

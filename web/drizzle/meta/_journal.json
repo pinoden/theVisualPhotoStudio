@@ -512,6 +512,13 @@
       "when": 1795587797939,
       "tag": "0072_rates_bundles",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1795731036810,
+      "tag": "0073_sales_tax",
+      "breakpoints": true
     }
   ]
 }
