@@ -14,6 +14,10 @@ import {
   quote,
   rulesWithBetween,
   studioPriceLines,
+  taxLabel,
+  taxPercent,
+  taxRuleFor,
+  taxRuleOf,
   unpriced,
   type AddonDef,
   type BundlePrice,
@@ -471,5 +475,86 @@ describe("the lengths between the listed ones (question 83)", () => {
     expect(bundlePricesWithBetween(bundles, 30)).toEqual([...bundles, { studioIds: [B, P], durationMinutes: 90, priceCents: 19300, between: true }]);
     // A length between is sold like a listed one.
     expect(quote({ ...base, bundlePrices: bundlePricesWithBetween(bundles, 30), studioIds: [B, P], dayType: "weekday", durationMinutes: 90 }).totalCents).toBe(19300);
+  });
+});
+
+describe("sales tax (the owner's decision of 2026-11-20; question 84)", () => {
+  const all = { basisPoints: 650, studio: true, addons: true };
+  const blanche = { ...base, studioIds: [B], dayType: "weekday" as const, durationMinutes: 120 };
+
+  it("is added on top of the price, rounded to a cent", () => {
+    expect(quote({ ...blanche, tax: all })).toMatchObject({ studiosSubtotalCents: 17600, taxCents: 1144, taxBasisPoints: 650, totalCents: 18744 });
+    // $115 at 6.5% is $7.475: half a cent rounds up.
+    const odd = quote({ ...base, rules: tiers(B, "weekday", { 60: 115 }), studioIds: [B], dayType: "weekday", durationMinutes: 60, tax: all });
+    expect(odd).toMatchObject({ taxCents: 748, totalCents: 12248 });
+  });
+
+  it("is nothing without a rule, or at a rate of 0", () => {
+    for (const tax of [undefined, null, { basisPoints: 0, studio: true, addons: true }]) {
+      expect(quote({ ...blanche, tax })).toMatchObject({ taxCents: 0, taxBasisPoints: 0, totalCents: 17600 });
+    }
+  });
+
+  it("covers the studio price and the add-ons, each only when the owners tax it", () => {
+    const withGuest = { ...blanche, addons: [{ addonId: "people", quantity: 1 }] };
+    expect(quote({ ...withGuest, tax: all })).toMatchObject({ taxCents: 1339, totalCents: 17600 + 3000 + 1339 });
+    expect(quote({ ...withGuest, tax: { ...all, addons: false } })).toMatchObject({ taxCents: 1144, taxBasisPoints: 650 });
+    expect(quote({ ...withGuest, tax: { ...all, studio: false } })).toMatchObject({ taxCents: 195 });
+    expect(quote({ ...withGuest, tax: { ...all, studio: false, addons: false } })).toMatchObject({ taxCents: 0, taxBasisPoints: 650, totalCents: 20600 });
+  });
+
+  it("is worked out after the discount for several studios, a percent code and a free hour", () => {
+    // Blanche and Dayglow for an hour: $166 less 20% is $132.80.
+    expect(quote({ ...base, studioIds: [B, D], dayType: "weekday", durationMinutes: 60, tax: all })).toMatchObject({ taxCents: 863, totalCents: 13280 + 863 });
+    const percent: PromoDef = { kind: "percent", value: 10 };
+    expect(quote({ ...blanche, promo: percent, tax: all })).toMatchObject({ promoDiscountCents: 1760, taxCents: 1030, totalCents: 15840 + 1030 });
+    const freeHour: PromoDef = { kind: "free_hour", value: 60 };
+    expect(quote({ ...blanche, promo: freeHour, tax: all })).toMatchObject({ promoDiscountCents: 8800, taxCents: 572, totalCents: 8800 + 572 });
+  });
+
+  it("is paid by credit like the rest of the total: credit comes after the tax", () => {
+    const part: PromoDef = { kind: "amount", value: 10000 };
+    expect(quote({ ...blanche, promo: part, tax: all })).toMatchObject({ promoDiscountCents: 10000, taxCents: 1144, totalCents: 8744 });
+    const more: PromoDef = { kind: "amount", value: 50000 };
+    expect(quote({ ...blanche, promo: more, tax: all })).toMatchObject({ promoDiscountCents: 18744, taxCents: 1144, totalCents: 0 });
+    // Without tax an amount pays up to the prices, as before.
+    expect(quote({ ...blanche, promo: more })).toMatchObject({ promoDiscountCents: 17600, totalCents: 0 });
+  });
+
+  it("is worked out after an amount that is a discount, not credit: the studio price first, then the add-ons", () => {
+    const withGuest = { ...blanche, addons: [{ addonId: "people", quantity: 1 }] };
+    const discount: PromoDef = { kind: "amount", value: 18600, beforeTax: true };
+    // $176 off the studio and $10 off the $30 guest: $20 is left to tax.
+    expect(quote({ ...withGuest, promo: discount, tax: all })).toMatchObject({ promoDiscountCents: 18600, taxCents: 130, totalCents: 2130 });
+    expect(quote({ ...withGuest, promo: discount, tax: { ...all, addons: false } })).toMatchObject({ taxCents: 0, totalCents: 2000 });
+  });
+
+  it("leaves out the time membership hours pay for", () => {
+    const member = { minutesLeft: 60, weekendDifference: false };
+    // One of the two hours is paid with minutes: $88 is left, and taxed.
+    expect(quote({ ...blanche, membership: member, tax: all })).toMatchObject({ membershipCents: 8800, taxCents: 572, totalCents: 8800 + 572 });
+    expect(quote({ ...blanche, membership: { ...member, minutesLeft: 120 }, tax: all })).toMatchObject({ taxCents: 0, totalCents: 0 });
+  });
+
+  it("covers a session's price", () => {
+    const session = { ...base, studioIds: [B], dayType: "weekday" as const, durationMinutes: 60, photoPackage: { priceCents: 25000 } };
+    expect(quote({ ...session, tax: all })).toMatchObject({ taxCents: 1625, totalCents: 26625 });
+  });
+
+  it("refuses a rate that is not a whole number of hundredths, or above 20%", () => {
+    expect(code(() => quote({ ...blanche, tax: { ...all, basisPoints: 6.5 } }))).toBe("BAD_TAX");
+    expect(code(() => quote({ ...blanche, tax: { ...all, basisPoints: 2001 } }))).toBe("BAD_TAX");
+  });
+
+  it("reads the owners' settings for a rental and for a session, and a booking's own rule", () => {
+    const settings = { salesTaxBasisPoints: 650, taxStudioTime: true, taxSessions: false, taxAddons: true };
+    expect(taxRuleFor(settings, false)).toEqual({ basisPoints: 650, studio: true, addons: true });
+    expect(taxRuleFor(settings, true)).toEqual({ basisPoints: 650, studio: false, addons: true });
+    expect(taxRuleOf({ taxBasisPoints: 700, taxStudio: false, taxAddons: true })).toEqual({ basisPoints: 700, studio: false, addons: true });
+  });
+
+  it("writes the rate as the owners typed it", () => {
+    expect([650, 700, 675, 5].map(taxPercent)).toEqual(["6.5%", "7%", "6.75%", "0.05%"]);
+    expect(taxLabel(650)).toBe("Sales tax (6.5%)");
   });
 });

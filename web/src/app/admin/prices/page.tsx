@@ -9,7 +9,7 @@ import { loadCatalog } from "@/server/catalog";
 import { requireOwner } from "@/server/session";
 import { LONGEST_BOOKINGS } from "@/server/settings";
 import { localDateOf } from "@/server/tz";
-import { addBundleLengthAction, addDurationAction, saveLengthsAction, saveBundlePricesAction, saveDiscountAction, savePricesAction, specialDateAction } from "../actions";
+import { addBundleLengthAction, addDurationAction, saveLengthsAction, saveBundlePricesAction, saveDiscountAction, savePricesAction, saveSalesTaxAction, specialDateAction } from "../actions";
 import { AdminFrame, AdminLoading } from "../frame";
 
 export const metadata: Metadata = { title: "Prices", robots: { index: false } };
@@ -101,6 +101,57 @@ async function Prices({ searchParams }: Pick<PageProps<"/admin/prices">, "search
         <p id="shown-lengths-help" style={{ fontSize: ".8rem", margin: ".5rem 0 0" }}>
           The booking screen shows the lengths above as buttons, those a studio or bundle can be booked for, and every
           other length behind &ldquo;More&rdquo;.
+        </p>
+      </div>
+
+      <div className="admin-card">
+        <h3>Sales tax</h3>
+        <p style={{ fontSize: ".875rem" }}>
+          Every price on the website is shown without tax. With a rate here, the tax is added as a line of its own on
+          the booking screen, on the booking and on its receipt, and the client pays the total with it.
+        </p>
+        <form action={saveSalesTaxAction}>
+          <div className="admin-form-row" style={{ marginBottom: ".75rem" }}>
+            <div className="form-group">
+              <label className="form-label" htmlFor="sales-tax">
+                Sales tax (%)
+              </label>
+              <input
+                id="sales-tax"
+                name="salesTaxPercent"
+                className="form-control"
+                inputMode="decimal"
+                pattern="\d{1,2}(\.\d{1,2})?"
+                title="A percentage with at most two decimals, such as 6.5. 0 charges none."
+                required
+                defaultValue={catalog.settings.salesTaxBasisPoints / 100}
+                aria-describedby="sales-tax-help"
+              />
+            </div>
+          </div>
+          <fieldset style={{ border: 0, padding: 0, margin: "0 0 .75rem" }}>
+            <legend className="form-label">Charged on</legend>
+            <label style={{ display: "block", marginBottom: ".4rem", fontSize: ".9rem" }}>
+              <input type="checkbox" name="taxStudioTime" defaultChecked={catalog.settings.taxStudioTime} /> Studio time
+            </label>
+            <label style={{ display: "block", marginBottom: ".4rem", fontSize: ".9rem" }}>
+              <input type="checkbox" name="taxSessions" defaultChecked={catalog.settings.taxSessions} /> Photography and content
+              creation sessions
+            </label>
+            <label style={{ display: "block", marginBottom: ".4rem", fontSize: ".9rem" }}>
+              <input type="checkbox" name="taxAddons" defaultChecked={catalog.settings.taxAddons} /> Add-ons, extra guests and
+              fees chosen with the booking
+            </label>
+          </fieldset>
+          <button type="submit" className="btn btn-dark btn-small">
+            Save
+          </button>
+        </form>
+        <p id="sales-tax-help" style={{ fontSize: ".8rem", margin: ".75rem 0 0" }}>
+          0 charges no tax and shows no tax line. The tax is worked out on the price after a discount code, a free hour
+          or membership hours, and rounded to a cent. A reschedule code and studio credit pay the total, tax included. A
+          booking keeps the rate it was made at: a change here applies to bookings made afterwards. Not taxed by the
+          website: memberships, extra charges added after a visit, and the fee for a further reschedule.
         </p>
       </div>
 

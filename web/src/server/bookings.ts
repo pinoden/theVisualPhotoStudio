@@ -16,7 +16,7 @@ import {
 import { extraGuestsFor, studioCombinationError } from "@/lib/catalog-view";
 import { businessDaysInWords, isStartFree, noticeHours } from "@/lib/domain/availability";
 import { labelOf, type LabelKey } from "@/lib/domain/labels";
-import { formatCents, PricingError, promoMisfitText, quote, type PromoKind, type Quote } from "@/lib/domain/pricing";
+import { formatCents, PricingError, promoMisfitText, quote, taxRuleFor, type PromoKind, type Quote } from "@/lib/domain/pricing";
 import type { PromoDays } from "@/lib/domain/promo-days";
 import { count, hoursInWords } from "@/lib/words";
 import { durationLabel, isIsoDate } from "@/lib/domain/time";
@@ -315,6 +315,7 @@ export async function quoteSelection(db: DbLike, rawInput: unknown, now: Date, p
       bookingDay: { date: input.date, special: input.date in catalog.specialDates },
       membership,
       photoPackage: session,
+      tax: taxRuleFor(catalog.settings, session !== null),
     });
     // A code that exists but cannot be used on this selection is refused with the reason.
     if (price.promoMisfit) return fail(422, "invalid_code", promoMisfitText(price.promoMisfit, promo, { date: input.date, special: input.date in catalog.specialDates }));
@@ -418,6 +419,7 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
     if (behind !== null && behind !== moneyKind) return fail(422, "invalid_code", OTHER_MONEY_CODE[moneyKind]);
   }
 
+  const taxRule = taxRuleFor(catalog.settings, session !== null);
   let price: Quote;
   try {
     price = quote({
@@ -434,6 +436,7 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
       bookingDay: { date: input.date, special: input.date in catalog.specialDates },
       membership: member ? { minutesLeft: member.minutesLeft, weekendDifference: catalog.settings.memberWeekendDifference } : null,
       photoPackage: session,
+      tax: taxRule,
     });
   } catch (error) {
     if (error instanceof PricingError) return fail(422, "invalid_price", error.message);
@@ -549,6 +552,9 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
             membershipId: spendsMinutes ? member!.id : null,
             membershipMinutes: spendsMinutes ? price.membershipMinutes : 0,
             membershipCents: spendsMinutes ? price.membershipCents : 0,
+            // The tax and the rule it was worked out by, which stays with the booking (`taxRuleOf`).
+            taxCents: price.taxCents,
+            ...(price.taxBasisPoints > 0 ? { taxBasisPoints: price.taxBasisPoints, taxStudio: taxRule.studio, taxAddons: taxRule.addons } : {}),
             // The kind of day it is priced as, which a move by the studio compares the new day with (follow-up 5).
             pricedAs: day.dayType,
             // Money that was already moved once stays "moved" on the new booking.
@@ -732,6 +738,7 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
         creditCents: spendsCode && promo!.kind === "amount" ? price.promoDiscountCents : price.membershipCents,
         creditName: spendsMinutes ? `membership hours (${durationLabel(price.membershipMinutes)})` : promo ? creditName(promo.source) : undefined,
         cardCents: price.totalCents,
+        tax: price.taxCents > 0 ? { cents: price.taxCents, basisPoints: price.taxBasisPoints } : undefined,
         // A booking the studio made is paid at the studio, whatever a code or membership hours left to pay: no card is charged.
         payAtStudio: Boolean(deps.madeBy),
         photoIncludes: session ? session.includes : undefined,
@@ -777,6 +784,9 @@ export interface BookingView {
   /** Membership minutes the booking took, and the part of the studio price they paid (follow-up 3). */
   membershipMinutes: number;
   membershipCents: number;
+  /** Sales tax, part of `totalCents`, and the rate it was worked out at (0 and 0 when the booking has none). */
+  taxCents: number;
+  taxBasisPoints: number;
   /** The status label an administrator sees. */
   label: LabelKey;
   /** Made in the admin for the client: nothing was charged online, the total is paid at the studio. */
@@ -892,6 +902,8 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[], now: Date =
     promoSource: codeRows.find((code) => code.id === booking.promoCodeId)?.source ?? null,
     membershipMinutes: booking.membershipMinutes,
     membershipCents: booking.membershipCents,
+    taxCents: booking.taxCents,
+    taxBasisPoints: booking.taxBasisPoints,
     label: labelOf(booking),
     madeByAdmin: booking.madeBy !== null,
     photography: booking.photographerId !== null ? { includes: booking.photoIncludes ?? "", service: serviceOf.get(booking.photographerId) ?? "photography" } : null,

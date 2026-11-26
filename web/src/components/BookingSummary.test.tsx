@@ -22,6 +22,8 @@ const PAID_ONLINE: BookingView = {
   creditAppliedCents: 0,
   membershipMinutes: 0,
   membershipCents: 0,
+  taxCents: 0,
+  taxBasisPoints: 0,
   promoKind: null,
   promoSource: null,
   label: "confirmed",
@@ -53,6 +55,28 @@ function lastRow(changes: Partial<BookingView>): [string, string] {
 }
 
 describe("a booking's summary", () => {
+  it("shows sales tax as a line of its own: after a discount, before the credit that pays for it", () => {
+    const rows = (changes: Partial<BookingView>) =>
+      [...renderToStaticMarkup(<BookingSummary booking={{ ...PAID_ONLINE, ...changes }} />).matchAll(/<div class="price-row[^"]*"><span>([^<]*)<\/span><span>([^<]*)<\/span><\/div>/g)].map(
+        (row) => `${row[1]} ${row[2]}`,
+      );
+    expect(rows({}).join("|")).not.toContain("Sales tax");
+    const taxed = { taxCents: 1144, taxBasisPoints: 650, totalCents: 18744, receivedCents: 18744 };
+    expect(rows(taxed)).toEqual(["Studio Blanche $176", "Sales tax (6.5%) $11.44", "Charged to card $187.44"]);
+    expect(rows({ ...taxed, promoKind: "percent", promoDiscountCents: 1760, taxCents: 1030, totalCents: 16870, receivedCents: 16870 })).toEqual([
+      "Studio Blanche $176",
+      "Discount code -$17.60",
+      "Sales tax (6.5%) $10.30",
+      "Charged to card $168.70",
+    ]);
+    expect(rows({ ...taxed, promoKind: "amount", promoSource: "manual", promoDiscountCents: 10000, creditAppliedCents: 10000, totalCents: 8744, receivedCents: 8744 })).toEqual([
+      "Studio Blanche $176",
+      "Sales tax (6.5%) $11.44",
+      "Paid with studio credit -$100",
+      "Charged to card $87.44",
+    ]);
+  });
+
   it("says where the money came from, or what is still to pay", () => {
     expect(lastRow({})).toEqual(["Charged to card", "$176"]);
     // Taking the amount did not go through yet: the card holds it, and it is not charged.

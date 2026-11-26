@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { bookingAddons, bookings, promoCodes, studioHolds } from "@/db/schema";
 import { together, type DbLike } from "@/db/client";
 import { durationLabel, type DayType, type IsoDate } from "@/lib/domain/time";
-import { formatCents, PricingError, quote, unpriced, type PromoDef, type Quote } from "@/lib/domain/pricing";
+import { formatCents, PricingError, quote, taxRuleOf, unpriced, type PromoDef, type Quote } from "@/lib/domain/pricing";
 import { dayTypeFor, type Catalog } from "./catalog";
 import { creditName, type PromoSource } from "./promos";
 import { localDateOf } from "./tz";
@@ -20,8 +20,9 @@ type BookingRow = typeof bookings.$inferSelect;
  * day. What paid for part of it pays the same part again: a percent code takes its percentage of the new price, a free
  * hour is the new day's hour, membership minutes pay for the same minutes at the new day's price, and credit (a
  * reschedule code or studio credit) pays what it paid, up to the new price; what the new price no longer needs of the
- * credit goes back onto its code, as the studio's cancellation gives it back. A photography session's price is the same
- * any day, so it never changes.
+ * credit goes back onto its code, as the studio's cancellation gives it back. Sales tax is worked out again on the new
+ * price, by the rule the booking was made under (`taxRuleOf`). A photography session's price is the same any day, so it
+ * never changes.
  */
 export type MovePrice =
   /** The price stays: a day of the same kind, or a photography session. */
@@ -95,7 +96,7 @@ export async function priceOnNewDay(db: DbLike, booking: BookingRow, date: IsoDa
         ? { kind: "amount", value: booking.creditAppliedCents }
         : code && code.kind !== "amount"
           ? { kind: code.kind, value: code.value, photographyOnly: code.photographyOnly }
-          : { kind: "amount", value: booking.promoDiscountCents };
+          : { kind: "amount", value: booking.promoDiscountCents, beforeTax: true };
 
   let priced: Quote;
   try {
@@ -111,6 +112,8 @@ export async function priceOnNewDay(db: DbLike, booking: BookingRow, date: IsoDa
       addonCatalog: addonRows.map((row) => ({ id: row.addonId, name: row.name, priceCents: row.unitCents, studioId: null, maxQuantity: row.quantity, kind: row.kind })),
       promo,
       membership: booking.membershipMinutes > 0 ? { minutesLeft: booking.membershipMinutes, weekendDifference: catalog.settings.memberWeekendDifference } : null,
+      // The tax rule it was made under: a booking from before tax stays without.
+      tax: taxRuleOf(booking),
     });
   } catch (error) {
     if (error instanceof PricingError) return { kind: "refused", message: error.message };

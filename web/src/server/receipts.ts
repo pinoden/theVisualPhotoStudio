@@ -1,4 +1,4 @@
-import { studioPriceLines } from "@/lib/domain/pricing";
+import { studioPriceLines, taxLabel } from "@/lib/domain/pricing";
 import { durationLabel } from "@/lib/domain/time";
 import { SERVICE_WORDS } from "@/lib/domain/services";
 import { and, asc, desc, eq, inArray, notInArray } from "drizzle-orm";
@@ -115,16 +115,21 @@ function linesOf(booking: BookingView): ReceiptLine[] {
   for (const addon of booking.addons) {
     lines.push({ label: addon.quantity > 1 ? `${addon.name} × ${addon.quantity}` : addon.name, cents: addon.unitCents * addon.quantity });
   }
-  if (booking.promoDiscountCents > 0) {
-    const label =
-      booking.creditAppliedCents > 0
-        ? `Paid with ${creditName(booking.promoSource ?? "reschedule")}`
-        : booking.promoKind === "free_hour"
-          ? "Free hour"
-          : "Discount code";
-    lines.push({ label, cents: -booking.promoDiscountCents });
-  }
+  // A discount comes off before the tax. Credit is money paid before: it pays the total, tax included.
+  const credit = booking.creditAppliedCents > 0;
+  const code: ReceiptLine[] =
+    booking.promoDiscountCents > 0
+      ? [
+          {
+            label: credit ? `Paid with ${creditName(booking.promoSource ?? "reschedule")}` : booking.promoKind === "free_hour" ? "Free hour" : "Discount code",
+            cents: -booking.promoDiscountCents,
+          },
+        ]
+      : [];
+  if (!credit) lines.push(...code);
   if (booking.membershipCents > 0) lines.push({ label: `Paid with membership hours (${durationLabel(booking.membershipMinutes)})`, cents: -booking.membershipCents });
+  if (booking.taxCents > 0) lines.push({ label: taxLabel(booking.taxBasisPoints), cents: booking.taxCents });
+  if (credit) lines.push(...code);
   for (const charge of booking.charges) lines.push({ label: charge.label, cents: charge.cents });
   return lines;
 }

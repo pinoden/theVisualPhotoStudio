@@ -29,7 +29,7 @@ export interface BookingFacts {
   cardPaidCents: number;
   /** Paid with a reschedule credit (money from an earlier booking). */
   creditAppliedCents: number;
-  /** Taken off the price by a percent code (a loyalty code, for example). That code is used up. */
+  /** Taken off the price by a percent code (a loyalty code, for example), with the sales tax it saved. That code is used up. */
   discountCents: number;
   /**
    * The pet fee on the booking. The owner's rule (2026-11-15): it is never

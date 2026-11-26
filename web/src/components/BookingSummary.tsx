@@ -1,4 +1,4 @@
-import { formatCents, studioPriceLines } from "@/lib/domain/pricing";
+import { formatCents, studioPriceLines, taxLabel } from "@/lib/domain/pricing";
 import { SERVICE_WORDS } from "@/lib/domain/services";
 import { durationLabel } from "@/lib/domain/time";
 import { listInWords } from "@/lib/words";
@@ -51,6 +51,15 @@ export function BookingSummary({ booking }: { booking: BookingView }) {
   const refunded = booking.receivedCents > 0 ? booking.refundedCents : 0;
   const refundedLabel =
     booking.refundsWaitingCents <= 0 ? "Refunded" : booking.refundsWaitingCents >= refunded ? "Refund on its way" : "Refunded (part on its way)";
+  const credit = booking.creditAppliedCents > 0;
+  const codeLine = booking.promoDiscountCents > 0 && (
+    <div className="price-row price-discount">
+      <span>
+        {credit ? (booking.promoSource === "reschedule" ? "Paid with reschedule code" : "Paid with studio credit") : booking.promoKind === "free_hour" ? "Free hour" : "Discount code"}
+      </span>
+      <span>{formatCents(-booking.promoDiscountCents)}</span>
+    </div>
+  );
   return (
     <div className="price-summary">
       <div className="price-row">
@@ -97,26 +106,21 @@ export function BookingSummary({ booking }: { booking: BookingView }) {
           <span>{formatCents(addon.unitCents * addon.quantity)}</span>
         </div>
       ))}
-      {booking.promoDiscountCents > 0 && (
-        <div className="price-row price-discount">
-          <span>
-            {booking.creditAppliedCents > 0
-              ? booking.promoSource === "reschedule"
-                ? "Paid with reschedule code"
-                : "Paid with studio credit"
-              : booking.promoKind === "free_hour"
-                ? "Free hour"
-                : "Discount code"}
-          </span>
-          <span>{formatCents(-booking.promoDiscountCents)}</span>
-        </div>
-      )}
+      {/* A discount comes off before the tax. Credit is money paid before: it pays the total, tax included. */}
+      {!credit && codeLine}
       {booking.membershipCents > 0 && (
         <div className="price-row price-discount">
           <span>Membership hours ({durationLabel(booking.membershipMinutes)})</span>
           <span>{formatCents(-booking.membershipCents)}</span>
         </div>
       )}
+      {booking.taxCents > 0 && (
+        <div className="price-row price-tax">
+          <span>{taxLabel(booking.taxBasisPoints)}</span>
+          <span>{formatCents(booking.taxCents)}</span>
+        </div>
+      )}
+      {credit && codeLine}
       {/* Added once the appointment started: overtime, cleaning, damage (src/server/charges.ts). */}
       {booking.charges.map((charge, index) => (
         <div className="price-row" key={`charge-${index}`}>

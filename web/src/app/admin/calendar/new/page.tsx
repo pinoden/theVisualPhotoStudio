@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { Suspense } from "react";
 import { getDb } from "@/db/client";
-import { bookableDurations, formatCents, PricingError, quote } from "@/lib/domain/pricing";
+import { bookableDurations, formatCents, PricingError, quote, taxLabel, taxRuleFor } from "@/lib/domain/pricing";
 import { durationLabel, isIsoDate, longDateLabel } from "@/lib/domain/time";
 import { can } from "@/lib/abilities";
 import { extraGuestsFor, studioCombinationError } from "@/lib/catalog-view";
@@ -91,6 +91,7 @@ async function NewBooking({ searchParams }: Pick<PageProps<"/admin/calendar/new"
         rules: catalog.rules,
         bundlePrices: catalog.bundlePrices,
         multiStudioPercent: catalog.settings.multiStudioPercent,
+        tax: taxRuleFor(catalog.settings, false),
       }).totalCents;
     } catch (error) {
       if (!(error instanceof PricingError)) throw error;
@@ -167,6 +168,7 @@ async function NewBooking({ searchParams }: Pick<PageProps<"/admin/calendar/new"
               <>
                 {" "}
                 <strong>{formatCents(price)}</strong>
+                {catalog.settings.salesTaxBasisPoints > 0 && ` with ${taxLabel(catalog.settings.salesTaxBasisPoints).toLowerCase()}`}
                 {addons.length > 0 && ", and the add-ons ticked below,"} to be paid at the studio. Nothing is charged online.
               </>
             )}

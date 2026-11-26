@@ -45,10 +45,12 @@ const EMAIL_DAY = dateAhead(129); // and for the booking whose confirmation the 
 const MEMBER_DAY = dateAhead(143); // and for the booking a membership's hours pay for
 const REPRICE_SATURDAY = dateAhead(150, "saturday"); // and for the booking the studio moves to a day that costs less
 const REPRICE_WEEKDAY = dateAhead(164);
+const TAX_DAY = dateAhead(171); // and for the booking made while the owners charge a sales tax
 const CODE_DAYS_SATURDAY = dateAhead(157, "saturday"); // a Saturday a weekdays-only code is tried on, and nothing booked
 
 const jane = { name: "Jane Smith", email: "jane.e2e@example.com", phone: "407-555-0100" };
 const bob = { name: "Bob Brown", email: "bob.e2e@example.com", phone: "407-555-0111" };
+const tess = { name: "Tess Tanner", email: "tess.e2e@example.com", phone: "407-555-0133" };
 const OWNER = "owner@studio.test";
 // The first owner has used up the three sign-in codes an address may ask for in 15 minutes.
 const SECOND_OWNER = "owner2@studio.test";
@@ -1095,7 +1097,7 @@ test("the calendar shows a day, a week and a month, one studio or all, and a boo
   await expect(page.getByRole("row", { name: /over: Studio Paris is open/ })).toBeVisible();
 });
 
-test("the owner sets a weekend price and the booking screen charges it on Saturday only", async ({ page }) => {
+test("the owner sets a weekend price and the booking screen charges it on Saturday only; and a sales tax, shown as a line of its own", async ({ page, browser }) => {
   await signIn(page, OWNER, "/admin/prices");
   await expect(byLabel(page, "Studio Blanche 1 hour weekend price")).toHaveValue("95");
   await expect(byLabel(page, "Studio Blanche 1.5 hours weekend price")).toHaveValue("142.50");
@@ -1124,6 +1126,48 @@ test("the owner sets a weekend price and the booking screen charges it on Saturd
 
   await page.goto("/rates");
   await expect(page.locator(".rates-grid:not(.session-prices, .bundle-prices) > .rate-card", { hasText: "Studio Blanche" }).getByRole("row", { name: /1 hour/ })).toContainText("$120");
+
+  // Sales tax (the owner's decision of 2026-11-20): none until the owners type a rate; then a line of its own, on top
+  // of the prices, on the booking screen, at checkout and on the booking.
+  await page.goto("/admin/prices");
+  const taxForm = page.locator("form", { has: page.getByLabel("Sales tax (%)") });
+  await expect(byLabel(page, "Sales tax (%)")).toHaveValue("0");
+  await byLabel(page, "Sales tax (%)").fill("6.5");
+  await taxForm.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(byText(page, "Sales tax saved: 6.5%, for bookings made from now on.")).toBeVisible();
+  await expect(byLabel(page, "Sales tax (%)")).toHaveValue("6.5");
+  await shot(page, "17b-admin-sales-tax");
+
+  const client = await (await browser.newContext()).newPage();
+  await client.goto("/book");
+  await pickStudio(client, "Studio Paris");
+  await next(client);
+  await client.getByRole("button", { name: "1 hr", exact: true }).click();
+  await byLabel(client, "Date").fill(TAX_DAY);
+  // Paris for an hour is $68: 6.5% of it is $4.42.
+  await expect(onScreen(client.locator(".price-row.price-tax"))).toHaveText("Sales tax (6.5%)$4.42");
+  await expect(totalRow(client)).toContainText("$72.42");
+  await bookStudioFirstToPayment(client, { studios: ["Studio Paris"], date: TAX_DAY, duration: "1 hr", time: "2:00 PM", customer: tess });
+  await expect(onScreen(client.locator(".price-row.price-tax"))).toHaveText("Sales tax (6.5%)$4.42");
+  await shot(client, "17c-checkout-sales-tax");
+  expect(await accessibilityProblems(client), "checkout with a sales tax line").toEqual([]);
+  await confirmAndGetRef(client, "Confirm & pay $72.42");
+  await expect(onScreen(client.locator(".price-row.price-tax"))).toHaveText("Sales tax (6.5%)$4.42");
+  await expect(totalRow(client)).toContainText("$72.42");
+
+  // Back to none, for the tests that follow. The booking keeps the tax it was made with.
+  await byLabel(page, "Sales tax (%)").fill("0");
+  await taxForm.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(byText(page, "No sales tax is added now.")).toBeVisible();
+  await client.reload();
+  await expect(onScreen(client.locator(".price-row.price-tax"))).toHaveText("Sales tax (6.5%)$4.42");
+  await client.goto("/book");
+  await pickStudio(client, "Studio Paris");
+  await next(client);
+  await client.getByRole("button", { name: "1 hr", exact: true }).click();
+  await expect(totalRow(client)).toContainText("$68");
+  await expect(client.locator(".price-row.price-tax")).toHaveCount(0);
+  await client.context().close();
 });
 
 test("the bundles have prices of their own, the same every day, which the owner changes; every studio and bundle is booked from 1 to 10 hours, six lengths shown and the rest behind More", async ({ page }) => {

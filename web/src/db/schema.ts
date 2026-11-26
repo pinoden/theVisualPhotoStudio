@@ -470,6 +470,16 @@ export const bookings = pgTable(
     membershipMinutes: integer("membership_minutes").notNull().default(0),
     membershipCents: integer("membership_cents").notNull().default(0),
     /**
+     * Sales tax: the part of `total_cents` that is tax, and the rule it was worked out by, which stays with the booking
+     * when the owners change the rate later (`TaxRule` in pricing.ts): the rate in hundredths of a percent, and whether
+     * the studio part and the add-ons are taxed. All 0 and false for a booking made before tax, or with none: a move or
+     * a change prices it again without tax.
+     */
+    taxCents: integer("tax_cents").notNull().default(0),
+    taxBasisPoints: integer("tax_basis_points").notNull().default(0),
+    taxStudio: boolean("tax_studio").notNull().default(false),
+    taxAddons: boolean("tax_addons").notNull().default(false),
+    /**
      * The kind of day the booking is priced as: its day's kind when it was made, or the new day's when a move priced it
      * again (follow-up 5). A move compares the new day with this, not with what the owners make the old day later (a
      * special date added since). Null for a booking made before it was kept (migration 0046 filled those in).
@@ -547,6 +557,7 @@ export const bookings = pgTable(
     uniqueIndex("bookings_imported_from").on(t.importedFrom).where(sql`${t.importedFrom} is not null`),
     // The scheduled task's look at the requests that wait (`finishWaitingEnds`).
     index("bookings_end_requested_idx").on(t.endRequestedAt).where(sql`${t.endRequestedAt} is not null`),
+    check("bookings_tax", sql`${t.taxCents} >= 0 and ${t.taxBasisPoints} >= 0 and ${t.taxBasisPoints} <= 2000`),
     check("bookings_money_kind", sql`${t.moneyKind} in ('test', 'live')`),
     check("bookings_end_request", sql`(${t.endRequest} is null) = (${t.endRequestedAt} is null)`),
   ],

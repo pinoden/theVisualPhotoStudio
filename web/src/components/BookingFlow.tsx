@@ -26,6 +26,8 @@ import {
   formatCents,
   promoMisfitText,
   quote,
+  taxLabel,
+  taxRuleFor,
   type PromoKind,
   type Quote,
 } from "@/lib/domain/pricing";
@@ -428,6 +430,7 @@ export function BookingFlow({
         bookingDay: date ? { date, special: date in catalog.specialDates } : null,
         membership: member?.membership ?? null,
         photoPackage: session ? { priceCents: session.priceCents, service: session.service } : null,
+        tax: taxRuleFor(settings, Boolean(session)),
       });
     } catch {
       return null;
@@ -789,6 +792,28 @@ export function BookingFlow({
   // Studios with one price together are one line (`studioPriceLines`).
   const studioLines = price ? studioPriceLines(price.studioLines.map((line) => ({ name: studioName(line.studioId), priceCents: line.priceCents })), price.multiStudioDiscountCents) : [];
 
+  /** The sales tax, where the owners charge one: a line of its own, as the prices leave it out. */
+  const taxLine = price && price.taxCents > 0 && (
+    <div className="price-row price-tax">
+      <span>{taxLabel(price.taxBasisPoints)}</span>
+      <span>{formatCents(price.taxCents)}</span>
+    </div>
+  );
+  const codeLine = price && promo && price.promoDiscountCents > 0 && (
+    <div className="price-row price-discount">
+      <span>
+        {promo.kind === "percent"
+          ? `Code ${promo.code} (${promo.value}% off ${photography ? "session" : "rental"})`
+          : promo.kind === "free_hour"
+            ? `Free hour, code ${promo.code}`
+            : promo.source === "reschedule" || promo.source === undefined
+              ? `Reschedule code ${promo.code}`
+              : `Studio credit, code ${promo.code}`}
+      </span>
+      <span>{formatCents(-price.promoDiscountCents)}</span>
+    </div>
+  );
+
   const summary = price && start !== null && (
     <div className="price-summary">
       <div className="price-row">
@@ -827,20 +852,8 @@ export function BookingFlow({
           <span>{formatCents(line.totalCents)}</span>
         </div>
       ))}
-      {promo && price.promoDiscountCents > 0 && (
-        <div className="price-row price-discount">
-          <span>
-            {promo.kind === "percent"
-              ? `Code ${promo.code} (${promo.value}% off ${photography ? "session" : "rental"})`
-              : promo.kind === "free_hour"
-                ? `Free hour, code ${promo.code}`
-                : promo.source === "reschedule" || promo.source === undefined
-                  ? `Reschedule code ${promo.code}`
-                  : `Studio credit, code ${promo.code}`}
-          </span>
-          <span>{formatCents(-price.promoDiscountCents)}</span>
-        </div>
-      )}
+      {/* A discount comes off before the tax. Credit is money paid before: it pays the total, tax included. */}
+      {promo?.kind !== "amount" && codeLine}
       {member && price.membershipCents > 0 && (
         <div className="price-row price-discount">
           <span>
@@ -849,6 +862,8 @@ export function BookingFlow({
           <span>{formatCents(-price.membershipCents)}</span>
         </div>
       )}
+      {taxLine}
+      {promo?.kind === "amount" && codeLine}
       <div className="price-row total">
         <span>{promo || member ? "To pay" : "Total"}</span>
         <span>{formatCents(price.totalCents)}</span>
@@ -1218,6 +1233,7 @@ export function BookingFlow({
                   <span>{formatCents(-price.multiStudioDiscountCents)}</span>
                 </div>
               )}
+              {taxLine}
               <div className="price-row total">
                 <span>Estimated total</span>
                 <span>{formatCents(price.totalCents)}</span>

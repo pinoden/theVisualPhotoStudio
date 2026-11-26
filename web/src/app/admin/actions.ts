@@ -10,7 +10,7 @@ import { studioCombinationError } from "@/lib/catalog-view";
 import { loadCatalog } from "@/server/catalog";
 import { dollarsToCents, formText, hhmmToMinutes, intInRange } from "@/lib/parse";
 import { ADMIN_LEVELS, ATTENDANT_SWITCH_KEYS, isAdminLevel, MANAGER_SWITCH_KEYS } from "@/lib/abilities";
-import { formatCents } from "@/lib/domain/pricing";
+import { formatCents, TAX_BASIS_POINTS_MAX, taxPercent } from "@/lib/domain/pricing";
 import { durationLabel, isIsoDate } from "@/lib/domain/time";
 import {
   addStaff,
@@ -289,6 +289,23 @@ export async function saveLengthsAction(formData: FormData): Promise<void> {
   if (!(await saveSetting(db, "betweenLengthsMinutes", step)) || !(await saveSetting(db, "longestBookingMinutes", longest))) failed("/admin/prices", "Choose from the lists.");
   updateTag(CATALOG_TAG);
   done("/admin/prices", step === 0 ? "Only the listed lengths can be booked now." : "The lengths that can be booked are saved.");
+}
+
+/**
+ * The sales tax added on top of the prices: its rate, typed as a percentage, and what it applies to. Bookings already
+ * made keep the rate they were made at.
+ */
+export async function saveSalesTaxAction(formData: FormData): Promise<void> {
+  await requireOwner("/admin/prices");
+  const typed = text(formData, "salesTaxPercent");
+  const basisPoints = /^\d{1,2}(\.\d{1,2})?$/.test(typed) ? Math.round(Number(typed) * 100) : NaN;
+  const db = await getDb();
+  if (!(await saveSetting(db, "salesTaxBasisPoints", basisPoints))) {
+    failed("/admin/prices", `Enter the sales tax as a percentage from 0 to ${TAX_BASIS_POINTS_MAX / 100}, with at most two decimals: for example 6.5. 0 charges none.`);
+  }
+  for (const key of ["taxStudioTime", "taxSessions", "taxAddons"] as const) await saveSetting(db, key, formData.get(key) === "on");
+  updateTag(CATALOG_TAG);
+  done("/admin/prices", basisPoints === 0 ? "No sales tax is added now." : `Sales tax saved: ${taxPercent(basisPoints)}, for bookings made from now on.`);
 }
 
 export async function specialDateAction(formData: FormData): Promise<void> {

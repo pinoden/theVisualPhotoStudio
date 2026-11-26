@@ -3,6 +3,7 @@ import { SERVICE_WORDS, type Service } from "@/lib/domain/services";
 import { emailOutbox } from "@/db/schema";
 import type { DbLike } from "@/db/client";
 import { afterFee } from "@/lib/domain/policy";
+import { taxLabel } from "@/lib/domain/pricing";
 import { durationLabel, longDateLabel } from "@/lib/domain/time";
 import { EMAIL_TEMPLATES, firstNameOf, renderEmail, type TemplateKey } from "@/lib/email-templates";
 import { mayUseTestTools } from "./browser-test-server";
@@ -261,8 +262,10 @@ export function bookingConfirmationEmail(input: {
   studios: string;
   when: string;
   duration: string;
-  /** Price after discounts. */
+  /** Price after discounts, sales tax included. */
   totalCents: number;
+  /** The sales tax in that total, when there is any. */
+  tax?: { cents: number; basisPoints: number };
   /** Part of the total covered by an amount code: a reschedule code, or studio credit. */
   creditCents: number;
   /** What that code is called: "reschedule code" or "studio credit". */
@@ -282,14 +285,15 @@ export function bookingConfirmationEmail(input: {
   // studio made, at the studio.
   // Nothing left after the code or the hours: no line says a card was charged, or that anything is to pay (the tester's
   // finding of 2026-11-18: "Charged to your card: $0" for a booking the studio made).
+  const taxNote = input.tax ? ` (includes ${money(input.tax.cents)} ${taxLabel(input.tax.basisPoints).toLowerCase()})` : "";
   const payment =
     input.creditCents > 0
       ? [
-          `Total: ${money(input.totalCents)}`,
+          `Total: ${money(input.totalCents)}${taxNote}`,
           `Paid with your ${input.creditName ?? "reschedule code"}: ${money(input.creditCents)}`,
           ...(input.cardCents > 0 ? [input.payAtStudio ? `To pay at the studio: ${money(input.cardCents)}` : `Charged to your card: ${money(input.cardCents)}`] : []),
         ]
-      : [input.payAtStudio && input.totalCents > 0 ? `To pay at the studio: ${money(input.totalCents)}` : `Total: ${money(input.totalCents)}`];
+      : [`${input.payAtStudio && input.totalCents > 0 ? "To pay at the studio" : "Total"}: ${money(input.totalCents)}${taxNote}`];
   return written(
     "booking_confirmation",
     { to: input.to, kind: "booking_confirmation" },

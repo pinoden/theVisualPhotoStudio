@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { settings as settingsTable } from "@/db/schema";
 import type { DbLike } from "@/db/client";
+import { TAX_BASIS_POINTS_MAX } from "@/lib/domain/pricing";
 import { EMAIL_RULE } from "@/lib/parse";
 
 /**
@@ -34,8 +35,8 @@ export interface Settings {
   /**
    * The lengths between the listed ones that can be booked, each priced between its two neighbours (`betweenLengths`
    * in pricing.ts): every 30 minutes, every 60, or 0 for the listed lengths only. The owner, 2026-11-25: "any studio
-   * and a bundle can be booked for any amount of hours over 1 hour"; how such a length is priced is the builder's
-   * reading (question 83 in ProjectLibrary.md).
+   * and a bundle can be booked for any amount of hours over 1 hour"; how such a length is priced they approved the
+   * same day ("OK on prices"; question 83 in ProjectLibrary.md).
    */
   betweenLengthsMinutes: number;
   /**
@@ -49,6 +50,19 @@ export interface Settings {
    * 2026-11-25: "remove 5 hours so 1, 2, 3, 4, 6 more".
    */
   shownLengthsMinutes: number[];
+
+  // ── Sales tax ──
+  /**
+   * The sales tax added on top of the prices, in hundredths of a percent: 650 is 6.5%. 0, the default: none, and no tax
+   * line anywhere. The owner's decision of 2026-11-20: prices exclude tax, shown as a line of its own at checkout and on
+   * receipts, at 6.5% until the accountant confirms the rate and what it applies to (question 84 in ProjectLibrary.md).
+   * A booking keeps the rate it was made at.
+   */
+  salesTaxBasisPoints: number;
+  /** What the tax applies to: the studios' time, a session's price (photography, content creation), and add-ons, extra guests and fees. */
+  taxStudioTime: boolean;
+  taxSessions: boolean;
+  taxAddons: boolean;
 
   // ── Cancelling and moving ──
   /** A cancellation at least this many hours before the start is refunded automatically. */
@@ -171,6 +185,11 @@ export const DEFAULT_SETTINGS: Settings = {
   betweenLengthsMinutes: 30,
   longestBookingMinutes: 600, // 10 hours, the owner's answer of 2026-11-25
   shownLengthsMinutes: [60, 120, 180, 240, 360], // 1, 2, 3, 4 and 6 hours, the owner's answer of 2026-11-25
+
+  salesTaxBasisPoints: 0, // set by the owners under Settings: 6.5% is their provisional rate (2026-11-20)
+  taxStudioTime: true,
+  taxSessions: true,
+  taxAddons: true,
 
   refundWindowHours: 168, // 7 days: the owner's answer of 2026-11-17, which changed the 14 days of 2026-11-15
   photoRefundWindowHours: 336, // 14 days, as on the live site and confirmed on 2026-11-17
@@ -300,6 +319,10 @@ const VALIDATORS: { [K in Exclude<keyof Settings, "multiStudioPercent">]: (v: un
   betweenLengthsMinutes: (v) => BETWEEN_LENGTHS.includes(v as number),
   longestBookingMinutes: (v) => LONGEST_BOOKINGS.includes(v as number),
   shownLengthsMinutes: shownLengthsList,
+  salesTaxBasisPoints: int([0, TAX_BASIS_POINTS_MAX]),
+  taxStudioTime: bool,
+  taxSessions: bool,
+  taxAddons: bool,
   refundWindowHours: int(NUMBER_SETTING_RANGES.refundWindowHours),
   photoRefundWindowHours: int(NUMBER_SETTING_RANGES.photoRefundWindowHours),
   refundFeePercent: int(NUMBER_SETTING_RANGES.refundFeePercent),

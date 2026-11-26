@@ -551,6 +551,7 @@ export async function moveBooking(
                 promoDiscountCents: repriced.quote.promoDiscountCents,
                 creditAppliedCents: repriced.creditAppliedCents,
                 membershipCents: repriced.quote.membershipCents,
+                taxCents: repriced.quote.taxCents,
                 totalCents: repriced.quote.totalCents,
               }
             : {}),

@@ -1,7 +1,7 @@
 import { sessionsOf } from "@/lib/domain/services";
 import { bookingLengths, multiStudioOffer, petPolicy } from "@/lib/catalog-view";
 import { noticeHours } from "@/lib/domain/availability";
-import { formatCents } from "@/lib/domain/pricing";
+import { formatCents, taxPercent } from "@/lib/domain/pricing";
 import { count, hoursInWords, hoursWithDays, listInWords } from "@/lib/words";
 import type { Catalog } from "@/server/catalog";
 import type { Business } from "./frame";
@@ -37,6 +37,7 @@ export function liveValues(catalog: Catalog, business: Business): LiveValue[] {
     value("refund window", "How long before the start a cancellation is refunded", hoursInWords(s.refundWindowHours)),
     value("refund window with hours", "The same, with the hours: 7 days (168 hours)", hoursWithDays(s.refundWindowHours)),
     value("refund fee", "The processing fee kept from a refund", `${s.refundFeePercent}%`),
+    value("sales tax", "The sales tax added to the prices at checkout: 6.5%. 0% while none is charged", taxPercent(s.salesTaxBasisPoints)),
     value("reschedule cutoff", "How long before the start a booking can still be moved", hoursInWords(s.rescheduleCutoffHours)),
     value("reschedules allowed", "How often one booking can be moved free of charge", s.maxReschedules === 1 ? "once" : `up to ${s.maxReschedules} times`),
     value("reschedule fee", "What moving a booking again costs, after the free times", formatCents(s.rescheduleFeeCents)),
