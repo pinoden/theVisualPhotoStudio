@@ -218,6 +218,59 @@ describe("cancelling", () => {
     expect(mail).toContain("The code you used for this booking can be used again.");
   });
 
+  it("uses up a code or studio credit when the client cancels too late for a refund, and says so first (the owners' decision of 2026-11-27)", async () => {
+    // NEAR is inside the seven days when nothing is refunded. A code that makes the booking free:
+    const promo = (await issuePromo(world.db, { kind: "percent", value: 100, source: "manual", email: null, expiresAt: daysAfter(NOW, 60), maxUses: 5 }))!;
+    const uses = async () => (await world.db.select().from(promoCodes).where(eq(promoCodes.id, promo.id)))[0].usedCount;
+    const free = expectOk(await world.book({ date: NEAR, promoCode: promo.code, paymentToken: undefined }));
+    expect(await uses()).toBe(1);
+    // Before she cancels, the page says the code will not come back: until now it read nothing of it, and gave it back.
+    const lost = "The code you used for this booking is not given back, as the booking is cancelled less than 7 days before it starts.";
+    const choice = (await getManageChoices(world.db, free.ref, byToken(free.manageToken), NOW))!.cancel;
+    expect(choice.text).toBe(`Nothing was charged to a card for this booking, so there is nothing to refund. ${lost}`);
+    const late = expectOk(await cancelBooking(world.db, free.ref, byToken(free.manageToken), world.manageDeps(), choice.text));
+    expect(late.message).toBe(choice.text);
+    expect(await uses()).toBe(1);
+    const mail = (await world.emails("booking_cancelled")).at(-1)!.body;
+    expect(mail).toContain(lost);
+    expect(mail).not.toContain("can be used again");
+    const freeId = (await bookingRow(free.ref)).id;
+    expect((await world.db.select().from(bookingEvents).where(eq(bookingEvents.bookingId, freeId))).at(-1)!.note).toContain("the code or credit it was made with used up, as the terms refund nothing");
+
+    // Studio credit is money too: it paid part of this booking, and a late cancellation keeps it with the rest.
+    const gift = (await issuePromo(world.db, { kind: "amount", value: 5000, source: "manual", email: null, expiresAt: daysAfter(NOW, 60) }))!;
+    const left = async () => (await world.db.select().from(promoCodes).where(eq(promoCodes.id, gift.id)))[0].value;
+    const part = expectOk(await world.book({ date: NEAR, startMinute: h(14), promoCode: gift.code, expectedTotalCents: 12600 }));
+    expect((await getManageChoices(world.db, part.ref, byToken(part.manageToken), NOW))!.cancel.text).toBe(
+      "No refund is due, because the booking starts in less than 7 days. The $50 of studio credit this booking was paid with is not given back, as the booking is cancelled less than 7 days before it starts.",
+    );
+    expectOk(await cancelBooking(world.db, part.ref, byToken(part.manageToken), world.manageDeps()));
+    expect(await left()).toBe(0);
+    expect(world.refundCalls).toHaveLength(0);
+
+    // When the studio cancels, the client gets the code back, however late.
+    const again = expectOk(await world.book({ date: NEAR, startMinute: h(16), promoCode: promo.code, paymentToken: undefined }));
+    expect(await uses()).toBe(2);
+    expectOk(await ownerCancelBooking(world.db, again.ref, { refundCents: 0 }, world.manageDeps()));
+    expect(await uses()).toBe(1);
+  });
+
+  it("gives a code back after any cancellation while the owners keep that switched on, for the bookings made meanwhile", async () => {
+    const promo = (await issuePromo(world.db, { kind: "percent", value: 100, source: "manual", email: null, expiresAt: daysAfter(NOW, 60), maxUses: 5 }))!;
+    const uses = async () => (await world.db.select().from(promoCodes).where(eq(promoCodes.id, promo.id)))[0].usedCount;
+    // Made under the rule as it stands: it keeps it, whatever the owners switch afterwards.
+    const strict = expectOk(await world.book({ date: NEAR, promoCode: promo.code, paymentToken: undefined }));
+    await world.db.insert(settings).values({ key: "lateCancelKeepsCode", value: true });
+    const lenient = expectOk(await world.book({ date: NEAR, startMinute: h(14), promoCode: promo.code, paymentToken: undefined }));
+    expect(await uses()).toBe(2);
+    const told = (await getManageChoices(world.db, lenient.ref, byToken(lenient.manageToken), NOW))!.cancel.text;
+    expect(told).not.toContain("not given back");
+    expect(expectOk(await cancelBooking(world.db, lenient.ref, byToken(lenient.manageToken), world.manageDeps(), told)).message).toContain("The code you used for this booking can be used again.");
+    expect(await uses()).toBe(1);
+    expect(expectOk(await cancelBooking(world.db, strict.ref, byToken(strict.manageToken), world.manageDeps())).message).toContain("is not given back");
+    expect(await uses()).toBe(1);
+  });
+
   it("names the refund window as the owner set it, in days only when it is whole days", () => {
     const late = { allowed: true, refundCents: 0, feeCents: 0, creditCents: 0, byHandCents: 0, why: "inside_window" } as const;
     const text = (refundWindowHours: number) => cancelOutcomeText(late, { ...DEFAULT_SETTINGS, refundWindowHours });

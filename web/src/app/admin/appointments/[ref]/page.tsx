@@ -218,6 +218,11 @@ async function AppointmentDetails({
                 : "Not moved online: moving was switched off when it was made."}
             </li>
             <li>A reschedule code or credit it gives is valid for {appointment.terms.creditValidDays} days.</li>
+            <li>
+              {appointment.terms.lateCancelKeepsCode
+                ? "A code or studio credit it was made with comes back after any cancellation."
+                : "A code or studio credit it was made with comes back only when the client cancels in time for a refund, or the studio cancels."}
+            </li>
           </ul>
           {appointment.terms.changedSince && (
             <p style={{ fontSize: ".8rem", margin: ".5rem 0 0" }}>

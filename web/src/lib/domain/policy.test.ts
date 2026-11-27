@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cancellationOutcome, rescheduleOutcome, type BookingFacts, type PolicySettings } from "./policy";
+import { cancellationOutcome, codeComesBack, rescheduleOutcome, type BookingFacts, type PolicySettings } from "./policy";
 
 /** A photography session's terms: 14 days, 5% kept. A rental's are the same with 7 days (2026-11-17). */
 const settings: PolicySettings = {
@@ -160,6 +160,26 @@ describe("cancelling a booking with a pet fee", () => {
       creditCents: 4000,
       byHandCents: 7800,
     });
+  });
+});
+
+describe("the code or credit a cancelled booking was made with", () => {
+  const rule = { refundWindowHours: 168, lateCancelKeepsCode: false };
+  it("comes back when the client cancels in time for a refund, and is used up later or once the booking was moved (the owners' decision of 2026-11-27)", () => {
+    expect(codeComesBack(booking(), hoursBefore(200), rule)).toBe(true);
+    expect(codeComesBack(booking(), hoursBefore(168), rule)).toBe(true);
+    expect(codeComesBack(booking(), hoursBefore(167.9), rule)).toBe(false);
+    expect(codeComesBack(booking(), hoursBefore(2), rule)).toBe(false);
+    // A moved booking is refunded at no time, and gives nothing back either.
+    expect(codeComesBack(booking({ rescheduledCount: 1 }), hoursBefore(500), rule)).toBe(false);
+    // A session has its own window, kept with the booking.
+    expect(codeComesBack(booking(), hoursBefore(200), { ...rule, refundWindowHours: 336 })).toBe(false);
+  });
+
+  it("comes back after any cancellation while the owners keep the rule as it was", () => {
+    const kept = { ...rule, lateCancelKeepsCode: true };
+    expect(codeComesBack(booking(), hoursBefore(2), kept)).toBe(true);
+    expect(codeComesBack(booking({ rescheduledCount: 2 }), hoursBefore(2), kept)).toBe(true);
   });
 });
 

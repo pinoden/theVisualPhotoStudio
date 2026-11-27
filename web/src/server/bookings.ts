@@ -16,7 +16,7 @@ import {
 import { extraGuestsFor, studioCombinationError } from "@/lib/catalog-view";
 import { businessDaysInWords, isStartFree, noticeHours } from "@/lib/domain/availability";
 import { labelOf, type LabelKey } from "@/lib/domain/labels";
-import { formatCents, PricingError, promoMisfitText, quote, taxRuleFor, type PromoKind, type Quote } from "@/lib/domain/pricing";
+import { formatCents, priceRows, PricingError, promoMisfitText, quote, taxRuleFor, type PromoKind, type Quote } from "@/lib/domain/pricing";
 import type { PromoDays } from "@/lib/domain/promo-days";
 import { count, hoursInWords } from "@/lib/words";
 import { durationLabel, isIsoDate } from "@/lib/domain/time";
@@ -738,6 +738,16 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
         creditCents: spendsCode && promo!.kind === "amount" ? price.promoDiscountCents : price.membershipCents,
         creditName: spendsMinutes ? `membership hours (${durationLabel(price.membershipMinutes)})` : promo ? creditName(promo.source) : undefined,
         cardCents: price.totalCents,
+        // Each studio, add-on and discount on a line of its own, as the booking's page lists them.
+        rows: priceRows({
+          studios: price.studioLines.map((line) => ({
+            name: `${session ? `${SERVICE_WORDS[session.service].Session}, ` : ""}${chosen.find((studio) => studio!.id === line.studioId)!.name}`,
+            priceCents: line.priceCents,
+          })),
+          multiStudioDiscountCents: price.multiStudioDiscountCents,
+          addons: price.addonLines,
+          discount: spendsCode ? { kind: promo!.kind, cents: price.promoDiscountCents } : null,
+        }),
         tax: price.taxCents > 0 ? { cents: price.taxCents, basisPoints: price.taxBasisPoints } : undefined,
         // A booking the studio made is paid at the studio, whatever a code or membership hours left to pay: no card is charged.
         payAtStudio: Boolean(deps.madeBy),

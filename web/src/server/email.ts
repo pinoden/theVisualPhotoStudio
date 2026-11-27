@@ -3,7 +3,7 @@ import { SERVICE_WORDS, type Service } from "@/lib/domain/services";
 import { emailOutbox } from "@/db/schema";
 import type { DbLike } from "@/db/client";
 import { afterFee } from "@/lib/domain/policy";
-import { taxLabel } from "@/lib/domain/pricing";
+import { taxLabel, type PriceRow } from "@/lib/domain/pricing";
 import { durationLabel, longDateLabel } from "@/lib/domain/time";
 import { EMAIL_TEMPLATES, firstNameOf, renderEmail, type TemplateKey } from "@/lib/email-templates";
 import { mayUseTestTools } from "./browser-test-server";
@@ -271,6 +271,12 @@ export function bookingConfirmationEmail(input: {
   duration: string;
   /** Price after discounts, sales tax included. */
   totalCents: number;
+  /**
+   * The price row by row, before tax (`priceRows`): listed above the total when there is more to it than one price,
+   * so that extra guests, a pet fee or a discount are each read in the email, as on the booking's page (the owners'
+   * decision of 2026-11-27). Left out, or one price with no tax: the total alone, as before.
+   */
+  rows?: PriceRow[];
   /** The sales tax in that total, when there is any. */
   tax?: { cents: number; basisPoints: number };
   /** Part of the total covered by an amount code: a reschedule code, or studio credit. */
@@ -292,15 +298,23 @@ export function bookingConfirmationEmail(input: {
   // studio made, at the studio.
   // Nothing left after the code or the hours: no line says a card was charged, or that anything is to pay (the tester's
   // finding of 2026-11-18: "Charged to your card: $0" for a booking the studio made).
-  const taxNote = input.tax ? ` (includes ${money(input.tax.cents)} ${taxLabel(input.tax.basisPoints).toLowerCase()})` : "";
-  const payment =
-    input.creditCents > 0
+  const rows = input.rows ?? [];
+  const listed = rows.length > 1 || (rows.length === 1 && input.tax !== undefined);
+  // The rows, and the tax as a row of its own after them; without rows the total says what tax it includes.
+  const priced = listed
+    ? [...rows.map((row) => `${row.label}: ${money(row.cents)}`), ...(input.tax ? [`${taxLabel(input.tax.basisPoints)}: ${money(input.tax.cents)}`] : [])]
+    : [];
+  const taxNote = input.tax && !listed ? ` (includes ${money(input.tax.cents)} ${taxLabel(input.tax.basisPoints).toLowerCase()})` : "";
+  const payment = [
+    ...priced,
+    ...(input.creditCents > 0
       ? [
           `Total: ${money(input.totalCents)}${taxNote}`,
           `Paid with your ${input.creditName ?? "reschedule code"}: ${money(input.creditCents)}`,
           ...(input.cardCents > 0 ? [input.payAtStudio ? `To pay at the studio: ${money(input.cardCents)}` : `Charged to your card: ${money(input.cardCents)}`] : []),
         ]
-      : [`${input.payAtStudio && input.totalCents > 0 ? "To pay at the studio" : "Total"}: ${money(input.totalCents)}${taxNote}`];
+      : [`${input.payAtStudio && input.totalCents > 0 ? "To pay at the studio" : "Total"}: ${money(input.totalCents)}${taxNote}`]),
+  ];
   return written(
     "booking_confirmation",
     { to: input.to, kind: "booking_confirmation" },

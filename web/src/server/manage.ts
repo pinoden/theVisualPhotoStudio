@@ -10,6 +10,7 @@ import { count, hoursInWords } from "@/lib/words";
 import {
   afterFee,
   cancellationOutcome,
+  codeComesBack,
   rescheduleOutcome,
   type BookingFacts,
   type CancelBlock,
@@ -148,6 +149,27 @@ function minutesOnCancelText(booking: Pick<BookingRow, "membershipMinutes" | "st
   return byStudio ? "" : `${used} is not given back, as the booking is cancelled less than ${hoursInWords(terms.memberReturnHours)} before it starts.`;
 }
 
+/**
+ * What a cancellation by the client does with the code or studio credit the booking was made with, when it uses it up
+ * (`codeComesBack` in src/lib/domain/policy.ts): said before they cancel, as part of what they agree to, and in the
+ * email. "" when no code was used, when it comes back (said once it has, `CODE_BACK`), when the studio cancels, and for
+ * a reschedule code, whose booking the terms already say is not refunded.
+ */
+function codeOnCancelText(
+  booking: Pick<BookingRow, "promoCodeId" | "promoDiscountCents" | "creditAppliedCents">,
+  facts: Pick<BookingFacts, "startAt" | "rescheduledCount" | "madeWithRescheduleCode">,
+  terms: Pick<Settings, "refundWindowHours" | "lateCancelKeepsCode">,
+  now: Date,
+  byStudio: boolean,
+): string {
+  if (byStudio || !booking.promoCodeId || booking.promoDiscountCents <= 0 || facts.madeWithRescheduleCode) return "";
+  if (codeComesBack(facts, now, terms)) return "";
+  const what = booking.creditAppliedCents > 0 ? `The ${formatCents(booking.creditAppliedCents)} of studio credit this booking was paid with` : "The code you used for this booking";
+  return facts.rescheduledCount > 0
+    ? `${what} is not given back, as the booking was moved.`
+    : `${what} is not given back, as the booking is cancelled less than ${hoursInWords(terms.refundWindowHours)} before it starts.`;
+}
+
 /** Give a cancelled booking's membership minutes back: a line of `membership_minutes`, which adds them to what is left. */
 async function giveMinutesBack(tx: DbLike, booking: BookingRow, actor: string): Promise<void> {
   await tx.insert(membershipMinutes).values({
@@ -165,7 +187,7 @@ async function manageContext(
   ref: string,
   actor: Actor,
   now: Date,
-): Promise<{ options: ManageOptions; terms: Settings; heldCents: number; booking: BookingRow } | null> {
+): Promise<{ options: ManageOptions; terms: Settings; heldCents: number; booking: BookingRow; facts: BookingFacts } | null> {
   if (!isBookingRef(ref)) return null;
   const [booking] = await db.select().from(bookings).where(eq(bookings.ref, ref)).limit(1);
   if (!booking || !mayAct(booking, actor)) return null;
@@ -177,6 +199,7 @@ async function manageContext(
     terms,
     heldCents: await heldCentsOf(db, booking.id, now),
     booking,
+    facts,
   };
 }
 
@@ -237,11 +260,15 @@ export async function getManageChoices(db: DbLike, ref: string, actor: Actor, no
   // Where the money to be given back by hand was paid: the same words as the cancellation itself uses (`cancelBooking`).
   const place = context.options.cancel.allowed && context.options.cancel.byHandCents > 0 ? await handPaidPlaceOf(db, context.booking.id) : undefined;
   const choices = describeManageOptions(context.options, context.terms, context.heldCents, place);
-  // What becomes of membership minutes is part of what the client is told, and agrees to, before cancelling.
-  const minutes = choices.cancel.allowed ? minutesOnCancelText(context.booking, context.terms, now, actor.kind === "owner") : "";
+  // What becomes of membership minutes, and of a code or credit that is used up, is part of what the client is told,
+  // and agrees to, before cancelling.
+  const byStudio = actor.kind === "owner";
+  const more = choices.cancel.allowed
+    ? [minutesOnCancelText(context.booking, context.terms, now, byStudio), codeOnCancelText(context.booking, context.facts, context.terms, now, byStudio)].filter(Boolean)
+    : [];
   return {
     ...choices,
-    cancel: minutes ? { ...choices.cancel, text: [choices.cancel.text, minutes].filter(Boolean).join(" ") } : choices.cancel,
+    cancel: more.length > 0 ? { ...choices.cancel, text: [choices.cancel.text, ...more].filter(Boolean).join(" ") } : choices.cancel,
     request: moveRequestChoice(context.booking, now),
   };
 }
@@ -885,9 +912,14 @@ async function recordRefunds(
  * returned), or when it is the studio that cancels. A customer who cancels a
  * booking made with a reschedule credit gets nothing back: a moved booking
  * cannot be refunded, which they are told before moving.
+ *
+ * `comesBack`: a customer's cancellation gives a code or credit back only
+ * when the terms refund it (`codeComesBack`, the owners' decision of
+ * 2026-11-27). The studio's always does.
  */
-async function giveCodeBack(tx: DbLike, booking: BookingRow, cancelledBy: "customer" | "studio"): Promise<boolean> {
+async function giveCodeBack(tx: DbLike, booking: BookingRow, cancelledBy: "customer" | "studio", comesBack = true): Promise<boolean> {
   if (!booking.promoCodeId || booking.promoDiscountCents <= 0) return false;
+  if (cancelledBy === "customer" && !comesBack) return false;
   if (booking.creditAppliedCents === 0) {
     await restorePromo(tx, booking.promoCodeId, "percent", 0);
     return true;
@@ -1140,7 +1172,8 @@ export async function cancelBooking(db: Db, ref: string, actor: Actor, deps: Man
     const asOf = askedAt ?? deps.now;
 
     const terms = termsFor(booking, settings);
-    const decision = cancellationOutcome(await factsFor(tx, booking), asOf, terms);
+    const facts = await factsFor(tx, booking);
+    const decision = cancellationOutcome(facts, asOf, terms);
     if (!decision.allowed) {
       await dropEndRequest(tx, booking, notDoneWhy(booking, decision.reason), deps);
       return { kind: "blocked" as const, reason: decision.reason, booking: { status: booking.status, cancelReason: booking.cancelReason } };
@@ -1150,7 +1183,9 @@ export async function cancelBooking(db: Db, ref: string, actor: Actor, deps: Man
     const byStudio = actor.kind === "owner";
     const minutesText = minutesOnCancelText(booking, terms, asOf, byStudio);
     const place = decision.byHandCents > 0 ? await handPaidPlaceOf(tx, booking.id) : "at the studio";
-    const said = [cancelOutcomeText(decision, terms, {}, heldCents, place), minutesText].filter(Boolean).join(" ");
+    // A code or credit the cancellation uses up: said before, with the rest, and in the email.
+    const codeText = codeOnCancelText(booking, facts, terms, asOf, byStudio);
+    const said = [cancelOutcomeText(decision, terms, {}, heldCents, place), minutesText, codeText].filter(Boolean).join(" ");
     if (!askedAt && seen !== undefined && seen !== said) return { kind: "changed" as const };
     // The processor could not say whether the open link was paid: nothing is cancelled until the site knows.
     const unseenLink = unseen ? await openPayLinkOf(tx, booking.id) : null;
@@ -1165,7 +1200,7 @@ export async function cancelBooking(db: Db, ref: string, actor: Actor, deps: Man
       .where(eq(bookings.id, booking.id));
     await releaseHolds(tx, booking.id);
 
-    const codeBack = await giveCodeBack(tx, booking, actor.kind === "owner" ? "studio" : "customer");
+    const codeBack = await giveCodeBack(tx, booking, byStudio ? "studio" : "customer", codeComesBack(facts, asOf, terms));
     const minutesBack = minutesComeBack(booking, terms, asOf, byStudio);
     if (minutesBack) await giveMinutesBack(tx, booking, byStudio ? "the studio" : "the site");
     // The pet is not coming: its fee stays off the card and goes back as studio credit.
@@ -1183,6 +1218,7 @@ export async function cancelBooking(db: Db, ref: string, actor: Actor, deps: Man
         decision.refundCents > 0 ? `Refund ${formatCents(decision.refundCents)}` : "No refund",
         ...(petCredit ? [`pet fee of ${formatCents(decision.creditCents)} returned as studio credit`] : []),
         ...(booking.membershipMinutes > 0 ? [`${durationLabel(booking.membershipMinutes)} of membership time ${minutesBack ? "given back" : "used"}`] : []),
+        ...(codeBack ? ["the code or credit it was made with given back"] : codeText ? ["the code or credit it was made with used up, as the terms refund nothing"] : []),
         ...(decision.byHandCents > 0
           ? [
               afterFee(decision.byHandCents, terms.refundFeePercent) > 0
@@ -1207,6 +1243,7 @@ export async function cancelBooking(db: Db, ref: string, actor: Actor, deps: Man
         ...(askedAt ? [askedOn(askedAt)] : []),
         cancelOutcomeText(decision, terms, { card: decision.refundCents > 0, pet: true }, heldCents, place),
         minutesText,
+        codeText,
         ...(codeBack ? [CODE_BACK] : []),
       ].filter(Boolean),
       ...(petCredit

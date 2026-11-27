@@ -167,7 +167,7 @@ const TEMPLATES: readonly EmailTemplateSpec[] = [
       {
         key: "payment",
         label:
-          "What the booking costs: “Total”, or “To pay at the studio” for a booking the studio made; and, when a code paid part of it, what the code paid and the card was charged",
+          "What the booking costs: each studio, add-on and discount on a line of its own when there is more than one price, then “Total”, or “To pay at the studio” for a booking the studio made; and, when a code paid part of it, what the code paid and the card was charged",
         lines: true,
         required: true,
         sample: "Total: $176",

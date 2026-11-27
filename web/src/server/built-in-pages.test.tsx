@@ -115,6 +115,8 @@ describe("the pages the website was built with", () => {
     expect(faq).toContain("You can move a booking once free of charge. To move it again, contact the studio: each further move costs $20.");
     expect(faq).not.toContain("A booking can be moved once.");
     expect(faq).toContain("The code is valid for 90 days.");
+    // A late cancellation uses up the code or credit, as it keeps money paid (the owners' decision of 2026-11-27).
+    expect(faq).toContain("A discount code, free hour or studio credit used for a booking comes back when you cancel in time for a refund. Cancelled later, or after the booking was moved, it is used up.");
     // The bundles have prices of their own, so no percentage is promised (question 81).
     expect(faq).not.toContain("You get");
     expect(faq).toContain("Pets are welcome in Studio Dayglow only. The other studios and all common areas are pet-free.");
@@ -130,6 +132,9 @@ describe("the pages the website was built with", () => {
     expect(policies).toContain("Cancellations made 7 days (168 hours) or more before the appointment are eligible for a full refund, excluding the non-refundable payment processing fee (5%).");
     expect(policies).toContain("may be rescheduled at no additional charge until 24 hours before the appointment.");
     expect(policies).toContain("An appointment may be rescheduled once at no additional charge. Each additional reschedule is arranged with the studio and costs $20.");
+    expect(policies).toContain(
+      "A discount code, free hour or studio credit applied to an appointment is returned only when the appointment is cancelled in time for a refund. If it is cancelled later, or after it has been rescheduled, the code or credit is used up.",
+    );
     expect(policies).toContain("Sessions are booked at least 14 days ahead.");
     expect(policies).toContain("Pets are permitted in Studio Dayglow only");
     expect(policies).toContain("Pets (Studio Dayglow only)");
@@ -202,6 +207,40 @@ describe("the pages the website was built with", () => {
     // Run again, it changes nothing.
     await world.db.execute(sql.raw(migration));
     expect(await world.db.select().from(siteVersions)).toHaveLength(versionsBefore + 2);
+  });
+
+  it("say nothing of codes used up while the owners give them back after any cancellation, and get the line from migration 0077", async () => {
+    await setting("lateCancelKeepsCode", true);
+    expect(await words("faq")).not.toContain("it is used up");
+    expect(await words("policies")).not.toContain("the code or credit is used up");
+    await setting("lateCancelKeepsCode", false);
+
+    // A database from before has neither line. On a page of their own the owners reworded the line it would follow.
+    const NEW_FAQ = "<li>{if not codes kept late}A discount code, free hour or studio credit used for a booking comes back when you cancel in time for a refund. Cancelled later, or after the booking was moved, it is used up.</li>";
+    const NEW_POLICIES =
+      "<li>{if not codes kept late}A discount code, free hour or studio credit applied to an appointment is returned only when the appointment is cancelled in time for a refund. If it is cancelled later, or after it has been rescheduled, the code or credit is used up.</li>";
+    const stored = async (slug: string) => (await world.db.select().from(siteDocuments).where(eq(siteDocuments.slug, slug)))[0];
+    const without = (value: unknown) => JSON.parse(JSON.stringify(value).replace(NEW_FAQ, "").replace(NEW_POLICIES, ""));
+    for (const slug of ["faq", "policies"]) {
+      const row = await stored(slug);
+      expect(JSON.stringify(row.published), slug).toContain("{if not codes kept late}");
+      await world.db.update(siteDocuments).set({ published: without(row.published) }).where(eq(siteDocuments.id, row.id));
+      expect(JSON.stringify((await stored(slug)).published), slug).not.toContain("{if not codes kept late}");
+    }
+    const own = expectOk(await createPage(world.db, owner, { title: "Our Terms" }, NOW)).id;
+    const theirs = parsePage({ blocks: [{ type: "Section", props: { content: [{ type: "Text", props: { html: "<ul><li>Once an appointment has been rescheduled, it cannot be refunded.</li></ul>" } }] } }] });
+    await world.db.update(siteDocuments).set({ published: theirs }).where(eq(siteDocuments.id, own));
+
+    const migration = readFileSync(path.join(process.cwd(), "drizzle", "0077_codes_after_late_cancel_copy.sql"), "utf8");
+    await world.db.execute(sql.raw(migration));
+    for (const slug of ["faq", "policies"] as const) expect((await stored(slug)).published, slug).toEqual(builtInPages().find((page) => page.slug === slug)!.content);
+    expect(await words("policies")).toContain("the code or credit is used up");
+    expect((await world.db.select().from(siteDocuments).where(eq(siteDocuments.id, own)))[0].published).toEqual(theirs);
+    // Run again, it adds no second line.
+    const versions = (await world.db.select().from(siteVersions)).length;
+    await world.db.execute(sql.raw(migration));
+    expect(await world.db.select().from(siteVersions)).toHaveLength(versions);
+    expect(JSON.stringify((await stored("policies")).published).split("{if not codes kept late}")).toHaveLength(2);
   });
 
   it("say the percentage off for several studios while no bundle has prices of its own", async () => {

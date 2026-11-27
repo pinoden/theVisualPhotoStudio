@@ -73,7 +73,8 @@ describe("with the owners' rate of 6.5%", () => {
       { label: "Sales tax (6.5%)", cents: 1144 },
     ]);
     expect(receipts[0].totalCents).toBe(18744);
-    expect((await world.emails("booking_confirmation"))[0].body).toContain("Total: $187.44 (includes $11.44 sales tax (6.5%))");
+    // In the confirmation too, each on a line of its own (the owners' decision of 2026-11-27).
+    expect((await world.emails("booking_confirmation"))[0].body).toContain("Studio Blanche: $176\nSales tax (6.5%): $11.44\nTotal: $187.44\n");
   });
 
   it("quotes the same total the booking takes, and refuses a total seen without the tax", async () => {

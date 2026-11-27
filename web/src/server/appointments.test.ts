@@ -488,7 +488,11 @@ describe("a booking made in the admin for a client", () => {
     expect(booking.totalCents).toBe(16400 + people.priceCents + pet.priceCents);
     const kinds = (await world.db.select().from(bookingAddons).where(eq(bookingAddons.bookingId, booking.id))).map((line) => line.kind).sort();
     expect(kinds).toEqual(["people", "pet"]);
-    expect((await world.emails("booking_confirmation")).at(-1)!.body).toContain(`To pay at the studio: $${(16400 + people.priceCents + pet.priceCents) / 100}`);
+    // The confirmation lists each of them, as the booking's page does: until 2026-11-27 it gave the total alone (the
+    // preview test of 2026-11-21, point 3).
+    expect((await world.emails("booking_confirmation")).at(-1)!.body).toContain(
+      `Studio Dayglow: $164\n${people.name}: $${people.priceCents / 100}\n${pet.name}: $${pet.priceCents / 100}\nTo pay at the studio: $${(16400 + people.priceCents + pet.priceCents) / 100}\n`,
+    );
     // An add-on of another studio is not for this booking.
     expect(await createAdminBooking(world.db, owner, { ...request, studioIds: [world.ids.paris], startMinute: h(17), durationMinutes: 60, addons: [{ addonId: pet.id, quantity: 1 }] }, deps)).toMatchObject({ ok: false });
   });

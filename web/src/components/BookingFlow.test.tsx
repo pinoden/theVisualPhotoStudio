@@ -95,12 +95,22 @@ let bookingReply: { status: number; body: Record<string, unknown> };
 let lostAnswers: number;
 /** What `/api/booking-config` answers: how the browser is to collect payment. */
 let paymentConfig: { mode: string; fakePayment?: true };
+/** What `/api/own-details` answers a signed-in client, once `ownDetailsWait` lets it. */
+let ownDetails: { name: string; email: string; phone: string } | null;
+let ownDetailsWait: Promise<void>;
 
 function reply(body: unknown, status = 200) {
   return { ok: status < 400, status, json: async () => body };
 }
 
 beforeEach(() => {
+  // Each test is a visit of its own: a new tab, on the booking page's own address. What a booking in the making keeps
+  // (the tab's storage, the step its address marks) would otherwise pass from one test to the next.
+  window.sessionStorage.clear();
+  window.history.replaceState(null, "", "/book");
+  document.cookie = "vs_signed_in=; max-age=0; path=/";
+  ownDetails = null;
+  ownDetailsWait = Promise.resolve();
   busy = {};
   availabilityCalls = 0;
   monthAsked = [];
@@ -167,6 +177,10 @@ beforeEach(() => {
             busy: (busy[s.id] ?? []).map(([start, end]) => ({ start, end })),
           })),
         });
+      }
+      if (input === "/api/own-details") {
+        await ownDetailsWait;
+        return reply({ ok: true, details: ownDetails });
       }
       if (input === "/api/booking-config") return reply(paymentConfig);
       // The server accepts any code as a free hour for the address that asks.
@@ -1142,5 +1156,163 @@ describe("bundles with prices of their own, and the lengths between (the owner's
     expect(screen.getByRole("status").textContent).toBe("Studio Blanche + Studio Paris together: $640 for 6 hours.");
     await next();
     expect(await screen.findByLabelText("Full name *")).toBeTruthy();
+  });
+});
+
+describe("the browser's Back button, a refresh, and a signed-in client (the owners' decisions of 2026-11-27)", () => {
+  /** Paris for two hours on Wednesday at 9:00, taken to the details step. */
+  async function toDetails() {
+    await user.click(studioBox("Studio Paris"));
+    await next();
+    pickDate(WED);
+    await pickDuration("2 hr");
+    await pickTime("9:00 AM");
+    await next();
+    await screen.findByLabelText("Full name *");
+  }
+  const asked = (address: string) => vi.mocked(fetch).mock.calls.filter(([input]) => input === address).length;
+
+  it("makes each step an entry of the browser's history, so that its Back and Forward buttons move between the steps", async () => {
+    render(<BookingFlow catalog={catalog} navigate={nav.push} />);
+    // A booking that has not begun has the page's own address.
+    expect(window.location.hash).toBe("");
+    await toDetails();
+    expect(window.location.hash).toBe("#step-details");
+
+    // Back: the day and its times, with what was chosen. Before, the browser left the booking for the page before it.
+    window.history.back();
+    await waitFor(() => expect(window.location.hash).toBe("#step-when"));
+    expect((await screen.findByLabelText("Date") as HTMLInputElement).value).toBe(WED);
+    expect(screen.getByRole("button", { name: /^9:00 AM/ }).getAttribute("aria-pressed")).toBe("true");
+    // Back again: the studios. The first step got its mark when it was left.
+    window.history.back();
+    await waitFor(() => expect(window.location.hash).toBe("#step-studios"));
+    expect((studioBox("Studio Paris") as HTMLInputElement).checked).toBe(true);
+    // Forward, twice: back at the details, nothing lost.
+    window.history.forward();
+    await screen.findByLabelText("Date");
+    window.history.forward();
+    await screen.findByLabelText("Full name *");
+    expect(window.location.hash).toBe("#step-details");
+  });
+
+  it("goes forward only as far as what is chosen now answers the steps on the way", async () => {
+    render(<BookingFlow catalog={catalog} navigate={nav.push} />);
+    await toDetails();
+    window.history.go(-2);
+    await waitFor(() => expect(window.location.hash).toBe("#step-studios"));
+    // No studio any more: the browser's Forward button cannot pass the studios.
+    await user.click(studioBox("Studio Paris"));
+    window.history.forward();
+    await waitFor(() => expect(window.location.hash).toBe("#step-studios"));
+    expect(screen.queryByLabelText("Date")).toBeNull();
+    expect((studioBox("Studio Paris") as HTMLInputElement).checked).toBe(false);
+  });
+
+  it("takes the screen's own Back through the same entries, so that the browser's buttons agree with it", async () => {
+    render(<BookingFlow catalog={catalog} navigate={nav.push} />);
+    await toDetails();
+    await user.click(screen.getByRole("button", { name: "← Back" }));
+    // Shown at once, and the address follows.
+    expect(screen.getByLabelText("Date")).toBeTruthy();
+    await waitFor(() => expect(window.location.hash).toBe("#step-when"));
+    // The details are still the entry after it, and the studios the one before.
+    window.history.forward();
+    await screen.findByLabelText("Full name *");
+    window.history.go(-2);
+    await waitFor(() => expect(window.location.hash).toBe("#step-studios"));
+    expect(studioBox("Studio Paris")).toBeTruthy();
+  });
+
+  it("brings back the step and what was typed after a refresh", async () => {
+    const first = render(<BookingFlow catalog={catalog} navigate={nav.push} />);
+    await toDetails();
+    await typeDetails();
+    await user.type(screen.getByLabelText(/^Notes/), "Two outfits");
+    const called = availabilityCalls;
+    // The refresh: the page is gone, and drawn again at the same address.
+    first.unmount();
+    render(<BookingFlow catalog={catalog} navigate={nav.push} />);
+    expect((await screen.findByLabelText("Full name *") as HTMLInputElement).value).toBe("Jane Smith");
+    expect((screen.getByLabelText("Email address *") as HTMLInputElement).value).toBe("jane@example.com");
+    expect((screen.getByLabelText("Phone number *") as HTMLInputElement).value).toBe("407-555-0100");
+    expect((screen.getByLabelText(/^Notes/) as HTMLTextAreaElement).value).toBe("Two outfits");
+    expect(window.location.hash).toBe("#step-details");
+    // Its Back still goes to the day and its times, read again, with the time chosen.
+    await user.click(screen.getByRole("button", { name: "← Back" }));
+    expect((screen.getByLabelText("Date") as HTMLInputElement).value).toBe(WED);
+    expect((await screen.findByRole("button", { name: /^9:00 AM/ })).getAttribute("aria-pressed")).toBe("true");
+    expect(availabilityCalls).toBeGreaterThan(called);
+    await waitFor(() => expect(window.location.hash).toBe("#step-when"));
+  });
+
+  it("asks for the agreement to the policies again after a refresh on the payment step", async () => {
+    const first = render(<BookingFlow catalog={catalog} navigate={nav.push} />);
+    await toDetails();
+    await fillDetails();
+    await next();
+    await screen.findByRole("button", { name: /^Confirm & pay/ });
+    expect(window.location.hash).toBe("#step-pay");
+    first.unmount();
+    render(<BookingFlow catalog={catalog} navigate={nav.push} />);
+    const agree = (await screen.findByRole("checkbox", { name: /I have read and agree/ })) as HTMLInputElement;
+    expect(agree.checked).toBe(false);
+    expect(screen.queryByRole("button", { name: /^Confirm & pay/ })).toBeNull();
+    await waitFor(() => expect(window.location.hash).toBe("#step-policies"));
+    // Agreed to again, the booking goes on and is made with what was kept.
+    await user.click(agree);
+    await next();
+    await user.click(await screen.findByRole("button", { name: /^Confirm & pay/ }));
+    await waitFor(() => expect(nav.push).toHaveBeenCalled());
+    expect(posted[0]).toMatchObject({ studioIds: [P], date: WED, startMinute: h(9), durationMinutes: 120, customer: { name: "Jane Smith", email: "jane@example.com", phone: "407-555-0100" } });
+  });
+
+  it("starts empty when the booking page is opened afresh, and keeps nothing once the booking is made", async () => {
+    const first = render(<BookingFlow catalog={catalog} navigate={nav.push} />);
+    await toDetails();
+    await typeDetails();
+    expect(window.sessionStorage.length).toBe(1);
+    // A link to the booking page, or its address typed: a new booking, whatever an earlier one left in the tab.
+    first.unmount();
+    window.history.pushState(null, "", "/book");
+    const second = render(<BookingFlow catalog={catalog} navigate={nav.push} />);
+    expect((studioBox("Studio Paris") as HTMLInputElement).checked).toBe(false);
+    await waitFor(() => expect(window.sessionStorage.length).toBe(0));
+    // Made: nothing of it stays behind.
+    await toDetails();
+    await fillDetails();
+    await next();
+    await user.click(await screen.findByRole("button", { name: /^Confirm & pay/ }));
+    await waitFor(() => expect(nav.push).toHaveBeenCalled());
+    expect(window.sessionStorage.length).toBe(0);
+    second.unmount();
+  });
+
+  it("fills in a signed-in client's own name, email address and phone number, and leaves what they typed", async () => {
+    document.cookie = "vs_signed_in=1; path=/";
+    ownDetails = { name: "Jane Smith", email: "jane@example.com", phone: "407-555-0100" };
+    let answer = () => {};
+    ownDetailsWait = new Promise((resolve) => {
+      answer = resolve;
+    });
+    render(<BookingFlow catalog={catalog} navigate={nav.push} />);
+    await toDetails();
+    expect(asked("/api/own-details")).toBe(1);
+    // She has begun to type another name before the answer comes: it stays.
+    await user.type(screen.getByLabelText("Full name *"), "Jane S. Smith");
+    await act(async () => answer());
+    await waitFor(() => expect((screen.getByLabelText("Email address *") as HTMLInputElement).value).toBe("jane@example.com"));
+    expect((screen.getByLabelText("Phone number *") as HTMLInputElement).value).toBe("407-555-0100");
+    expect((screen.getByLabelText("Full name *") as HTMLInputElement).value).toBe("Jane S. Smith");
+    // Nothing is left to type: the next step opens.
+    await next();
+    expect(await screen.findByRole("checkbox", { name: /I have read and agree/ })).toBeTruthy();
+  });
+
+  it("asks nothing about a visitor who is not signed in", async () => {
+    render(<BookingFlow catalog={catalog} navigate={nav.push} />);
+    await toDetails();
+    expect(asked("/api/own-details")).toBe(0);
+    expect((screen.getByLabelText("Full name *") as HTMLInputElement).value).toBe("");
   });
 });

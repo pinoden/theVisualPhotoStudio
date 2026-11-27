@@ -120,6 +120,22 @@ export function cancellationOutcome(booking: BookingFacts, now: Date, settings: 
   return { allowed: true, refundCents, feeCents: refundable - refundCents, creditCents, byHandCents, why: "refund", ...pet };
 }
 
+/**
+ * Whether a cancellation by the client gives back the discount code, free hour or studio credit the booking was made
+ * with: when the terms refund it (cancelled `refundWindowHours` or more before the start, and never moved), whatever
+ * it was paid with. A cancellation that money would not come back from uses the code up too (the owners' decision of
+ * 2026-11-27; until then a code came back after any cancellation). `lateCancelKeepsCode` is the owners' switch for the
+ * rule as it was. A cancellation by the studio always gives it back, and is not asked here.
+ */
+export function codeComesBack(
+  booking: Pick<BookingFacts, "startAt" | "rescheduledCount">,
+  now: Date,
+  settings: Pick<PolicySettings, "refundWindowHours"> & { lateCancelKeepsCode: boolean },
+): boolean {
+  if (settings.lateCancelKeepsCode) return true;
+  return booking.rescheduledCount === 0 && hoursUntil(booking.startAt, now) >= settings.refundWindowHours;
+}
+
 export type RescheduleBlock =
   | "not_confirmed"
   | "already_started"
