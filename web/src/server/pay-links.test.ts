@@ -937,6 +937,7 @@ describe("the page a client's link leads to", () => {
       when: "Wed, Nov 18, 2026, 2:00 PM",
       processorUrl: "https://pay.test/link_1",
       pretend: false,
+      fakePayment: false, // FAKE PAYMENT
       late: null,
       closed: null,
       foreign: false,

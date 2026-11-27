@@ -93,6 +93,8 @@ let posted: Record<string, unknown>[];
 let bookingReply: { status: number; body: Record<string, unknown> };
 /** How many of the next answers to a booking are lost on the way, as when a phone's connection drops. */
 let lostAnswers: number;
+/** What `/api/booking-config` answers: how the browser is to collect payment. */
+let paymentConfig: { mode: string; fakePayment?: true };
 
 function reply(body: unknown, status = 200) {
   return { ok: status < 400, status, json: async () => body };
@@ -112,6 +114,7 @@ beforeEach(() => {
   photographerBusy = [];
   posted = [];
   lostAnswers = 0;
+  paymentConfig = { mode: "mock" };
   bookingReply = { status: 201, body: { ok: true, ref: "VS-TEST22", manageToken: "secret-token-1234567890" } };
   nav.push.mockReset();
   nav.refresh.mockReset();
@@ -165,7 +168,7 @@ beforeEach(() => {
           })),
         });
       }
-      if (input === "/api/booking-config") return reply({ mode: "mock" });
+      if (input === "/api/booking-config") return reply(paymentConfig);
       // The server accepts any code as a free hour for the address that asks.
       if (input === "/api/quote") return reply({ ok: true, promo: { code: "THANKS-FREE-HOUR", kind: "free_hour", value: 60 } });
       if (input === "/api/bookings") {
@@ -772,6 +775,35 @@ describe("studio-first flow", () => {
     expect((await screen.findByRole("alert")).textContent).toContain("Card declined");
     expect(screen.getByRole("button", { name: "Confirm & pay $68" })).toBeTruthy();
     expect(nav.push).not.toHaveBeenCalled();
+  });
+
+  // FAKE PAYMENT (temporary): delete with the button.
+  const toPayment = async () => {
+    render(<BookingFlow catalog={catalog} navigate={nav.push} />);
+    await user.click(studioBox("Studio Paris"));
+    await next();
+    pickDate(WED);
+    await pickDuration("1 hr");
+    await pickTime("9:00 AM");
+    await next();
+    await fillDetails();
+    await next();
+    await screen.findByRole("button", { name: "Confirm & pay $68" });
+  };
+
+  it("books with the Fake Payment button, beside the payment button, where the server offers it", async () => {
+    paymentConfig = { mode: "mock", fakePayment: true };
+    await toPayment();
+    const fake = await screen.findByRole("button", { name: "Fake Payment" });
+    expect(fake.previousElementSibling).toBe(screen.getByRole("button", { name: "Confirm & pay $68" }));
+    await user.click(fake);
+    await waitFor(() => expect(nav.push).toHaveBeenCalledWith("/booking/VS-TEST22?t=secret-token-1234567890"));
+    expect(posted).toEqual([expect.objectContaining({ paymentToken: "fake-payment", expectedTotalCents: 6800 })]);
+  });
+
+  it("shows no Fake Payment button where the server does not offer it", async () => {
+    await toPayment();
+    expect(screen.queryByRole("button", { name: "Fake Payment" })).toBeNull();
   });
 });
 

@@ -15,6 +15,7 @@ import { loadSettings } from "./settings";
 import { canViewDay } from "./staff";
 import { OTHER_MONEY_LINK, payLinkPossible } from "./test-mode";
 import { formatInstant, localDateOf } from "./tz";
+import { FAKE_ID_PREFIX } from "@/lib/fake-payment"; // FAKE PAYMENT
 
 /**
  * A payment link: a page of the card processor where a client pays, by card,
@@ -760,6 +761,8 @@ export interface PayPage {
   processorUrl: string | null;
   /** True for the pretend processor of development and test mode: the page then offers a pretend payment. */
   pretend: boolean;
+  /** FAKE PAYMENT: the page offers the test button too. */
+  fakePayment: boolean;
 }
 
 /**
@@ -815,7 +818,25 @@ export async function getPayPage(db: Db, linkId: string, deps: PayLinkDeps): Pro
     when: formatInstant(row.booking.startAt),
     processorUrl: status === "open" && row.link.provider !== "mock" ? row.link.url : null,
     pretend: row.link.provider === "mock" && ours,
+    fakePayment: status === "open" && ours && deps.payments?.offersFakePayment === true, // FAKE PAYMENT
   };
+}
+
+/**
+ * FAKE PAYMENT (temporary, src/lib/fake-payment.ts): the "Fake Payment" button of a payment link's page. The link is
+ * recorded as paid, as `settle` does for one the processor says was paid, and withdrawn at the processor, so that its
+ * page takes no second payment. Only for an open link of the test processor set up now.
+ */
+export async function fakePayLink(db: Db, linkId: string, deps: PayLinkDeps): Promise<boolean> {
+  const provider = deps.payments;
+  if (!provider?.offersFakePayment || !/^[0-9a-f-]{36}$/i.test(linkId)) return false;
+  const [link] = await db.select().from(paymentLinks).where(eq(paymentLinks.id, linkId)).limit(1);
+  if (!link || link.provider !== provider.name || link.status !== "open") return false;
+  const result = await settle(db, link, { paymentId: `${FAKE_ID_PREFIX}link_${link.id}`, amountCents: link.amountCents }, deps.now);
+  if (!result.settled) return false;
+  await giveBackLate(db, result.late, deps);
+  await provider.cancelPayLink(link.providerLinkId);
+  return true;
 }
 
 /**

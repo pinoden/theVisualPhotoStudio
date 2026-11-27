@@ -338,6 +338,7 @@ describe("which card processor is used", () => {
       squareApplicationId: "sandbox-sq0idb-a",
       squareLocationId: "l",
       squareEnvironment: "sandbox",
+      fakePayment: true, // FAKE PAYMENT
     });
     expect(resolvePayments({ ...live, SQUARE_ENVIRONMENT: "production", NODE_ENV: "production" }).client.squareEnvironment).toBe("production");
     expect(resolvePayments({ SQUARE_ACCESS_TOKEN: "t", NODE_ENV: "production" }).client.mode).toBe("disabled");

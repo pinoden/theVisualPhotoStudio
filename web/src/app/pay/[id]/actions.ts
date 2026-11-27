@@ -3,7 +3,7 @@
 import { notFound, redirect } from "next/navigation";
 import { getDb } from "@/db/client";
 import { formText } from "@/lib/parse";
-import { pretendToPay } from "@/server/pay-links";
+import { fakePayLink, pretendToPay } from "@/server/pay-links";
 import { flushEmailsSoon, payLinkDeps } from "@/server/runtime";
 
 /**
@@ -16,6 +16,15 @@ export async function pretendPayAction(formData: FormData): Promise<void> {
   const id = formText(formData.get("id"));
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
   await pretendToPay(await getDb(), id, new Date(), (await payLinkDeps()).payments);
+  flushEmailsSoon();
+  redirect(`/pay/${id}`);
+}
+
+/** FAKE PAYMENT (temporary): the test button of a payment link's page. Refused unless the processor is a test one. */
+export async function fakePayAction(formData: FormData): Promise<void> {
+  const id = formText(formData.get("id"));
+  if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
+  await fakePayLink(await getDb(), id, await payLinkDeps());
   flushEmailsSoon();
   redirect(`/pay/${id}`);
 }

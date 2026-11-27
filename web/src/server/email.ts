@@ -10,6 +10,7 @@ import { mayUseTestTools } from "./browser-test-server";
 import { ownersWording } from "./email-templates";
 import { formatInstant } from "./tz";
 import { loadBusiness } from "./website";
+import { isFakePaymentEmail, NOT_SENT_FAKE_PAYMENT } from "./fake-payment"; // FAKE PAYMENT
 
 /**
  * Email is always queued in the database first, in the same step as the
@@ -199,6 +200,12 @@ export async function deliverPendingEmails(
       .where(and(eq(emailOutbox.id, row.id), isNull(emailOutbox.sentAt), eq(emailOutbox.attempts, row.attempts)))
       .returning({ toEmail: emailOutbox.toEmail, subject: emailOutbox.subject, body: emailOutbox.body, replyTo: emailOutbox.replyTo });
     if (!claimed) continue;
+
+    // FAKE PAYMENT: nothing about a payment made with the test button is sent. The row stays, with why.
+    if (await isFakePaymentEmail(db, { ...claimed, kind: row.kind })) {
+      await db.update(emailOutbox).set({ attempts: MAX_EMAIL_ATTEMPTS, error: NOT_SENT_FAKE_PAYMENT }).where(eq(emailOutbox.id, row.id));
+      continue;
+    }
 
     const result = await transport.send({
       to: claimed.toEmail,
