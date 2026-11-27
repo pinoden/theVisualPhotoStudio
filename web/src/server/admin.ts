@@ -26,7 +26,7 @@ import { MANUAL_PROVIDER } from "@/lib/payment-methods";
 import { parseStudioFacts, type StudioFacts } from "@/lib/studio-facts";
 import { deleteAllSessions, normalizeEmail } from "./auth";
 import { toBookingViews, type BookingView } from "./bookings";
-import { handPaidByBooking } from "./money";
+import { creditLeftCentsByBooking, handPaidByBooking } from "./money";
 import { issuePromo, looksSiteMade, normalizeCode } from "./promos";
 import { dayBoundsUtc } from "./tz";
 
@@ -378,6 +378,35 @@ export async function listRefundProblems(db: DbLike): Promise<RefundProblem[]> {
     .where(and(inArray(refunds.status, ["pending", "failed"]), eq(payments.status, "succeeded")))
     .orderBy(desc(refunds.createdAt));
   return rows as RefundProblem[];
+}
+
+/** A booking paid for more than it costs, after a move or a change by the studio: the refund the owners still have to make. */
+export interface RefundOwed {
+  ref: string;
+  customerName: string;
+  startAt: Date;
+  /** What was paid beyond what the booking costs now (`creditLeftCentsByBooking`). */
+  cents: number;
+}
+
+/**
+ * Every booking that stands and was paid for more than it costs (src/server/refund-owed.ts), the soonest first: the
+ * Overview lists them until each is refunded, on its appointment's page. Narrowed first, in the database, to the
+ * bookings that received more than their price; what was given back since comes off in the exact figure.
+ */
+export async function listRefundsOwed(db: DbLike): Promise<RefundOwed[]> {
+  const received = sql`(select coalesce(sum(${payments.amountCents}), 0) from ${payments} where ${payments.bookingId} = ${bookings.id} and ${payments.status} = 'succeeded')`;
+  const rows = await db
+    .select({ id: bookings.id, ref: bookings.ref, customerName: bookings.customerName, startAt: bookings.startAt, totalCents: bookings.totalCents, status: bookings.status })
+    .from(bookings)
+    // The bookings that stand (`STANDS` in money.ts): one that ended had its money dealt with by its cancellation or its code.
+    .where(and(inArray(bookings.status, ["confirmed", "completed", "no_show"]), sql`${received} > ${bookings.totalCents}`))
+    .orderBy(asc(bookings.startAt));
+  const left = await creditLeftCentsByBooking(db, rows);
+  return rows.flatMap((row) => {
+    const cents = left.get(row.id) ?? 0;
+    return cents > 0 ? [{ ref: row.ref, customerName: row.customerName, startAt: row.startAt, cents }] : [];
+  });
 }
 
 // ── Codes ────────────────────────────────────────────────────────────────────

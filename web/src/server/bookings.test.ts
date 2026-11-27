@@ -565,8 +565,14 @@ describe("bad input is refused", () => {
     });
     expect(await book({ customer: { name: "A B", email: "a@example.com", phone: "" } })).toMatchObject({
       ok: false,
-      message: "Please check the phone number: from 7 to 40 characters.",
+      message: "Please check the phone number: at least 7 digits, and at most 40 characters.",
     });
+    // Words in place of a number were taken until 2026-11-27 (the preview test of 2026-11-21, point 13).
+    expect(await book({ customer: { name: "A B", email: "a@example.com", phone: "no phone" } })).toMatchObject({
+      ok: false,
+      message: "Please check the phone number: at least 7 digits, and at most 40 characters.",
+    });
+    expect(await book({ customer: { name: "A B", email: "a@example.com", phone: "+1 (407) 555-0100 ext. 2" } })).toMatchObject({ ok: true });
     expect(await book({ notes: "x".repeat(2001) })).toMatchObject({ ok: false, message: "Please make the notes shorter: at most 2,000 characters." });
   });
 

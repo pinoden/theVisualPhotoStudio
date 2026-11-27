@@ -163,21 +163,37 @@ export function repriceNote(price: Extract<MovePrice, { kind: "new" }>, before: 
  * the studio"): the new total, and then what is still to pay, what comes back to them, or what went back on their code.
  */
 export function movePriceText(input: {
-  dayType: DayType;
-  /** The total before and after, as the confirmation said it: after discounts, before credit and minutes. */
-  wasCents: number;
-  nowCents: number;
-  /** After the move: what is still to pay, and what was paid beyond the new price. */
+  /**
+   * Set when the new day priced the booking differently. The totals before and after are as the confirmation said them:
+   * after discounts, before credit and minutes.
+   */
+  price: { dayType: DayType; wasCents: number; nowCents: number; codeBack: { code: string; source: PromoSource; cents: number } | null } | null;
+  /**
+   * The fee this move added to the booking: one the client asked the studio for after their free moves (`freeMoves` of
+   * them, the owners' decision of 2026-11-27). Left out, or 0: none.
+   */
+  fee?: { cents: number; freeMoves: number };
+  /** After the move: what is still to pay, and what was paid beyond what the booking now costs. */
   owedCents: number;
   creditLeftCents: number;
-  codeBack: { code: string; source: PromoSource; cents: number } | null;
 }): string {
+  const fee = input.fee && input.fee.cents > 0 ? input.fee : null;
+  if (!input.price && !fee) return "";
   return [
-    `Its new day is priced as ${PRICED_AS[input.dayType]}, so its total is now ${formatCents(input.nowCents)} instead of ${formatCents(input.wasCents)}.`,
-    ...(input.codeBack
-      ? [`${formatCents(input.codeBack.cents)} of the ${creditName(input.codeBack.source)} it was paid with is back on that code: ${input.codeBack.code}.`]
+    ...(input.price
+      ? [`Its new day is priced as ${PRICED_AS[input.price.dayType]}, so its total is now ${formatCents(input.price.nowCents)} instead of ${formatCents(input.price.wasCents)}.`]
       : []),
+    ...(input.price?.codeBack
+      ? [`${formatCents(input.price.codeBack.cents)} of the ${creditName(input.price.codeBack.source)} it was paid with is back on that code: ${input.price.codeBack.code}.`]
+      : []),
+    ...(fee ? [`This move costs ${formatCents(fee.cents)}: under the rental terms, each move after the free ${fee.freeMoves === 1 ? "one" : "ones"} does.`] : []),
     ...(input.owedCents > 0 ? [`Still to pay: ${formatCents(input.owedCents)}, at the studio or with a payment link we email you.`] : []),
-    ...(input.creditLeftCents > 0 ? [`You have paid ${formatCents(input.creditLeftCents)} more than that: we will refund it to you.`] : []),
+    ...(input.creditLeftCents > 0
+      ? [
+          input.price && !fee
+            ? `You have paid ${formatCents(input.creditLeftCents)} more than that: we will refund it to you.`
+            : `You have paid ${formatCents(input.creditLeftCents)} more than the booking now costs: we will refund it to you.`,
+        ]
+      : []),
   ].join("\n");
 }

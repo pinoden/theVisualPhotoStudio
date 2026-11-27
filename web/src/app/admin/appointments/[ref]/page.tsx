@@ -210,9 +210,11 @@ async function AppointmentDetails({
             </li>
             <li>
               {appointment.terms.maxReschedules > 0
-                ? `Moved online until ${hoursInWords(appointment.terms.rescheduleCutoffHours)} before it starts: ${
+                ? `Moved online by the client until ${hoursInWords(appointment.terms.rescheduleCutoffHours)} before it starts, ${
                     appointment.terms.maxReschedules === 1 ? "once" : `${appointment.terms.maxReschedules} times`
-                  } free${appointment.terms.rescheduleFeeCents > 0 ? `, then ${formatCents(appointment.terms.rescheduleFeeCents)} each time` : ", then no more"}.`
+                  }, free of charge. A further move is the studio's to make${
+                    appointment.terms.rescheduleFeeCents > 0 ? `, for ${formatCents(appointment.terms.rescheduleFeeCents)} each time the client asks` : ", at no charge"
+                  }.`
                 : "Not moved online: moving was switched off when it was made."}
             </li>
             <li>A reschedule code or credit it gives is valid for {appointment.terms.creditValidDays} days.</li>
@@ -318,7 +320,7 @@ async function AppointmentDetails({
                   {charge.voided && <div style={{ fontSize: ".8rem" }}>Taken back by {charge.voidedBy}: it does not count.</div>}
                   {appointment.may.changePayments && !charge.voided && (
                     <details>
-                      <summary style={{ fontSize: ".8rem", cursor: "pointer" }}>Added by mistake</summary>
+                      <summary style={{ fontSize: ".8rem", cursor: "pointer" }}>{charge.kind === "reschedule" ? "Let this fee go" : "Added by mistake"}</summary>
                       <form action={voidChargeAction}>
                         <input type="hidden" name="ref" value={appointment.ref} />
                         <input type="hidden" name="chargeId" value={charge.id} />
@@ -429,6 +431,14 @@ async function AppointmentDetails({
             A charge adds to what the booking owes: collect it below, at the studio (Mark as paid) or with a payment link.
           </p>
         </div>
+      )}
+
+      {/* For whoever cannot see the booking's payments: the fact, without its amount (the owners' decision of 2026-11-27). */}
+      {appointment.refundOwed && !appointment.payments && (
+        <p className="refund-owed" role="status">
+          <strong>A refund is owed to the client for this booking.</strong> It was paid for more than it costs now. The owners have been told, and
+          make the refund.
+        </p>
       )}
 
       {/* Also for an open link of a booking that ended with nothing paid: an owner may have to close it by hand. */}

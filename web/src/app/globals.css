@@ -1576,6 +1576,14 @@ button { font-family: inherit; }
 .payment-facts small { font-size: .78rem; }
 /* What a move to the chosen day does to the price (follow-up 5). */
 .move-price { font-size: .88rem; margin: .5rem 0; padding: .5rem .75rem; border-left: 3px solid var(--color-rose-dark); background: var(--color-cream); color: var(--color-dark); }
+/* Who asked for a move: the client or the studio, with neither chosen for whoever moves it (the owners' decision of 2026-11-27). */
+.move-asked { min-width: 0; margin: .5rem 0 0; padding: .4rem .85rem .6rem; border: 1px solid var(--color-border); font-size: .85rem; }
+.move-asked legend { padding: 0 .35rem; font-weight: 700; color: var(--color-dark); }
+.move-asked label { display: block; padding: .4rem 0; }
+.move-asked input { margin-right: .3rem; }
+.move-asked .move-waive { margin-top: .25rem; border-top: 1px solid var(--color-border); }
+/* A refund the studio owes after its own move or change, for whoever cannot see the booking's payments. */
+.refund-owed { font-size: .88rem; margin: 0 0 1rem; padding: .5rem .75rem; border-left: 3px solid var(--color-rose-dark); background: var(--color-cream); color: var(--color-dark); }
 
 /* Appointments in the account. */
 .appointment-card h3 { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }

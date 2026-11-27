@@ -36,7 +36,7 @@ import {
   receivedCentsByBooking,
   refundedCentsByBooking,
 } from "./money";
-import { emailField, hashToken, lineField, textField } from "./input-fields";
+import { emailField, hashToken, lineField, phoneField, textField } from "./input-fields";
 import { giveBackUnmadeMinutes, takeBookingMinutes } from "./membership-minutes";
 import { findUsableMembership, isMembershipCode, type UsableMembership } from "./memberships";
 export { hashToken };
@@ -70,7 +70,7 @@ export const bookingInput = z.object({
   customer: z.object({
     name: lineField(2, 120),
     email: emailField,
-    phone: lineField(7, 40),
+    phone: phoneField,
   }),
   notes: textField(0, 2000).default(""),
   addons: addonsField,
@@ -172,7 +172,7 @@ function fail<T extends string>(status: number, code: T, message: string) {
 const FIELD_WORDS: Record<string, string> = {
   "customer.email": "Please check the email address: it does not look like one.",
   "customer.name": "Please check your name: from 2 to 120 characters.",
-  "customer.phone": "Please check the phone number: from 7 to 40 characters.",
+  "customer.phone": "Please check the phone number: at least 7 digits, and at most 40 characters.",
   notes: "Please make the notes shorter: at most 2,000 characters.",
 };
 

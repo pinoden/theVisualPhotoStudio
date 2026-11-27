@@ -41,7 +41,7 @@ import {
   studioToday,
   type DayType,
 } from "@/lib/domain/time";
-import { EMAIL_FIELD, EMAIL_RULE } from "@/lib/parse";
+import { EMAIL_FIELD, EMAIL_RULE, hasPhoneDigits } from "@/lib/parse";
 import { count, hoursInWords } from "@/lib/words";
 import type { DayAvailability } from "@/server/availability";
 import { agreementKey, policiesKey, type QuestionKind } from "@/lib/booking-form-keys";
@@ -668,7 +668,7 @@ export function BookingFlow({
         if (name.trim().length < 2) return "Please enter your name.";
         // The booking's own rule (src/lib/parse.ts): an address taken here is never refused at "Confirm & pay".
         if (!EMAIL_RULE.test(email.trim())) return "Please enter a valid email address.";
-        if (phone.trim().length < 7) return "Please enter your phone number.";
+        if (!hasPhoneDigits(phone)) return "Please enter a phone number with at least 7 digits.";
         return "";
       case "policies": {
         if (!forms || forms.key !== formsKey) return "The studio's booking form is still loading.";

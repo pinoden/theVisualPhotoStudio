@@ -6,8 +6,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
 import { BookingSummary } from "@/components/BookingSummary";
-import { bookings, priceRules, promoCodes, specialDates, studioHolds } from "@/db/schema";
+import { bookings, priceRules, promoCodes, settings, specialDates, staffShifts, studioHolds } from "@/db/schema";
 import { cardReceiptOf, createAdminBooking, getAppointment, moveBooking, moveOptions } from "./appointments";
+import { listRefundsOwed } from "./admin";
 import type { AuthUser } from "./auth";
 import { toBookingViews } from "./bookings";
 import { loadCatalog } from "./catalog";
@@ -103,6 +104,41 @@ describe("moving a booking to a day of the other kind", () => {
     expect(await ownerRefund(world.db, ref, { amountCents: 1400, reason: "The difference" }, world.manageDeps())).toMatchObject({ ok: true, refundCents: 1400 });
     expect(world.refundCalls.map((call) => call.amountCents)).toEqual([1400]);
     expect(await paymentCard(ref)).toMatchObject({ paidCents: 17600, dueCents: 0, creditLeftCents: 0 });
+  });
+
+  it("tells the owners of the refund it owes, lists it until it is made, and tells staff the fact without its amount (the owners' decision of 2026-11-27)", async () => {
+    const { ref } = expectOk(await world.book({ date: SATURDAY }));
+    // An attendant who may move bookings and sees no prices moves it to a weekday, which costs $14 less.
+    await world.db.insert(settings).values({ key: "staffMovesBookings", value: true });
+    await world.db.insert(staffShifts).values([
+      { userId: sam.id, day: SATURDAY },
+      { userId: sam.id, day: FAR },
+      { userId: sam.id, day: THURSDAY },
+    ]);
+    const notice = { ownerEmail: OWNER_EMAIL, baseUrl: BASE_URL };
+    expectOk(await moveBooking(world.db, sam, ref, to(FAR), NOW, notice));
+    const [mail] = await world.emails("owner_refund_owed");
+    expect(mail).toMatchObject({ toEmail: OWNER_EMAIL, subject: `ACTION NEEDED: $14 to refund for ${ref}` });
+    expect(mail.body).toContain(`sam@studio.test moved booking ${ref} from Sat, Dec 12, 2026`);
+    expect(mail.body).toContain(`Jane Smith has now paid $14 more than booking ${ref} costs, and was told by email that it will be refunded. Nothing refunds it by itself.`);
+    expect(mail.body).toContain(`${BASE_URL}/admin/appointments/${ref}`);
+    // The Overview lists it, and the attendant's page says a refund is owed, with no amount and no payments card.
+    expect(await listRefundsOwed(world.db)).toMatchObject([{ ref, customerName: "Jane Smith", cents: 1400 }]);
+    expect(await getAppointment(world.db, sam, ref, NOW)).toMatchObject({ refundOwed: true, payments: null, money: null });
+
+    // A move that leaves what is owed as it was tells nobody again; nor does one with no address to tell.
+    expectOk(await moveBooking(world.db, sam, ref, to(THURSDAY), NOW, notice));
+    expect(await world.emails("owner_refund_owed")).toHaveLength(1);
+    // Once an owner refunds it, the list is empty again and the page says nothing.
+    expect(await ownerRefund(world.db, ref, { amountCents: 1400, reason: "The difference" }, world.manageDeps())).toMatchObject({ ok: true, refundCents: 1400 });
+    expect(await listRefundsOwed(world.db)).toEqual([]);
+    expect(await getAppointment(world.db, sam, ref, NOW)).toMatchObject({ refundOwed: false });
+
+    // A booking that was never paid for more than it costs is not on the list, and a dearer day owes no refund.
+    const other = expectOk(await world.book({ date: FAR, startMinute: h(14) }));
+    expectOk(await moveBooking(world.db, owner, other.ref, to(SATURDAY, h(14)), NOW, notice));
+    expect(await world.emails("owner_refund_owed")).toHaveLength(1);
+    expect(await listRefundsOwed(world.db)).toEqual([]);
   });
 
   it("takes a percent code's percentage of the new price, and a free hour as the new day's hour", async () => {

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { formText } from "@/lib/parse";
+import { formText, hasPhoneDigits } from "@/lib/parse";
 
 /**
  * Rules for what clients type, shared by a booking and a membership's checkout, so that both take the same name,
@@ -21,6 +21,9 @@ export const lineField = (min: number, max: number) =>
     .string()
     .transform((value) => formText(value).replace(/\s+/g, " "))
     .pipe(z.string().min(min).max(max));
+
+/** A phone number: one line of 7 to 40 characters with at least seven digits in it (`hasPhoneDigits`). */
+export const phoneField = lineField(7, 40).refine(hasPhoneDigits);
 
 /** What is stored of a secret (a link's token, a page's request id): its SHA-256, never the secret itself. */
 export function hashToken(token: string): string {

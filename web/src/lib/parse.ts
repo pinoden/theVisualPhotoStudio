@@ -113,6 +113,23 @@ export const EMAIL_FIELD = {
 } as const;
 
 /**
+ * A phone number, wherever a client's is typed: one line with at least seven digits in it, so that the studio can
+ * call it. Whatever else is typed stays ("+1 (407) 555-0100 ext. 2"). Before 2026-11-27 any 7 characters passed,
+ * "no phone" too (the preview test of 2026-11-21, point 13).
+ */
+const PHONE_MIN_DIGITS = 7;
+export const hasPhoneDigits = (value: string): boolean => (value.match(/\d/g) ?? []).length >= PHONE_MIN_DIGITS;
+
+/** The same rule as a field's pattern, with the length the server takes (`phoneField` in src/server/input-fields.ts). */
+export const PHONE_FIELD = {
+  type: "tel",
+  pattern: String.raw`(?:\D*\d){${PHONE_MIN_DIGITS}}.*`,
+  minLength: PHONE_MIN_DIGITS,
+  maxLength: 40,
+  title: "A phone number with at least 7 digits",
+} as const;
+
+/**
  * A code an owner names in Admin → Codes, once in capitals with no spaces (as checkout reads what a client types,
  * `normalizeCode` in src/server/promos.ts): 3 to 30 letters, digits and hyphens, starting and ending with a letter
  * or a digit.

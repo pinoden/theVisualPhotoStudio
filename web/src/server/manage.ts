@@ -220,20 +220,13 @@ function rescheduleOfferText(
   outcome: Extract<RescheduleOutcome, { allowed: true }>,
   settings: Pick<Settings, "creditValidDays">,
 ): string {
-  // A move after the free ones: the fee is taken off the code, and the words say so, with the amount.
-  const fee = outcome.feeCents > 0 ? `less the ${formatCents(outcome.feeCents)} fee for moving a booking again` : "";
-  const discount =
-    outcome.discountCents > 0
-      ? ` That is what you paid plus the ${formatCents(outcome.discountCents)} your discount code took off${fee ? `, ${fee}` : ""}.`
-      : fee
-        ? ` That is what you paid ${fee}.`
-        : "";
-  // The client is told, before they use it, what moving the new booking will cost, or that it cannot be moved online.
-  const next = !outcome.nextMovable
-    ? " The new booking cannot be moved online again."
-    : outcome.feeCents === 0 && outcome.nextFeeCents > 0
-      ? ` Moving the new booking again would cost ${formatCents(outcome.nextFeeCents)}.`
-      : "";
+  const discount = outcome.discountCents > 0 ? ` That is what you paid plus the ${formatCents(outcome.discountCents)} your discount code took off.` : "";
+  // The client is told, before they use it, that the new booking cannot be moved online, and what the studio's move costs.
+  const next = outcome.nextMovable
+    ? ""
+    : outcome.nextFeeCents > 0
+      ? ` The new booking cannot be moved online again: the studio moves it for you, for ${formatCents(outcome.nextFeeCents)} each time.`
+      : " The new booking cannot be moved online again.";
   return `This booking will be released and you will get a code worth ${formatCents(outcome.creditCents)}, valid for ${count(settings.creditValidDays, "day")}, to book a new time.${discount} A booking made with the code cannot be refunded.${next}`;
 }
 
@@ -381,9 +374,10 @@ function rescheduleBlockText(
     case "too_late":
       return `Bookings can be moved online until ${hoursInWords(settings.rescheduleCutoffHours)} before they start. Please call the studio.`;
     case "limit_reached":
-      return "This booking was already moved and cannot be moved again online. Please call the studio.";
-    case "fee_not_covered":
-      return `Moving a booking again costs ${formatCents(settings.rescheduleFeeCents)}, and this booking is not worth more than that, so no credit would be left to move. Please call the studio.`;
+      // The owners' decision of 2026-11-20: a client moves a booking online once, and the studio makes any later move.
+      return settings.rescheduleFeeCents > 0
+        ? `This booking was already moved, so it cannot be moved again online. Ask the studio to move it: each further move costs ${formatCents(settings.rescheduleFeeCents)}.`
+        : "This booking was already moved, so it cannot be moved again online. Ask the studio to move it.";
     case "nothing_paid":
       // The card holds the amount, and taking it did not go through yet: it is not money paid.
       return heldCents > 0
@@ -1336,10 +1330,7 @@ export async function requestRescheduleCode(db: Db, ref: string, actor: Actor, d
       .where(eq(bookings.id, booking.id));
     await releaseHolds(tx, booking.id);
 
-    const released =
-      decision.feeCents > 0
-        ? `Released for a reschedule code worth ${formatCents(decision.creditCents)}, after the ${formatCents(decision.feeCents)} fee for moving a booking again`
-        : `Released for a reschedule code worth ${formatCents(decision.creditCents)}`;
+    const released = `Released for a reschedule code worth ${formatCents(decision.creditCents)}`;
     await recordEvent(tx, {
       bookingId: booking.id,
       from: labelOf(booking),
@@ -1378,7 +1369,6 @@ export async function requestRescheduleCode(db: Db, ref: string, actor: Actor, d
         code: issued.code,
         valueCents: decision.creditCents,
         discountCents: decision.discountCents,
-        feeCents: decision.feeCents,
         expires: formatInstant(expiresAt),
         bookUrl: `${deps.baseUrl.replace(/\/$/, "")}${bookPath}`,
         note: askedAt ? askedOn(askedAt) : null,

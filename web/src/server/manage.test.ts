@@ -233,7 +233,7 @@ describe("cancelling", () => {
     const early = expectOk(await world.book({ date: FAR }));
     expect(await getManageOptions(world.db, early.ref, byToken(early.manageToken), NOW)).toEqual({
       cancel: { allowed: true, refundCents: 16720, feeCents: 880, creditCents: 0, byHandCents: 0, why: "refund" },
-      reschedule: { allowed: true, creditCents: 17600, discountCents: 0, feeCents: 0, nextFeeCents: 2000, nextMovable: true },
+      reschedule: { allowed: true, creditCents: 17600, discountCents: 0, nextMovable: false, nextFeeCents: 2000 },
     });
     const late = expectOk(await world.book({ date: NEAR }));
     expect(await getManageOptions(world.db, late.ref, byToken(late.manageToken), NOW)).toMatchObject({
@@ -414,16 +414,20 @@ describe("a refund the processor accepted without completing it", () => {
 });
 
 describe("the reschedule code", () => {
-  it("says what moving the new booking again costs by today's settings, which the new booking takes (the tester's finding of 2026-11-18)", async () => {
+  it("says what the studio's move of the new booking costs by today's settings, which the new booking takes (the tester's finding of 2026-11-18)", async () => {
     const first = expectOk(await world.book({ date: FAR }));
     // The owners raise the fee for a further move from $20 to $35 after the booking was made.
     expect(await saveSetting(world.db, "rescheduleFeeCents", 3500)).toBe(true);
     const told = (await getManageChoices(world.db, first.ref, byToken(first.manageToken), NOW))!.reschedule.text;
-    expect(told).toContain("Moving the new booking again would cost $35.");
+    expect(told).toContain("The new booking cannot be moved online again: the studio moves it for you, for $35 each time.");
     const released = expectOk(await requestRescheduleCode(world.db, first.ref, byToken(first.manageToken), world.manageDeps()));
     const second = expectOk(await world.book({ date: FAR, startMinute: h(14), promoCode: released.code, paymentToken: undefined }));
-    // The new booking was made under today's terms: what it was told is what it costs.
-    expect((await getManageChoices(world.db, second.ref, byToken(second.manageToken), NOW))!.reschedule.text).toContain("less the $35 fee");
+    // The new booking was made under today's terms: what the client was told is what its own page says.
+    expect((await getManageChoices(world.db, second.ref, byToken(second.manageToken), NOW))!.reschedule).toEqual({
+      allowed: false,
+      offered: true,
+      text: "This booking was already moved, so it cannot be moved again online. Ask the studio to move it: each further move costs $35.",
+    });
   });
 
   it("releases the booking and emails a code worth what was paid", async () => {
@@ -467,7 +471,7 @@ describe("the reschedule code", () => {
     expect(choices?.reschedule).toEqual({
       allowed: true,
       offered: true,
-      text: "This booking will be released and you will get a code worth $176, valid for 90 days, to book a new time. That is what you paid plus the $17.60 your discount code took off. A booking made with the code cannot be refunded. Moving the new booking again would cost $20.",
+      text: "This booking will be released and you will get a code worth $176, valid for 90 days, to book a new time. That is what you paid plus the $17.60 your discount code took off. A booking made with the code cannot be refunded. The new booking cannot be moved online again: the studio moves it for you, for $20 each time.",
     });
     const moved = expectOk(await requestRescheduleCode(world.db, first.ref, byToken(first.manageToken), world.manageDeps()));
     expect(moved.valueCents).toBe(17600);
@@ -506,10 +510,10 @@ describe("the reschedule code", () => {
     expect(world.charges).toHaveLength(1); // only the original payment
     expect(await bookingRow(second.ref)).toMatchObject({ rescheduledCount: 1, creditAppliedCents: 17600 });
 
-    // 25 days ahead would normally be refundable. A moved booking is not. It can be moved again, for the fee.
+    // 25 days ahead would normally be refundable. A moved booking is not. Nor is it moved again online: that is the studio's to do.
     expect(await getManageOptions(world.db, second.ref, byToken(second.manageToken), NOW)).toEqual({
       cancel: { allowed: true, refundCents: 0, feeCents: 0, creditCents: 0, byHandCents: 0, why: "rescheduled" },
-      reschedule: { allowed: true, creditCents: 15600, discountCents: 0, feeCents: 2000, nextFeeCents: 2000, nextMovable: true },
+      reschedule: { allowed: false, reason: "limit_reached" },
     });
     const cancelled = expectOk(await cancelBooking(world.db, second.ref, byToken(second.manageToken), world.manageDeps()));
     expect(cancelled).toMatchObject({ refundCents: 0, refund: "none" });
@@ -517,86 +521,47 @@ describe("the reschedule code", () => {
     expect(world.refundCalls).toHaveLength(0);
   });
 
-  it("moves a booking a second time for the fee, taken off the new code (the owner's answer of 2026-11-17)", async () => {
+  it("is given once: a booking made with it is the studio's to move, for the fee (the owners' decision of 2026-11-20)", async () => {
     const first = expectOk(await world.book({ date: NEAR })); // $176 by card
     const one = expectOk(await requestRescheduleCode(world.db, first.ref, byToken(first.manageToken), world.manageDeps()));
-    expect(one.valueCents).toBe(17600); // the first move is free
+    expect(one.valueCents).toBe(17600); // the one free move
     const second = expectOk(await world.book({ date: FAR, promoCode: one.code, paymentToken: undefined }));
 
-    // Before she presses, the page says what the code will be worth, and why.
+    // Until 2026-11-27 the page offered a second code here, worth $156 after the $20 fee. Now it says who moves the
+    // booking, and what that costs.
     const choices = await getManageChoices(world.db, second.ref, byToken(second.manageToken), NOW);
     expect(choices?.reschedule).toEqual({
-      allowed: true,
+      allowed: false,
       offered: true,
-      text: "This booking will be released and you will get a code worth $156, valid for 90 days, to book a new time. That is what you paid less the $20 fee for moving a booking again. A booking made with the code cannot be refunded.",
+      text: "This booking was already moved, so it cannot be moved again online. Ask the studio to move it: each further move costs $20.",
     });
-    const two = expectOk(await requestRescheduleCode(world.db, second.ref, byToken(second.manageToken), world.manageDeps(), choices!.reschedule.text));
-    expect(two.valueCents).toBe(15600);
-    const [code] = await world.db.select().from(promoCodes).where(eq(promoCodes.code, two.code));
-    expect(code).toMatchObject({ value: 15600, rescheduleGeneration: 2, source: "reschedule" });
-    const mails = (await world.emails("reschedule_code")).map((mail) => mail.body);
-    expect(mails).toHaveLength(2);
-    expect(mails.find((body) => body.includes(second.ref))).toContain(
-      `Your booking ${second.ref} has been released. What you paid, less the $20 fee for moving a booking again, is now a credit of $156.`,
-    );
-    expect(mails.find((body) => body.includes(first.ref))).toContain(`Your booking ${first.ref} has been released, and what you paid is now a credit of $176.`);
-    const secondId = (await bookingRow(second.ref)).id;
-    const notes = (await world.db.select().from(bookingEvents).where(eq(bookingEvents.bookingId, secondId))).map((event) => event.note);
-    expect(notes).toContain("Released for a reschedule code worth $156, after the $20 fee for moving a booking again");
-
-    // The same booking at a new time costs the fee: the code pays the rest. No money is charged for the move itself.
+    // Asking the studio is offered beside it.
+    expect(choices?.request).toMatchObject({ allowed: true });
+    expect(await requestRescheduleCode(world.db, second.ref, byToken(second.manageToken), world.manageDeps())).toMatchObject({ ok: false, code: "limit_reached" });
+    expect((await bookingRow(second.ref)).status).toBe("confirmed");
+    expect(await world.emails("reschedule_code")).toHaveLength(1);
     expect(world.charges).toHaveLength(1);
-    const third = expectOk(await world.book({ date: FAR, startMinute: h(14), promoCode: two.code, expectedTotalCents: 2000 }));
-    expect(third.totalCents).toBe(2000);
-    expect(world.charges.at(-1)?.amountCents).toBe(2000);
-    expect(await bookingRow(third.ref)).toMatchObject({ rescheduledCount: 2, creditAppliedCents: 15600 });
-    // And once more, the same fee: the $20 paid by card moves with the credit.
-    expect((await getManageOptions(world.db, third.ref, byToken(third.manageToken), NOW))?.reschedule).toEqual({
-      allowed: true,
-      creditCents: 15600,
-      discountCents: 0,
-      feeCents: 2000,
-      nextFeeCents: 2000,
-      nextMovable: true,
-    });
   });
 
-  it("keeps the fee the booking was made under when the owners change it while the page is open", async () => {
+  it("names the fee the booking was made under, whatever the fee is now", async () => {
     const first = expectOk(await world.book({ date: NEAR }));
     const one = expectOk(await requestRescheduleCode(world.db, first.ref, byToken(first.manageToken), world.manageDeps()));
     const second = expectOk(await world.book({ date: FAR, promoCode: one.code, paymentToken: undefined }));
-    const seen = (await getManageChoices(world.db, second.ref, byToken(second.manageToken), NOW))!.reschedule.text;
-    // A change of the settings applies to bookings made from then on (question 10): what the client read still holds.
+    // A change of the settings applies to bookings made from then on (question 10).
     await world.db.insert(settings).values({ key: "rescheduleFeeCents", value: 3000 });
-    expect(await requestRescheduleCode(world.db, second.ref, byToken(second.manageToken), world.manageDeps(), seen)).toMatchObject({ ok: true, valueCents: 15600 });
+    expect((await getManageChoices(world.db, second.ref, byToken(second.manageToken), NOW))!.reschedule.text).toContain("each further move costs $20.");
   });
 
-  it("refuses a second move whose fee would leave no credit, and any second move while the owners set no fee", async () => {
-    const first = expectOk(await world.book({ date: NEAR, durationMinutes: 60 })); // $88
+  it("says to ask the studio, with no fee named, while the owners set none", async () => {
+    await world.db.insert(settings).values({ key: "rescheduleFeeCents", value: 0 });
+    const first = expectOk(await world.book({ date: NEAR, durationMinutes: 60 }));
     const one = expectOk(await requestRescheduleCode(world.db, first.ref, byToken(first.manageToken), world.manageDeps()));
-    // Made while a further move costs $88: the booking keeps that fee (question 10).
-    await world.db.insert(settings).values({ key: "rescheduleFeeCents", value: 8800 });
     const second = expectOk(await world.book({ date: FAR, durationMinutes: 60, promoCode: one.code, paymentToken: undefined }));
-    expect(await requestRescheduleCode(world.db, second.ref, byToken(second.manageToken), world.manageDeps())).toMatchObject({
-      ok: false,
-      code: "fee_not_covered",
-      message: "Moving a booking again costs $88, and this booking is not worth more than that, so no credit would be left to move. Please call the studio.",
+    expect(await getManageChoices(world.db, second.ref, byToken(second.manageToken), NOW)).toMatchObject({
+      reschedule: { allowed: false, offered: true, text: "This booking was already moved, so it cannot be moved again online. Ask the studio to move it." },
     });
+    expect(await requestRescheduleCode(world.db, second.ref, byToken(second.manageToken), world.manageDeps())).toMatchObject({ ok: false, code: "limit_reached" });
     expect((await bookingRow(second.ref)).status).toBe("confirmed");
-
-    // Made while the owners set no fee for a further move: it cannot be moved again online.
-    const firstAgain = expectOk(await world.book({ date: NEAR, startMinute: h(14), durationMinutes: 60 }));
-    const two = expectOk(await requestRescheduleCode(world.db, firstAgain.ref, byToken(firstAgain.manageToken), world.manageDeps()));
-    await world.db.update(settings).set({ value: 0 }).where(eq(settings.key, "rescheduleFeeCents"));
-    const third = expectOk(await world.book({ date: FAR, startMinute: h(14), durationMinutes: 60, promoCode: two.code, paymentToken: undefined }));
-    expect(await getManageChoices(world.db, third.ref, byToken(third.manageToken), NOW)).toMatchObject({
-      reschedule: { allowed: false, offered: true, text: "This booking was already moved and cannot be moved again online. Please call the studio." },
-    });
-    expect(await requestRescheduleCode(world.db, third.ref, byToken(third.manageToken), world.manageDeps())).toMatchObject({
-      ok: false,
-      code: "limit_reached",
-    });
-    expect((await bookingRow(third.ref)).status).toBe("confirmed");
   });
 
   it("charges only the difference for a dearer time and carries the whole value if moved again", async () => {

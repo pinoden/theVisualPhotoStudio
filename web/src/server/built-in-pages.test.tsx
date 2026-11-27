@@ -1,4 +1,6 @@
-import { eq } from "drizzle-orm";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { eq, sql } from "drizzle-orm";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { PageBlocks } from "@/components/site/PageBlocks";
@@ -108,8 +110,9 @@ describe("the pages the website was built with", () => {
     expect(faq).toContain("Bookings open 180 days ahead and close 24 hours before the start time.");
     expect(faq).toContain("Cancel 7 days (168 hours) or more before your start time and your payment is refunded to your card automatically, less the 5% payment processing fee.");
     expect(faq).toContain("Yes, until 24 hours before it starts.");
-    // The first reschedule is free, and each further one costs the fee (the owner's answer of 2026-11-17).
-    expect(faq).toContain("You can move a booking once free of charge. Moving it again costs $20 each time, which is taken off the code.");
+    // The first reschedule is free and made online; each further one is the studio's to make, for the fee (the owners'
+    // decision of 2026-11-20, built 2026-11-27).
+    expect(faq).toContain("You can move a booking once free of charge. To move it again, contact the studio: each further move costs $20.");
     expect(faq).not.toContain("A booking can be moved once.");
     expect(faq).toContain("The code is valid for 90 days.");
     // The bundles have prices of their own, so no percentage is promised (question 81).
@@ -126,7 +129,7 @@ describe("the pages the website was built with", () => {
     const policies = await words("policies");
     expect(policies).toContain("Cancellations made 7 days (168 hours) or more before the appointment are eligible for a full refund, excluding the non-refundable payment processing fee (5%).");
     expect(policies).toContain("may be rescheduled at no additional charge until 24 hours before the appointment.");
-    expect(policies).toContain("An appointment may be rescheduled once at no additional charge. Each additional reschedule costs $20, which is deducted from the reschedule credit.");
+    expect(policies).toContain("An appointment may be rescheduled once at no additional charge. Each additional reschedule is arranged with the studio and costs $20.");
     expect(policies).toContain("Sessions are booked at least 14 days ahead.");
     expect(policies).toContain("Pets are permitted in Studio Dayglow only");
     expect(policies).toContain("Pets (Studio Dayglow only)");
@@ -157,6 +160,48 @@ describe("the pages the website was built with", () => {
     expect(home).toContain("Where Every Frame Tells a Story");
     expect(home).toContain("Studio Blanche");
     expect(home).toContain("(407) 663-6109");
+  });
+
+  it("get the new words about a further reschedule from migration 0076, where the owners left the old ones as they were", async () => {
+    const OLD_FAQ = "Moving it again costs {reschedule fee} each time, which is taken off the code.";
+    const NEW_FAQ = "To move it again, contact the studio: each further move costs {reschedule fee}.";
+    const OLD_POLICIES = "Each additional reschedule costs {reschedule fee}, which is deducted from the reschedule credit.";
+    const NEW_POLICIES = "Each additional reschedule is arranged with the studio and costs {reschedule fee}.";
+    // A database from before: its guest information and policies say the fee comes off the code. On the policies the
+    // owners have a draft too, and on a page of their own they wrote the sentence their way.
+    const stored = async (slug: string) => (await world.db.select().from(siteDocuments).where(eq(siteDocuments.slug, slug)))[0];
+    const back = (value: unknown) => JSON.parse(JSON.stringify(value).replace(NEW_FAQ, OLD_FAQ).replace(NEW_POLICIES, OLD_POLICIES));
+    for (const slug of ["faq", "policies"]) {
+      const row = await stored(slug);
+      expect(JSON.stringify(row.published), slug).toMatch(/contact the studio|arranged with the studio/);
+      await world.db.update(siteDocuments).set({ published: back(row.published), draft: slug === "policies" ? back(row.published) : null }).where(eq(siteDocuments.id, row.id));
+    }
+    const own = expectOk(await createPage(world.db, owner, { title: "Our Terms" }, NOW)).id;
+    const theirs = parsePage({ blocks: [{ type: "Section", props: { content: [{ type: "Text", props: { html: "<p>Each additional reschedule costs {reschedule fee}, paid at the desk.</p>" } }] } }] });
+    await world.db.update(siteDocuments).set({ published: theirs }).where(eq(siteDocuments.id, own));
+    expect(await words("faq")).toContain("Moving it again costs $20 each time, which is taken off the code.");
+    const versionsBefore = (await world.db.select().from(siteVersions)).length;
+
+    const migration = readFileSync(path.join(process.cwd(), "drizzle", "0076_further_moves_copy.sql"), "utf8");
+    await world.db.execute(sql.raw(migration));
+    expect(await words("faq")).toContain("You can move a booking once free of charge. To move it again, contact the studio: each further move costs $20.");
+    expect(await words("policies")).toContain("Each additional reschedule is arranged with the studio and costs $20.");
+    // Stored as the pages are written in the code today, the draft too; and each page's history has the change.
+    for (const slug of ["faq", "policies"] as const) {
+      const row = await stored(slug);
+      expect(row.published, slug).toEqual(builtInPages().find((page) => page.slug === slug)!.content);
+      expect(row.publishedBy, slug).toBe("the site");
+    }
+    expect((await stored("policies")).draft).toEqual((await stored("policies")).published);
+    expect((await stored("faq")).draft).toBeNull();
+    const versions = await world.db.select().from(siteVersions);
+    expect(versions).toHaveLength(versionsBefore + 2);
+    expect(versions.filter((version) => version.note === "A further reschedule is arranged with the studio")).toHaveLength(2);
+    // The owners' own sentence is theirs.
+    expect((await world.db.select().from(siteDocuments).where(eq(siteDocuments.id, own)))[0].published).toEqual(theirs);
+    // Run again, it changes nothing.
+    await world.db.execute(sql.raw(migration));
+    expect(await world.db.select().from(siteVersions)).toHaveLength(versionsBefore + 2);
   });
 
   it("say the percentage off for several studios while no bundle has prices of its own", async () => {

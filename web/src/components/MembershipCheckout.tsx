@@ -6,7 +6,7 @@ import { useState } from "react";
 import { joinMembershipAction } from "@/app/book/membership/actions";
 import { formatCents } from "@/lib/domain/pricing";
 import { durationLabel, longDateLabel } from "@/lib/domain/time";
-import { EMAIL_FIELD } from "@/lib/parse";
+import { EMAIL_FIELD, hasPhoneDigits, PHONE_FIELD } from "@/lib/parse";
 import type { MembershipView } from "@/server/memberships";
 import { CopyCode } from "./CopyCode";
 import { buyerVerification, useCardForm } from "./square-card";
@@ -55,8 +55,8 @@ export function MembershipCheckout({
       setError("Please enter your name.");
       return;
     }
-    if (phone.trim().length < 7) {
-      setError("Please enter your phone number.");
+    if (!hasPhoneDigits(phone)) {
+      setError("Please enter a phone number with at least 7 digits.");
       return;
     }
     if (!terms) {
@@ -163,7 +163,7 @@ export function MembershipCheckout({
           <label className="form-label" htmlFor="member-phone">
             Phone number *
           </label>
-          <input id="member-phone" type="tel" className="form-control" autoComplete="tel" minLength={7} maxLength={40} required value={phone} onChange={(event) => setPhone(event.target.value)} />
+          <input id="member-phone" {...PHONE_FIELD} className="form-control" autoComplete="tel" required value={phone} onChange={(event) => setPhone(event.target.value)} />
         </div>
       </div>
 

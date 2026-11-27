@@ -8,7 +8,7 @@ import { bookableDurations, formatCents, PricingError, quote, taxLabel, taxRuleF
 import { durationLabel, isIsoDate, longDateLabel } from "@/lib/domain/time";
 import { can } from "@/lib/abilities";
 import { extraGuestsFor, studioCombinationError } from "@/lib/catalog-view";
-import { EMAIL_FIELD } from "@/lib/parse";
+import { EMAIL_FIELD, PHONE_FIELD } from "@/lib/parse";
 import { freeStartsFor } from "@/server/appointments";
 import { dayTypeFor, loadCatalog } from "@/server/catalog";
 import { requireStaff } from "@/server/session";
@@ -216,7 +216,7 @@ async function NewBooking({ searchParams }: Pick<PageProps<"/admin/calendar/new"
                   <label className="form-label" htmlFor="new-phone">
                     Client&rsquo;s phone
                   </label>
-                  <input id="new-phone" name="phone" type="tel" className="form-control" minLength={7} maxLength={40} autoComplete="off" defaultValue={client.phone} required />
+                  <input id="new-phone" name="phone" {...PHONE_FIELD} className="form-control" autoComplete="off" defaultValue={client.phone} required />
                 </div>
               </div>
               <div className="form-group">

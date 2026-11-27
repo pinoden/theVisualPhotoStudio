@@ -185,6 +185,7 @@ describe("every email to a client", () => {
       emails.moveRequestStudioEmail({ to: "o@x.test", client: { name: "Jane", email: "j@x.test", phone: "" }, ref: "VS-1", studios: "Paris", when: "W", duration: "1 hour", message: "M", appointmentUrl: "U" }),
       emails.contactMessageEmail({ to: "o@x.test", name: "N", email: "n@x.test", topic: "T", message: "M" }),
       emails.ownerHandRefundNotice({ to: "o@x.test", ref: "VS-1", customer: "Jane", paidCents: 100, feePercent: 5 }),
+      emails.ownerRefundOwedNotice({ to: "o@x.test", ref: "VS-1", customer: "Jane", cents: 700, change: "C", appointmentUrl: "U" }),
       emails.ownerRefundNotice({ to: "o@x.test", ref: "VS-1", customer: "Jane", amountCents: 100, automatic: true }),
       emails.ownerRefundNotice({ to: "o@x.test", ref: "VS-1", customer: "Jane", amountCents: 100, automatic: true, failedReason: "R" }),
       emails.ownerRefundWaitingNotice({ to: "o@x.test", ref: "VS-1", customer: "Jane", amountCents: 100, reason: "R" }),

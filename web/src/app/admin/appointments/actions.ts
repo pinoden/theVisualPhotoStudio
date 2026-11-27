@@ -13,7 +13,7 @@ import { changeConflicts, confirmedKeys, conflictsFor, moveConflicts } from "@/s
 import { cancelPayLink, checkBookingPayLink, closePayLinkByHand, sendPayLink } from "@/server/pay-links";
 import { resolvePayments } from "@/server/payments";
 import { givePetFeeCredit } from "@/server/pet-fee";
-import { flushEmailsSoon, payLinkDeps, siteUrl } from "@/server/runtime";
+import { flushEmailsSoon, ownerNotifyEmail, payLinkDeps, siteUrl } from "@/server/runtime";
 import { requireOwner, requireStaff } from "@/server/session";
 import { recordHandRefund, recordStudioPayment, voidStudioPayment } from "@/server/studio-payments";
 import { formatInstant } from "@/server/tz";
@@ -76,18 +76,28 @@ export async function moveBookingAction(formData: FormData): Promise<void> {
   const retry = !isIsoDate(date) ? (fromCalendar ?? page) : fromCalendar ? calendarAt(fromCalendar, { move: date }) : `${page}?move=${date}`;
   const startMinute = intInRange(formText(formData.get("startMinute")), 0, 1439);
   if (startMinute === null) redirect(withMessage(retry, "error", "Choose a start time."));
+  const asked = formText(formData.get("asked"));
 
   const result = await moveBooking(
     await getDb(),
     viewer,
     ref,
-    { date, startMinute, countsAsClientMove: formData.get("countsAsClientMove") !== null, override: confirmedKeys(formData.get("overrideConfirmed")) },
+    {
+      date,
+      startMinute,
+      // "Who asked for this move?": one of the two must be chosen, and `moveBooking` refuses a form that does not say.
+      countsAsClientMove: asked === "client" ? true : asked === "studio" ? false : null,
+      waiveFee: formData.get("waiveFee") !== null,
+      override: confirmedKeys(formData.get("overrideConfirmed")),
+    },
     new Date(),
+    { ownerEmail: ownerNotifyEmail(), baseUrl: await siteUrl() },
   );
   if (!result.ok) redirect(withMessage(retry, "error", result.message));
   flushEmailsSoon();
   const moved = fromCalendar ? calendarAt(fromCalendar, { date, move: null, notice: null, error: null }) : page;
-  redirect(withMessage(moved, "notice", `Moved to ${formatInstant(result.startAt)}. The client has been emailed.`));
+  const fee = result.feeCents > 0 ? ` ${formatCents(result.feeCents)} was added for this move, to pay at the studio or through a payment link.` : "";
+  redirect(withMessage(moved, "notice", `Moved to ${formatInstant(result.startAt)}. The client has been emailed.${fee}`));
 }
 
 /**
@@ -108,7 +118,10 @@ export async function editBookingAction(formData: FormData): Promise<void> {
     if (quantity > 0) addons.push({ addonId: name.slice("addon:".length), quantity });
   }
   const studioIds = formData.getAll("studio").filter((value): value is string => typeof value === "string");
-  const result = await editBooking(await getDb(), viewer, ref, { studioIds, durationMinutes: durationMinutes!, addons, override: confirmedKeys(formData.get("overrideConfirmed")) }, new Date());
+  const result = await editBooking(await getDb(), viewer, ref, { studioIds, durationMinutes: durationMinutes!, addons, override: confirmedKeys(formData.get("overrideConfirmed")) }, new Date(), {
+    ownerEmail: ownerNotifyEmail(),
+    baseUrl: await siteUrl(),
+  });
   if (!result.ok) redirect(withMessage(page, "error", result.message) + "#change");
   flushEmailsSoon();
   const words = [

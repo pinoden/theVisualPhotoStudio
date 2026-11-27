@@ -28,7 +28,7 @@ export const CONDITIONS = {
   "extra people": { yes: "extra people can be added to a booking", no: "extra people cannot be added" },
   "add-ons": { yes: "an add-on is offered", no: "no add-on is offered" },
   moving: { yes: "a booking can be moved", no: "a booking cannot be moved" },
-  "reschedule fee": { yes: "a booking can be moved again for a fee", no: "a booking cannot be moved again for a fee" },
+  "reschedule fee": { yes: "a further move of a booking costs a fee", no: "a further move of a booking costs no fee, or moving is switched off" },
   "free hours": { yes: "returning guests earn free hours", no: "free hours are switched off" },
   "getting in": { yes: "how to get in is written under Settings", no: "how to get in is not written yet" },
   photography: { yes: "a photography session can be booked", no: "no photography session can be booked" },

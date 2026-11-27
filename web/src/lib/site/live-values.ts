@@ -40,7 +40,7 @@ export function liveValues(catalog: Catalog, business: Business): LiveValue[] {
     value("sales tax", "The sales tax added to the prices at checkout: 6.5%. 0% while none is charged", taxPercent(s.salesTaxBasisPoints)),
     value("reschedule cutoff", "How long before the start a booking can still be moved", hoursInWords(s.rescheduleCutoffHours)),
     value("reschedules allowed", "How often one booking can be moved free of charge", s.maxReschedules === 1 ? "once" : `up to ${s.maxReschedules} times`),
-    value("reschedule fee", "What moving a booking again costs, after the free times", formatCents(s.rescheduleFeeCents)),
+    value("reschedule fee", "What each further move of a booking costs, after the free times: the studio makes those", formatCents(s.rescheduleFeeCents)),
     value("reschedule code valid", "How long a reschedule code can be used", count(s.creditValidDays, "day")),
     value("member hours back", "How long before the start a cancelled booking gives its membership hours back", hoursInWords(s.memberReturnHours)),
     value("free hour visits", "Visits, on separate days, that earn a free hour", count(s.loyaltyVisits, "time")),
