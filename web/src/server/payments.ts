@@ -4,6 +4,7 @@
  */
 import { STUDIO_TIME_ZONE } from "@/lib/domain/time";
 import { splitName } from "@/lib/names";
+import { withFakePayments } from "./fake-payment"; // FAKE PAYMENT
 
 export interface ChargeRequest {
   amountCents: number;
@@ -156,6 +157,8 @@ export interface PaymentProvider {
    * asks one about what the other made.
    */
   name: "square" | "square-sandbox" | "mock";
+  /** FAKE PAYMENT: set on a test processor that takes the "Fake Payment" button's payments (src/server/fake-payment.ts). */
+  offersFakePayment?: true;
   memberships: MembershipBilling;
   charge(request: ChargeRequest): Promise<ChargeResult>;
   refund(request: RefundRequest): Promise<RefundResult>;
@@ -689,6 +692,8 @@ export interface PaymentClientConfig {
   squareApplicationId?: string;
   squareLocationId?: string;
   squareEnvironment?: "sandbox" | "production";
+  /** FAKE PAYMENT: the pages show the "Fake Payment" button. Never with Square's live account. */
+  fakePayment?: true;
   /** For `disabled` when credentials are set but disagree: why payments are off, for the owners' overview. */
   problem?: string;
 }
@@ -728,6 +733,8 @@ function squareEnvironment(applicationId: string, declared: string | undefined):
  *  - PAYMENTS_MODE=mock          -> the pretend processor, stated on screen.
  *  - Otherwise in development    -> the pretend processor.
  *  - Otherwise (production)      -> none: bookings are refused, never free.
+ * FAKE PAYMENT: the two that move no money (the pretend one and Square's sandbox) also take the "Fake Payment"
+ * button's payments.
  */
 export function resolvePayments(env: Env = process.env): { provider: PaymentProvider | null; client: PaymentClientConfig } {
   const accessToken = env.SQUARE_ACCESS_TOKEN;
@@ -736,18 +743,21 @@ export function resolvePayments(env: Env = process.env): { provider: PaymentProv
   if (accessToken && locationId && applicationId) {
     const environment = squareEnvironment(applicationId, env.SQUARE_ENVIRONMENT);
     if (typeof environment !== "string") return { provider: null, client: { mode: "disabled", problem: environment.problem } };
+    const square = squareProvider({ accessToken, locationId, environment });
+    const testing = environment === "sandbox"; // FAKE PAYMENT
     return {
-      provider: squareProvider({ accessToken, locationId, environment }),
+      provider: testing ? withFakePayments(square, mockProvider.memberships) : square,
       client: {
         mode: "square",
         squareApplicationId: applicationId,
         squareLocationId: locationId,
         squareEnvironment: environment,
+        ...(testing ? { fakePayment: true as const } : {}),
       },
     };
   }
   if (env.PAYMENTS_MODE === "mock" || env.NODE_ENV !== "production") {
-    return { provider: mockProvider, client: { mode: "mock" } };
+    return { provider: withFakePayments(mockProvider, mockProvider.memberships), client: { mode: "mock", fakePayment: true } }; // FAKE PAYMENT
   }
   return { provider: null, client: { mode: "disabled" } };
 }

@@ -9,7 +9,8 @@ import { telHref } from "@/lib/site/frame";
 import { getPayPage } from "@/server/pay-links";
 import { flushEmailsSoon, payLinkDeps } from "@/server/runtime";
 import { siteFrame } from "@/server/site";
-import { pretendPayAction } from "./actions";
+import { fakePayAction, pretendPayAction } from "./actions";
+import { FAKE_PAYMENT_LABEL, FAKE_PAYMENT_NOTE } from "@/lib/fake-payment"; // FAKE PAYMENT
 
 // A name for every state of the page: to pay, paid, refunded, or nothing to pay.
 export const metadata: Metadata = {
@@ -160,6 +161,16 @@ async function Pay({ params }: Pick<PageProps<"/pay/[id]">, "params">) {
                 again in a minute.
               </p>
             </>
+          )}
+          {/* FAKE PAYMENT */}
+          {page.fakePayment && (
+            <form action={fakePayAction} style={{ textAlign: "center", marginTop: ".75rem" }}>
+              <input type="hidden" name="id" value={page.id} />
+              <button type="submit" className="btn btn-outline">
+                {FAKE_PAYMENT_LABEL}
+              </button>
+              <p className="fake-payment-note" style={{ textAlign: "center" }}>{FAKE_PAYMENT_NOTE}</p>
+            </form>
           )}
           <p style={{ fontSize: ".85rem" }}>You can also pay at the studio.</p>
         </>

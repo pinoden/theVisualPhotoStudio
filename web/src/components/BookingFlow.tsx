@@ -47,6 +47,7 @@ import type { DayAvailability } from "@/server/availability";
 import { agreementKey, policiesKey, type QuestionKind } from "@/lib/booking-form-keys";
 import type { Catalog } from "@/server/catalog";
 import { buyerVerification, useCardForm } from "./square-card";
+import { FAKE_PAYMENT_LABEL, FAKE_PAYMENT_NOTE, FAKE_PAYMENT_TOKEN } from "@/lib/fake-payment"; // FAKE PAYMENT
 
 type Mode = "studio" | "time";
 type Step = "studios" | "when" | "details" | "policies" | "pay";
@@ -688,14 +689,17 @@ export function BookingFlow({
     go(stepIndex + 1);
   }
 
-  async function submit() {
+  async function submit(fake = false) {
+    // FAKE PAYMENT: `fake` is the test button, which pays with no card.
     if (!price || start === null || submitting) return;
     setError("");
     setSubmitting(true);
     let leaving = false;
     try {
       let paymentToken: string | undefined;
-      if (price.totalCents > 0) {
+      if (price.totalCents > 0 && fake) {
+        paymentToken = FAKE_PAYMENT_TOKEN; // FAKE PAYMENT
+      } else if (price.totalCents > 0) {
         // The card's bank may check the client here, on this page, before Square gives the token (3-D Secure). A press
         // after no answer sends the same token again: it is the same attempt (`useCardForm`).
         const card = await cardForm.token(buyerVerification({ amountCents: price.totalCents, intent: "CHARGE", name, email }));
@@ -1545,24 +1549,33 @@ export function BookingFlow({
             <button type="button" className="btn btn-outline" onClick={() => go(stepIndex - 1)} disabled={submitting}>
               ← Back
             </button>
-            <button
-              type="button"
-              className="btn btn-dark"
-              onClick={submit}
-              disabled={
-                submitting ||
-                !price ||
-                (needsCard &&
-                  (!cardForm.config || cardForm.config.mode === "disabled" || (cardForm.config.mode === "square" && !cardForm.ready)))
-              }
-            >
-              {submitting
-                ? "Processing…"
-                : needsCard && price
-                  ? `Confirm & pay ${formatCents(price.totalCents)}`
-                  : "Confirm booking"}
-            </button>
+            {/* FAKE PAYMENT: the wrapper holds the test button beside the real one. */}
+            <div className="wizard-actions-pay">
+              <button
+                type="button"
+                className="btn btn-dark"
+                onClick={() => submit()}
+                disabled={
+                  submitting ||
+                  !price ||
+                  (needsCard &&
+                    (!cardForm.config || cardForm.config.mode === "disabled" || (cardForm.config.mode === "square" && !cardForm.ready)))
+                }
+              >
+                {submitting
+                  ? "Processing…"
+                  : needsCard && price
+                    ? `Confirm & pay ${formatCents(price.totalCents)}`
+                    : "Confirm booking"}
+              </button>
+              {needsCard && cardForm.config?.fakePayment && (
+                <button type="button" className="btn btn-outline" onClick={() => submit(true)} disabled={submitting || !price}>
+                  {FAKE_PAYMENT_LABEL}
+                </button>
+              )}
+            </div>
           </div>
+          {needsCard && cardForm.config?.fakePayment && <p className="fake-payment-note">{FAKE_PAYMENT_NOTE}</p>}
         </div>
       )}
     </div>

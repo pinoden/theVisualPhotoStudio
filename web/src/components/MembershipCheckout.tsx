@@ -10,6 +10,7 @@ import { EMAIL_FIELD } from "@/lib/parse";
 import type { MembershipView } from "@/server/memberships";
 import { CopyCode } from "./CopyCode";
 import { buyerVerification, useCardForm } from "./square-card";
+import { FAKE_PAYMENT_LABEL, FAKE_PAYMENT_NOTE, FAKE_PAYMENT_TOKEN } from "@/lib/fake-payment"; // FAKE PAYMENT
 
 const CARD_CONTAINER = "membership-card";
 
@@ -47,6 +48,8 @@ export function MembershipCheckout({
   async function join(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (sending) return;
+    // FAKE PAYMENT: which of the form's two buttons sent it.
+    const fake = (event.nativeEvent as SubmitEvent).submitter?.hasAttribute("data-fake-payment") ?? false;
     // As the server checks them, before the card's bank is asked: spaces alone pass the fields' own length rules.
     if (name.trim().length < 2) {
       setError("Please enter your name.");
@@ -64,7 +67,9 @@ export function MembershipCheckout({
     setSending(true);
     try {
       // The card is kept for the monthly billing: the bank is told so when it checks the client (3-D Secure).
-      const token = await card.token(buyerVerification({ amountCents: plan.priceCents, intent: "CHARGE_AND_STORE", name, email }));
+      const token = fake
+        ? { ok: true as const, token: FAKE_PAYMENT_TOKEN } // FAKE PAYMENT
+        : await card.token(buyerVerification({ amountCents: plan.priceCents, intent: "CHARGE_AND_STORE", name, email }));
       if (!token.ok) {
         setError(token.message);
         return;
@@ -210,10 +215,19 @@ export function MembershipCheckout({
         <Link href="/memberships" className="btn btn-outline">
           ← Memberships
         </Link>
-        <button type="submit" className="btn btn-dark" disabled={sending || card.config?.mode === "disabled" || (card.config?.mode === "square" && !card.ready)}>
-          {sending ? "Joining…" : `Pay ${price} and join`}
-        </button>
+        {/* FAKE PAYMENT: the wrapper holds the test button beside the real one, which stays first: Enter presses it. */}
+        <div className="wizard-actions-pay">
+          <button type="submit" className="btn btn-dark" disabled={sending || card.config?.mode === "disabled" || (card.config?.mode === "square" && !card.ready)}>
+            {sending ? "Joining…" : `Pay ${price} and join`}
+          </button>
+          {card.config?.fakePayment && (
+            <button type="submit" className="btn btn-outline" data-fake-payment disabled={sending}>
+              {FAKE_PAYMENT_LABEL}
+            </button>
+          )}
+        </div>
       </div>
+      {card.config?.fakePayment && <p className="fake-payment-note">{FAKE_PAYMENT_NOTE}</p>}
     </form>
   );
 }
