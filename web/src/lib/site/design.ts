@@ -31,12 +31,18 @@ export interface HeadingStyle {
 
 export interface Design {
   colors: {
-    /** Links, small headings above titles, and the buttons that ask to book. */
+    /** The buttons that ask to book, and words in the accent colour on the dark parts. */
     accent: string;
     /** The accent when the pointer is on it. */
     accentHover: string;
     /** A pale accent, for soft highlights. */
     accentSoft: string;
+    /**
+     * The accent for words on a light background: links, the small headings above titles, prices. A darker shade of the
+     * accent, which cannot be read there as words (the owners' decision of 2026-11-27: the buttons keep the brand's tan,
+     * and words take this shade).
+     */
+    accentText: string;
     /** Text on something filled with the accent. */
     onAccent: string;
     /** The page. */
@@ -88,7 +94,10 @@ export const DEFAULT_DESIGN: Design = {
     accent: "#c8a882",
     accentHover: "#a88760",
     accentSoft: "#e8d5bb",
-    onAccent: "#ffffff",
+    // 4.5 to 1 on the page and 4.7 on a card, where the accent itself is 2.1; and dark words on a button in the
+    // accent, 6.7 to 1 where white was 2.2 (the owners' decision of 2026-11-27).
+    accentText: "#8e6a3e",
+    onAccent: "#2c2420",
     background: "#f9f5f0",
     surface: "#fdfaf6",
     heading: "#2c2420",
@@ -236,6 +245,7 @@ export function designVariables(design: Design, custom: readonly CustomFont[] = 
     "--color-rose": colors.accent,
     "--color-rose-dark": colors.accentHover,
     "--color-rose-light": colors.accentSoft,
+    "--color-accent-text": colors.accentText,
     "--on-accent": colors.onAccent,
     "--color-cream": colors.background,
     "--color-ivory": colors.surface,
@@ -338,8 +348,11 @@ export function readabilityChecks(design: Design): ReadabilityCheck[] {
     check("Running text on the page", c.text, c.background, 4.5),
     check("Running text on cards", c.text, c.surface, 4.5),
     check("Headings on the page", c.heading, c.background, 3),
-    check("Links and small headings in the accent colour, on the page", c.accent, c.background, 3),
+    check("Links and small headings in the accent for words, on the page", c.accentText, c.background, 4.5),
+    check("Links and small headings in the accent for words, on cards", c.accentText, c.surface, 4.5),
     check("Words on a button in the accent colour", c.onAccent, c.accent, 4.5),
+    check("Words on a button in the accent colour, under the pointer", c.onAccent, c.accentHover, 4.5),
+    check("Words in the accent colour on the dark parts", c.accent, c.heading, 4.5),
     check("White words on a dark button, and in the footer", "#ffffff", c.heading, 4.5),
   ];
 }

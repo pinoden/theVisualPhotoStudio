@@ -10,10 +10,11 @@
    here (`designCss` in src/lib/site/design.ts). The values below are the
    site as it was built: the same as DEFAULT_DESIGN, which a test checks. */
 :root {
-  --color-rose: #c8a882;        /* the accent: links, small headings, the buttons that ask to book */
+  --color-rose: #c8a882;        /* the accent: the buttons that ask to book, and words in the accent on dark parts */
   --color-rose-dark: #a88760;   /* the accent under the pointer */
   --color-rose-light: #e8d5bb;  /* a pale accent */
-  --on-accent: #ffffff;         /* text on something filled with the accent */
+  --color-accent-text: #8e6a3e; /* the accent for words on the page and on cards: links, small headings, prices */
+  --on-accent: #2c2420;         /* text on something filled with the accent */
   --color-cream: #f9f5f0;       /* the page */
   --color-ivory: #fdfaf6;       /* cards and every second section */
   --color-dark: #2c2420;        /* headings, dark buttons, the footer */
@@ -47,6 +48,19 @@
      everything in the sans the body font. */
   --font-serif: var(--font-heading);
   --font-sans: var(--font-body);
+
+  /* Words in the accent colour (the owners' decision of 2026-11-27). The brand's tan cannot be read as words on the
+     page: 2.1 to 1 on the cream, where 4.5 is asked. So words written in the accent take its shade for words on a
+     light background, and keep the accent itself on something dark (the next rule), where it reads well. A rule that
+     colours words with the accent uses `--accent-words`, never `--color-rose`; under the pointer, the words go as dark
+     as the headings, or pale on something dark. */
+  --accent-words: var(--color-accent-text);
+  --accent-words-hover: var(--color-dark);
+}
+/* The dark parts: a dark section, a band with a picture behind its words, the footer, the admin's sidebar. */
+:is(.section-dark, .blk-bg-dark, .blk-banner.has-picture, .blk-slideshow[data-shade="dark"], .site-footer, .admin-sidebar) {
+  --accent-words: var(--color-rose);
+  --accent-words-hover: var(--color-rose-light);
 }
 
 /* ── Base ── */
@@ -101,11 +115,11 @@ h3, h4, h5 { font-family: var(--font-subheading); }
 .site-page .section { padding-top: var(--section-pad); padding-bottom: var(--section-pad); }
 
 a {
-  color: var(--color-rose);
+  color: var(--accent-words);
   text-decoration: none;
   transition: color .2s;
 }
-a:hover { color: var(--color-rose-dark); }
+a:hover { color: var(--accent-words-hover); }
 /* A link inside a sentence is underlined, so that it is told apart from the words around it by more than its
    colour (WCAG 1.4.1; the accessibility tests check it). Buttons, the menu and the footer keep their own look. */
 .page-content :is(p, li, label, dd, blockquote, td, .stat-label) a:not(.btn) { text-decoration: underline; text-underline-offset: 3px; }
@@ -306,8 +320,8 @@ a:hover { color: var(--color-rose-dark); }
 
 .btn-ghost {
   background: transparent;
-  border: 1px solid var(--color-rose);
-  color: var(--color-rose);
+  border: 1px solid var(--accent-words);
+  color: var(--accent-words);
 }
 .btn-ghost:hover {
   background: var(--color-rose);
@@ -370,7 +384,7 @@ a:hover { color: var(--color-rose-dark); }
   font-size: .75rem;
   letter-spacing: .2em;
   text-transform: uppercase;
-  color: var(--color-rose);
+  color: var(--accent-words);
   margin-bottom: 1.2rem;
 }
 .hero h1 { --h1-base: clamp(2.8rem, 6vw, 5rem); margin: 0 0 1.5rem; }
@@ -390,7 +404,7 @@ a:hover { color: var(--color-rose-dark); }
   font-size: .72rem;
   letter-spacing: .2em;
   text-transform: uppercase;
-  color: var(--color-rose);
+  color: var(--accent-words);
   margin-bottom: .75rem;
 }
 .divider {
@@ -468,7 +482,7 @@ a:hover { color: var(--color-rose-dark); }
 .studio-arch-img .studio-photo { width: 100%; height: 100%; object-fit: cover; transition: transform .4s; }
 .studio-arch-link:hover .studio-photo { transform: scale(1.04); }
 .studio-arch-name { font-family: var(--font-serif); font-size: 1.35rem; color: var(--color-dark); }
-.studio-arch-link:hover .studio-arch-name { color: var(--color-rose); }
+.studio-arch-link:hover .studio-arch-name { color: var(--accent-words); }
 .studio-arch .studio-price { margin: 0; }
 
 .studio-placeholder-text {
@@ -486,7 +500,7 @@ a:hover { color: var(--color-rose-dark); }
   font-size: .8rem;
   letter-spacing: .1em;
   text-transform: uppercase;
-  color: var(--color-rose);
+  color: var(--accent-words);
   font-weight: 700;
 }
 
@@ -543,11 +557,11 @@ a:hover { color: var(--color-rose-dark); }
   align-items: center;
   gap: 1rem;
 }
-.faq-question:hover { color: var(--color-rose); }
+.faq-question:hover { color: var(--accent-words); }
 .faq-icon {
   font-size: 1.6rem;
   font-weight: 400;
-  color: var(--color-rose);
+  color: var(--accent-words);
   transition: transform .3s;
   flex-shrink: 0;
 }
@@ -605,7 +619,7 @@ details.faq-item[open] .faq-icon { transform: rotate(45deg); }
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  color: var(--color-rose-dark);
+  color: var(--accent-words);
   font-size: .9rem;
 }
 .contact-detail strong { color: var(--color-dark); }
@@ -934,7 +948,7 @@ details.faq-item[open] .faq-icon { transform: rotate(45deg); }
 }
 .studio-option-rate {
   font-size: .8rem;
-  color: var(--color-rose);
+  color: var(--accent-words);
   letter-spacing: .06em;
   font-weight: 700;
 }
@@ -1105,7 +1119,7 @@ details.faq-item[open] .faq-icon { transform: rotate(45deg); }
 .booking-ref {
   font-family: var(--font-serif);
   font-size: 2rem;
-  color: var(--color-rose);
+  color: var(--accent-words);
   letter-spacing: .05em;
 }
 
@@ -1262,7 +1276,8 @@ details.faq-item[open] .faq-icon { transform: rotate(45deg); }
 .footer-col a { color: rgba(255,255,255,.6); font-size: .875rem; }
 .footer-col a:hover { color: var(--color-rose); }
 .footer-col p { font-size: .875rem; margin: 0 0 .75rem; }
-.footer-note { font-size: .8rem !important; color: rgba(255,255,255,.4); }
+/* .55 of white on the dark footer is 5.6 to 1; .4 was 3.7 (the contrast scan of 2026-11-27). */
+.footer-note { font-size: .8rem !important; color: rgba(255,255,255,.55); }
 .footer-social { display: flex; flex-wrap: wrap; gap: .25rem 1.25rem; list-style: none; margin: 1.25rem 0 0; padding: 0; }
 .footer-social a { color: rgba(255,255,255,.75); font-size: .8rem; letter-spacing: .08em; text-transform: uppercase; }
 .footer-social a:hover { color: var(--color-rose); }
@@ -1277,7 +1292,7 @@ details.faq-item[open] .faq-icon { transform: rotate(45deg); }
 }
 
 /* ── Utility ── */
-.text-rose { color: var(--color-rose) !important; }
+.text-rose { color: var(--accent-words) !important; }
 .text-dark { color: var(--color-dark) !important; }
 .text-muted { color: var(--color-muted) !important; }
 .text-center { text-align: center; }
@@ -1393,7 +1408,8 @@ button { font-family: inherit; }
   color: var(--color-muted);
 }
 .mode-option strong { display: block; color: var(--color-dark); margin-bottom: .2rem; font-size: 1rem; }
-.mode-option.selected { border-color: var(--color-rose); background: color-mix(in srgb, var(--color-rose) 6%, transparent); }
+/* The chosen path's words are as dark as its title: on its tinted background the running text's colour is 4.3 to 1. */
+.mode-option.selected { border-color: var(--color-rose); background: color-mix(in srgb, var(--color-rose) 6%, transparent); color: var(--color-dark); }
 
 .duration-btn { width: auto; min-width: 72px; height: 56px; padding: 0 .9rem; }
 .time-slot-btn small { display: block; font-size: .7rem; opacity: .8; }
@@ -1453,7 +1469,7 @@ button { font-family: inherit; }
 /* ── Accounts, codes and managing a booking ── */
 .link-button {
   background: none; border: none; padding: 0; cursor: pointer;
-  color: var(--color-rose); font-size: .85rem; text-decoration: underline;
+  color: var(--accent-words); font-size: .85rem; text-decoration: underline;
 }
 .field-error { color: #8b2020; font-size: .85rem; margin: .5rem 0 0; }
 .manage-booking { margin-top: 1.5rem; }
@@ -1548,7 +1564,7 @@ button { font-family: inherit; }
 .stamp-row { display: flex; justify-content: center; flex-wrap: wrap; gap: .6rem; margin-bottom: .6rem; }
 .stamp {
   width: 2.6rem; height: 2.6rem; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
-  border: 2px solid var(--color-rose); color: #fff; font-size: 1.1rem; background: transparent;
+  border: 2px solid var(--color-rose); color: var(--on-accent); font-size: 1.1rem; background: transparent;
 }
 .stamp-filled { background: var(--color-rose); }
 .stamp-count { font-family: var(--font-serif); font-size: 2rem; color: var(--color-dark); line-height: 1.1; }
@@ -2096,7 +2112,7 @@ fieldset { min-inline-size: 0; }
   border: 1px solid var(--color-border); border-radius: 999px; background: #fff; font-size: .8rem;
 }
 .editor-devices label.chosen { background: var(--color-dark); border-color: var(--color-dark); color: #fff; }
-.editor-devices label:focus-within { outline: 2px solid var(--color-rose); outline-offset: 2px; }
+.editor-devices label:focus-within { outline: 2px solid var(--accent-words); outline-offset: 2px; }
 .editor-devices input { position: absolute; width: 1px; height: 1px; opacity: 0; }
 
 .editor-group > summary { cursor: pointer; font-family: var(--font-serif); font-size: 1.15rem; color: var(--color-dark); }
@@ -2261,7 +2277,7 @@ fieldset { min-inline-size: 0; }
 .blk-cards { display: grid; grid-template-columns: repeat(var(--cols, 3), minmax(0, 1fr)); gap: 2rem; }
 .blk-card { text-align: center; padding: 1.5rem; }
 .blk-cards-boxed .blk-card { background: var(--color-ivory); border: 1px solid var(--color-border); }
-.blk-card-symbol { font-size: 2rem; margin-bottom: 1rem; color: var(--color-rose); }
+.blk-card-symbol { font-size: 2rem; margin-bottom: 1rem; color: var(--accent-words); }
 .blk-card h4 { --h4-base: 1.2rem; margin: 0 0 .5rem; }
 .blk-card p { font-size: .875rem; margin: 0; white-space: pre-line; }
 /* A card that is a link: the whole card is pressed, and shows it (the owner's brief of 2026-11-24, item 2). */
@@ -2287,7 +2303,7 @@ fieldset { min-inline-size: 0; }
 .blk-review blockquote p::after { content: "\201D"; }
 .blk-review figcaption { font-size: .8rem; letter-spacing: .08em; text-transform: uppercase; overflow-wrap: anywhere; }
 .blk-review cite { font-style: normal; }
-.blk-review-stars { margin: 0; color: var(--color-rose); letter-spacing: .15em; }
+.blk-review-stars { margin: 0; color: var(--accent-words); letter-spacing: .15em; }
 
 .blk-questions { width: min(800px, 100%); margin-inline: auto; }
 
@@ -2369,7 +2385,7 @@ fieldset { min-inline-size: 0; }
   transform: translateY(-50%);
 }
 .picture-row-arrow:hover { background: var(--color-dark); }
-.picture-row-arrow:focus-visible { outline: 2px solid var(--color-rose); outline-offset: 2px; }
+.picture-row-arrow:focus-visible { outline: 2px solid var(--accent-words); outline-offset: 2px; }
 .picture-row-arrow[data-side="back"] { left: .75rem; }
 .picture-row-arrow[data-side="next"] { right: .75rem; }
 .picture-row[data-arrows] .picture-row-arrow { display: flex; }
@@ -2445,9 +2461,9 @@ fieldset { min-inline-size: 0; }
 
 /* A studio's facts on the studios page: what photographers choose by. */
 .studio-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: .75rem 1.5rem; margin: 1rem 0; }
-.studio-facts dt { font-size: .72rem; letter-spacing: .12em; text-transform: uppercase; color: var(--color-rose); }
+.studio-facts dt { font-size: .72rem; letter-spacing: .12em; text-transform: uppercase; color: var(--accent-words); }
 .studio-facts dd { margin: .15rem 0 0; color: var(--color-dark); overflow-wrap: anywhere; }
-.studio-included-title { margin: 1rem 0 .4rem; font-size: .72rem; letter-spacing: .12em; text-transform: uppercase; color: var(--color-rose); }
+.studio-included-title { margin: 1rem 0 .4rem; font-size: .72rem; letter-spacing: .12em; text-transform: uppercase; color: var(--accent-words); }
 .studio-included { margin: 0 0 1.25rem; padding-left: 1.1rem; columns: 2 12rem; column-gap: 1.5rem; }
 .studio-included li { margin-bottom: .3rem; break-inside: avoid; }
 .studio-floor-plan { margin: 1rem 0 0; }
@@ -2461,8 +2477,8 @@ fieldset { min-inline-size: 0; }
 .studio-section { border-bottom: 1px solid var(--color-border); }
 .studio-section > summary { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: .85rem 0; cursor: pointer; list-style: none; font-size: .8rem; letter-spacing: .12em; text-transform: uppercase; color: var(--color-dark); }
 .studio-section > summary::-webkit-details-marker { display: none; }
-.studio-section > summary:hover { color: var(--color-rose); }
-.studio-section > summary::after { content: "+"; font-size: 1.25rem; letter-spacing: 0; color: var(--color-rose); transition: transform .3s; }
+.studio-section > summary:hover { color: var(--accent-words); }
+.studio-section > summary::after { content: "+"; font-size: 1.25rem; letter-spacing: 0; color: var(--accent-words); transition: transform .3s; }
 .studio-section[open] > summary::after { transform: rotate(45deg); }
 .studio-section-body { padding: 0 0 1rem; font-size: .95rem; line-height: 1.75; }
 .studio-section-body p { margin: 0 0 .6rem; }
@@ -2494,7 +2510,7 @@ fieldset { min-inline-size: 0; }
 .rate-card .rate-book { width: 100%; }
 .blk-contact .contact-detail strong { color: var(--color-dark); }
 .blk-table-wrap { overflow-x: auto; }
-.blk-table-wrap:focus-visible { outline: 2px solid var(--color-rose-dark); outline-offset: 2px; }
+.blk-table-wrap:focus-visible { outline: 2px solid var(--accent-words); outline-offset: 2px; }
 .blk-table th:last-child, .blk-table td:last-child { text-align: left; }
 .blk-table th, .blk-table td { padding-right: 1rem; }
 .live-values > summary { cursor: pointer; font-family: var(--font-serif); font-size: 1.1rem; color: var(--color-dark); }
@@ -2770,11 +2786,11 @@ fieldset { min-inline-size: 0; }
 .membership-option .membership-plan-description { margin: .25rem 0 .5rem; }
 .membership-option .rate-book { margin-top: auto; }
 .membership-benefits { margin-top: 1.5rem; text-align: left; }
-.membership-benefits-title { margin: 0 0 .5rem; font-size: .72rem; letter-spacing: .12em; text-transform: uppercase; color: var(--color-rose); text-align: center; }
+.membership-benefits-title { margin: 0 0 .5rem; font-size: .72rem; letter-spacing: .12em; text-transform: uppercase; color: var(--accent-words); text-align: center; }
 .membership-benefits ul { list-style: none; margin: 0; padding: 0; }
 .membership-benefits li { position: relative; padding: .3rem 0 .3rem 1.4rem; font-size: .875rem; border-bottom: 1px solid var(--color-border); }
 .membership-benefits li:last-child { border-bottom: 0; }
-.membership-benefits li::before { content: "✓"; position: absolute; left: 0; color: var(--color-rose); }
+.membership-benefits li::before { content: "✓"; position: absolute; left: 0; color: var(--accent-words); }
 .membership-terms-link { display: inline-block; margin-top: 1rem; font-size: .85rem; }
 /* Photography's sessions on the Rates page (brief of 2026-11-24, item 4). */
 .session-includes { display: block; font-size: .78rem; color: var(--color-muted); }

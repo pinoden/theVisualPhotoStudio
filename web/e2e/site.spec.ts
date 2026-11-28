@@ -12,6 +12,7 @@ import {
   latestEmail,
   next,
   onScreen,
+  pickLength,
   pickStudio,
   requestsSettled,
   shot,
@@ -278,6 +279,79 @@ test("the booking screen can be used from the keyboard", async ({ page }) => {
   await page.getByRole("button", { name: /^Next/ }).focus();
   await page.keyboard.press("Enter");
   await expect(page.getByRole("heading", { name: "Select date, duration & time" })).toBeFocused();
+});
+
+test("the browser's Back button goes a step back on the booking screen, and a refresh keeps the step and what was typed", async ({ page }) => {
+  // The owners' decision of 2026-11-27 (the preview test of 2026-11-21, point 12): Back left the booking for the page
+  // before it, and a refresh started it again. Nothing is booked here.
+  const day = dateAhead(94);
+  const paris = onScreen(page.locator("label.studio-option", { hasText: "Studio Paris" })).getByRole("checkbox");
+  await page.goto("/rates");
+  await page.goto("/book");
+  await pickStudio(page, "Studio Paris");
+  await next(page);
+  await byLabel(page, "Date").fill(day);
+  await pickLength(page, "1 hr");
+  await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
+  await next(page);
+  await fillDetails(page, tess);
+  // Each step is an entry of the browser's history, marked in the address.
+  await expect(page).toHaveURL(/\/book#step-details$/);
+
+  // Back: the day and its times, with the day and the time still chosen. Back again: the studios, with Paris chosen.
+  await page.goBack();
+  await expect(byLabel(page, "Date")).toHaveValue(day);
+  await expect(page.getByRole("button", { name: "10:00 AM", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page).toHaveURL(/\/book#step-when$/);
+  await page.goBack();
+  await expect(paris).toBeChecked();
+  await expect(page).toHaveURL(/\/book#step-studios$/);
+  // Forward, twice: the details as they were typed.
+  await page.goForward();
+  await expect(byLabel(page, "Date")).toHaveValue(day);
+  await page.goForward();
+  await expect(byLabel(page, "Full name *")).toHaveValue(tess.name);
+
+  // A refresh: the same step, with what was typed.
+  await page.reload();
+  await expect(byLabel(page, "Full name *")).toHaveValue(tess.name);
+  await expect(byLabel(page, "Email address *")).toHaveValue(tess.email);
+  await expect(byLabel(page, "Phone number *")).toHaveValue(tess.phone);
+  await expect(page).toHaveURL(/\/book#step-details$/);
+  // The screen's own Back goes through the same entries, so the browser's Forward comes back to the details.
+  await page.getByRole("button", { name: "← Back" }).click();
+  await expect(byLabel(page, "Date")).toHaveValue(day);
+  await expect(page.getByRole("button", { name: "10:00 AM", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page).toHaveURL(/\/book#step-when$/);
+  await page.goForward();
+  await expect(byLabel(page, "Full name *")).toHaveValue(tess.name);
+
+  // On to the payment step, and a refresh there: the policies are shown, to be agreed to again.
+  await agreeToPolicies(page);
+  await next(page);
+  await expect(page.getByRole("button", { name: /^Confirm & pay/ })).toBeVisible();
+  await expect(page).toHaveURL(/\/book#step-pay$/);
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Policies & booking form" })).toBeVisible();
+  await expect(page.getByRole("checkbox", { name: /I have read and agree/ })).not.toBeChecked();
+  await expect(page).toHaveURL(/\/book#step-policies$/);
+
+  // Back from the booking's first step leaves it for the page before it, as it always did.
+  await page.goBack();
+  await expect(byLabel(page, "Full name *")).toHaveValue(tess.name);
+  await page.goBack();
+  await expect(byLabel(page, "Date")).toHaveValue(day);
+  await page.goBack();
+  await expect(paris).toBeChecked();
+  await page.goBack();
+  await expect(page.getByRole("heading", { name: "Studio Rates" })).toBeVisible();
+  // And the booking page opened afresh is a new booking: nothing of the one left behind is in it.
+  await page.goto("/book");
+  await expect(paris).not.toBeChecked();
+  await expect(page).toHaveURL(/\/book$/);
+  await pickStudio(page, "Studio Blanche");
+  await next(page);
+  await expect(byLabel(page, "Date")).toHaveValue("");
 });
 
 test("the website fixes of 2026-11-24: three ways to book, the studios' sections, photography's prices, memberships in the menu", async ({ page }) => {
@@ -574,13 +648,12 @@ test("the released time is bookable again, and the code pays for a new booking w
   await page.getByRole("button", { name: "Cancel booking" }).click();
   await expect(byText(page, "No refund is due, because this booking was made with a reschedule code.")).toBeVisible();
   await page.getByRole("button", { name: "Keep my booking" }).click();
-  // Moving it again is offered for the $20 fee, which comes off the new code (the owner's answer of 2026-11-17).
+  // Moving it again online is not offered: she has used her free move, and a further one is the studio's to make, for
+  // $20 (the owners' decision of 2026-11-20, built 2026-11-27). Until then a second code was offered, $20 less.
   await page.getByRole("button", { name: "Reschedule" }).click();
-  await expect(
-    byText(page, /you will get a code worth \$[\d.,]+, valid for 90 days, to book a new time\. That is what you paid less the \$20 fee for moving a booking again\./),
-  ).toBeVisible();
-  await expect(page.getByRole("button", { name: "Yes, release it and send my code" })).toBeEnabled();
-  await page.getByRole("button", { name: "Keep my booking" }).click();
+  await expect(byText(page, "This booking was already moved, so it cannot be moved again online. Ask the studio to move it: each further move costs $20.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Yes, release it and send my code" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Back", exact: true }).click();
   // Or she asks the studio to move it (question 20 of 2026-11-17): it keeps its time, marked Reschedule Pending.
   await page.getByRole("button", { name: "Ask the studio to move it" }).click();
   await byLabel(page, "When would suit you?").fill("Any weekday afternoon the week after");
@@ -793,6 +866,18 @@ test("a customer cannot open the staff or owner areas", async ({ page }) => {
     await page.goto(path);
     await expect(byText(page, /could not be found/i)).toBeVisible();
   }
+  // Signed in, he need not type his own details again: the booking screen fills them in (the owners' decision of
+  // 2026-11-27; the preview test of 2026-11-21, point 9). Nothing is booked here.
+  await page.goto("/book");
+  await pickStudio(page, "Studio Paris");
+  await next(page);
+  await byLabel(page, "Date").fill(dateAhead(94));
+  await pickLength(page, "1 hr");
+  await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
+  await next(page);
+  await expect(byLabel(page, "Full name *")).toHaveValue(bob.name);
+  await expect(byLabel(page, "Email address *")).toHaveValue(bob.email);
+  await expect(byLabel(page, "Phone number *")).toHaveValue(bob.phone);
   // Signed out, the same pages ask to sign in instead of showing anything.
   await page.goto("/account");
   await expect(onScreen(page.locator(".account-who"))).toContainText(bob.email);

@@ -206,15 +206,29 @@ export const byText = (scope: Scope, text: string | RegExp) => onScreen(scope.ge
  * contrast is left out: see e2e/a11y.spec.ts. `exclude` leaves out parts of
  * the page that are not the site's own (the page editor's canvas is Puck's).
  */
-export async function accessibilityProblems(page: Page, options: { exclude?: string[] } = {}): Promise<string[]> {
+export async function accessibilityProblems(page: Page, options: { exclude?: string[]; contrast?: boolean } = {}): Promise<string[]> {
   // After a form is sent, the framework draws the page and puts its title back a moment later. Scanned in between,
   // a page that is about to have a title is reported without one; a page that never gets one fails here instead.
   await expect.poll(() => page.title(), { message: "the page has a title" }).not.toBe("");
   let builder = new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
-    .disableRules(["color-contrast"])
     // The development server's own button, which visitors never get.
     .exclude("nextjs-portal");
+  // Colour contrast is checked where a test asks for it (`contrast`): on the public pages and the booking steps, whose
+  // colours all pass since 2026-11-27. The logo's second half keeps the brand's tan: a logotype needs no contrast (WCAG
+  // 1.4.3), and the scan cannot know it is one. Elsewhere the rule stays off: the admin's pages were not gone through.
+  builder = options.contrast ? builder.exclude(".site-logo span") : builder.disableRules(["color-contrast"]);
+  if (options.contrast) {
+    // Words that are still fading in are read as paler than they are: a step of the booking screen takes 0.3 s to show.
+    await page.evaluate(() =>
+      Promise.all(
+        document
+          .getAnimations()
+          .filter((animation) => animation.effect?.getComputedTiming().iterations !== Infinity)
+          .map((animation) => animation.finished.catch(() => undefined)),
+      ),
+    );
+  }
   for (const selector of options.exclude ?? []) builder = builder.exclude(selector);
   const result = await builder.analyze();
   // The scan finishes in a blank page of its own, which it then closes. In WebKit a press 1 ms after that did nothing

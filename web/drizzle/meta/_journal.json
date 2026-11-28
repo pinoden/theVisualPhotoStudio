@@ -547,6 +547,13 @@
       "when": 1795821582370,
       "tag": "0077_codes_after_late_cancel_copy",
       "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1795823342211,
+      "tag": "0078_words_on_the_accent",
+      "breakpoints": true
     }
   ]
 }

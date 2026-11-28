@@ -725,9 +725,16 @@ function BookingWizard({
   function shown() {
     ownPath.current = window.location.pathname;
     const marked = stepOfHash(window.location.hash, steps);
-    if (marked !== stepIndex && (marked !== -1 || stepIndex > 0)) {
-      // Not the step this entry marked: nothing kept answered the steps before it, or the router brought this screen
-      // back on an entry of its own. Either way the entries below are not this booking's earlier steps.
+    const below = marked - stepIndex;
+    if (below > 0 && depth.current >= below) {
+      // An earlier step than this entry marks: the policies, after a refresh on the payment step. The history goes back
+      // to that step's own entry, so that the browser's Back button then shows the step before it.
+      depth.current = Math.min(depth.current - below, stepIndex);
+      ownMoves.current += 1;
+      window.history.go(-below);
+    } else if (marked !== stepIndex && (marked !== -1 || stepIndex > 0)) {
+      // Not the step this entry marked, and the screen does not know of its own entries below: nothing kept answered the
+      // steps before it, or the router brought this screen back on an entry of its own. The entry takes the step's mark.
       depth.current = 0;
       window.history.replaceState(null, "", stepIndex > 0 ? stepHash(steps[stepIndex]) : `${window.location.pathname}${window.location.search}`);
     } else {
