@@ -45,7 +45,7 @@ import { count, hoursInWords } from "@/lib/words";
 import type { DayAvailability } from "@/server/availability";
 import { agreementKey, policiesKey, type QuestionKind } from "@/lib/booking-form-keys";
 import type { Catalog } from "@/server/catalog";
-import { useOwnDetails } from "./own-details";
+import type { OwnDetails } from "@/server/own-details";
 import { buyerVerification, useCardForm } from "./square-card";
 import { FAKE_PAYMENT_LABEL, FAKE_PAYMENT_NOTE, FAKE_PAYMENT_TOKEN } from "@/lib/fake-payment"; // FAKE PAYMENT
 
@@ -173,10 +173,11 @@ function storeBooking(storageKey: string, kept: KeptBooking | null): void {
 /**
  * What the tab kept of a booking in the making (src/lib/booking-progress.ts), for a screen that is shown where it was
  * left: on an entry of the history marked as one of its steps, or in a document the browser brought back by a refresh
- * or its Back and Forward buttons. A screen opened afresh, by a link or a typed address, starts empty. Null on the
- * server and while the page starts: the server draws an empty screen, and the page has to start as that one.
+ * or its Back and Forward buttons. A screen opened afresh, by a link or a typed address, starts empty: null.
+ * Undefined on the server and while the page starts, when it has not been read yet: the server draws an empty screen,
+ * and the page has to start as that one.
  */
-function useKeptBooking(storageKey: string): KeptBooking | null {
+function useKeptBooking(storageKey: string): KeptBooking | null | undefined {
   const [screen] = useState(() => ({}));
   return useSyncExternalStore(
     subscribeNever,
@@ -185,11 +186,16 @@ function useKeptBooking(storageKey: string): KeptBooking | null {
         const first = !screenDrawnBefore;
         screenDrawnBefore = true;
         const marked = /^#step-/.test(window.location.hash);
-        keptAtStart.set(screen, marked || (first && documentCameBack()) ? storedBooking(storageKey) : null);
+        const kept = marked || (first && documentCameBack()) ? storedBooking(storageKey) : null;
+        // A screen that starts afresh is a new booking: what an earlier one left in the tab is taken away, here, where
+        // it was decided. The screen itself writes nothing until something on it changes (see its effect): while the
+        // page starts, the empty screen the server drew is on show, and this is read only after its effects have run.
+        if (!kept) storeBooking(storageKey, null);
+        keptAtStart.set(screen, kept);
       }
       return keptAtStart.get(screen) ?? null;
     },
-    () => null,
+    () => undefined,
   );
 }
 
@@ -209,6 +215,12 @@ interface BookingFlowProps {
   photography?: boolean;
   /** Whose sessions, in the session flow: the photographer's or the content creator's (question 69). */
   service?: Service;
+  /**
+   * A signed-in client's own name, email address and phone number, which the page reads with their session
+   * (src/app/book/booking-screen.tsx): the details step starts with them, so that they are not typed again (the
+   * owners' decision of 2026-11-27). Null, or left out, for a visitor.
+   */
+  own?: OwnDetails | null;
 }
 
 /**
@@ -219,7 +231,7 @@ interface BookingFlowProps {
 export function BookingFlow(props: BookingFlowProps) {
   const storageKey = `booking-in-the-making:${props.photography ? (props.service ?? "photography") : "rental"}`;
   const kept = useKeptBooking(storageKey);
-  return <BookingWizard key={kept ? "kept" : "new"} kept={kept} storageKey={storageKey} {...props} />;
+  return <BookingWizard key={kept ? "kept" : "new"} kept={kept ?? null} ready={kept !== undefined} storageKey={storageKey} {...props} />;
 }
 
 function BookingWizard({
@@ -228,11 +240,19 @@ function BookingWizard({
   photography = false,
   service = "photography",
   policies = null,
+  own = null,
   kept,
+  ready,
   storageKey,
 }: BookingFlowProps & {
   /** What the tab kept of this booking, to start from; null for a screen that starts empty. */
   kept: KeptBooking | null;
+  /**
+   * Whether what the tab kept has been read. Not while the page starts: the screen on show is then the empty one the
+   * server drew, and it leaves the address and the browser's history alone, or it would take away the step's mark
+   * before the screen made from what was kept reads it (the development server's runs of 2026-11-27).
+   */
+  ready: boolean;
   storageKey: string;
 }) {
   const words = SERVICE_WORDS[service];
@@ -273,9 +293,10 @@ function BookingWizard({
     // An add-on the owners took away since is not brought back.
     Object.fromEntries(Object.entries(kept?.addonCounts ?? {}).filter(([id]) => catalog.addons.some((addon) => addon.id === id))),
   );
-  const [name, setName] = useState(kept?.name ?? "");
-  const [email, setEmail] = useState(kept?.email ?? "");
-  const [phone, setPhone] = useState(kept?.phone ?? "");
+  // What was kept of a booking in the making, else a signed-in client's own details, else empty.
+  const [name, setName] = useState(kept?.name || own?.name || "");
+  const [email, setEmail] = useState(kept?.email || own?.email || "");
+  const [phone, setPhone] = useState(kept?.phone || own?.phone || "");
   const [notes, setNotes] = useState(kept?.notes ?? "");
   // The agreement to the policies is not kept: it is given again after a refresh.
   const [terms, setTerms] = useState(false);
@@ -344,12 +365,14 @@ function BookingWizard({
   // What the browser's events call, as it is on the latest drawing of the screen (set below, after those functions).
   const onShown = useRef(() => {});
   const onHistory = useRef(() => {});
-  // Kept in the tab as it changes, until the booking is made. An untouched screen keeps nothing, and takes away what an
-  // earlier booking left: a screen opened afresh is a new booking.
+  // Kept in the tab as it changes, until the booking is made. Nothing is written while the screen is as it started:
+  // the empty screen the server drew is on show while the page starts, before what the tab kept is read
+  // (`useKeptBooking`), and writing then would take that away (the development server's and WebKit's runs of
+  // 2026-11-27, where a refresh brought nothing back).
+  const startedAs = useRef<string | null>(null);
   useEffect(() => {
     if (made.current) return;
-    storeBooking(storageKey, {
-      at: Date.now(),
+    const now = {
       mode,
       studioIds,
       date: isIsoDate(dateInput) ? dateInput : "",
@@ -364,15 +387,14 @@ function BookingWizard({
       answers,
       codeInput,
       applied,
-      depth: depth.current,
-    });
+    };
+    const state = JSON.stringify([stepIndex, now]);
+    startedAs.current ??= state;
+    if (startedAs.current === state) return;
+    // Changed once, it is written from then on, also when it comes back to how it started.
+    startedAs.current = "";
+    storeBooking(storageKey, { ...now, at: Date.now(), depth: depth.current });
   }, [storageKey, mode, stepIndex, studioIds, dateInput, durationChoice, start, moreLengths, addonCounts, name, email, phone, notes, answers, codeInput, applied]);
-  // A signed-in client's own details, in the fields that are still empty: what was typed, or kept, stays.
-  useOwnDetails((own) => {
-    setName((typed) => typed || own.name);
-    setEmail((typed) => typed || own.email);
-    setPhone((typed) => typed || own.phone);
-  });
   const { settings, rules, bundlePrices } = catalog;
 
   const dayType: DayType = date ? (catalog.specialDates[date] ?? defaultDayType(date)) : "weekday";
@@ -726,7 +748,10 @@ function BookingWizard({
     ownPath.current = window.location.pathname;
     const marked = stepOfHash(window.location.hash, steps);
     const below = marked - stepIndex;
-    if (below > 0 && depth.current >= below) {
+    if (ownMoves.current > 0) {
+      // A move of the screen's own through the history is on its way: React's development mode runs every effect
+      // twice, and the second run would go back once more. The entry it arrives at is looked at there (`fromHistory`).
+    } else if (below > 0 && depth.current >= below) {
       // An earlier step than this entry marks: the policies, after a refresh on the payment step. The history goes back
       // to that step's own entry, so that the browser's Back button then shows the step before it.
       depth.current = Math.min(depth.current - below, stepIndex);
@@ -900,11 +925,12 @@ function BookingWizard({
   // The screen is on show: when it is first drawn, and again when the router brings back a page it kept (a page that was
   // left stays in the document, hidden, and its effects end until it shows again).
   useEffect(() => {
+    if (!ready) return;
     onShown.current();
     const moved = () => onHistory.current();
     window.addEventListener("popstate", moved);
     return () => window.removeEventListener("popstate", moved);
-  }, []);
+  }, [ready]);
 
   function next() {
     const problem = validate(step);

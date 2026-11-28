@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
-import { BookingFlow } from "@/components/BookingFlow";
 import { CodeBalanceCheck } from "@/components/CodeBalanceCheck";
 import { sessionsOf } from "@/lib/domain/services";
 import { telHref } from "@/lib/site/frame";
 import { getCatalog } from "@/server/cached";
+import { BookingScreen } from "../booking-screen";
 import { checkoutPolicies } from "../checkout-policies";
 import { shareMetadata, siteFrame } from "@/server/site";
 
@@ -58,7 +58,7 @@ export default async function BookContentPage() {
                 </div>
               }
             >
-              <BookingFlow catalog={catalog} photography service="content" policies={policies} />
+              <BookingScreen catalog={catalog} photography service="content" policies={policies} />
             </Suspense>
           </>
         )}

@@ -7,7 +7,6 @@ import { joinMembershipAction } from "@/app/book/membership/actions";
 import { formatCents } from "@/lib/domain/pricing";
 import { durationLabel, longDateLabel } from "@/lib/domain/time";
 import { EMAIL_FIELD, hasPhoneDigits, PHONE_FIELD } from "@/lib/parse";
-import { useOwnDetails } from "./own-details";
 import type { MembershipView } from "@/server/memberships";
 import { CopyCode } from "./CopyCode";
 import { buyerVerification, useCardForm } from "./square-card";
@@ -32,17 +31,12 @@ export function MembershipCheckout({
   prefill,
 }: {
   plan: { id: string; name: string; description: string; minutes: number; priceCents: number; studios: string[] };
-  prefill: { name: string; email: string };
+  /** A signed-in client's own details, which the page reads with their session. */
+  prefill: { name: string; email: string; phone: string };
 }) {
   const [name, setName] = useState(prefill.name);
   const [email, setEmail] = useState(prefill.email);
-  const [phone, setPhone] = useState("");
-  // A signed-in client's own details, in the fields that are still empty (the owners' decision of 2026-11-27).
-  useOwnDetails((own) => {
-    setName((typed) => typed || own.name);
-    setEmail((typed) => typed || own.email);
-    setPhone((typed) => typed || own.phone);
-  });
+  const [phone, setPhone] = useState(prefill.phone);
   const [terms, setTerms] = useState(false);
   const [requestId, setRequestId] = useState(() => crypto.randomUUID());
   const [sending, setSending] = useState(false);

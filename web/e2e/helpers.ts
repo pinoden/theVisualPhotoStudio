@@ -219,7 +219,10 @@ export async function accessibilityProblems(page: Page, options: { exclude?: str
   // 1.4.3), and the scan cannot know it is one. Elsewhere the rule stays off: the admin's pages were not gone through.
   builder = options.contrast ? builder.exclude(".site-logo span") : builder.disableRules(["color-contrast"]);
   if (options.contrast) {
-    // Words that are still fading in are read as paler than they are: a step of the booking screen takes 0.3 s to show.
+    // Words that are dimmed while an answer is on its way are read as paler than they are: the month calendar's days and
+    // weekdays, until the month has come (CI's development-server runs of 2026-11-27).
+    await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
+    // And words that are still fading in: a step of the booking screen takes 0.3 s to show.
     await page.evaluate(() =>
       Promise.all(
         document

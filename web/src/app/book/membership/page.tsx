@@ -4,6 +4,8 @@ import { connection } from "next/server";
 import { Suspense } from "react";
 import { MembershipCheckout } from "@/components/MembershipCheckout";
 import { getCatalog } from "@/server/cached";
+import { getDb } from "@/db/client";
+import { ownDetails } from "@/server/own-details";
 import { getCurrentUser } from "@/server/session";
 
 export const metadata: Metadata = { title: "Join a Membership", robots: { index: false } };
@@ -47,6 +49,8 @@ async function Checkout({ searchParams }: Pick<PageProps<"/book/membership">, "s
     );
   }
   const user = await getCurrentUser();
+  // A signed-in client's own name and phone number, as their latest booking has them (the owners' decision of 2026-11-27).
+  const own = await ownDetails(await getDb(), user);
   const studios = plan.studioIds.map((id) => catalog.studios.find((studio) => studio.id === id)?.name ?? "").filter(Boolean);
-  return <MembershipCheckout plan={{ ...plan, studios }} prefill={{ name: user?.name ?? "", email: user?.email ?? "" }} />;
+  return <MembershipCheckout plan={{ ...plan, studios }} prefill={{ name: own?.name || user?.name || "", email: user?.email ?? "", phone: own?.phone ?? "" }} />;
 }
