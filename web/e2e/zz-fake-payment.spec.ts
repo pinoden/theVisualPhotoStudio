@@ -6,6 +6,7 @@ import {
   byText,
   confirmAndGetRef,
   dateAhead,
+  fillDetails,
   latestEmail,
   onScreen,
   shot,
@@ -68,9 +69,7 @@ test("a membership is bought with the Fake Payment button, and its hours pay for
   const max = { name: "Mel Fakemember", email: "mel.fakemember.e2e@example.com", phone: "407-555-0142" };
   await page.goto("/memberships");
   await page.getByRole("link", { name: "Join: Studio Paris, 5 hours a month" }).click();
-  await byLabel(page, "Full name *").fill(max.name);
-  await byLabel(page, "Email address *").fill(max.email);
-  await byLabel(page, "Phone number *").fill(max.phone);
+  await fillDetails(page, max);
   await page.getByRole("checkbox", { name: /membership terms/ }).check();
   expect(await accessibilityProblems(page)).toEqual([]);
   await fakeButton(page).click();

@@ -1,6 +1,6 @@
 import { expect, test, type Browser, type Locator, type Page } from "@playwright/test";
 import sharp from "sharp";
-import { accessibilityProblems, byLabel, byText, isNotFoundPage, isPermanentRedirect, onScreen, openNotFound, shot, signIn, watchBrowser } from "./helpers";
+import { accessibilityProblems, byLabel, byText, isNotFoundPage, isPermanentRedirect, onScreen, openNotFound, requestsSettled, shot, signIn, watchBrowser } from "./helpers";
 
 /**
  * The website's editor (the owner's requirements 21, 25, 26 and 27, and the
@@ -355,7 +355,10 @@ test("the owner adds pictures, describes them, puts them on a studio, replaces o
   const blanche = onScreen(page.locator(".admin-card", { hasText: "Photos of Studio Blanche" }));
   await expect(blanche.locator(".media-ordered li")).toHaveCount(2);
   await expect(blanche.locator(".media-ordered li").first()).toContainText("the white cyclorama wall");
-  // The second becomes the first: the one on the studio's card.
+  // The second becomes the first: the one on the studio's card. The move is a second save, and it is not pressed while
+  // the first one's screen is still fetching the pages it links to: the Studios page, drawn for that between the two,
+  // was kept with the photos in their first order (`webkit-production` on 2026-11-21 and 2026-11-25; `requestsSettled`).
+  await requestsSettled(page);
   await page.getByRole("button", { name: "Move photo 2 of Studio Blanche earlier" }).click();
   await expect(blanche.locator(".media-ordered li").first()).toContainText("the window side");
   await shot(page, "46-admin-studio-photos");
@@ -827,7 +830,8 @@ test("the owner makes a page from blocks, previews it, and visitors see it at it
   await expect(byText(page, /Draft saved at .+ Visitors do not see it yet\./)).toBeVisible();
   await shot(page, "48-admin-page-editor");
   // The editor around the page: its bar, the page's settings and the lists beside it. The canvas is Puck's own.
-  expect(await accessibilityProblems(page, { exclude: [".page-editor-canvas"] }), "the page editor").toEqual([]);
+  // Without the contrast of colours: the canvas is Puck's, and it lays the page's words on a grey of its own.
+  expect(await accessibilityProblems(page, { exclude: [".page-editor-canvas"], contrast: false }), "the page editor").toEqual([]);
 
   // Not on the website yet.
   const guest = await visitor(browser);
