@@ -45,7 +45,7 @@ import { keptText, readKept, stepHash, stepOfHash, stepToShowAgain, type Applied
 import { count, hoursInWords } from "@/lib/words";
 import type { DayAvailability } from "@/server/availability";
 import { agreementKey, initialsKey, initialsOf, policiesKey, type QuestionKind } from "@/lib/booking-form-keys";
-import { bookingSale, listsOnSale, salesInForce, saleWords } from "@/lib/domain/sale";
+import { bookingSale, listsOnSale, saleCodesWords, salesInForce, saleWords } from "@/lib/domain/sale";
 import type { Catalog } from "@/server/catalog";
 import type { OwnDetails } from "@/server/own-details";
 import { SalePrice } from "./SalePrice";
@@ -406,6 +406,8 @@ function BookingWizard({
   const sale = useMemo(() => bookingSale(salesNow, catalog.studios.map((studio) => studio.id)), [salesNow, catalog.studios]);
   /** The studios' prices as the sale lowers them, to show beside the usual ones. */
   const saleRules = useMemo(() => listsOnSale(rules, bundlePrices, sale).rules, [rules, bundlePrices, sale]);
+  /** The sale of the studios chosen, as the server works it out (`saleFor`): what the booking is priced under. */
+  const ownSale = useMemo(() => bookingSale(salesNow, studioIds), [salesNow, studioIds]);
 
   const dayType: DayType = date ? (catalog.specialDates[date] ?? defaultDayType(date)) : "weekday";
   /**
@@ -575,14 +577,14 @@ function BookingWizard({
         membership: member?.membership ?? null,
         photoPackage: session ? { priceCents: session.priceCents, service: session.service } : null,
         tax: taxRuleFor(settings, Boolean(session)),
-        sale,
+        sale: ownSale,
       });
     } catch {
       return null;
     }
     // availableAddons, guestsAllowed and mostOf are derived from studioIds and the catalog.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [studioIds, date, dayType, duration, rules, bundlePrices, sale, settings.multiStudioPercent, catalog.addons, addonCounts, promo, member, photography, session, combinationError]);
+  }, [studioIds, date, dayType, duration, rules, bundlePrices, ownSale, settings.multiStudioPercent, catalog.addons, addonCounts, promo, member, photography, session, combinationError]);
 
   const needsCard = price !== null && price.totalCents > 0;
   // The payment configuration and Square's card form, on the payment step of a booking that costs money.
@@ -723,7 +725,7 @@ function BookingWizard({
   async function fetchForms() {
     const key = formsKey;
     try {
-      const response = await fetch(`/api/checkout-forms?studios=${studioIds.join(",")}&date=${date}${photography ? "&photography=1" : ""}`, { cache: "no-store" });
+      const response = await fetch(`/api/checkout-forms?studios=${studioIds.join(",")}&date=${date}${photography ? `&service=${service}` : ""}`, { cache: "no-store" });
       const data = (await response.json().catch(() => ({}))) as { ok?: boolean; questions?: FormQuestion[]; agreements?: FormAgreement[] };
       if (!response.ok || !data.ok) throw new Error();
       setForms({ key, questions: data.questions ?? [], agreements: data.agreements ?? [] });
@@ -1157,10 +1159,10 @@ function BookingWizard({
           </span>
         </div>
       ))}
-      {price.saleCents !== undefined && sale && (
+      {price.saleCents !== undefined && ownSale && (
         <div className="price-row price-sale-note">
           <span>
-            {sale.name}: {formatCents(price.saleCents)} off the usual price
+            {ownSale.name}: {formatCents(price.saleCents)} off the usual price
           </span>
         </div>
       )}
@@ -1199,6 +1201,13 @@ function BookingWizard({
         <p style={{ fontSize: ".8rem", margin: ".75rem 0 0" }}>
           A {words.session} is refunded when it is cancelled {hoursInWords(settings.photoRefundWindowHours)} or more
           before it starts{settings.refundFeePercent > 0 ? `, less the ${settings.refundFeePercent}% payment processing fee` : ""}.
+        </p>
+      )}
+      {/* A sale and a discount code are not combined (the owner, 2026-11-28): the one that leaves less to pay is used. */}
+      {promo && price.saleSetAside && ownSale && (
+        <p className="price-sale-note" role="status" style={{ margin: ".75rem 0 0" }}>
+          Code {promo.code} takes more off than the {ownSale.name} price would, so the code is used and the usual prices are shown: a discount code is not used on top of a
+          sale&rsquo;s price.
         </p>
       )}
       {promo && price.promoMisfit && (
@@ -1395,7 +1404,7 @@ function BookingWizard({
     <div className="wizard-container" ref={topRef} style={{ scrollMarginTop: 90 }}>
       {salesNow.map((on) => (
         <p className="sale-banner" key={on.id}>
-          <strong>{on.name}:</strong> {saleWords(on, catalog.studios)}.
+          <strong>{on.name}:</strong> {saleWords(on, catalog.studios)}.{saleCodesWords(on)}
         </p>
       ))}
       {!photography && (

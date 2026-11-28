@@ -330,6 +330,11 @@ export const sales = pgTable(
     bookUntil: date("book_until", { mode: "string" }).notNull(),
     visitFrom: date("visit_from", { mode: "string" }),
     visitUntil: date("visit_until", { mode: "string" }),
+    /**
+     * Whether a discount code can be used on top of the sale's price. Off, as the owner decided on 2026-11-28 ("Either
+     * or, not combine"): a client gets the sale's price or their code's discount, whichever leaves less to pay.
+     */
+    withCodes: boolean("with_codes").notNull().default(false),
     createdAt: createdAt(),
   },
   (t) => [check("sales_percent", sql`${t.percent} between 1 and 90`), check("sales_days", sql`${t.bookUntil} >= ${t.bookFrom}`)],
@@ -1335,7 +1340,10 @@ export const intakeQuestions = pgTable("intake_questions", {
   active: boolean("active").notNull().default(false),
   studioIds: jsonb("studio_ids").$type<string[]>().notNull().default([]),
   forRentals: boolean("for_rentals").notNull().default(true),
+  /** For photography sessions. Until 2026-11-28 it stood for sessions of both kinds. */
   forPhotography: boolean("for_photography").notNull().default(true),
+  /** For content creation sessions (the owner, 2026-11-28: photography and content creation have sets of their own). */
+  forContent: boolean("for_content").notNull().default(true),
   startsOn: date("starts_on", { mode: "string" }),
   endsOn: date("ends_on", { mode: "string" }),
   sortOrder: integer("sort_order").notNull().default(0),
@@ -1355,6 +1363,7 @@ export const agreements = pgTable("agreements", {
   studioIds: jsonb("studio_ids").$type<string[]>().notNull().default([]),
   forRentals: boolean("for_rentals").notNull().default(true),
   forPhotography: boolean("for_photography").notNull().default(true),
+  forContent: boolean("for_content").notNull().default(true),
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: createdAt(),
 });

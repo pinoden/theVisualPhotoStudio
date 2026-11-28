@@ -96,6 +96,15 @@ async function SettingsForm({ searchParams }: Pick<PageProps<"/admin/settings">,
                   is used up, as money paid is kept then. A cancellation by the studio always gives it back. A booking keeps the rule it was
                   made under.
                 </p>
+                <label style={{ display: "block", marginBottom: ".4rem", fontSize: ".9rem" }}>
+                  <input type="checkbox" name="weekdayCodeOnWeekdays" defaultChecked={settings.weekdayCodeOnWeekdays} /> A studio rental booked for
+                  a weekday is moved to a weekday only
+                </label>
+                <p style={{ fontSize: ".78rem", margin: "0 0 1rem" }}>
+                  On, the code a client gets for releasing such a booking works Monday to Friday and not on the dates under Prices, &ldquo;Holidays and
+                  special dates&rdquo;. A booking made for a weekend or a holiday gets a code for any day, and so does a session. The studio can still move
+                  a booking to any day from the calendar. Off, every code is for any day. A booking keeps the rule it was made under.
+                </p>
               </>
             )}
             {group.title === "Memberships" && (

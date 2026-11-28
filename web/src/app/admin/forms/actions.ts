@@ -28,6 +28,7 @@ function appliesFrom(formData: FormData): Applies {
     studioIds: formData.getAll("studio").filter((value): value is string => typeof value === "string"),
     forRentals: formData.get("forRentals") === "1",
     forPhotography: formData.get("forPhotography") === "1",
+    forContent: formData.get("forContent") === "1",
   };
 }
 

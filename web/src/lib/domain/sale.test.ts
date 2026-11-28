@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { quote, type BundlePrice, type PriceRule } from "./pricing";
-import { bookingSale, bundlePercent, listsOnSale, salePriceCents, salesInForce, type Sale } from "./sale";
+import { bookingSale, bundlePercent, listsOnSale, saleCodesWords, salePriceCents, salesInForce, type Sale } from "./sale";
 
 const sale = (overrides: Partial<Sale>): Sale => ({
   id: "s1",
@@ -11,6 +11,7 @@ const sale = (overrides: Partial<Sale>): Sale => ({
   bookUntil: "2026-11-28",
   visitFrom: null,
   visitUntil: null,
+  withCodes: false,
   ...overrides,
 });
 
@@ -111,8 +112,8 @@ describe("a price under a sale", () => {
     expect("saleCents" in session).toBe(false);
   });
 
-  it("comes off first: the discount for several studios, a code and the tax are worked out on the sale's prices", () => {
-    const sale = { percents: { blanche: 25, paris: 25 } };
+  it("comes off first: the discount for several studios, the tax, and a code where the owners let one go with the sale, are worked out on the sale's prices", () => {
+    const sale = { percents: { blanche: 25, paris: 25 }, withCodes: true as const };
     const both = { ...input, studioIds: ["blanche", "paris"], promo: { kind: "percent" as const, value: 10 }, tax: { basisPoints: 650, studio: true, addons: true } };
     const priced = quote({ ...both, sale });
     // $78 less a quarter is $58.50, $59 in whole dollars; two of them, less 20% for two studios.
@@ -121,5 +122,74 @@ describe("a price under a sale", () => {
     expect(priced.saleCents).toBe(3040);
     // The same as a price worked out on lists already lowered, with what the sale took off beside it.
     expect(priced).toEqual({ ...quote({ ...both, ...listsOnSale(rules, [], sale) }), saleCents: 3040, usualStudioLines: quote({ ...both, promo: null, tax: null }).studioLines });
+  });
+});
+
+describe("a sale and a discount code (the owner, 2026-11-28: \"Either or, not combine\")", () => {
+  const rules: PriceRule[] = [
+    { studioId: "blanche", dayType: "weekday", durationMinutes: 60, priceCents: 7800 },
+    { studioId: "paris", dayType: "weekday", durationMinutes: 60, priceCents: 7800 },
+  ];
+  const input = { studioIds: ["blanche"], dayType: "weekday" as const, durationMinutes: 60, rules, bundlePrices: [], multiStudioPercent: { 2: 20 } };
+  // 17% off $78 is $65, in whole dollars.
+  const sale = { percents: { blanche: 17 } };
+  const percent = (value: number) => ({ kind: "percent" as const, value });
+
+  it("charges the sale's price when the code would take off less, and the code is not used", () => {
+    const priced = quote({ ...input, sale, promo: percent(10) });
+    expect(priced).toMatchObject({ totalCents: 6500, saleCents: 1300, promoDiscountCents: 0, promoMisfit: "sale" });
+    expect("saleSetAside" in priced).toBe(false);
+    // The same as the sale's price with no code at all.
+    expect({ ...priced, promoMisfit: null }).toEqual(quote({ ...input, sale }));
+  });
+
+  it("charges the usual price with the code when the code takes off more, and the sale is set aside", () => {
+    // A quarter off $78 leaves $58.50, less than $65.
+    const priced = quote({ ...input, sale, promo: percent(25) });
+    expect(priced).toMatchObject({ studioLines: [{ studioId: "blanche", priceCents: 7800 }], promoDiscountCents: 1950, totalCents: 5850, promoMisfit: null, saleSetAside: true });
+    expect("saleCents" in priced).toBe(false);
+    expect("usualStudioLines" in priced).toBe(false);
+    // The same as the code's price with no sale at all.
+    expect(priced).toEqual({ ...quote({ ...input, promo: percent(25) }), saleSetAside: true });
+  });
+
+  it("keeps the sale's price, and the code for another day, when the two leave the same to pay", () => {
+    // Half off $78 either way.
+    expect(quote({ ...input, sale: { percents: { blanche: 50 } }, promo: percent(50) })).toMatchObject({ totalCents: 3900, saleCents: 3900, promoDiscountCents: 0, promoMisfit: "sale" });
+  });
+
+  it("counts a free hour as a discount code, and compares what is left to pay with the tax", () => {
+    // The hour is free with the code: nothing to pay, where the sale would leave $65.
+    expect(quote({ ...input, sale, promo: { kind: "free_hour", value: 60 } })).toMatchObject({ totalCents: 0, promoDiscountCents: 7800, saleSetAside: true });
+    const taxed = quote({ ...input, sale, promo: percent(10), tax: { basisPoints: 650, studio: true, addons: true } });
+    // $65 and its tax, against $70.20 and its tax.
+    expect(taxed).toMatchObject({ totalCents: 6923, taxCents: 423, promoMisfit: "sale" });
+  });
+
+  it("lets credit and membership hours pay a sale's price like any other: they are payment, not a discount", () => {
+    expect(quote({ ...input, sale, promo: { kind: "amount", value: 5000 } })).toMatchObject({ totalCents: 1500, saleCents: 1300, promoDiscountCents: 5000, promoMisfit: null });
+    expect(quote({ ...input, sale, membership: { minutesLeft: 30, weekendDifference: false } })).toMatchObject({ totalCents: 3250, saleCents: 1300, membershipCents: 3250 });
+  });
+
+  it("says why a code does not fit before it says anything of the sale, and leaves a code alone where the sale lowers nothing", () => {
+    const weekdays = { from: null, until: null, weekdays: [1, 2, 3, 4, 5], notOnSpecialDates: false };
+    // 2026-12-12 is a Saturday.
+    expect(quote({ ...input, sale, promo: { ...percent(25), days: weekdays }, bookingDay: { date: "2026-12-12", special: false } })).toMatchObject({ totalCents: 6500, promoMisfit: "day" });
+    // Paris is on sale, Blanche is booked: the code works as ever.
+    expect(quote({ ...input, sale: { percents: { paris: 17 } }, promo: percent(10) })).toEqual(quote({ ...input, promo: percent(10) }));
+  });
+
+  it("takes a code on top of a sale the owners ticked for it, when every sale that lowers the booking's studios is ticked", () => {
+    expect(quote({ ...input, sale: { ...sale, withCodes: true }, promo: percent(10) })).toMatchObject({ totalCents: 5850, saleCents: 1300, promoDiscountCents: 650, promoMisfit: null });
+    const open = { id: "s1", name: "Quiet week", percent: 10, studioIds: ["blanche"], bookFrom: "2026-11-27" as const, bookUntil: "2026-11-28" as const, visitFrom: null, visitUntil: null, withCodes: true };
+    const closed = { ...open, id: "s2", name: "Black Friday", percent: 17, studioIds: ["paris"], withCodes: false };
+    expect(bookingSale([open, closed], ["blanche"])).toEqual({ name: "Quiet week", percents: { blanche: 10 }, withCodes: true });
+    expect(bookingSale([open, closed], ["blanche", "paris"])).toEqual({ name: "Quiet week + Black Friday", percents: { blanche: 10, paris: 17 } });
+    expect(bookingSale([open, closed], ["paris"])).toEqual({ name: "Black Friday", percents: { paris: 17 } });
+  });
+
+  it("tells clients on the sale's line, unless a code can go with it", () => {
+    expect(saleCodesWords({ withCodes: false })).toBe(" A discount code cannot be combined with it.");
+    expect(saleCodesWords({ withCodes: true })).toBe("");
   });
 });

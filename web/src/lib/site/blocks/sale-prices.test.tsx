@@ -17,7 +17,7 @@ const B = "id-blanche";
 const P = "id-paris";
 const hours = Object.fromEntries([1, 2, 3, 4, 5, 6, 7].map((weekday) => [weekday, { openMinute: 540, closeMinute: 1140 }]));
 const studio = (id: string, slug: string, name: string) => ({ id, slug, name, tagline: "", description: "", includedGuests: 6, extraGuests: 6, bufferMinutes: 15, color: "#888888", hours, photos: [], facts: NO_FACTS, floorPlan: null });
-const blackFriday: Sale = { id: "sale-1", name: "Black Friday", percent: 17, studioIds: [P], bookFrom: "2026-11-27", bookUntil: "2026-11-28", visitFrom: null, visitUntil: null };
+const blackFriday: Sale = { id: "sale-1", name: "Black Friday", percent: 17, studioIds: [P], bookFrom: "2026-11-27", bookUntil: "2026-11-28", visitFrom: null, visitUntil: null, withCodes: false };
 const catalog: Catalog = {
   studios: [studio(B, "blanche", "Studio Blanche"), studio(P, "paris", "Studio Paris")],
   rules: [
@@ -48,7 +48,9 @@ const crossed = (usual: string, now: string) =>
 describe("a sale on the price lists", () => {
   it("crosses out the usual prices of the studio on sale, on the days it can be booked, and says what is on", () => {
     const html = draw([block("RateCards")], "2026-11-27");
-    expect(html).toContain('<p class="sale-note"><strong>Black Friday:</strong> 17% off Studio Paris when you book by Saturday, November 28, 2026.</p>');
+    expect(html).toContain('<p class="sale-note"><strong>Black Friday:</strong> 17% off Studio Paris when you book by Saturday, November 28, 2026. A discount code cannot be combined with it.</p>');
+    // Unless the owners let a code go with the sale.
+    expect(draw([block("RateCards")], "2026-11-27", [{ ...blackFriday, withCodes: true }])).toContain("when you book by Saturday, November 28, 2026.</p>");
     const paris = html.slice(html.indexOf("<h3>Studio Paris</h3>"));
     // $78 an hour is $65, in whole dollars; two hours, $136, are $113; and the weekend's hour, $98, is $81.
     expect(paris).toContain(`<div class="rate-price">${crossed("$78", "$65")}</div>`);

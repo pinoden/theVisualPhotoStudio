@@ -2,6 +2,7 @@ import { and, asc, desc, eq, inArray, isNotNull, isNull, max } from "drizzle-orm
 import { together, type DbLike } from "@/db/client";
 import { agreements, agreementVersions, bookingAcceptances, bookingAnswers, intakeQuestions, siteDocuments, siteVersions, studios } from "@/db/schema";
 import { agreementKey, initialsKey, initialsOf, policiesKey, type QuestionKind } from "@/lib/booking-form-keys";
+import type { Service } from "@/lib/domain/services";
 import { isIsoDate, type IsoDate } from "@/lib/domain/time";
 import { conditionsOf, shownWords } from "@/lib/site/conditions";
 import { fillLiveValues, liveValues } from "@/lib/site/live-values";
@@ -43,21 +44,27 @@ const BODY_MAX = 20000;
 /** What a booking is, for the questions and agreements that apply to it. */
 export interface FormContext {
   studioIds: string[];
-  photography: boolean;
+  /** The kind of session, or null for a studio rental. */
+  service: Service | null;
   date: IsoDate;
 }
 
-/** To whom a question or an agreement applies. */
+/**
+ * To whom a question or an agreement applies: studio rentals, photography sessions, content creation sessions, or
+ * several of them. Photography and content creation have sets of their own (the owner, 2026-11-28); until then one
+ * tick stood for sessions of both kinds.
+ */
 export interface Applies {
   /** Empty: every studio. Otherwise a booking that holds any one of them, in a bundle too. */
   studioIds: string[];
   forRentals: boolean;
   forPhotography: boolean;
+  forContent: boolean;
 }
 
 /** Whether a question or an agreement applies to a booking: its studios, its type, and for a question its days. */
 export function appliesTo(item: Applies & { startsOn?: string | null; endsOn?: string | null }, context: FormContext): boolean {
-  if (context.photography ? !item.forPhotography : !item.forRentals) return false;
+  if (!(context.service === "content" ? item.forContent : context.service === "photography" ? item.forPhotography : item.forRentals)) return false;
   if (item.studioIds.length > 0 && !context.studioIds.some((id) => item.studioIds.includes(id))) return false;
   if (item.startsOn && context.date < item.startsOn) return false;
   if (item.endsOn && context.date > item.endsOn) return false;
@@ -109,6 +116,7 @@ const questionView = (row: typeof intakeQuestions.$inferSelect): QuestionView =>
   studioIds: row.studioIds,
   forRentals: row.forRentals,
   forPhotography: row.forPhotography,
+  forContent: row.forContent,
   startsOn: row.startsOn,
   endsOn: row.endsOn,
 });
@@ -143,7 +151,7 @@ async function publishedAgreements(db: DbLike): Promise<(AgreementShown & Applie
   return rows.flatMap((row) => {
     const latest = versions.find((version) => version.agreementId === row.id);
     return latest
-      ? [{ agreementId: row.id, versionId: latest.id, number: latest.number, title: latest.title, body: latest.body, studioIds: row.studioIds, forRentals: row.forRentals, forPhotography: row.forPhotography }]
+      ? [{ agreementId: row.id, versionId: latest.id, number: latest.number, title: latest.title, body: latest.body, studioIds: row.studioIds, forRentals: row.forRentals, forPhotography: row.forPhotography, forContent: row.forContent }]
       : [];
   });
 }
@@ -309,7 +317,7 @@ export interface QuestionInput extends Applies {
 export type SaveResult = { ok: true; id: string } | { ok: false; message: string };
 
 async function checkApplies(db: DbLike, applies: Applies): Promise<string | null> {
-  if (!applies.forRentals && !applies.forPhotography) return "Choose rentals, photography and content creation sessions, or both.";
+  if (!applies.forRentals && !applies.forPhotography && !applies.forContent) return "Choose the bookings it is for: studio rentals, photography sessions, content creation sessions, or several of them.";
   const ids = [...new Set(applies.studioIds)];
   if (ids.length > 0 && (await db.select({ id: studios.id }).from(studios).where(inArray(studios.id, ids))).length !== ids.length) return "Unknown studio.";
   return null;
@@ -341,6 +349,7 @@ async function checkedQuestion(db: DbLike, input: QuestionInput): Promise<Omit<t
     studioIds: [...new Set(input.studioIds)],
     forRentals: input.forRentals,
     forPhotography: input.forPhotography,
+    forContent: input.forContent,
     startsOn,
     endsOn,
   };
@@ -417,6 +426,7 @@ export async function listAgreements(db: DbLike): Promise<AgreementView[]> {
     studioIds: row.studioIds,
     forRentals: row.forRentals,
     forPhotography: row.forPhotography,
+    forContent: row.forContent,
     versions: versions
       .filter((version) => version.agreementId === row.id)
       .map((version) => ({ id: version.id, number: version.number, title: version.title, body: version.body, publishedAt: version.publishedAt.toISOString(), publishedBy: version.publishedBy })),
@@ -431,7 +441,7 @@ export async function saveAgreement(db: DbLike, id: string | null, input: Agreem
   if (draft.length > BODY_MAX) return { ok: false, message: `The text can be at most ${BODY_MAX} characters.` };
   const applies = await checkApplies(db, input);
   if (applies) return { ok: false, message: applies };
-  const values = { title, draft, studioIds: [...new Set(input.studioIds)], forRentals: input.forRentals, forPhotography: input.forPhotography };
+  const values = { title, draft, studioIds: [...new Set(input.studioIds)], forRentals: input.forRentals, forPhotography: input.forPhotography, forContent: input.forContent };
   if (id) {
     const changed = await db.update(agreements).set(values).where(eq(agreements.id, id)).returning({ id: agreements.id });
     return changed.length > 0 ? { ok: true, id } : { ok: false, message: "That agreement is gone." };

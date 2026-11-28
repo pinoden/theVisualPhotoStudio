@@ -396,7 +396,7 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
   // for a client is not: the client has not read the policies there.
   let forms: CheckedForms | null = null;
   if (!deps.madeBy) {
-    const checked = await checkForms(db, { studioIds: input.studioIds, photography: Boolean(session), date: input.date }, { accepted: input.accepted, answers: input.answers, name: input.customer.name }, now);
+    const checked = await checkForms(db, { studioIds: input.studioIds, service: session ? (session.service ?? "photography") : null, date: input.date }, { accepted: input.accepted, answers: input.answers, name: input.customer.name }, now);
     if (!checked.ok) return fail(checked.problem.code === "policies_changed" ? 409 : 422, checked.problem.code === "policies_changed" ? "policies_changed" : "invalid_input", checked.problem.message);
     forms = checked.forms;
   }

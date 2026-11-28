@@ -560,9 +560,10 @@ test("a customer signs in, sees their booking, and turns it into a reschedule co
   await page.getByRole("link", { name: "Back to My Appointments" }).click();
 
   await card.getByRole("button", { name: "Reschedule" }).click();
-  await expect(byText(card, /you will get a code worth \$115, valid for 90 days/)).toBeVisible();
+  // Booked for a weekday, so the code is for weekdays (the owner, 2026-11-28): said before the release, and with the code.
+  await expect(byText(card, /you will get a code worth \$115, valid for 90 days.* The code is for a booking on a weekday \(Monday to Friday, not a holiday\)/)).toBeVisible();
   await card.getByRole("button", { name: "Yes, release it and send my code" }).click();
-  await expect(byText(card, /Your code is worth \$115/)).toBeVisible();
+  await expect(byText(card, /Your code is worth \$115 .* The code is for a booking on a weekday/)).toBeVisible();
   rescheduleCode = (await card.locator(".booking-ref").innerText()).trim();
   expect(rescheduleCode).toMatch(/^MOVE-[0-9A-Z]{4}-[0-9A-Z]{4}$/);
   await shot(page, "10-reschedule-code");
@@ -1281,7 +1282,9 @@ test("the owners put a studio on sale: its usual price is crossed out on the Rat
   await form.getByRole("button", { name: "Add the sale" }).click();
   await expect(byText(page, "Sale added. It begins and ends by itself, on its days.")).toBeVisible();
   const saleRow = page.locator("#sales").getByRole("row", { name: /Black Friday/ });
-  await expect(saleRow).toContainText(`17% off Studio Dayglow when you book by ${tomorrow}.`);
+  // A discount code is not used on top of a sale unless the owners tick it (the owner, 2026-11-28: "Either or, not combine").
+  await expect(form.getByRole("checkbox", { name: "A discount code can be used on top of this sale" })).not.toBeChecked();
+  await expect(saleRow).toContainText(`17% off Studio Dayglow when you book by ${tomorrow}. A discount code cannot be combined with it.`);
   await expect(saleRow).toContainText("On now");
   await shot(page, "17d-admin-sale");
   expect(await accessibilityProblems(page), "Prices, with a sale").toEqual([]);
@@ -1289,7 +1292,7 @@ test("the owners put a studio on sale: its usual price is crossed out on the Rat
   // A visitor reads on the Rates page what is on, and Dayglow's usual prices crossed out beside the sale's.
   const client = await (await browser.newContext()).newPage();
   await client.goto("/rates");
-  await expect(onScreen(client.locator(".sale-note"))).toHaveText(`Black Friday: 17% off Studio Dayglow when you book by ${tomorrow}.`);
+  await expect(onScreen(client.locator(".sale-note"))).toHaveText(`Black Friday: 17% off Studio Dayglow when you book by ${tomorrow}. A discount code cannot be combined with it.`);
   // A studio's own card: a session's card with the same heading is a section.
   const ratesOf = (name: string) => onScreen(client.locator("div.rate-card", { has: client.getByRole("heading", { name, exact: true }) }));
   await expect(ratesOf("Studio Dayglow").locator(".rate-price")).toHaveText("Usual price $78 now $65");
@@ -1303,7 +1306,7 @@ test("the owners put a studio on sale: its usual price is crossed out on the Rat
 
   // The booking screen says the same, and an hour of Dayglow is charged $65.
   await client.goto("/book");
-  await expect(onScreen(client.locator(".sale-banner"))).toHaveText(`Black Friday: 17% off Studio Dayglow when you book by ${tomorrow}.`);
+  await expect(onScreen(client.locator(".sale-banner"))).toHaveText(`Black Friday: 17% off Studio Dayglow when you book by ${tomorrow}. A discount code cannot be combined with it.`);
   await expect(onScreen(client.locator("label.studio-option", { hasText: "Studio Dayglow" })).locator(".studio-option-rate")).toHaveText("From Usual price $78 now $65 / hour");
   await expect(onScreen(client.locator("label.studio-option", { hasText: "Studio Paris" })).locator(".studio-option-rate")).toHaveText("From $68 / hour");
   await bookStudioFirstToPayment(client, { studios: ["Studio Dayglow"], date: SALE_DAY, duration: "1 hr", time: "10:00 AM", customer: { name: "Sally Saver", email: "sally.e2e@example.com", phone: "407-555-0177" } });
@@ -1431,7 +1434,9 @@ test("the owners write a seasonal question and an agreement, a client answers an
   await byLabel(page, "Kind").selectOption({ label: "Tick box" });
   await page.locator("#question-form").getByRole("checkbox", { name: "Required" }).check();
   await page.locator("#question-form").getByRole("checkbox", { name: "Studio Dayglow" }).check();
-  await page.locator("#question-form").getByRole("checkbox", { name: "Photography and content creation sessions" }).uncheck();
+  // Photography and content creation have ticks of their own (the owner, 2026-11-28).
+  await page.locator("#question-form").getByRole("checkbox", { name: "Photography sessions" }).uncheck();
+  await page.locator("#question-form").getByRole("checkbox", { name: "Content creation sessions" }).uncheck();
   await byLabel(page, "From (optional)").fill(addDays(day, -2));
   await byLabel(page, "Until (optional)").fill(addDays(day, 2));
   await page.getByRole("button", { name: "Add the question" }).click();
@@ -1453,11 +1458,16 @@ test("the owners write a seasonal question and an agreement, a client answers an
   await expect(preview.locator(".initials-item")).toHaveCount(5);
   await expect(preview).toContainText("I understand that if I cancel less than 7 days before my start time, my payment is not refunded. *");
   await expect(preview).toContainText("I may reschedule once at no charge, that each further reschedule costs $20, and that a rescheduled booking is not refunded. *");
-  await byLabel(page, "Booking").selectOption({ label: "Photography or content creation session" });
-  await page.locator("#preview").getByRole("button", { name: "Show" }).click();
-  await expect(preview.locator(".initials-item")).toHaveCount(3);
-  await expect(preview).not.toContainText("renting studio space only");
-  await expect(preview).toContainText("before my session, my payment is not refunded. *");
+  // A photography session and a content creation session are previewed each by itself (the owner, 2026-11-28: they
+  // have sets of their own); the three statements the site starts with for sessions are for both.
+  for (const kind of ["Photography session", "Content creation session"]) {
+    await byLabel(page, "Booking").selectOption({ label: kind });
+    await page.locator("#preview").getByRole("button", { name: "Show" }).click();
+    await expect(page).toHaveURL(new RegExp(`previewType=${kind.startsWith("Photography") ? "photography" : "content"}`));
+    await expect(preview.locator(".initials-item"), kind).toHaveCount(3);
+    await expect(preview, kind).not.toContainText("renting studio space only");
+    await expect(preview, kind).toContainText("before my session, my payment is not refunded. *");
+  }
   await page.locator("#questions").getByRole("row", { name: /Christmas decor/ }).getByRole("button", { name: "Publish" }).click();
   await expect(byText(page, "Published: clients are asked it from now on.")).toBeVisible();
 

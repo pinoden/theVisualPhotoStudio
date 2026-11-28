@@ -40,6 +40,7 @@ describe("a booking keeps the terms it was made under", () => {
       creditValidDays: 90,
       memberReturnHours: 48,
       lateCancelKeepsCode: false,
+      weekdayCodeOnWeekdays: true,
     });
   });
 
@@ -124,11 +125,16 @@ describe("reading terms back", () => {
       creditValidDays: 90,
       memberReturnHours: 48,
       lateCancelKeepsCode: false,
+      weekdayCodeOnWeekdays: true,
     });
     expect(storedTerms({ photographerId: null, terms: "nonsense" }, DEFAULT_SETTINGS)).toEqual(termsAtBooking(DEFAULT_SETTINGS, false));
     // Whether a late cancellation gives a code back is kept as yes or no; a booking from before it was kept follows the setting.
     expect(storedTerms({ photographerId: null, terms: { lateCancelKeepsCode: true } }, DEFAULT_SETTINGS).lateCancelKeepsCode).toBe(true);
     expect(storedTerms({ photographerId: null, terms: { lateCancelKeepsCode: "yes" } }, DEFAULT_SETTINGS).lateCancelKeepsCode).toBe(false);
     expect(storedTerms({ photographerId: null, terms: {} }, { ...DEFAULT_SETTINGS, lateCancelKeepsCode: true }).lateCancelKeepsCode).toBe(true);
+    // And so is the rule of 2026-11-28, that a weekday's booking is moved to a weekday.
+    expect(storedTerms({ photographerId: null, terms: { weekdayCodeOnWeekdays: false } }, DEFAULT_SETTINGS).weekdayCodeOnWeekdays).toBe(false);
+    expect(storedTerms({ photographerId: null, terms: {} }, DEFAULT_SETTINGS).weekdayCodeOnWeekdays).toBe(true);
+    expect(storedTerms({ photographerId: null, terms: { weekdayCodeOnWeekdays: 1 } }, { ...DEFAULT_SETTINGS, weekdayCodeOnWeekdays: false }).weekdayCodeOnWeekdays).toBe(false);
   });
 });

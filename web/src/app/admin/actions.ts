@@ -322,6 +322,7 @@ export async function saveSaleAction(formData: FormData): Promise<void> {
     bookUntil: text(formData, "bookUntil"),
     visitFrom: text(formData, "visitFrom"),
     visitUntil: text(formData, "visitUntil"),
+    withCodes: formData.get("withCodes") !== null,
   });
   if (!result.ok) failed(id ? `/admin/prices?sale=${id}` : "/admin/prices", result.message);
   updateTag(CATALOG_TAG); // the price lists and the booking screen show a sale
@@ -560,6 +561,7 @@ export async function saveSettingsAction(formData: FormData): Promise<void> {
   await switchLoyalty(db, formData.get("loyaltyEnabled") !== null, new Date());
   await saveSetting(db, "memberWeekendDifference", formData.get("memberWeekendDifference") !== null);
   await saveSetting(db, "lateCancelKeepsCode", formData.get("lateCancelKeepsCode") !== null);
+  await saveSetting(db, "weekdayCodeOnWeekdays", formData.get("weekdayCodeOnWeekdays") !== null);
   updateTag(CATALOG_TAG);
   if (rejected.length > 0) {
     failed("/admin/settings", `Not saved: ${rejected.join("; ")}. Everything else was saved.`);

@@ -105,7 +105,7 @@ export function taxLabel(basisPoints: number): string {
 }
 
 /** Why a code that exists cannot be used on a selection. */
-export type PromoMisfit = "several_studios" | "photography" | "content" | "rental" | "day";
+export type PromoMisfit = "several_studios" | "photography" | "content" | "rental" | "day" | "sale";
 
 /**
  * A code for sessions (`photographyOnly`) is for both kinds, photography and content creation: a session moved for a
@@ -117,7 +117,14 @@ export const PROMO_MISFIT_TEXT: Record<PromoMisfit, string> = {
   content: "That code is for studio rentals. It cannot be used for a content creation session.",
   rental: "That code is for photography and content creation sessions. It cannot be used for a studio rental.",
   day: "That code cannot be used for a booking on that day.",
+  sale: "A discount code is not used on top of a sale's price, and the sale's price is the lower of the two for this booking.",
 };
+
+/**
+ * Whether a code takes something off a price, as a sale does: a percentage, an amount off, a free hour. An amount that
+ * is credit (a reschedule code, studio credit) is money paid before, and pays a sale's price like any other.
+ */
+const isDiscountCode = (promo: Pick<PromoDef, "kind" | "beforeTax">): boolean => promo.kind !== "amount" || promo.beforeTax === true;
 
 /**
  * Why a code does not fit. For its days, the days it works for and why the booking's day is not one of them
@@ -162,9 +169,10 @@ export interface QuoteInput {
   tax?: TaxRule | null;
   /**
    * The sale the booking is made under (sale.ts): what comes off each studio. `rules` and `bundlePrices` are the usual
-   * lists; the sale lowers them here. Never for a session, which has a price of its own.
+   * lists; the sale lowers them here. Never for a session, which has a price of its own. Unless the sale says so
+   * (`withCodes`), a discount code is not used on top of it: see `quote`.
    */
-  sale?: Pick<BookingSale, "percents"> | null;
+  sale?: Pick<BookingSale, "percents" | "withCodes"> | null;
 }
 
 /** The most guests in all for studios booked together, by how many: the owners' settings (10 for two, 20 for three). */
@@ -222,6 +230,11 @@ export interface Quote {
    */
   saleCents?: number;
   usualStudioLines?: { studioId: string; priceCents: number }[];
+  /**
+   * Only when the booking is under a sale that a discount code set aside: the code takes more off than the sale would,
+   * and the two are not combined. The prices are then the usual ones, with the code.
+   */
+  saleSetAside?: true;
 }
 
 export type PricingErrorCode =
@@ -438,7 +451,25 @@ export function unpriced(
   return missing.length > 0 ? { studioIds: missing, together: false } : null;
 }
 
+/**
+ * What a booking costs.
+ *
+ * A sale's price and a discount code are not combined (the owner, 2026-11-28: "Either or, not combine"; question 88 in
+ * ProjectLibrary.md): the client pays the lower of the two totals. When the sale's price is the lower one, or they are
+ * the same, the code is not used and stays theirs (`promoMisfit` "sale"); when the code takes more off, the usual
+ * prices are charged with the code, and the sale is set aside (`saleSetAside`). Credit pays a sale's price like any
+ * other price, and so do membership hours. A sale the owners ticked "with codes" for takes a code on top.
+ */
 export function quote(input: QuoteInput): Quote {
+  const priced = priceOf(input);
+  const promo = input.promo;
+  if (!priced.saleCents || input.sale?.withCodes || !promo || !isDiscountCode(promo) || priced.promoMisfit || priced.promoDiscountCents === 0) return priced;
+  const onSale = priceOf({ ...input, promo: null });
+  const withCode = priceOf({ ...input, sale: null });
+  return withCode.totalCents < onSale.totalCents ? { ...withCode, saleSetAside: true } : { ...onSale, promoMisfit: "sale" };
+}
+
+function priceOf(input: QuoteInput): Quote {
   const { studioIds, dayType, durationMinutes } = input;
   const sale = input.sale && !input.photoPackage ? input.sale : null;
   const { rules, bundlePrices } = listsOnSale(input.rules, input.bundlePrices, sale);
@@ -584,7 +615,7 @@ export function quote(input: QuoteInput): Quote {
   creditCents = Math.min(creditCents, beforeCreditCents);
 
   // Under a sale: what the studios would cost without it, to say what it took off.
-  const usual = sale ? quote({ ...input, sale: null, addons: [], promo: null, membership: null, tax: null }) : null;
+  const usual = sale ? priceOf({ ...input, sale: null, addons: [], promo: null, membership: null, tax: null }) : null;
   const saleCents = usual ? usual.studiosSubtotalCents - usual.multiStudioDiscountCents - (studiosSubtotalCents - multiStudioDiscountCents) : 0;
 
   return {

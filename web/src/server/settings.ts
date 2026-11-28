@@ -90,6 +90,12 @@ export interface Settings {
    * the client, as it did until that day. A cancellation by the studio always gives it back.
    */
   lateCancelKeepsCode: boolean;
+  /**
+   * Whether the code a client gets for releasing a rental booked for a weekday is for weekdays only: Monday to Friday,
+   * not a holiday. On, the default (the owner, 2026-11-28: "if the original booking was a weekday, they can't book for
+   * weekend"). Off: the code is for any day, as it was until then.
+   */
+  weekdayCodeOnWeekdays: boolean;
 
   /**
    * How many hours before the start the reminder email goes out (the owner's answer of 2026-11-17: 24). 0 sends none.
@@ -206,6 +212,7 @@ export const DEFAULT_SETTINGS: Settings = {
   rescheduleFeeCents: 2000, // the owner's answer of 2026-11-17: the first reschedule is free, each further one $20
   creditValidDays: 90,
   lateCancelKeepsCode: false,
+  weekdayCodeOnWeekdays: true,
 
   reminderHours: 24,
   memberReturnHours: 48,
@@ -342,6 +349,7 @@ const VALIDATORS: { [K in Exclude<keyof Settings, "multiStudioPercent">]: (v: un
   memberReturnHours: int(NUMBER_SETTING_RANGES.memberReturnHours),
   memberWeekendDifference: bool,
   lateCancelKeepsCode: bool,
+  weekdayCodeOnWeekdays: bool,
   twoStudioGuestLimit: int(NUMBER_SETTING_RANGES.twoStudioGuestLimit),
   threeStudioGuestLimit: int(NUMBER_SETTING_RANGES.threeStudioGuestLimit),
   loyaltyEnabled: bool,

@@ -223,6 +223,7 @@ async function AppointmentDetails({
                 ? "A code or studio credit it was made with comes back after any cancellation."
                 : "A code or studio credit it was made with comes back only when the client cancels in time for a refund, or the studio cancels."}
             </li>
+            {appointment.terms.weekdayCodeOnWeekdays && <li>Booked for a weekday, the code it is released for works on weekdays only (Monday to Friday, not a holiday).</li>}
           </ul>
           {appointment.terms.changedSince && (
             <p style={{ fontSize: ".8rem", margin: ".5rem 0 0" }}>

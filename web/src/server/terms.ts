@@ -20,10 +20,14 @@ export interface BookingTerms {
   memberReturnHours: number;
   /** Whether the code or credit it was made with comes back when its client cancels and the terms refund nothing (`Settings.lateCancelKeepsCode`). */
   lateCancelKeepsCode: boolean;
+  /** Whether the code it is released for is for weekdays only when it was booked for one (`Settings.weekdayCodeOnWeekdays`). */
+  weekdayCodeOnWeekdays: boolean;
 }
 
+/** The terms that are switches. A booking made before one was kept follows the setting of the day, like one made before any terms were. */
+const SWITCHES = ["lateCancelKeepsCode", "weekdayCodeOnWeekdays"] as const satisfies readonly (keyof BookingTerms)[];
 /** The terms that are numbers, each within its setting's range. */
-type NumberTerm = Exclude<keyof BookingTerms, "lateCancelKeepsCode">;
+type NumberTerm = Exclude<keyof BookingTerms, (typeof SWITCHES)[number]>;
 
 const RANGES: Record<NumberTerm, readonly [number, number]> = {
   refundWindowHours: NUMBER_SETTING_RANGES.refundWindowHours,
@@ -48,6 +52,7 @@ export function termsAtBooking(settings: Settings, photography: boolean): Bookin
     creditValidDays: settings.creditValidDays,
     memberReturnHours: settings.memberReturnHours,
     lateCancelKeepsCode: settings.lateCancelKeepsCode,
+    weekdayCodeOnWeekdays: settings.weekdayCodeOnWeekdays,
   };
 }
 
@@ -65,8 +70,10 @@ export function storedTerms(booking: { photographerId: string | null; terms: unk
     const [min, max] = RANGES[key];
     if (typeof value === "number" && Number.isInteger(value) && value >= min && value <= max) terms[key] = value;
   }
-  // A booking made before this was kept (2026-11-27) follows the setting of the day, like one made before any terms were.
-  if (typeof stored.lateCancelKeepsCode === "boolean") terms.lateCancelKeepsCode = stored.lateCancelKeepsCode;
+  for (const key of SWITCHES) {
+    const value = stored[key];
+    if (typeof value === "boolean") terms[key] = value;
+  }
   return terms;
 }
 
@@ -82,5 +89,5 @@ export function termsFor(booking: { photographerId: string | null; terms: unknow
 export function termsChangedSince(booking: { photographerId: string | null; terms: unknown }, settings: Settings): boolean {
   const kept = storedTerms(booking, settings);
   const now = termsAtBooking(settings, booking.photographerId !== null);
-  return KEYS.some((key) => kept[key] !== now[key]) || kept.lateCancelKeepsCode !== now.lateCancelKeepsCode;
+  return [...KEYS, ...SWITCHES].some((key) => kept[key] !== now[key]);
 }
