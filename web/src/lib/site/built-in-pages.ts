@@ -348,7 +348,7 @@ function faq(): BuiltInPage {
         "<li>Closer to the start than that, a cancellation is not refunded.</li>" +
         "<li>{if moving}You can move the booking instead: see the next question.</li>" +
         "<li>{if moving}A booking that has been moved can no longer be refunded.</li>" +
-        "<li>{if not codes kept late}A discount code, free hour or studio credit used for a booking comes back when you cancel in time for a refund. Cancelled later, or after the booking was moved, it is used up.</li>" +
+        "<li>{if not codes kept late}A discount code or free hour used for a booking comes back when you cancel in time for a refund. Cancelled later, or after the booking was moved, it is used up. Studio credit used for the booking does not come back by itself then: contact us, and we look at each case.</li>" +
         "<li>Cancel from the link in your confirmation email, or from your account (Log In, at the top of the page).</li>" +
         "</ul>",
     ),
@@ -464,7 +464,7 @@ function policies(): BuiltInPage {
     "<li>{if reschedule fee}An appointment may be rescheduled {reschedules allowed} at no additional charge. Each additional reschedule is arranged with the studio and costs {reschedule fee}.</li>" +
     "<li>{if moving}Once an appointment has been rescheduled, it is no longer eligible for a refund.</li>" +
     "<li>{if weekday moves}A studio rental booked for a weekday can be rescheduled to another weekday only (Monday to Friday, not a holiday): its reschedule code cannot be used for a weekend.</li>" +
-    "<li>{if not codes kept late}A discount code, free hour or studio credit applied to an appointment is returned only when the appointment is cancelled in time for a refund. If it is cancelled later, or after it has been rescheduled, the code or credit is used up.</li>" +
+    "<li>{if not codes kept late}A discount code or free hour applied to an appointment is returned only when the appointment is cancelled in time for a refund. If it is cancelled later, or after it has been rescheduled, the code is used up. Studio credit applied to it is not returned automatically in that case: contact the studio, which decides each case.</li>" +
     "<li>{if photography}Photography sessions with our in-house photographer follow the same terms: a session cancelled {photography refund window} or more before the appointment is refunded, and one cancelled later is not. Sessions are booked at least {photography notice} ahead.</li>" +
     "</ul>" +
     "<h2>Rental Time</h2>" +

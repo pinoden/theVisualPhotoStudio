@@ -61,6 +61,12 @@ const WEEKDAY_FAQ = "<p>{if weekday moves}A studio rental booked for a weekday i
 const WEEKDAY_POLICIES =
   "<li>{if weekday moves}A studio rental booked for a weekday can be rescheduled to another weekday only (Monday to Friday, not a holiday): its reschedule code cannot be used for a weekend.</li>";
 
+/** The lines about codes after a late cancellation as the pages the site starts with have them since 2026-11-28 (migration 0084). */
+const CREDIT_FAQ =
+  "<li>{if not codes kept late}A discount code or free hour used for a booking comes back when you cancel in time for a refund. Cancelled later, or after the booking was moved, it is used up. Studio credit used for the booking does not come back by itself then: contact us, and we look at each case.</li>";
+const CREDIT_POLICIES =
+  "<li>{if not codes kept late}A discount code or free hour applied to an appointment is returned only when the appointment is cancelled in time for a refund. If it is cancelled later, or after it has been rescheduled, the code is used up. Studio credit applied to it is not returned automatically in that case: contact the studio, which decides each case.</li>";
+
 /** A published page as a visitor reads it: its words, without the HTML. */
 async function words(slug: string): Promise<string> {
   const page = await loadPublishedPage(world.db, slug, NOW);
@@ -121,7 +127,9 @@ describe("the pages the website was built with", () => {
     expect(faq).not.toContain("A booking can be moved once.");
     expect(faq).toContain("The code is valid for 90 days.");
     // A late cancellation uses up the code or credit, as it keeps money paid (the owners' decision of 2026-11-27).
-    expect(faq).toContain("A discount code, free hour or studio credit used for a booking comes back when you cancel in time for a refund. Cancelled later, or after the booking was moved, it is used up.");
+    expect(faq).toContain("A discount code or free hour used for a booking comes back when you cancel in time for a refund. Cancelled later, or after the booking was moved, it is used up.");
+    // Studio credit then waits for the studio's word (the owner, 2026-11-28).
+    expect(faq).toContain("Studio credit used for the booking does not come back by itself then: contact us, and we look at each case.");
     // The bundles have prices of their own, so no percentage is promised (question 81).
     expect(faq).not.toContain("You get");
     expect(faq).toContain("Pets are welcome in Studio Dayglow only. The other studios and all common areas are pet-free.");
@@ -138,7 +146,7 @@ describe("the pages the website was built with", () => {
     expect(policies).toContain("may be rescheduled at no additional charge until 24 hours before the appointment.");
     expect(policies).toContain("An appointment may be rescheduled once at no additional charge. Each additional reschedule is arranged with the studio and costs $20.");
     expect(policies).toContain(
-      "A discount code, free hour or studio credit applied to an appointment is returned only when the appointment is cancelled in time for a refund. If it is cancelled later, or after it has been rescheduled, the code or credit is used up.",
+      "A discount code or free hour applied to an appointment is returned only when the appointment is cancelled in time for a refund. If it is cancelled later, or after it has been rescheduled, the code is used up. Studio credit applied to it is not returned automatically in that case: contact the studio, which decides each case.",
     );
     expect(policies).toContain("Sessions are booked at least 14 days ahead.");
     expect(policies).toContain("Pets are permitted in Studio Dayglow only");
@@ -227,7 +235,9 @@ describe("the pages the website was built with", () => {
     const stored = async (slug: string) => (await world.db.select().from(siteDocuments).where(eq(siteDocuments.slug, slug)))[0];
     // Nor the lines of 2026-11-28 about a weekday's booking, which migration 0083 brings (the next test).
     const beforeWeekdays = (value: unknown) => JSON.parse(JSON.stringify(value).replace(WEEKDAY_FAQ, "").replace(WEEKDAY_POLICIES, ""));
-    const without = (value: unknown) => JSON.parse(JSON.stringify(beforeWeekdays(value)).replace(NEW_FAQ, "").replace(NEW_POLICIES, ""));
+    // And with the lines about studio credit as they read before migration 0084 (the test after the next).
+    const beforeCredit = (value: unknown) => JSON.parse(JSON.stringify(value).replace(CREDIT_FAQ, NEW_FAQ).replace(CREDIT_POLICIES, NEW_POLICIES));
+    const without = (value: unknown) => JSON.parse(JSON.stringify(beforeWeekdays(beforeCredit(value))).replace(NEW_FAQ, "").replace(NEW_POLICIES, ""));
     for (const slug of ["faq", "policies"]) {
       const row = await stored(slug);
       expect(JSON.stringify(row.published), slug).toContain("{if not codes kept late}");
@@ -240,7 +250,7 @@ describe("the pages the website was built with", () => {
 
     const migration = readFileSync(path.join(process.cwd(), "drizzle", "0077_codes_after_late_cancel_copy.sql"), "utf8");
     await world.db.execute(sql.raw(migration));
-    for (const slug of ["faq", "policies"] as const) expect((await stored(slug)).published, slug).toEqual(beforeWeekdays(builtInPages().find((page) => page.slug === slug)!.content));
+    for (const slug of ["faq", "policies"] as const) expect((await stored(slug)).published, slug).toEqual(beforeWeekdays(beforeCredit(builtInPages().find((page) => page.slug === slug)!.content)));
     expect(await words("policies")).toContain("the code or credit is used up");
     expect((await world.db.select().from(siteDocuments).where(eq(siteDocuments.id, own)))[0].published).toEqual(theirs);
     // Run again, it adds no second line.
@@ -285,6 +295,34 @@ describe("the pages the website was built with", () => {
     await world.db.execute(sql.raw(migration));
     expect(await world.db.select().from(siteVersions)).toHaveLength(versions);
     for (const slug of ["faq", "policies"]) expect(JSON.stringify((await stored(slug)).published).split("{if weekday moves}"), slug).toHaveLength(2);
+  });
+
+  it("ask a client to contact the studio about studio credit after a late cancellation, and get the words from migration 0084", async () => {
+    // The owner, 2026-11-28: "we should not issue them studio credit right away. We will decide it on case to case basics".
+    expect(await words("faq")).toContain("Studio credit used for the booking does not come back by itself then: contact us, and we look at each case.");
+    // A database from before has the lines of migration 0077. On a page of their own the owners reworded it.
+    const OLD_FAQ = "<li>{if not codes kept late}A discount code, free hour or studio credit used for a booking comes back when you cancel in time for a refund. Cancelled later, or after the booking was moved, it is used up.</li>";
+    const OLD_POLICIES =
+      "<li>{if not codes kept late}A discount code, free hour or studio credit applied to an appointment is returned only when the appointment is cancelled in time for a refund. If it is cancelled later, or after it has been rescheduled, the code or credit is used up.</li>";
+    const stored = async (slug: string) => (await world.db.select().from(siteDocuments).where(eq(siteDocuments.slug, slug)))[0];
+    const before = (value: unknown) => JSON.parse(JSON.stringify(value).replace(CREDIT_FAQ, OLD_FAQ).replace(CREDIT_POLICIES, OLD_POLICIES));
+    for (const slug of ["faq", "policies"]) {
+      const row = await stored(slug);
+      await world.db.update(siteDocuments).set({ published: before(row.published) }).where(eq(siteDocuments.id, row.id));
+      expect(JSON.stringify((await stored(slug)).published), slug).not.toContain("we look at each case");
+    }
+    const own = expectOk(await createPage(world.db, owner, { title: "Our Terms" }, NOW)).id;
+    const theirs = parsePage({ blocks: [{ type: "Section", props: { content: [{ type: "Text", props: { html: "<ul><li>Studio credit is used up by a late cancellation.</li></ul>" } }] } }] });
+    await world.db.update(siteDocuments).set({ published: theirs }).where(eq(siteDocuments.id, own));
+
+    const migration = readFileSync(path.join(process.cwd(), "drizzle", "0084_studio_credit_ask_the_studio_copy.sql"), "utf8");
+    await world.db.execute(sql.raw(migration));
+    for (const slug of ["faq", "policies"] as const) expect((await stored(slug)).published, slug).toEqual(builtInPages().find((page) => page.slug === slug)!.content);
+    expect((await world.db.select().from(siteDocuments).where(eq(siteDocuments.id, own)))[0].published).toEqual(theirs);
+    // Run again, it changes nothing.
+    const versions = (await world.db.select().from(siteVersions)).length;
+    await world.db.execute(sql.raw(migration));
+    expect(await world.db.select().from(siteVersions)).toHaveLength(versions);
   });
 
   it("say the percentage off for several studios while no bundle has prices of its own", async () => {
