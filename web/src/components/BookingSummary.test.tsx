@@ -44,6 +44,7 @@ const PAID_ONLINE: BookingView = {
   rescheduledCount: 0,
   endRequest: null,
   accepted: [],
+  initialed: [],
 };
 
 /** The summary's last row, as its two sides read. */

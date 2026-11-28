@@ -1297,7 +1297,8 @@ export const intakeQuestions = pgTable("intake_questions", {
   id: id(),
   label: text("label").notNull(),
   help: text("help").notNull().default(""),
-  kind: text("kind", { enum: ["text", "checkbox", "dropdown", "choice"] }).notNull(),
+  /** "initials": a statement the client initials at the policies step, not a question (src/lib/booking-form-keys.ts). */
+  kind: text("kind", { enum: ["text", "checkbox", "dropdown", "choice", "initials"] }).notNull(),
   /** The choices of a dropdown or of multiple choice, in order. */
   options: jsonb("options").$type<string[]>().notNull().default([]),
   required: boolean("required").notNull().default(false),
@@ -1356,6 +1357,11 @@ export const bookingAnswers = pgTable(
     questionId: uuid("question_id").references(() => intakeQuestions.id, { onDelete: "set null" }),
     label: text("label").notNull(),
     answer: text("answer").notNull(),
+    /**
+     * The client's initials, when the row is a statement they initialed (`label`, as they read it, its figures filled
+     * in). Null for an answer to a question.
+     */
+    initials: text("initials"),
     sortOrder: integer("sort_order").notNull().default(0),
   },
   (t) => [index("booking_answers_booking_idx").on(t.bookingId)],

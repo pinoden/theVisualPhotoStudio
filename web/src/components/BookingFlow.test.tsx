@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { bundlePricesWithBetween, rulesWithBetween } from "@/lib/domain/pricing";
 import { defaultDayType, isoWeekday } from "@/lib/domain/time";
+import { initialsKey } from "@/lib/booking-form-keys";
 import { NO_FACTS } from "@/lib/studio-facts";
 import type { Catalog } from "@/server/catalog";
 import { DEFAULT_SETTINGS } from "@/server/settings";
@@ -351,6 +352,71 @@ describe("studio-first flow", () => {
     });
     sizes.mockRestore();
     height.mockRestore();
+  });
+
+  it("has the client initial each statement with one click, the initials taken from their full name (the owner, 2026-11-27)", async () => {
+    formQuestions = [
+      { id: "q-group", label: "How many people are coming?", help: "", kind: "dropdown", options: ["1–5", "6–10"], required: false },
+      { id: "s-studio", label: "I understand that I am renting studio space only.", help: "", kind: "initials", options: [], required: true },
+      { id: "s-late", label: "I understand that if I cancel less than 7 days before my start time, my payment is not refunded.", help: "", kind: "initials", options: [], required: true },
+    ];
+    render(<BookingFlow catalog={catalog} navigate={nav.push} policies={{ versionId: "v-policies", title: "Studio Policies", html: "<p>Rules.</p>" }} />);
+    await user.click(studioBox("Studio Paris"));
+    await next();
+    pickDate(WED);
+    await pickDuration("1 hr");
+    await pickTime("9:00 AM");
+    await next();
+    await typeDetails();
+    await next();
+
+    const statement = (name: RegExp) => screen.getByRole("checkbox", { name }) as HTMLInputElement;
+    const boxOf = (name: RegExp) => statement(name).closest("label")!.querySelector(".initials-box")!.textContent;
+    await screen.findByRole("checkbox", { name: /renting studio space only/ });
+    // The statements stand apart from the questions, say whose initials they take, and none is initialed for the client.
+    expect(within(screen.getByRole("group", { name: "A few questions" })).queryByRole("checkbox")).toBeNull();
+    expect(within(screen.getByRole("group", { name: "Please add your initials" })).getAllByRole("checkbox")).toHaveLength(2);
+    expect(screen.getByText(/One click beside each statement/).textContent).toBe("One click beside each statement adds your initials, JS, taken from the full name you gave.");
+    expect(statement(/renting studio space only/).checked).toBe(false);
+    expect(boxOf(/renting studio space only/)).toBe("Initial");
+
+    // The tick for the whole of the policies does not stand for them.
+    await user.click(screen.getByRole("checkbox", { name: /I have read and agree/ }));
+    await next();
+    expect(screen.getByRole("alert").textContent).toBe("Please add your initials to each statement.");
+    await user.click(statement(/renting studio space only/));
+    expect(boxOf(/renting studio space only/)).toBe("JS");
+    expect(boxOf(/cancel less than 7 days/)).toBe("Initial");
+    await next();
+    expect(screen.getByRole("alert").textContent).toBe("Please add your initials to each statement.");
+    await user.click(statement(/cancel less than 7 days/));
+    expect(statement(/cancel less than 7 days/).checked).toBe(true);
+
+    // Another name gives other initials: what was initialed as JS counts no more.
+    await user.click(screen.getByRole("button", { name: "← Back" }));
+    await user.clear(screen.getByLabelText("Full name *"));
+    await user.type(screen.getByLabelText("Full name *"), "Ann Lee");
+    await next();
+    await screen.findByRole("checkbox", { name: /renting studio space only/ });
+    expect(statement(/renting studio space only/).checked).toBe(false);
+    await next();
+    expect(screen.getByRole("alert").textContent).toBe("Please add your initials to each statement.");
+    await user.click(statement(/renting studio space only/));
+    await user.click(statement(/cancel less than 7 days/));
+    expect(boxOf(/cancel less than 7 days/)).toBe("AL");
+
+    // With the booking go the statements initialed, each with the words it stood beside; they are no answers.
+    await next();
+    await user.click(await screen.findByRole("button", { name: /^Confirm & pay/ }));
+    expect(posted[0]).toMatchObject({
+      customer: { name: "Ann Lee" },
+      accepted: [
+        "page:v-policies",
+        initialsKey("s-studio", "I understand that I am renting studio space only."),
+        initialsKey("s-late", "I understand that if I cancel less than 7 days before my start time, my payment is not refunded."),
+      ],
+      answers: {},
+    });
   });
 
   it("sends the client back to read the policies again when they were published meanwhile", async () => {

@@ -1,6 +1,6 @@
 import { expect, test, type Browser, type Locator, type Page } from "@playwright/test";
 import sharp from "sharp";
-import { accessibilityProblems, byLabel, byText, isNotFoundPage, isPermanentRedirect, onScreen, shot, signIn, watchBrowser } from "./helpers";
+import { accessibilityProblems, byLabel, byText, isNotFoundPage, isPermanentRedirect, onScreen, openNotFound, shot, signIn, watchBrowser } from "./helpers";
 
 /**
  * The website's editor (the owner's requirements 21, 25, 26 and 27, and the
@@ -244,10 +244,7 @@ test("a manager cannot open the website until the owners let them, and then prep
 
   const wes = await visitor(browser);
   await signIn(wes, MANAGER);
-  for (const path of ["/admin/website", "/admin/website/design", "/admin/website/navigation"]) {
-    await wes.goto(path);
-    await expect(byText(wes, /could not be found/i)).toBeVisible();
-  }
+  for (const path of ["/admin/website", "/admin/website/design", "/admin/website/navigation"]) await openNotFound(wes, path);
   expect((await wes.request.get("/admin/website/preview?to=%2F", { maxRedirects: 0 })).status()).toBe(404);
 
   // The owners switch it on, for drafts only.

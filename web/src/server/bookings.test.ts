@@ -65,7 +65,8 @@ function book(overrides: Partial<BookingInput> = {}, deps: Partial<Parameters<ty
 }
 
 async function resetData() {
-  await db.execute(sql`truncate email_outbox, refunds, payments, booking_addons, studio_holds, blocks, bookings, special_dates, settings cascade`);
+  // `intake_questions`: a database starts with the statements a client initials (migration 0079), which these bookings do not send.
+  await db.execute(sql`truncate email_outbox, refunds, payments, booking_addons, studio_holds, blocks, bookings, special_dates, settings, intake_questions cascade`);
   charges = [];
 }
 

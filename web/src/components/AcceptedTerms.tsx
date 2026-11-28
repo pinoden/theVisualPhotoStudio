@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { AcceptedItem, AcceptedText } from "@/server/booking-forms";
+import type { AcceptedItem, AcceptedText, InitialedItem } from "@/server/booking-forms";
 import { formatInstant } from "@/server/tz";
 
 /**
@@ -17,6 +17,24 @@ export function AcceptedList({ accepted, hrefOf }: { accepted: AcceptedItem[]; h
         </li>
       ))}
     </ul>
+  );
+}
+
+/**
+ * The statements a client initialed at checkout, in the words they read, with the initials (the owner, 2026-11-27):
+ * shown with what they accepted, on their booking's page and in their account.
+ */
+export function InitialedList({ initialed }: { initialed: InitialedItem[] }) {
+  if (initialed.length === 0) return null;
+  return (
+    <>
+      <p className="initialed-title">You added your initials, {initialed[0].initials}, to:</p>
+      <ul className="accepted-list">
+        {initialed.map((item, index) => (
+          <li key={index}>{item.words}</li>
+        ))}
+      </ul>
+    </>
   );
 }
 

@@ -1,10 +1,14 @@
 import { and, asc, desc, eq, inArray, isNotNull, isNull, max } from "drizzle-orm";
-import type { DbLike } from "@/db/client";
+import { together, type DbLike } from "@/db/client";
 import { agreements, agreementVersions, bookingAcceptances, bookingAnswers, intakeQuestions, siteDocuments, siteVersions, studios } from "@/db/schema";
-import { agreementKey, policiesKey, type QuestionKind } from "@/lib/booking-form-keys";
+import { agreementKey, initialsKey, initialsOf, policiesKey, type QuestionKind } from "@/lib/booking-form-keys";
 import { isIsoDate, type IsoDate } from "@/lib/domain/time";
+import { conditionsOf, shownWords } from "@/lib/site/conditions";
+import { fillLiveValues, liveValues } from "@/lib/site/live-values";
 import { pageTextHtml } from "@/lib/site/page-text";
+import { loadCatalog } from "./catalog";
 import { loadPageVersion, loadPublishedPage } from "./pages";
+import { loadBusiness } from "./website";
 
 /**
  * Booking Forms & Agreements (the owner's brief of 2026-11-22, items 6 and 7, and the admin brief's item 8): the
@@ -12,6 +16,10 @@ import { loadPageVersion, loadPublishedPage } from "./pages";
  * the record of both on each booking. The studio policies are the website's Policies page, edited in the page editor
  * with its drafts, preview, publishing and history; the other agreements (a waiver, a photography agreement) have
  * texts and versions of their own here. What the builder read into the briefs is question 66 in ProjectLibrary.md.
+ *
+ * A fifth kind of question is no question: "initials", a statement the client initials with one click at the policies
+ * step, beside the one tick for the whole of the policies (the owner, 2026-11-27; question 86). The initials are those
+ * of the full name they gave. Each booking keeps the statements initialed, in the words read.
  */
 
 export const QUESTION_KINDS: Record<QuestionKind, string> = {
@@ -19,10 +27,12 @@ export const QUESTION_KINDS: Record<QuestionKind, string> = {
   checkbox: "Tick box",
   dropdown: "Dropdown",
   choice: "Multiple choice",
+  initials: "Initials on a statement",
 };
 const isKind = (value: string): value is QuestionKind => Object.hasOwn(QUESTION_KINDS, value);
 
-const LABEL_MAX = 200;
+/** A statement to initial runs longer than a question. */
+export const LABEL_MAX = 300;
 const HELP_MAX = 500;
 const OPTION_MAX = 120;
 const OPTIONS_MAX = 20;
@@ -145,11 +155,29 @@ export interface CheckoutForms {
   agreements: AgreementShown[];
 }
 
+/**
+ * Questions and statements as a client reads them. A figure written as a live value (`{refund window}`) is today's
+ * setting, as on the website's pages (src/lib/site/live-values.ts): a statement to initial must say what the policies
+ * say, and the owners change the figures under Settings. And one whose words start with a condition (`{if reschedule
+ * fee}`) is left out while it does not hold (src/lib/site/conditions.ts). The studio's data is read only when some
+ * words hold a brace.
+ */
+export async function asClientsRead(db: DbLike, questions: QuestionView[]): Promise<QuestionView[]> {
+  if (!questions.some((question) => question.label.includes("{") || question.help.includes("{"))) return questions;
+  const [catalog, business] = await together(db, [() => loadCatalog(db), () => loadBusiness(db)]);
+  const values = Object.fromEntries(liveValues(catalog, business).map((entry) => [entry.name, entry.value]));
+  const holds = conditionsOf(catalog);
+  return questions.flatMap((question) => {
+    const label = shownWords(question.label, holds);
+    return label === null ? [] : [{ ...question, label: fillLiveValues(label, values).trim(), help: fillLiveValues(question.help, values) }];
+  });
+}
+
 /** What a booking of these studios, of this type, on this day, is asked and must accept beside the studio policies. */
 export async function checkoutForms(db: DbLike, context: FormContext): Promise<CheckoutForms> {
   const [questions, shown] = await Promise.all([listQuestions(db), publishedAgreements(db)]);
   return {
-    questions: questions.filter((question) => question.active && appliesTo(question, context)),
+    questions: await asClientsRead(db, questions.filter((question) => question.active && appliesTo(question, context))),
     agreements: shown.filter((agreement) => appliesTo(agreement, context)).map(({ agreementId, versionId, number, title, body }) => ({ agreementId, versionId, number, title, body })),
   };
 }
@@ -160,18 +188,23 @@ export type FormsProblem = { code: "policies_changed"; message: string } | { cod
 
 export interface CheckedForms {
   acceptances: { kind: "policies_page" | "agreement"; title: string; siteVersionId: string | null; agreementVersionId: string | null; versionNumber: number; shownHtml: string | null }[];
-  answers: { questionId: string; label: string; answer: string; sortOrder: number }[];
+  answers: { questionId: string; label: string; answer: string; initials: string | null; sortOrder: number }[];
 }
 
 /**
  * Check what a client sent with a booking: every version they must accept, accepted (`accepted`, the keys of the
  * versions they were shown), and every question that applies answered as it allows. A version published since they
  * read it, or a question added, sends them back to read again. Answers to questions that do not apply are left out.
+ *
+ * A statement to initial is initialed when `accepted` holds its key for the very words it reads now
+ * (`initialsKey`). Without it the client reads again: the booking screen lets nobody past a statement it shows, so
+ * the statement was added, or its words or figures changed, since they read. The initials kept are those of `name`,
+ * the full name the booking is made in, whatever the browser showed.
  */
 export async function checkForms(
   db: DbLike,
   context: FormContext,
-  sent: { accepted: string[]; answers: Record<string, unknown> },
+  sent: { accepted: string[]; answers: Record<string, unknown>; name: string },
   now: Date,
 ): Promise<{ ok: true; forms: CheckedForms } | { ok: false; problem: FormsProblem }> {
   const [forms, policies] = await Promise.all([checkoutForms(db, context), currentPolicies(db)]);
@@ -181,7 +214,13 @@ export async function checkForms(
   if (forms.agreements.some((agreement) => !accepted.has(agreementKey(agreement.versionId)))) return changed;
 
   const answers: CheckedForms["answers"] = [];
+  const initials = initialsOf(sent.name);
   for (const [index, question] of forms.questions.entries()) {
+    if (question.kind === "initials") {
+      if (!accepted.has(initialsKey(question.id, question.label))) return changed;
+      answers.push({ questionId: question.id, label: question.label, answer: `Initialed ${initials} by ${sent.name.trim()}`, initials, sortOrder: index });
+      continue;
+    }
     const raw = sent.answers[question.id];
     const answer =
       question.kind === "checkbox"
@@ -198,7 +237,7 @@ export async function checkForms(
     if ((question.kind === "dropdown" || question.kind === "choice") && !question.options.includes(answer)) {
       return { ok: false, problem: { code: "answers", message: `Please choose one of the answers offered: ${question.label}` } };
     }
-    answers.push({ questionId: question.id, label: question.label, answer, sortOrder: index });
+    answers.push({ questionId: question.id, label: question.label, answer, initials: null, sortOrder: index });
   }
   return {
     ok: true,
@@ -230,6 +269,7 @@ export async function recordForms(tx: DbLike, bookingId: string, forms: CheckedF
 }
 
 export interface BookingForms {
+  /** Answers to the questions, and the statements initialed (`answer` then says by whom). */
   answers: { label: string; answer: string }[];
   acceptances: { id: string; kind: "policies_page" | "agreement"; title: string; versionNumber: number; acceptedAt: string; siteVersionId: string | null; agreementVersionId: string | null }[];
 }
@@ -280,6 +320,8 @@ async function checkedQuestion(db: DbLike, input: QuestionInput): Promise<Omit<t
   const label = input.label.trim();
   if (label.length < 2 || label.length > LABEL_MAX) return `Write the question in 2 to ${LABEL_MAX} characters.`;
   if (!isKind(input.kind)) return "Choose the kind of question.";
+  // Words that start with a condition are shown only while it holds: a marker with nothing after it shows nothing.
+  if (shownWords(label, undefined)?.trim() === "") return "Write the words after the condition.";
   const options = [...new Set(input.options.map((option) => option.trim()).filter(Boolean))];
   if ((input.kind === "dropdown" || input.kind === "choice") && options.length < 2) return "Give at least two answers to choose from, one on each line.";
   if (options.length > OPTIONS_MAX || options.some((option) => option.length > OPTION_MAX)) return `At most ${OPTIONS_MAX} answers, each up to ${OPTION_MAX} characters.`;
@@ -294,7 +336,8 @@ async function checkedQuestion(db: DbLike, input: QuestionInput): Promise<Omit<t
     help: input.help.trim().slice(0, HELP_MAX),
     kind: input.kind,
     options: input.kind === "dropdown" || input.kind === "choice" ? options : [],
-    required: input.required,
+    // A statement to initial is never optional: initials that could be left out would say nothing.
+    required: input.kind === "initials" ? true : input.required,
     studioIds: [...new Set(input.studioIds)],
     forRentals: input.forRentals,
     forPhotography: input.forPhotography,
@@ -443,6 +486,25 @@ export async function acceptancesOf(db: DbLike, bookingIds: string[]): Promise<M
   for (const row of rows) {
     byBooking.set(row.bookingId, [...(byBooking.get(row.bookingId) ?? []), { id: row.id, title: row.title, versionNumber: row.versionNumber, acceptedAt: row.acceptedAt.toISOString() }]);
   }
+  return byBooking;
+}
+
+/** A statement a booking's client initialed at checkout, in the words they read. */
+export interface InitialedItem {
+  words: string;
+  initials: string;
+}
+
+/** The statements each of these bookings' clients initialed at checkout, by booking, in the order shown. */
+export async function initialedOf(db: DbLike, bookingIds: string[]): Promise<Map<string, InitialedItem[]>> {
+  const byBooking = new Map<string, InitialedItem[]>();
+  if (bookingIds.length === 0) return byBooking;
+  const rows = await db
+    .select({ bookingId: bookingAnswers.bookingId, words: bookingAnswers.label, initials: bookingAnswers.initials })
+    .from(bookingAnswers)
+    .where(and(inArray(bookingAnswers.bookingId, bookingIds), isNotNull(bookingAnswers.initials)))
+    .orderBy(asc(bookingAnswers.sortOrder));
+  for (const row of rows) byBooking.set(row.bookingId, [...(byBooking.get(row.bookingId) ?? []), { words: row.words, initials: row.initials ?? "" }]);
   return byBooking;
 }
 
