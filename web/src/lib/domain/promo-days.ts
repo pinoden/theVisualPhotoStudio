@@ -16,6 +16,9 @@ export interface PromoDays {
   notOnSpecialDates: boolean;
 }
 
+/** The days of a code released from a rental booked for a weekday: Monday to Friday, not a holiday (the owner, 2026-11-28). */
+export const WEEKDAYS_ONLY: PromoDays = { from: null, until: null, weekdays: [1, 2, 3, 4, 5], notOnSpecialDates: true };
+
 /** A schedule that limits nothing is no schedule. */
 export function isLimiting(days: PromoDays | null | undefined): days is PromoDays {
   if (!days) return false;

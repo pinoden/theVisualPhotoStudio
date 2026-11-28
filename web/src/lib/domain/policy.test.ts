@@ -184,6 +184,16 @@ describe("the code or credit a cancelled booking was made with", () => {
 });
 
 describe("moving a booking", () => {
+  it("says that the code is for weekdays when a rental booked for a weekday is released, while the owners keep that rule (2026-11-28)", () => {
+    const on = { ...settings, weekdayCodeOnWeekdays: true };
+    expect(rescheduleOutcome(booking({ weekdayRental: true }), hoursBefore(48), on)).toMatchObject({ allowed: true, weekdaysOnly: true });
+    // A weekend's booking, a session, or the rule switched off: nothing is said, and the code is for any day.
+    for (const outcome of [rescheduleOutcome(booking(), hoursBefore(48), on), rescheduleOutcome(booking({ weekdayRental: false }), hoursBefore(48), on), rescheduleOutcome(booking({ weekdayRental: true }), hoursBefore(48), settings)]) {
+      expect(outcome.allowed).toBe(true);
+      expect("weekdaysOnly" in outcome).toBe(false);
+    }
+  });
+
   it("turns everything paid into credit, including credit already used on it", () => {
     expect(rescheduleOutcome(booking(), hoursBefore(48), settings)).toEqual({
       allowed: true,

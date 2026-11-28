@@ -395,6 +395,8 @@ describe("using a free hour", () => {
       allowed: true,
       creditCents: 13200,
       discountCents: 8800,
+      // Booked for a weekday: the code is for weekdays (the owner, 2026-11-28).
+      weekdaysOnly: true,
       nextMovable: false,
       nextFeeCents: 2000,
     });

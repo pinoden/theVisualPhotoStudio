@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { formatCents } from "@/lib/domain/pricing";
-import { bookableOn, salePriceCents, saleWords, SALE_PERCENT_MAX, type Sale } from "@/lib/domain/sale";
+import { bookableOn, saleCodesWords, salePriceCents, saleWords, SALE_PERCENT_MAX, type Sale } from "@/lib/domain/sale";
 import { longDateLabel, type IsoDate } from "@/lib/domain/time";
 import type { Catalog } from "@/server/catalog";
 import { saleAction, saveSaleAction } from "../actions";
@@ -47,7 +47,7 @@ export function SalesCard({ sales, catalog, today, editing }: { sales: Sale[]; c
                   <tr key={sale.id}>
                     <td>{sale.name}</td>
                     <td>
-                      {saleWords(sale, catalog.studios)}. Booked from {longDateLabel(sale.bookFrom)}.
+                      {saleWords(sale, catalog.studios)}.{saleCodesWords(sale)} Booked from {longDateLabel(sale.bookFrom)}.
                     </td>
                     <td>{saleStatus(sale, today)}</td>
                     <td>
@@ -137,6 +137,14 @@ export function SalesCard({ sales, catalog, today, editing }: { sales: Sale[]; c
           </div>
         </div>
         <p className="avail-hint">Fill these in to lower the prices only of studio time on some days: this weekend, or until Christmas. Left empty, the sale is for any day.</p>
+        <label className="avail-check">
+          <input type="checkbox" name="withCodes" defaultChecked={editing?.withCodes ?? false} /> A discount code can be used on top of this sale
+        </label>
+        <p className="avail-hint">
+          Not ticked: a client gets the sale&rsquo;s price or their code&rsquo;s discount, whichever leaves them less to pay, and never both. A code that is not used
+          stays theirs. A discount code is a percentage off or a free hour; studio credit, a reschedule code and membership hours are payment, and pay a sale&rsquo;s
+          price like any other.
+        </p>
         <div className="avail-actions">
           <button type="submit" className="btn btn-dark btn-small">
             {editing ? "Save the sale" : "Add the sale"}

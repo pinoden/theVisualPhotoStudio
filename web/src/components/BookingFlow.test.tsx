@@ -421,10 +421,10 @@ describe("studio-first flow", () => {
   });
 
   it("shows a sale's prices beside the usual ones crossed out, and books at them (the owner, 2026-11-27)", async () => {
-    const blackFriday = { id: "sale-1", name: "Black Friday", percent: 25, studioIds: [P], bookFrom: "2000-01-01", bookUntil: "2999-12-31", visitFrom: null, visitUntil: null };
+    const blackFriday = { id: "sale-1", name: "Black Friday", percent: 25, studioIds: [P], bookFrom: "2000-01-01", bookUntil: "2999-12-31", visitFrom: null, visitUntil: null, withCodes: false };
     render(<BookingFlow catalog={{ ...catalog, sales: [blackFriday] }} navigate={nav.push} />);
     // What is on, above the steps.
-    expect(screen.getByText(/25% off Studio Paris when you book by \w+, December 31, 2999\.$/).closest("p")!.textContent).toMatch(/^Black Friday: 25% off Studio Paris/);
+    expect(screen.getByText(/25% off Studio Paris when you book by \w+, December 31, 2999\. A discount code cannot be combined with it\.$/).closest("p")!.textContent).toMatch(/^Black Friday: 25% off Studio Paris/);
     // Paris, an hour: the usual $68 crossed out, and $51 beside it. Blanche is not on sale.
     const rateOf = (name: string) => studioBox(name).closest("label")!.querySelector(".studio-option-rate")!;
     expect(rateOf("Studio Paris").querySelector("s")!.textContent).toBe("$68");
@@ -447,7 +447,7 @@ describe("studio-first flow", () => {
   });
 
   it("leaves a sale out for a day of studio time it is not for", async () => {
-    const untilNewYear = { id: "sale-1", name: "Black Friday", percent: 25, studioIds: [P], bookFrom: "2000-01-01", bookUntil: "2999-12-31", visitFrom: null, visitUntil: "2029-12-31" };
+    const untilNewYear = { id: "sale-1", name: "Black Friday", percent: 25, studioIds: [P], bookFrom: "2000-01-01", bookUntil: "2999-12-31", visitFrom: null, visitUntil: "2029-12-31", withCodes: true };
     render(<BookingFlow catalog={{ ...catalog, sales: [untilNewYear] }} navigate={nav.push} />);
     // Before a day is chosen the sale shows, as on a price list, with the days it is for.
     expect(screen.getByText(/for studio time until Monday, December 31, 2029\.$/)).toBeTruthy();
@@ -464,6 +464,42 @@ describe("studio-first flow", () => {
     expect(summary.textContent).toContain("$136");
     expect(summary.textContent).not.toContain("Usual price");
     expect(summary.querySelector("s")).toBeNull();
+  });
+
+  it("uses a sale's price or a discount code, whichever leaves less to pay, and says which (the owner, 2026-11-28)", async () => {
+    const back = () => user.click(screen.getByRole("button", { name: /Back/ }));
+    const blackFriday = { id: "sale-1", name: "Black Friday", percent: 60, studioIds: [P], bookFrom: "2000-01-01", bookUntil: "2999-12-31", visitFrom: null, visitUntil: null, withCodes: false };
+    render(<BookingFlow catalog={{ ...catalog, sales: [blackFriday] }} navigate={nav.push} />);
+    await user.click(studioBox("Studio Paris"));
+    await next();
+    pickDate(WED);
+    await pickDuration("2 hr");
+    await pickTime("9:00 AM");
+    await next();
+    await typeDetails();
+    await user.type(screen.getByLabelText("Have a code?"), "thanks-free-hour");
+    await user.click(screen.getByRole("button", { name: "Apply" }));
+    // Two hours: $136, and $54 on sale (60% off, in whole dollars). The free hour would leave $68: the sale's price
+    // stays, and the code is not used.
+    expect((await screen.findByText(/is not used on this booking and stays yours\.$/)).textContent).toBe(
+      "A discount code is not used on top of a sale's price, and the sale's price is the lower of the two for this booking. Code THANKS-FREE-HOUR is not used on this booking and stays yours.",
+    );
+    expect(screen.getByText("To pay").nextElementSibling?.textContent).toBe("$54");
+    expect(screen.queryByText("Free hour, code THANKS-FREE-HOUR")).toBeNull();
+
+    // One hour: $27 on sale, and nothing to pay with the free hour. The code is used, at the usual price.
+    await back();
+    await pickDuration("1 hr");
+    await pickTime("9:00 AM");
+    await next();
+    expect(screen.getByText("Free hour, code THANKS-FREE-HOUR")).toBeTruthy();
+    expect(screen.getByText("To pay").nextElementSibling?.textContent).toBe("$0");
+    expect(screen.getByText(/^Code THANKS-FREE-HOUR takes more off/).textContent).toBe(
+      "Code THANKS-FREE-HOUR takes more off than the Black Friday price would, so the code is used and the usual prices are shown: a discount code is not used on top of a sale\u2019s price.",
+    );
+    const summary = [...document.querySelectorAll(".price-summary")].find((box) => box.textContent?.startsWith("When"))!;
+    expect(summary.querySelector("s")).toBeNull();
+    expect(summary.textContent).not.toContain("off the usual price");
   });
 
   it("sends the client back to read the policies again when they were published meanwhile", async () => {

@@ -29,6 +29,12 @@ export interface Sale {
   /** The days of studio time it is for, when the owners limit them: either end may be open. */
   visitFrom: IsoDate | null;
   visitUntil: IsoDate | null;
+  /**
+   * Whether a discount code can be used on top of its prices. Off unless the owners tick it (the owner, 2026-11-28:
+   * "Either or, not combine"): a client then gets the sale's price or their code's discount, whichever leaves less to
+   * pay (`quote` in pricing.ts).
+   */
+  withCodes: boolean;
 }
 
 export const SALE_PERCENT_MAX = 90;
@@ -41,6 +47,8 @@ export interface BookingSale {
   name: string;
   /** Studio id -> percent off. A studio that is not on sale is left out. */
   percents: Record<string, number>;
+  /** Set when a discount code can be used on top: every sale that lowers one of the booking's studios allows it. */
+  withCodes?: true;
 }
 
 /** Whether a sale can be booked on `bookedOn`, whatever the day of the studio time. */
@@ -68,6 +76,7 @@ export function salesInForce(sales: readonly Sale[], bookedOn: IsoDate, date?: I
 export function bookingSale(sales: readonly Sale[], studioIds: readonly string[]): BookingSale | null {
   const percents: Record<string, number> = {};
   const names: string[] = [];
+  let withCodes = true;
   for (const studioId of studioIds) {
     const best = sales
       .filter((sale) => sale.studioIds.length === 0 || sale.studioIds.includes(studioId))
@@ -75,8 +84,9 @@ export function bookingSale(sales: readonly Sale[], studioIds: readonly string[]
     if (!best || best.percent <= 0) continue;
     percents[studioId] = best.percent;
     if (!names.includes(best.name)) names.push(best.name);
+    if (!best.withCodes) withCodes = false;
   }
-  return names.length > 0 ? { name: names.join(" + "), percents } : null;
+  return names.length > 0 ? { name: names.join(" + "), percents, ...(withCodes ? { withCodes: true as const } : {}) } : null;
 }
 
 /** A price with a percentage off, in whole dollars, and never more than the price itself. */
@@ -143,3 +153,6 @@ export function saleWords(sale: Sale, studios: readonly { id: string; name: stri
           : "";
   return `${sale.percent}% off ${what} when you book by ${longDateLabel(sale.bookUntil)}${time}`;
 }
+
+/** The sentence after it, when a discount code is not used on top of the sale's price: with a space before it, or nothing. */
+export const saleCodesWords = (sale: Pick<Sale, "withCodes">): string => (sale.withCodes ? "" : " A discount code cannot be combined with it.");

@@ -259,6 +259,11 @@ export async function accessibilityProblems(page: Page, options: { exclude?: str
     await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
     // And a part of the page that is still on its way shows a spinner in its place: the booking screen, while it starts.
     await expect(page.locator(".spinner").filter({ visible: true })).toHaveCount(0);
+    // And an editor of the website keeps its form switched off until it has started, and dims it while it saves (a
+    // fieldset that is disabled, or inert): the menu editor's buttons were read on their way from pale to their own
+    // colours, a fifth of a second (CI's `webkit` on PR #47, 2026-11-28: 13 buttons of `/admin/website/navigation`,
+    // in one run of two). Once it has started, the wait for animations below sees that change through.
+    await expect(page.locator(".editor-form:disabled, .editor-form[inert], .page-editor-canvas[inert]")).toHaveCount(0);
     // And a button the pointer rests on changes its colours over a fifth of a second, and is read in between as words
     // on a ground of nearly their own colour: after "Next" the pointer lies where the payment step puts its buttons
     // (`master`'s WebKit run of 2026-11-28, on the "Fake Payment" button). The pointer is taken off the page's controls.

@@ -470,6 +470,29 @@ describe("old addresses", () => {
     expect((await listRedirects(world.db, owner))!).toHaveLength(after.size);
   });
 
+  it("of the old website's shop lead to Guest Information since migration 0082, where /store still led home (the owner, 2026-11-28)", async () => {
+    // Asked where /events and /store should lead: "Review the docs - I don't know either". On the old website /store
+    // sells one thing, the free "Studio Guest Guide", and /events is an empty page.
+    const read = (name: string) => readFileSync(path.join(process.cwd(), "drizzle", name), "utf8");
+    const run = async (migration: string) => {
+      for (const statement of migration.split("--> statement-breakpoint")) await world.db.execute(sql.raw(statement));
+    };
+    await run(read("0074_old_addresses.sql"));
+    expect(await findRedirect(world.db, "/store")).toBe("/");
+    await run(read("0082_store_leads_to_guest_information.sql"));
+    expect(await findRedirect(world.db, "/store")).toBe("/faq");
+    expect(await findRedirect(world.db, "/store/p/studio-guest-guide-free-download")).toBe("/faq");
+    expect(await findRedirect(world.db, "/events")).toBe("/contact");
+    // The guide's address is one the site's own form would take, so the owners can change it there.
+    expect(await addRedirect(world.db, owner, { from: "/store/p/studio-guest-guide-free-download", to: "/faq" })).toEqual({ ok: true });
+    // A destination the owners gave /store since is kept; run again, nothing changes.
+    expectOk(await addRedirect(world.db, owner, { from: "/store", to: "/gift-cards" }));
+    const before = await listRedirects(world.db, owner);
+    await run(read("0082_store_leads_to_guest_information.sql"));
+    expect(await listRedirects(world.db, owner)).toEqual(before);
+    expect(await findRedirect(world.db, "/store")).toBe("/gift-cards");
+  });
+
   it("cannot be a page's own address, the site's own, or lead nowhere", async () => {
     await make();
     const refused = async (from: string, to: string) => {

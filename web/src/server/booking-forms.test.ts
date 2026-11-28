@@ -46,26 +46,33 @@ describe("Booking Forms & Agreements (the owner's brief of 2026-11-22, items 6 a
     studioIds: [],
     forRentals: true,
     forPhotography: true,
+    forContent: true,
     startsOn: "",
     endsOn: "",
     ...overrides,
   });
 
   it("asks a question of the bookings it applies to: its studios, its type and its days", () => {
-    const decor = { studioIds: ["dayglow"], forRentals: true, forPhotography: false, startsOn: "2026-12-01", endsOn: "2027-01-02" };
-    expect(appliesTo(decor, { studioIds: ["dayglow"], photography: false, date: "2026-12-20" })).toBe(true);
-    expect(appliesTo(decor, { studioIds: ["paris", "dayglow"], photography: false, date: "2026-12-20" })).toBe(true); // a bundle with Dayglow
-    expect(appliesTo(decor, { studioIds: ["blanche"], photography: false, date: "2026-12-20" })).toBe(false);
-    expect(appliesTo(decor, { studioIds: ["dayglow"], photography: true, date: "2026-12-20" })).toBe(false);
-    expect(appliesTo(decor, { studioIds: ["dayglow"], photography: false, date: "2027-01-03" })).toBe(false);
-    expect(appliesTo(decor, { studioIds: ["dayglow"], photography: false, date: "2026-11-30" })).toBe(false);
-    expect(appliesTo({ studioIds: [], forRentals: true, forPhotography: true }, { studioIds: ["paris"], photography: true, date: "2026-12-20" })).toBe(true);
+    const decor = { studioIds: ["dayglow"], forRentals: true, forPhotography: false, forContent: false, startsOn: "2026-12-01", endsOn: "2027-01-02" };
+    expect(appliesTo(decor, { studioIds: ["dayglow"], service: null, date: "2026-12-20" })).toBe(true);
+    expect(appliesTo(decor, { studioIds: ["paris", "dayglow"], service: null, date: "2026-12-20" })).toBe(true); // a bundle with Dayglow
+    expect(appliesTo(decor, { studioIds: ["blanche"], service: null, date: "2026-12-20" })).toBe(false);
+    expect(appliesTo(decor, { studioIds: ["dayglow"], service: "photography" as const, date: "2026-12-20" })).toBe(false);
+    expect(appliesTo(decor, { studioIds: ["dayglow"], service: null, date: "2027-01-03" })).toBe(false);
+    expect(appliesTo(decor, { studioIds: ["dayglow"], service: null, date: "2026-11-30" })).toBe(false);
+    expect(appliesTo({ studioIds: [], forRentals: true, forPhotography: true, forContent: true }, { studioIds: ["paris"], service: "photography" as const, date: "2026-12-20" })).toBe(true);
+    // Photography sessions and content creation sessions have sets of their own (the owner, 2026-11-28).
+    const release = { studioIds: [], forRentals: false, forPhotography: true, forContent: false };
+    const reels = { studioIds: [], forRentals: false, forPhotography: false, forContent: true };
+    const at = (service: "photography" | "content" | null) => ({ studioIds: ["paris"], service, date: "2026-12-20" });
+    expect([appliesTo(release, at("photography")), appliesTo(release, at("content")), appliesTo(release, at(null))]).toEqual([true, false, false]);
+    expect([appliesTo(reels, at("photography")), appliesTo(reels, at("content")), appliesTo(reels, at(null))]).toEqual([false, true, false]);
   });
 
   it("keeps a new question off until it is published, and orders, changes and deletes questions", async () => {
     const first = expectOk(await saveQuestion(world.db, null, question({})));
     const second = expectOk(await saveQuestion(world.db, null, question({ label: "Anything we should know?", kind: "text", options: [], required: false })));
-    const context = { studioIds: [world.ids.paris], photography: false, date: "2026-11-18" };
+    const context = { studioIds: [world.ids.paris], service: null, date: "2026-11-18" };
     expect((await checkoutForms(world.db, context)).questions).toEqual([]);
     await setQuestionActive(world.db, first.id, true);
     await setQuestionActive(world.db, second.id, true);
@@ -86,19 +93,20 @@ describe("Booking Forms & Agreements (the owner's brief of 2026-11-22, items 6 a
     expect(await refusal({ kind: "essay" })).toBe("Choose the kind of question.");
     expect(await refusal({ options: ["Only one", " Only one "] })).toBe("Give at least two answers to choose from, one on each line.");
     expect(await refusal({ startsOn: "2026-12-10", endsOn: "2026-12-01" })).toBe("The last day must be on or after the first.");
-    expect(await refusal({ forRentals: false, forPhotography: false })).toBe("Choose rentals, photography and content creation sessions, or both.");
+    expect(await refusal({ forRentals: false, forPhotography: false, forContent: false })).toBe("Choose the bookings it is for: studio rentals, photography sessions, content creation sessions, or several of them.");
+    expect(await refusal({ forRentals: false, forPhotography: false, forContent: true })).toBeNull();
     expect(await refusal({ studioIds: ["00000000-0000-4000-8000-000000000000"] })).toBe("Unknown studio.");
   });
 
   it("publishes an agreement's draft as numbered versions, keeps them, and shows clients the newest", async () => {
-    const waiver = expectOk(await saveAgreement(world.db, null, { title: "Photography release", draft: "You allow us to share the photos.", studioIds: [], forRentals: false, forPhotography: true }));
-    const rental = { studioIds: [world.ids.paris], photography: false, date: "2026-11-18" };
-    const session = { ...rental, photography: true };
+    const waiver = expectOk(await saveAgreement(world.db, null, { title: "Photography release", draft: "You allow us to share the photos.", studioIds: [], forRentals: false, forPhotography: true, forContent: false }));
+    const rental = { studioIds: [world.ids.paris], service: null, date: "2026-11-18" };
+    const session = { ...rental, service: "photography" as const };
     expect((await checkoutForms(world.db, session)).agreements).toEqual([]); // nothing published yet
     expect(await publishAgreement(world.db, waiver.id, "owner@studio.test", NOW)).toEqual({ ok: true, number: 1 });
     expect(await publishAgreement(world.db, waiver.id, "owner@studio.test", NOW)).toEqual({ ok: false, message: "Nothing changed since the version published last." });
     expect((await checkoutForms(world.db, rental)).agreements).toEqual([]); // not for rentals
-    expectOk(await saveAgreement(world.db, waiver.id, { title: "Photography release", draft: "You allow us to share the photos, with your name only if you agree.", studioIds: [], forRentals: false, forPhotography: true }));
+    expectOk(await saveAgreement(world.db, waiver.id, { title: "Photography release", draft: "You allow us to share the photos, with your name only if you agree.", studioIds: [], forRentals: false, forPhotography: true, forContent: false }));
     // The draft is not what clients read until it is published.
     expect((await checkoutForms(world.db, session)).agreements.map((a) => [a.number, a.body])).toEqual([[1, "You allow us to share the photos."]]);
     expect(await publishAgreement(world.db, waiver.id, "owner@studio.test", NOW)).toEqual({ ok: true, number: 2 });
@@ -150,11 +158,11 @@ describe("Booking Forms & Agreements (the owner's brief of 2026-11-22, items 6 a
     expect((await formsOfBooking(world.db, row.id)).answers.map((answer) => answer.label)).toEqual(["I understand the Christmas decor stays in place.", "How many people are coming?"]);
 
     // Blanche in December is not asked about the decor; an agreement published meanwhile sends the client back to read it.
-    const terms = expectOk(await saveAgreement(world.db, null, { title: "Equipment terms", draft: "Handle the lights with care.", studioIds: [], forRentals: true, forPhotography: true }));
+    const terms = expectOk(await saveAgreement(world.db, null, { title: "Equipment terms", draft: "Handle the lights with care.", studioIds: [], forRentals: true, forPhotography: true, forContent: true }));
     await publishAgreement(world.db, terms.id, "owner@studio.test", NOW);
     const blanche = { studioIds: [world.ids.blanche], date: "2026-12-21", startMinute: h(14), durationMinutes: 60, answers: { [groups.id]: "6–10" } };
     expect(await world.book({ ...blanche, accepted })).toMatchObject({ ok: false, code: "policies_changed" });
-    const [shown] = (await checkoutForms(world.db, { studioIds: [world.ids.blanche], photography: false, date: "2026-12-21" })).agreements;
+    const [shown] = (await checkoutForms(world.db, { studioIds: [world.ids.blanche], service: null, date: "2026-12-21" })).agreements;
     const second = expectOk(await world.book({ ...blanche, accepted: [...accepted, agreementKey(shown.versionId)] }));
     const [other] = await world.db.select().from(bookings).where(eq(bookings.ref, second.ref));
     expect((await world.db.select().from(bookingAcceptances).where(eq(bookingAcceptances.bookingId, other.id))).map((a) => [a.kind, a.title, a.versionNumber])).toEqual([
@@ -167,9 +175,9 @@ describe("Booking Forms & Agreements (the owner's brief of 2026-11-22, items 6 a
   it("keeps the Policies page's words as the client read them, and gives each acceptance back to read again", async () => {
     await ensureBuiltInPages(world.db, NOW);
     const policies = (await currentPolicies(world.db))!;
-    const terms = expectOk(await saveAgreement(world.db, null, { title: "Equipment terms", draft: "Handle the lights with care.\n\nTell us of any damage.", studioIds: [], forRentals: true, forPhotography: true }));
+    const terms = expectOk(await saveAgreement(world.db, null, { title: "Equipment terms", draft: "Handle the lights with care.\n\nTell us of any damage.", studioIds: [], forRentals: true, forPhotography: true, forContent: true }));
     await publishAgreement(world.db, terms.id, "owner@studio.test", NOW);
-    const [shown] = (await checkoutForms(world.db, { studioIds: [world.ids.blanche], photography: false, date: "2026-11-18" })).agreements;
+    const [shown] = (await checkoutForms(world.db, { studioIds: [world.ids.blanche], service: null, date: "2026-11-18" })).agreements;
     const booked = expectOk(await world.book({ accepted: [policiesKey(policies.versionId), agreementKey(shown.versionId)] }));
     const [row] = await world.db.select().from(bookings).where(eq(bookings.ref, booked.ref));
 
@@ -228,7 +236,7 @@ describe("Booking Forms & Agreements (the owner's brief of 2026-11-22, items 6 a
     const statement = (label: string, overrides: Partial<QuestionInput> = {}) => question({ label, kind: "initials", options: [], required: false, ...overrides });
     // A condition with no words after it would show an empty statement.
     expect(await saveQuestion(world.db, null, statement("{if reschedule fee} "))).toEqual({ ok: false, message: "Write the words after the condition." });
-    const studioOnly = expectOk(await saveQuestion(world.db, null, statement("I understand that I am renting studio space only.", { forPhotography: false })));
+    const studioOnly = expectOk(await saveQuestion(world.db, null, statement("I understand that I am renting studio space only.", { forPhotography: false, forContent: false })));
     const late = expectOk(await saveQuestion(world.db, null, statement("I understand that if I cancel less than {refund window} before my start time, my payment is not refunded.")));
     const moves = expectOk(await saveQuestion(world.db, null, statement("{if reschedule fee}I may reschedule {reschedules allowed} at no charge; each further reschedule costs {reschedule fee}.")));
     for (const id of [studioOnly.id, late.id, moves.id]) await setQuestionActive(world.db, id, true);
@@ -236,7 +244,7 @@ describe("Booking Forms & Agreements (the owner's brief of 2026-11-22, items 6 a
     expect((await listQuestions(world.db)).map((q) => q.required)).toEqual([true, true, true]);
 
     // A client reads the figures of today's settings, and no markers.
-    const rental = { studioIds: [world.ids.blanche], photography: false, date: FAR };
+    const rental = { studioIds: [world.ids.blanche], service: null, date: FAR };
     const shown = (await checkoutForms(world.db, rental)).questions;
     expect(shown.map((q) => q.label)).toEqual([
       "I understand that I am renting studio space only.",
@@ -244,7 +252,13 @@ describe("Booking Forms & Agreements (the owner's brief of 2026-11-22, items 6 a
       "I may reschedule once at no charge; each further reschedule costs $20.",
     ]);
     // A session with the studio's own photographer is not told that it has none.
-    expect((await checkoutForms(world.db, { ...rental, photography: true })).questions.map((q) => q.id)).toEqual([late.id, moves.id]);
+    expect((await checkoutForms(world.db, { ...rental, service: "photography" as const })).questions.map((q) => q.id)).toEqual([late.id, moves.id]);
+    // A statement for content creation sessions alone is asked of those, and of no photography session (the owner, 2026-11-28).
+    const reels = expectOk(await saveQuestion(world.db, null, statement("I understand that reels and stories are filmed with an iPhone.", { forRentals: false, forPhotography: false })));
+    await setQuestionActive(world.db, reels.id, true);
+    expect((await checkoutForms(world.db, { ...rental, service: "content" as const })).questions.map((q) => q.id)).toEqual([late.id, moves.id, reels.id]);
+    expect((await checkoutForms(world.db, { ...rental, service: "photography" as const })).questions.map((q) => q.id)).toEqual([late.id, moves.id]);
+    expect((await checkoutForms(world.db, rental)).questions.map((q) => q.id)).toEqual([studioOnly.id, late.id, moves.id]);
 
     const accepted = [policiesKey(policies.versionId)];
     const keys = shown.map((q) => initialsKey(q.id, q.label));

@@ -286,7 +286,8 @@ describe("cancelling", () => {
     const early = expectOk(await world.book({ date: FAR }));
     expect(await getManageOptions(world.db, early.ref, byToken(early.manageToken), NOW)).toEqual({
       cancel: { allowed: true, refundCents: 16720, feeCents: 880, creditCents: 0, byHandCents: 0, why: "refund" },
-      reschedule: { allowed: true, creditCents: 17600, discountCents: 0, nextMovable: false, nextFeeCents: 2000 },
+      // FAR is a Wednesday: the code will be for weekdays (the owner, 2026-11-28).
+      reschedule: { allowed: true, creditCents: 17600, discountCents: 0, weekdaysOnly: true, nextMovable: false, nextFeeCents: 2000 },
     });
     const late = expectOk(await world.book({ date: NEAR }));
     expect(await getManageOptions(world.db, late.ref, byToken(late.manageToken), NOW)).toMatchObject({
@@ -483,6 +484,49 @@ describe("the reschedule code", () => {
     });
   });
 
+  it("gives a rental booked for a weekday a code for weekdays only, and a weekend's a code for any day (the owner, 2026-11-28)", async () => {
+    // The owner: "if the original booking was a weekday, they can't book for weekend". FAR is a Wednesday.
+    const SATURDAY = "2026-12-12";
+    const WEEKDAY_WORDS = "The code is for a booking on a weekday (Monday to Friday, not a holiday): a booking made for a weekday is not moved to a weekend.";
+    const first = expectOk(await world.book({ date: FAR }));
+    expect((await getManageChoices(world.db, first.ref, byToken(first.manageToken), NOW))!.reschedule.text).toContain(WEEKDAY_WORDS);
+    const released = expectOk(await requestRescheduleCode(world.db, first.ref, byToken(first.manageToken), world.manageDeps()));
+    expect(released.weekdaysOnly).toBe(true);
+    expect((await world.db.select().from(promoCodes).where(eq(promoCodes.code, released.code)))[0].bookingDays).toEqual({ from: null, until: null, weekdays: [1, 2, 3, 4, 5], notOnSpecialDates: true });
+    expect((await world.emails("reschedule_code")).at(-1)!.body).toContain(`is now a credit of $176. ${WEEKDAY_WORDS}`);
+    // On a Saturday it is refused, with the days it works for; on a weekday it pays.
+    expect(await world.book({ date: SATURDAY, promoCode: released.code, paymentToken: undefined })).toMatchObject({
+      ok: false,
+      code: "invalid_code",
+      message: "That code works only for bookings on weekdays (Monday to Friday), not on holidays. December 12, 2026 is a Saturday. Choose another date, or book without the code.",
+    });
+    const moved = expectOk(await world.book({ date: FAR, startMinute: h(14), promoCode: released.code, paymentToken: undefined }));
+    expect((await bookingRow(moved.ref)).totalCents).toBe(0);
+
+    // A booking made for a Saturday gets a code for any day, and nothing is said of days.
+    const weekend = expectOk(await world.book({ date: SATURDAY }));
+    expect((await bookingRow(weekend.ref)).pricedAs).toBe("weekend");
+    expect((await getManageChoices(world.db, weekend.ref, byToken(weekend.manageToken), NOW))!.reschedule.text).not.toContain("weekday");
+    const free = expectOk(await requestRescheduleCode(world.db, weekend.ref, byToken(weekend.manageToken), world.manageDeps()));
+    expect(free.weekdaysOnly).toBe(false);
+    expect((await world.db.select().from(promoCodes).where(eq(promoCodes.code, free.code)))[0].bookingDays).toBeNull();
+    expect((await world.emails("reschedule_code")).at(-1)!.body).not.toContain("weekday");
+  });
+
+  it("keeps the weekday rule a booking was made under, and gives a code for any day once the owners switch it off", async () => {
+    const SATURDAY = "2026-12-12";
+    const under = expectOk(await world.book({ date: FAR }));
+    expect(await saveSetting(world.db, "weekdayCodeOnWeekdays", false)).toBe(true);
+    // Made while the rule was on: its code is for weekdays, whatever the setting is now.
+    expect(expectOk(await requestRescheduleCode(world.db, under.ref, byToken(under.manageToken), world.manageDeps())).weekdaysOnly).toBe(true);
+    // Made with the rule off: a code for any day, which pays for a Saturday.
+    const after = expectOk(await world.book({ date: FAR, startMinute: h(15) }));
+    expect((await getManageOptions(world.db, after.ref, byToken(after.manageToken), NOW))!.reschedule).toEqual({ allowed: true, creditCents: 17600, discountCents: 0, nextMovable: false, nextFeeCents: 2000 });
+    const released = expectOk(await requestRescheduleCode(world.db, after.ref, byToken(after.manageToken), world.manageDeps()));
+    expect(released.weekdaysOnly).toBe(false);
+    expect((await world.book({ date: SATURDAY, promoCode: released.code })).ok).toBe(true);
+  });
+
   it("releases the booking and emails a code worth what was paid", async () => {
     const booked = expectOk(await world.book({ date: NEAR })); // inside the refund window
     const row = await bookingRow(booked.ref);
@@ -524,7 +568,7 @@ describe("the reschedule code", () => {
     expect(choices?.reschedule).toEqual({
       allowed: true,
       offered: true,
-      text: "This booking will be released and you will get a code worth $176, valid for 90 days, to book a new time. That is what you paid plus the $17.60 your discount code took off. A booking made with the code cannot be refunded. The new booking cannot be moved online again: the studio moves it for you, for $20 each time.",
+      text: "This booking will be released and you will get a code worth $176, valid for 90 days, to book a new time. That is what you paid plus the $17.60 your discount code took off. The code is for a booking on a weekday (Monday to Friday, not a holiday): a booking made for a weekday is not moved to a weekend. A booking made with the code cannot be refunded. The new booking cannot be moved online again: the studio moves it for you, for $20 each time.",
     });
     const moved = expectOk(await requestRescheduleCode(world.db, first.ref, byToken(first.manageToken), world.manageDeps()));
     expect(moved.valueCents).toBe(17600);

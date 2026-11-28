@@ -3,6 +3,7 @@
 import { refresh } from "next/cache";
 import type { BookPath } from "@/lib/domain/services";
 import { getDb } from "@/db/client";
+import { WEEKDAYS_ONLY_TEXT } from "@/lib/domain/policy";
 import { formatCents } from "@/lib/domain/pricing";
 import { askStudioToMove, cancelBooking, requestRescheduleCode, type Actor } from "@/server/manage";
 import { flushEmailsSoon, manageDeps } from "@/server/runtime";
@@ -80,7 +81,7 @@ export async function rescheduleBookingAction(_previous: ManageState, formData: 
     status: "rescheduled",
     code: result.code,
     bookPath: result.bookPath,
-    message: `Your booking was released. Your code is worth ${formatCents(result.valueCents)} and is valid until ${formatInstant(result.expiresAt)}. We also emailed it to you.`,
+    message: `Your booking was released. Your code is worth ${formatCents(result.valueCents)} and is valid until ${formatInstant(result.expiresAt)}.${result.weekdaysOnly ? ` ${WEEKDAYS_ONLY_TEXT}` : ""} We also emailed it to you.`,
   };
 }
 

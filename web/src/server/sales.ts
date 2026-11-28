@@ -21,6 +21,7 @@ const saleOf = (row: typeof sales.$inferSelect): Sale => ({
   bookUntil: row.bookUntil,
   visitFrom: row.visitFrom,
   visitUntil: row.visitUntil,
+  withCodes: row.withCodes,
 });
 
 /** Every sale, the one that ends last first: for the owners' list, and for pricing, which reads their dates itself. */
@@ -37,6 +38,8 @@ export interface SaleInput {
   bookUntil: string;
   visitFrom: string;
   visitUntil: string;
+  /** A discount code can be used on top of the sale's price. Left out: it cannot. */
+  withCodes?: boolean;
 }
 
 export type SaleSaved = { ok: true; id: string } | { ok: false; message: string };
@@ -58,7 +61,16 @@ export async function saveSale(db: DbLike, id: string | null, input: SaleInput):
   if (studioIds.length > 0 && (await db.select({ id: studios.id }).from(studios).where(inArray(studios.id, studioIds))).length !== studioIds.length) {
     return { ok: false, message: "Unknown studio." };
   }
-  const values = { name, percent, studioIds, bookFrom: input.bookFrom as IsoDate, bookUntil: input.bookUntil as IsoDate, visitFrom: visitFrom as IsoDate | null, visitUntil: visitUntil as IsoDate | null };
+  const values = {
+    name,
+    percent,
+    studioIds,
+    bookFrom: input.bookFrom as IsoDate,
+    bookUntil: input.bookUntil as IsoDate,
+    visitFrom: visitFrom as IsoDate | null,
+    visitUntil: visitUntil as IsoDate | null,
+    withCodes: input.withCodes === true,
+  };
   if (id) {
     const changed = await db.update(sales).set(values).where(eq(sales.id, id)).returning({ id: sales.id });
     return changed.length > 0 ? { ok: true, id } : { ok: false, message: "That sale was deleted meanwhile." };

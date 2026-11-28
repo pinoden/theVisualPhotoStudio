@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { bookings, studioHolds } from "@/db/schema";
+import { bookings, promoCodes, studioHolds } from "@/db/schema";
 import { findPrice } from "@/lib/domain/pricing";
 import { salePriceCents } from "@/lib/domain/sale";
 import { moveBooking } from "./appointments";
@@ -8,6 +8,7 @@ import type { AuthUser } from "./auth";
 import { quoteSelection, toBookingViews } from "./bookings";
 import { loadCatalog, salesAround } from "./catalog";
 import { requestRescheduleCode } from "./manage";
+import { issuePromo } from "./promos";
 import { deleteSale, endSale, listSales, saveSale, type SaleInput } from "./sales";
 import { createTestWorld, daysAfter, expectOk, FAR, h, NEAR, NOW, OWNER_EMAIL, type TestWorld } from "./testing";
 
@@ -64,7 +65,7 @@ describe("a sale the owners set (the owner, 2026-11-27; question 87)", () => {
 
     const saved = expectOk(await saveSale(world.db, null, blackFriday({ name: "  Black   Friday ", studioIds: [world.ids.blanche] })));
     expect(await listSales(world.db)).toEqual([
-      { id: saved.id, name: "Black Friday", percent: 25, studioIds: [world.ids.blanche], bookFrom: TODAY, bookUntil: "2026-11-15", visitFrom: null, visitUntil: null },
+      { id: saved.id, name: "Black Friday", percent: 25, studioIds: [world.ids.blanche], bookFrom: TODAY, bookUntil: "2026-11-15", visitFrom: null, visitUntil: null, withCodes: false },
     ]);
     // Changed in place.
     expectOk(await saveSale(world.db, saved.id, blackFriday({ percent: "30" })));
@@ -89,6 +90,47 @@ describe("a sale the owners set (the owner, 2026-11-27; question 87)", () => {
     const later = expectOk(await world.book({ startMinute: h(14) }, { now: daysAfter(NOW, 2) }));
     expect(await rowOf(later.ref)).toMatchObject({ totalCents: 17600, saleCents: 0, sale: null });
     expect((await toBookingViews(world.db, [await rowOf(later.ref)], NOW))[0]).toMatchObject({ saleName: null, saleCents: 0 });
+  });
+
+  it("gives a client the sale's price or their discount code, never both, unless the owners tick the sale for codes (the owner, 2026-11-28)", async () => {
+    const JANE = "jane@example.com";
+    const code = async (kind: "percent" | "amount", value: number) => (await issuePromo(world.db, { kind, value, source: "manual", email: JANE, expiresAt: daysAfter(NOW, 90) }))!.code;
+    const usesOf = async (name: string) => (await world.db.select({ uses: promoCodes.usedCount }).from(promoCodes).where(eq(promoCodes.code, name)))[0].uses;
+    const sale = expectOk(await saveSale(world.db, null, blackFriday()));
+    const [tenth, half, credit] = [await code("percent", 10), await code("percent", 50), await code("amount", 5000)];
+    const NOT_BOTH = "A discount code is not used on top of a sale's price, and the sale's price is the lower of the two for this booking.";
+
+    // Blanche for two hours: $176, and $132 on sale. A tenth off would leave $158.40: the sale's price is the lower one,
+    // so the code is refused with the reason, on "Apply" and at the booking, and is not used up.
+    const selection = { studioIds: [world.ids.blanche], date: NEAR, durationMinutes: 120, email: JANE };
+    expect(await quoteSelection(world.db, { ...selection, promoCode: tenth }, NOW)).toMatchObject({ ok: false, code: "invalid_code", message: NOT_BOTH });
+    expect(await world.book({ promoCode: tenth })).toMatchObject({ ok: false, code: "invalid_code", message: NOT_BOTH });
+    expect(await usesOf(tenth)).toBe(0);
+
+    // Half off leaves $88, less than the sale's $132: the code is used on the usual price, and the booking keeps no sale.
+    const quoted = expectOk(await quoteSelection(world.db, { ...selection, promoCode: half }, NOW));
+    expect(quoted.quote).toMatchObject({ totalCents: 8800, promoDiscountCents: 8800, saleSetAside: true });
+    const withCode = expectOk(await world.book({ promoCode: half, expectedTotalCents: 8800 }));
+    expect(await rowOf(withCode.ref)).toMatchObject({ studiosSubtotalCents: 17600, promoDiscountCents: 8800, totalCents: 8800, sale: null, saleCents: 0 });
+    expect(await holdPrices(withCode.ref)).toEqual([17600]);
+    expect(await usesOf(half)).toBe(1);
+
+    // Credit is money paid before, not a discount: it pays the sale's price.
+    const paid = expectOk(await world.book({ startMinute: h(14), promoCode: credit }));
+    expect(await rowOf(paid.ref)).toMatchObject({ studiosSubtotalCents: 13200, saleCents: 4400, creditAppliedCents: 5000, totalCents: 8200, sale: { name: "Black Friday" } });
+
+    // Ticked "A discount code can be used on top of this sale": the tenth comes off the sale's price, and the booking
+    // keeps that it was sold so.
+    expectOk(await saveSale(world.db, sale.id, blackFriday({ withCodes: true })));
+    expect((await listSales(world.db))[0]).toMatchObject({ withCodes: true });
+    const both = expectOk(await world.book({ date: FAR, promoCode: tenth }));
+    expect(await rowOf(both.ref)).toMatchObject({ studiosSubtotalCents: 13200, promoDiscountCents: 1320, totalCents: 11880, saleCents: 4400, sale: { name: "Black Friday", percents: { [world.ids.blanche]: 25 }, withCodes: true } });
+    // And it stays priced so when the studio moves it, after the owners untick the sale.
+    expectOk(await saveSale(world.db, sale.id, blackFriday()));
+    expectOk(await moveBooking(world.db, owner, both.ref, { date: SATURDAY, startMinute: h(10), countsAsClientMove: false }, NOW));
+    const weekend = await usualPrice("blanche", "weekend");
+    const onSale = salePriceCents(weekend, 25);
+    expect(await rowOf(both.ref)).toMatchObject({ pricedAs: "weekend", studiosSubtotalCents: onSale, promoDiscountCents: Math.round(onSale * 0.1), saleCents: weekend - onSale });
   });
 
   it("is for its studios only, and for studio time on its days only when the owners limit them", async () => {

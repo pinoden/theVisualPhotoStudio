@@ -204,6 +204,7 @@ export async function loadCatalog(db: DbLike): Promise<Catalog> {
       bookUntil: row.bookUntil,
       visitFrom: row.visitFrom,
       visitUntil: row.visitUntil,
+      withCodes: row.withCodes,
     })),
   };
 }

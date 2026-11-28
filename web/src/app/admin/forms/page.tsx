@@ -4,6 +4,7 @@ import { connection } from "next/server";
 import { Suspense } from "react";
 import { getDb } from "@/db/client";
 import { shortStudioName } from "@/lib/domain/appointment-look";
+import { isService } from "@/lib/domain/services";
 import { isIsoDate, longDateLabel } from "@/lib/domain/time";
 import { appliesTo, asClientsRead, currentPolicies, LABEL_MAX, listAgreements, listQuestions, QUESTION_KINDS, type Applies, type QuestionView } from "@/server/booking-forms";
 import { loadCatalog, type CatalogStudio } from "@/server/catalog";
@@ -22,10 +23,19 @@ export default function FormsPage(props: PageProps<"/admin/forms">) {
   );
 }
 
-/** "Every studio · Rentals and photography · Dec 1, 2026 – Jan 2, 2027". */
+/** "Rentals", "Rentals and photography sessions", "Photography and content creation sessions", "Every booking". */
+function bookingsText(item: Applies): string {
+  if (item.forRentals && item.forPhotography && item.forContent) return "Every booking";
+  const kinds = [item.forRentals ? "rentals" : "", item.forPhotography ? "photography" : "", item.forContent ? "content creation" : ""].filter(Boolean);
+  const sessions = item.forPhotography || item.forContent;
+  const words = `${kinds.join(" and ")}${sessions ? " sessions" : ""}`;
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/** "Every studio · Rentals and photography sessions · Dec 1, 2026 – Jan 2, 2027". */
 function appliesText(item: Applies & { startsOn?: string | null; endsOn?: string | null }, studios: CatalogStudio[]): string {
   const where = item.studioIds.length === 0 ? "Every studio" : studios.filter((studio) => item.studioIds.includes(studio.id)).map((studio) => shortStudioName(studio.name)).join(", ");
-  const what = item.forRentals && item.forPhotography ? "Rentals and sessions" : item.forRentals ? "Rentals" : "Photography and content creation sessions";
+  const what = bookingsText(item);
   const day = (date: string) => longDateLabel(date).replace(/^\w+, /, "");
   const when = item.startsOn || item.endsOn ? ` · ${item.startsOn ? day(item.startsOn) : "Until"}${item.endsOn ? ` – ${day(item.endsOn)}` : " on"}` : "";
   return `${where} · ${what}${when}`;
@@ -50,7 +60,10 @@ function AppliesFields({ item, studios, prefix }: { item: Applies | null; studio
           <input type="checkbox" name="forRentals" value="1" id={`${prefix}-rentals`} defaultChecked={item?.forRentals ?? true} /> Studio rentals
         </label>
         <label className="avail-check">
-          <input type="checkbox" name="forPhotography" value="1" id={`${prefix}-photography`} defaultChecked={item?.forPhotography ?? true} /> Photography and content creation sessions
+          <input type="checkbox" name="forPhotography" value="1" id={`${prefix}-photography`} defaultChecked={item?.forPhotography ?? true} /> Photography sessions
+        </label>
+        <label className="avail-check">
+          <input type="checkbox" name="forContent" value="1" id={`${prefix}-content`} defaultChecked={item?.forContent ?? true} /> Content creation sessions
         </label>
       </fieldset>
     </>
@@ -120,8 +133,8 @@ async function Forms({ searchParams }: Pick<PageProps<"/admin/forms">, "searchPa
   const today = localDateOf(new Date());
   const previewStudio = typeof query.previewStudio === "string" && catalog.studios.some((studio) => studio.id === query.previewStudio) ? query.previewStudio : (catalog.studios[0]?.id ?? "");
   const previewDate = typeof query.previewDate === "string" && isIsoDate(query.previewDate) ? query.previewDate : today;
-  const previewPhotography = query.previewType === "photography";
-  const context = { studioIds: [previewStudio], photography: previewPhotography, date: previewDate };
+  const previewService = isService(query.previewType) ? query.previewType : null;
+  const context = { studioIds: [previewStudio], service: previewService, date: previewDate };
   // As a client reads them: the figures filled in, and a statement left out while its condition does not hold.
   const previewed = await asClientsRead(db, questions.filter((question) => appliesTo(question, context)));
   const previewedAgreements = agreementsList.filter((agreement) => agreement.active && appliesTo(agreement, context));
@@ -293,9 +306,10 @@ async function Forms({ searchParams }: Pick<PageProps<"/admin/forms">, "searchPa
             <label className="form-label" htmlFor="preview-type">
               Booking
             </label>
-            <select id="preview-type" name="previewType" className="form-control" defaultValue={previewPhotography ? "photography" : "rental"}>
+            <select id="preview-type" name="previewType" className="form-control" defaultValue={previewService ?? "rental"}>
               <option value="rental">Studio rental</option>
-              <option value="photography">Photography or content creation session</option>
+              <option value="photography">Photography session</option>
+              <option value="content">Content creation session</option>
             </select>
           </div>
           <div className="form-group">

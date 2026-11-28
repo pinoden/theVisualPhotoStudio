@@ -15,6 +15,8 @@ export interface PolicySettings {
    * what the booking owes (`moveBooking` in src/server/appointments.ts). 0: they cost nothing.
    */
   rescheduleFeeCents: number;
+  /** Whether the code for a rental booked for a weekday is for weekdays only (the owner, 2026-11-28). Left out: it is not. */
+  weekdayCodeOnWeekdays?: boolean;
 }
 
 export interface BookingFacts {
@@ -51,6 +53,8 @@ export interface BookingFacts {
   paidAtStudioCents?: number;
   /** Membership minutes the booking took (follow-up 3). Leave it out for a booking without any. */
   membershipMinutes?: number;
+  /** A studio rental priced as a weekday (`bookings.priced_as`). Leave it out for a weekend's, a session, or when it does not matter. */
+  weekdayRental?: boolean;
 }
 
 export type CancelBlock = "not_confirmed" | "already_started";
@@ -164,6 +168,11 @@ export type RescheduleOutcome =
       /** The part of `discountCents` that a sale took off: there only when one did. */
       saleCents?: number;
       /**
+       * There only when the code will be for weekdays (Monday to Friday, not a holiday): the booking is a rental booked
+       * for a weekday, and a weekday's booking is not moved to a weekend (the owner, 2026-11-28).
+       */
+      weekdaysOnly?: true;
+      /**
        * Whether the new booking can be moved online again, by the terms it will be made under: only while free moves are
        * left, and not while the owners have moving switched off (the tester's third pass of 2026-11-18).
        */
@@ -215,8 +224,20 @@ export function rescheduleOutcome(
   const nextMovable = booking.rescheduledCount + 1 < nextTerms.maxReschedules;
   // With moving switched off in the new booking's terms, they say nothing about a move: the studio's costs nothing.
   const nextFeeCents = nextMovable || nextTerms.maxReschedules <= 0 ? 0 : nextTerms.rescheduleFeeCents;
-  return { allowed: true, creditCents: paidCents + discountCents, discountCents, ...(saleCents > 0 ? { saleCents } : {}), nextMovable, nextFeeCents };
+  const weekdaysOnly = settings.weekdayCodeOnWeekdays === true && booking.weekdayRental === true;
+  return {
+    allowed: true,
+    creditCents: paidCents + discountCents,
+    discountCents,
+    ...(saleCents > 0 ? { saleCents } : {}),
+    ...(weekdaysOnly ? { weekdaysOnly: true as const } : {}),
+    nextMovable,
+    nextFeeCents,
+  };
 }
+
+/** What a client reads of a code that is for weekdays: before they release the booking, and with the code. */
+export const WEEKDAYS_ONLY_TEXT = "The code is for a booking on a weekday (Monday to Friday, not a holiday): a booking made for a weekday is not moved to a weekend.";
 
 /** Whose saving a reschedule code carries besides the money paid: "your discount code", "the sale price", or both. */
 export function savingWords(amounts: { discountCents: number; saleCents?: number }): string {

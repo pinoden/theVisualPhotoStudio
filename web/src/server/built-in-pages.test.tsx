@@ -56,6 +56,11 @@ beforeEach(async () => {
 
 const setting = (key: string, value: unknown) => world.db.insert(settings).values({ key, value }).onConflictDoUpdate({ target: settings.key, set: { value } });
 
+/** The lines of 2026-11-28 about a weekday's booking, as the pages the site starts with have them and migration 0083 adds them. */
+const WEEKDAY_FAQ = "<p>{if weekday moves}A studio rental booked for a weekday is moved to a weekday (Monday to Friday, not a holiday): its code does not work for a weekend.</p>";
+const WEEKDAY_POLICIES =
+  "<li>{if weekday moves}A studio rental booked for a weekday can be rescheduled to another weekday only (Monday to Friday, not a holiday): its reschedule code cannot be used for a weekend.</li>";
+
 /** A published page as a visitor reads it: its words, without the HTML. */
 async function words(slug: string): Promise<string> {
   const page = await loadPublishedPage(world.db, slug, NOW);
@@ -220,7 +225,9 @@ describe("the pages the website was built with", () => {
     const NEW_POLICIES =
       "<li>{if not codes kept late}A discount code, free hour or studio credit applied to an appointment is returned only when the appointment is cancelled in time for a refund. If it is cancelled later, or after it has been rescheduled, the code or credit is used up.</li>";
     const stored = async (slug: string) => (await world.db.select().from(siteDocuments).where(eq(siteDocuments.slug, slug)))[0];
-    const without = (value: unknown) => JSON.parse(JSON.stringify(value).replace(NEW_FAQ, "").replace(NEW_POLICIES, ""));
+    // Nor the lines of 2026-11-28 about a weekday's booking, which migration 0083 brings (the next test).
+    const beforeWeekdays = (value: unknown) => JSON.parse(JSON.stringify(value).replace(WEEKDAY_FAQ, "").replace(WEEKDAY_POLICIES, ""));
+    const without = (value: unknown) => JSON.parse(JSON.stringify(beforeWeekdays(value)).replace(NEW_FAQ, "").replace(NEW_POLICIES, ""));
     for (const slug of ["faq", "policies"]) {
       const row = await stored(slug);
       expect(JSON.stringify(row.published), slug).toContain("{if not codes kept late}");
@@ -233,7 +240,7 @@ describe("the pages the website was built with", () => {
 
     const migration = readFileSync(path.join(process.cwd(), "drizzle", "0077_codes_after_late_cancel_copy.sql"), "utf8");
     await world.db.execute(sql.raw(migration));
-    for (const slug of ["faq", "policies"] as const) expect((await stored(slug)).published, slug).toEqual(builtInPages().find((page) => page.slug === slug)!.content);
+    for (const slug of ["faq", "policies"] as const) expect((await stored(slug)).published, slug).toEqual(beforeWeekdays(builtInPages().find((page) => page.slug === slug)!.content));
     expect(await words("policies")).toContain("the code or credit is used up");
     expect((await world.db.select().from(siteDocuments).where(eq(siteDocuments.id, own)))[0].published).toEqual(theirs);
     // Run again, it adds no second line.
@@ -241,6 +248,43 @@ describe("the pages the website was built with", () => {
     await world.db.execute(sql.raw(migration));
     expect(await world.db.select().from(siteVersions)).toHaveLength(versions);
     expect(JSON.stringify((await stored("policies")).published).split("{if not codes kept late}")).toHaveLength(2);
+  });
+
+  it("say that a weekday's booking is moved to a weekday while the owners keep that rule, and get the lines from migration 0083", async () => {
+    // The owner, 2026-11-28: "if the original booking was a weekday, they can't book for weekend".
+    expect(await words("faq")).toContain("A studio rental booked for a weekday is moved to a weekday (Monday to Friday, not a holiday): its code does not work for a weekend.");
+    expect(await words("policies")).toContain("A studio rental booked for a weekday can be rescheduled to another weekday only (Monday to Friday, not a holiday): its reschedule code cannot be used for a weekend.");
+    // Switched off under Settings, or with moving switched off, the pages say nothing of it.
+    await setting("weekdayCodeOnWeekdays", false);
+    expect(await words("faq")).not.toContain("booked for a weekday");
+    expect(await words("policies")).not.toContain("booked for a weekday");
+    await setting("weekdayCodeOnWeekdays", true);
+    await setting("maxReschedules", 0);
+    expect(await words("policies")).not.toContain("booked for a weekday");
+    await setting("maxReschedules", 1);
+
+    // A database from before has neither line. On a page of their own the owners reworded the line it would follow.
+    const stored = async (slug: string) => (await world.db.select().from(siteDocuments).where(eq(siteDocuments.slug, slug)))[0];
+    const without = (value: unknown) => JSON.parse(JSON.stringify(value).replace(WEEKDAY_FAQ, "").replace(WEEKDAY_POLICIES, ""));
+    for (const slug of ["faq", "policies"]) {
+      const row = await stored(slug);
+      expect(JSON.stringify(row.published), slug).toContain("{if weekday moves}");
+      await world.db.update(siteDocuments).set({ published: without(row.published) }).where(eq(siteDocuments.id, row.id));
+      expect(JSON.stringify((await stored(slug)).published), slug).not.toContain("{if weekday moves}");
+    }
+    const own = expectOk(await createPage(world.db, owner, { title: "Our Terms" }, NOW)).id;
+    const theirs = parsePage({ blocks: [{ type: "Section", props: { content: [{ type: "Text", props: { html: "<ul><li>Once an appointment has been rescheduled, it cannot be refunded.</li></ul>" } }] } }] });
+    await world.db.update(siteDocuments).set({ published: theirs }).where(eq(siteDocuments.id, own));
+
+    const migration = readFileSync(path.join(process.cwd(), "drizzle", "0083_weekday_moves_copy.sql"), "utf8");
+    await world.db.execute(sql.raw(migration));
+    for (const slug of ["faq", "policies"] as const) expect((await stored(slug)).published, slug).toEqual(builtInPages().find((page) => page.slug === slug)!.content);
+    expect((await world.db.select().from(siteDocuments).where(eq(siteDocuments.id, own)))[0].published).toEqual(theirs);
+    // Run again, it adds no second line.
+    const versions = (await world.db.select().from(siteVersions)).length;
+    await world.db.execute(sql.raw(migration));
+    expect(await world.db.select().from(siteVersions)).toHaveLength(versions);
+    for (const slug of ["faq", "policies"]) expect(JSON.stringify((await stored(slug)).published).split("{if weekday moves}"), slug).toHaveLength(2);
   });
 
   it("say the percentage off for several studios while no bundle has prices of its own", async () => {

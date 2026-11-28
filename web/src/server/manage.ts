@@ -13,12 +13,14 @@ import {
   codeComesBack,
   rescheduleOutcome,
   savingWords,
+  WEEKDAYS_ONLY_TEXT,
   type BookingFacts,
   type CancelBlock,
   type CancelOutcome,
   type RescheduleBlock,
   type RescheduleOutcome,
 } from "@/lib/domain/policy";
+import { WEEKDAYS_ONLY } from "@/lib/domain/promo-days";
 import type { AuthUser } from "./auth";
 import { isBookingRef, tokenMatches, toBookingViews } from "./bookings";
 import {
@@ -123,6 +125,8 @@ async function factsFor(db: DbLike, booking: BookingRow): Promise<BookingFacts> 
     petCreditGiven: petFeeCents > 0 && (await petCreditOf(db, booking.id)) !== null,
     paidAtStudioCents: await paidAtStudioCents(db, booking.id),
     membershipMinutes: booking.membershipMinutes,
+    // A rental booked for a weekday: its code is for weekdays, while the booking's terms say so (`rescheduleOutcome`).
+    weekdayRental: booking.photographerId === null && booking.pricedAs === "weekday",
   };
 }
 
@@ -253,7 +257,8 @@ function rescheduleOfferText(
     : outcome.nextFeeCents > 0
       ? ` The new booking cannot be moved online again: the studio moves it for you, for ${formatCents(outcome.nextFeeCents)} each time.`
       : " The new booking cannot be moved online again.";
-  return `This booking will be released and you will get a code worth ${formatCents(outcome.creditCents)}, valid for ${count(settings.creditValidDays, "day")}, to book a new time.${discount} A booking made with the code cannot be refunded.${next}`;
+  const days = outcome.weekdaysOnly ? ` ${WEEKDAYS_ONLY_TEXT}` : "";
+  return `This booking will be released and you will get a code worth ${formatCents(outcome.creditCents)}, valid for ${count(settings.creditValidDays, "day")}, to book a new time.${discount}${days} A booking made with the code cannot be refunded.${next}`;
 }
 
 /** What cancelling or moving would do, in words. A page asks `noticeBookingPayments` first, so that this counts a link just paid. */
@@ -1314,6 +1319,8 @@ export type RescheduleResult =
       bookPath: BookPath;
       valueCents: number;
       expiresAt: Date;
+      /** The code is for weekdays only (`RescheduleOutcome.weekdaysOnly`). */
+      weekdaysOnly: boolean;
     }
   /** `waiting`: not released yet (202, `waitToEnd`), or a cancellation the client asked for waits already (409). As `CancelResult`. */
   | { ok: false; status: number; code: "not_found" | "changed" | "waiting" | RescheduleBlock; message: string };
@@ -1397,6 +1404,7 @@ export async function requestRescheduleCode(db: Db, ref: string, actor: Actor, d
       originBookingId: booking.id,
       note: `Credit from ${booking.ref}`,
       issuedAt: deps.now,
+      bookingDays: decision.weekdaysOnly ? WEEKDAYS_ONLY : null,
     });
     if (!issued) throw new Error(`A reschedule code already exists for ${booking.ref}.`);
 
@@ -1410,12 +1418,13 @@ export async function requestRescheduleCode(db: Db, ref: string, actor: Actor, d
         valueCents: decision.creditCents,
         discountCents: decision.discountCents,
         saleCents: decision.saleCents,
+        weekdaysOnly: decision.weekdaysOnly === true,
         expires: formatInstant(expiresAt),
         bookUrl: `${deps.baseUrl.replace(/\/$/, "")}${bookPath}`,
         note: askedAt ? askedOn(askedAt) : null,
       }),
     );
-    return { kind: "done" as const, code: issued.code, bookPath, valueCents: decision.creditCents, expiresAt, bookingId: booking.id };
+    return { kind: "done" as const, code: issued.code, bookPath, valueCents: decision.creditCents, expiresAt, bookingId: booking.id, weekdaysOnly: decision.weekdaysOnly === true };
   });
 
   if (outcome.kind === "not_found") return { ok: false, status: 404, code: "not_found", message: "Booking not found." };
@@ -1435,7 +1444,7 @@ export async function requestRescheduleCode(db: Db, ref: string, actor: Actor, d
   if (outcome.kind === "waits") return { ok: false, status: 202, code: "waiting", message: outcome.message };
   // Withdrawn now that the processor has said it was not paid (see `cancelBooking`).
   await closePayLinkOf(db, outcome.bookingId, deps);
-  return { ok: true, code: outcome.code, bookPath: outcome.bookPath, valueCents: outcome.valueCents, expiresAt: outcome.expiresAt };
+  return { ok: true, code: outcome.code, bookPath: outcome.bookPath, valueCents: outcome.valueCents, expiresAt: outcome.expiresAt, weekdaysOnly: outcome.weekdaysOnly };
 }
 
 // ── Owner actions ────────────────────────────────────────────────────────────

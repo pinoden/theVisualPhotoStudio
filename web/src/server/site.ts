@@ -35,6 +35,10 @@ export const isPreview = cache(async (): Promise<boolean> => {
   // cookies (Partial Prefetching), and in Draft Mode nothing it would draw is kept: without this, every such prefetch
   // in a preview read the clock for the session (`new Date()` while prerendering) and missed its caches, which
   // Next.js logs as errors (the browser tests against a production build, 2026-11-20).
+  // So whatever a page reads from a cache is read after this was asked, never beside it: a cached read begun in a
+  // preview's first pass is made and thrown away, and the final pass reports it missing ("Unexpected cache miss after
+  // cache warming phase", 250 times in a run of the browser suite until 2026-11-28, from the booking pages' catalog
+  // and policies and from `sharePicture`).
   await connection();
   const user = await getCurrentUser();
   if (!user) return false;
@@ -74,6 +78,8 @@ export async function siteFrame(): Promise<ShownFrame> {
 
 /** The picture a link to the website shows when shared: the one the owners chose, else the first studio's first photo. */
 export async function sharePicture(): Promise<Picture | null> {
+  // The preview is asked for before the cached catalog is read, not beside it: see `isPreview`.
+  await isPreview();
   const [{ share }, catalog] = await Promise.all([siteFrame(), getCatalog()]);
   return share ?? catalog.studios.find((studio) => studio.photos.length > 0)?.photos[0] ?? null;
 }

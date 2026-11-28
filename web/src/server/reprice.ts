@@ -114,8 +114,9 @@ export async function priceOnNewDay(db: DbLike, booking: BookingRow, date: IsoDa
       membership: booking.membershipMinutes > 0 ? { minutesLeft: booking.membershipMinutes, weekendDifference: catalog.settings.memberWeekendDifference } : null,
       // The tax rule it was made under: a booking from before tax stays without.
       tax: taxRuleOf(booking),
-      // And the sale it was sold under, whatever the sales are now.
-      sale: booking.sale,
+      // And the sale it was sold under, whatever the sales are now. Whether a code went with the sale was settled when
+      // the booking was made (`quote`): one that has both keeps both.
+      sale: booking.sale && { ...booking.sale, withCodes: true },
     });
   } catch (error) {
     if (error instanceof PricingError) return { kind: "refused", message: error.message };

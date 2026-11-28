@@ -4,7 +4,7 @@ import { PictureRow } from "@/components/site/PictureRow";
 import { SalePrice } from "@/components/SalePrice";
 import { bundleName, bundleTables, catalogOnSale, hasWeekendPricing, hourlyFromCents, hoursLines, openingHours, priceTable } from "@/lib/catalog-view";
 import { formatCents } from "@/lib/domain/pricing";
-import { saleWords, type Sale } from "@/lib/domain/sale";
+import { saleCodesWords, saleWords, type Sale } from "@/lib/domain/sale";
 import { sessionsOf } from "@/lib/domain/services";
 import { durationLabel } from "@/lib/domain/time";
 import { FACT_LABELS, sectionParts } from "@/lib/studio-facts";
@@ -275,7 +275,7 @@ function SaleNotes({ sales, catalog }: { sales: Sale[]; catalog: { studios: { id
     <div className="sale-notes">
       {sales.map((sale) => (
         <p className="sale-note" key={sale.id}>
-          <strong>{sale.name}:</strong> {saleWords(sale, catalog.studios)}.
+          <strong>{sale.name}:</strong> {saleWords(sale, catalog.studios)}.{saleCodesWords(sale)}
         </p>
       ))}
     </div>

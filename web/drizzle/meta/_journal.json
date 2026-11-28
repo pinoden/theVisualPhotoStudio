@@ -568,6 +568,27 @@
       "when": 1795842633053,
       "tag": "0080_sales",
       "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1795855076217,
+      "tag": "0081_sale_or_code_and_content_forms",
+      "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1795855698805,
+      "tag": "0082_store_leads_to_guest_information",
+      "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1795855699813,
+      "tag": "0083_weekday_moves_copy",
+      "breakpoints": true
     }
   ]
 }

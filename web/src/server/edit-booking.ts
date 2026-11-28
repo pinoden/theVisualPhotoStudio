@@ -169,8 +169,9 @@ export async function editBooking(db: Db, viewer: AuthUser, ref: string, input: 
       promo,
       // The tax rule it was made under: a booking from before tax stays without.
       tax: taxRuleOf(found),
-      // And the sale: what the studio adds or takes away is priced as the booking was sold.
-      sale: found.sale,
+      // And the sale: what the studio adds or takes away is priced as the booking was sold. Whether a code went with
+      // the sale was settled when it was made (`quote`): a booking that has both keeps both.
+      sale: found.sale && { ...found.sale, withCodes: true },
     });
   } catch (error) {
     if (error instanceof PricingError) return refuse(error.message);
