@@ -5,7 +5,7 @@ import { Suspense } from "react";
 import { getDb } from "@/db/client";
 import { shortStudioName } from "@/lib/domain/appointment-look";
 import { isIsoDate, longDateLabel } from "@/lib/domain/time";
-import { appliesTo, currentPolicies, listAgreements, listQuestions, QUESTION_KINDS, type Applies, type QuestionView } from "@/server/booking-forms";
+import { appliesTo, asClientsRead, currentPolicies, LABEL_MAX, listAgreements, listQuestions, QUESTION_KINDS, type Applies, type QuestionView } from "@/server/booking-forms";
 import { loadCatalog, type CatalogStudio } from "@/server/catalog";
 import { requireOwner } from "@/server/session";
 import { formatInstant, localDateOf } from "@/server/tz";
@@ -60,6 +60,17 @@ function AppliesFields({ item, studios, prefix }: { item: Applies | null; studio
 /** A question as a client sees it, for the preview: nothing in it can be sent. */
 function QuestionPreview({ question }: { question: QuestionView }) {
   const label = `${question.label}${question.required ? " *" : ""}${question.active ? "" : " (draft)"}`;
+  if (question.kind === "initials") {
+    return (
+      <div className="initials-item forms-preview-question">
+        <span className="initials-box">Initial</span>
+        <span>
+          {label}
+          {question.help && <span className="intake-help">{question.help}</span>}
+        </span>
+      </div>
+    );
+  }
   return (
     <div className="form-group forms-preview-question">
       {question.kind === "checkbox" ? (
@@ -111,7 +122,8 @@ async function Forms({ searchParams }: Pick<PageProps<"/admin/forms">, "searchPa
   const previewDate = typeof query.previewDate === "string" && isIsoDate(query.previewDate) ? query.previewDate : today;
   const previewPhotography = query.previewType === "photography";
   const context = { studioIds: [previewStudio], photography: previewPhotography, date: previewDate };
-  const previewed = questions.filter((question) => appliesTo(question, context));
+  // As a client reads them: the figures filled in, and a statement left out while its condition does not hold.
+  const previewed = await asClientsRead(db, questions.filter((question) => appliesTo(question, context)));
   const previewedAgreements = agreementsList.filter((agreement) => agreement.active && appliesTo(agreement, context));
 
   return (
@@ -133,6 +145,10 @@ async function Forms({ searchParams }: Pick<PageProps<"/admin/forms">, "searchPa
         <h3>Intake questions</h3>
         <p style={{ fontSize: ".875rem" }}>
           Asked at checkout, on the policies step, of the bookings each applies to. A new question is a draft until you publish it: preview it below first.
+        </p>
+        <p style={{ fontSize: ".875rem" }}>
+          The kind &ldquo;Initials on a statement&rdquo; is not a question. The client adds their initials to it with one click, below the policies and above the box
+          to tick; the initials are those of the full name they gave. Each booking keeps the statements initialed, in the words read.
         </p>
         {questions.length === 0 ? (
           <p>No questions yet.</p>
@@ -193,9 +209,9 @@ async function Forms({ searchParams }: Pick<PageProps<"/admin/forms">, "searchPa
         <div className="admin-form-row">
           <div className="form-group" style={{ flex: "2 1 18rem" }}>
             <label className="form-label" htmlFor="question-label">
-              Question
+              Question, or statement to initial
             </label>
-            <input id="question-label" name="label" className="form-control" maxLength={200} defaultValue={editingQuestion?.label ?? ""} required />
+            <input id="question-label" name="label" className="form-control" maxLength={LABEL_MAX} defaultValue={editingQuestion?.label ?? ""} required />
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="question-kind">
@@ -226,6 +242,10 @@ async function Forms({ searchParams }: Pick<PageProps<"/admin/forms">, "searchPa
         <label className="avail-check">
           <input type="checkbox" name="required" value="1" defaultChecked={editingQuestion?.required ?? false} /> Required
         </label>
+        <p className="avail-hint">
+          A statement to initial is always required. Write a figure in it as a live value, such as {"{refund window}"} or {"{reschedule fee}"}, and it follows
+          Settings; start it with a condition, such as {"{if reschedule fee}"}, and it shows only while that holds. The page editor lists both.
+        </p>
         <AppliesFields item={editingQuestion} studios={catalog.studios} prefix="question" />
         <div className="admin-form-row">
           <div className="form-group">
@@ -290,6 +310,7 @@ async function Forms({ searchParams }: Pick<PageProps<"/admin/forms">, "searchPa
         </form>
         <div className="forms-preview" aria-label="The booking form as a client sees it">
           {previewed.length === 0 ? <p>No question is asked of this booking.</p> : previewed.map((question) => <QuestionPreview key={question.id} question={question} />)}
+          {previewed.some((question) => question.kind === "initials") && <p className="avail-hint">The statements to initial come below the policies, whatever their place here.</p>}
           <p className="avail-hint">
             Then the {policies?.title ?? "studio policies"}
             {previewedAgreements.length > 0 && ` and ${previewedAgreements.map((agreement) => agreement.title).join(", ")}`}, read to the end, and the box to tick.

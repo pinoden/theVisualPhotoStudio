@@ -77,14 +77,43 @@ const cutOffChunk = (message: string) => /^(ChunkLoadError: )?Failed to load chu
 const cutOffPageData = (message: string) => /^\/?\/?localhost:\d+\/\S*[?&]_rsc=\S* due to access control checks\.$/.test(message);
 
 /**
+ * React's error 419 in the browser, a production build's words for it and a development build's: a part of the page
+ * the server did not finish, which the browser then draws itself.
+ */
+const UNFINISHED_PART = /Minified React error #419|could not finish this Suspense boundary/;
+
+/** The addresses a test opened knowing that they answer "not found" (`openNotFound`), as paths. */
+const notFoundOnPurpose = new Set<string>();
+const pathOf = (address: string) => new URL(address, "http://localhost").pathname;
+
+/**
+ * Open an address that answers "not found" on purpose (an owner's page, to someone who is not one), and see that it
+ * says so. Such a page is answered in two parts: its frame at once, then, where its content would be, the news that
+ * there is none. The browser learns of that in one of two ways, whichever arrives first: from the page's data, and it
+ * shows "not found" without a word; or from the unfinished part of the page itself, and React reports its error 419
+ * before showing the same "not found". Which one it is differs from one load to the next: the trace of the run of
+ * 2026-11-28 that failed shows five such pages opened in a row, each answered alike (200, the frame first), and one
+ * error. That there are two ways is the builder's reading of React's and the framework's code, not an experiment. It
+ * is what stopped `site.spec.ts` at "staff see the day sheet" now and then since 2026-11-21, mostly on a loaded
+ * machine. A visitor sees the same page either way, so for an address opened here, and only there, `watchBrowser`
+ * lets that one error pass.
+ */
+export async function openNotFound(page: Page, path: string): Promise<void> {
+  notFoundOnPurpose.add(pathOf(path));
+  await page.goto(path);
+  await expect(byText(page, /could not be found/i)).toBeVisible();
+}
+
+/**
  * Watch a page for what its browser says went wrong, and report each problem:
  * errors of its scripts, and errors in its console (unless `consoleErrors` is
  * false). Left out: the development build's own (`frameworkNoise`), requests
  * the console says failed (pages that answer "not found" on purpose log one,
  * and the tests check what the page shows), and a request or a part of the
  * site's code cut off by leaving the page for another (`CUT_OFF`,
- * `cutOffChunk`, `cutOffPageData`). `where` follows "script
- * error" in a report: " on an iPad".
+ * `cutOffChunk`, `cutOffPageData`), and React's error 419 on an address that
+ * was opened as one that answers "not found" (`openNotFound`). `where` follows
+ * "script error" in a report: " on an iPad".
  */
 export function watchBrowser(page: Page, report: (problem: string) => void, { where = "", consoleErrors = true } = {}) {
   // From the request for the next document until it is shown, the page is being left.
@@ -96,6 +125,8 @@ export function watchBrowser(page: Page, report: (problem: string) => void, { wh
     if (frame === page.mainFrame()) leaving = false;
   });
   page.on("pageerror", (error) => {
+    // The browser's events come in order: an error of a document is told before the next document's address is.
+    if (UNFINISHED_PART.test(error.message) && notFoundOnPurpose.has(pathOf(page.url()))) return;
     if (frameworkNoise(error.message) || cutOffPageData(error.message) || (leaving && (error.message === CUT_OFF || cutOffChunk(error.message)))) return;
     report(`script error${where}: ${error.message}`);
   });
@@ -224,6 +255,10 @@ export async function accessibilityProblems(page: Page, options: { exclude?: str
     await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
     // And a part of the page that is still on its way shows a spinner in its place: the booking screen, while it starts.
     await expect(page.locator(".spinner").filter({ visible: true })).toHaveCount(0);
+    // And a button the pointer rests on changes its colours over a fifth of a second, and is read in between as words
+    // on a ground of nearly their own colour: after "Next" the pointer lies where the payment step puts its buttons
+    // (`master`'s WebKit run of 2026-11-28, on the "Fake Payment" button). The pointer is taken off the page's controls.
+    await page.mouse.move(0, 0);
     // And words that are still fading in: a step of the booking screen takes 0.3 s to show.
     await page.evaluate(() =>
       Promise.all(
@@ -331,6 +366,8 @@ export async function agreeToPolicies(page: Page): Promise<void> {
   await expect(step).toBeVisible();
   const box = page.getByRole("region", { name: "Studio policies and booking terms" });
   await box.evaluate((element) => element.scrollTo(0, element.scrollHeight));
+  // The statements to initial, one click each (the owner, 2026-11-27): a booking has them or it has none.
+  for (const statement of await page.locator(".initials-item input").all()) await statement.check();
   const agree = page.getByRole("checkbox", { name: /I have read and agree/ });
   await expect(agree).toBeEnabled();
   await agree.check();

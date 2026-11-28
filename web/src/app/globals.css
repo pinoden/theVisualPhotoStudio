@@ -801,6 +801,39 @@ details.faq-item[open] .faq-icon { transform: rotate(45deg); }
 .policies-box h2 { font-size: 1.2rem; margin: 1rem 0 .4rem; }
 .policies-box h4 { font-size: 1.05rem; margin: 1rem 0 .4rem; }
 .policies-box .blk-section, .policies-box section { padding: 0 !important; background: transparent !important; }
+/* Statements the client initials with one click each, between the policies and the tick for the whole (the owner,
+   2026-11-27). Each is a tick box that looks like the box on a paper form: "Initial", then the client's initials. */
+.initials-form { margin: 1.25rem 0 .5rem; padding: 0; border: 0; }
+.initials-form > legend { margin-bottom: .25rem; color: var(--color-dark); font-family: var(--font-serif); font-size: 1.2rem; }
+.initials-hint { margin: 0 0 .75rem; color: var(--color-muted); font-size: .85rem; }
+.initials-item { position: relative; display: flex; gap: .75rem; align-items: flex-start; min-height: 2.75rem; margin-bottom: .6rem; font-size: .95rem; cursor: pointer; }
+.initials-item input { position: absolute; top: 0; left: 0; width: 4.25rem; height: 2.5rem; margin: 0; opacity: 0; cursor: pointer; }
+.initials-box {
+  flex: 0 0 4.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 2.5rem;
+  border: 1.5px dashed var(--color-muted);
+  background: #fff;
+  color: var(--color-muted);
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.initials-item.initialed .initials-box {
+  border: 1.5px solid var(--color-dark);
+  color: var(--color-dark);
+  font-family: var(--font-serif);
+  font-size: 1.3rem;
+  font-style: italic;
+  font-weight: 400;
+  letter-spacing: .04em;
+  text-transform: none;
+}
+.initials-item input:focus-visible + .initials-box { outline: 2px solid var(--color-dark); outline-offset: 2px; }
+.initials-item:hover .initials-box { border-color: var(--color-dark); }
 .policies-agree { display: flex; gap: .6rem; align-items: flex-start; min-height: 2.5rem; margin: 1rem 0 .25rem; color: var(--color-dark); font-weight: 700; }
 .policies-agree input { margin-top: .3rem; width: 1.15rem; height: 1.15rem; }
 .policies-agree-locked { color: var(--color-muted); font-weight: 400; }
@@ -808,6 +841,7 @@ details.faq-item[open] .faq-icon { transform: rotate(45deg); }
 /* What a client accepted, listed on their booking and read again (src/components/AcceptedTerms.tsx). */
 .accepted-list { margin: .25rem 0 0; padding-left: 1.1rem; font-size: .9rem; }
 .accepted-list li { margin: .2rem 0; }
+.initialed-title { margin: .75rem 0 0; font-size: .9rem; }
 .accepted-when { color: var(--color-muted); font-size: .9rem; }
 .accepted-words h3 { font-size: 1.15rem; margin: 1.25rem 0 .4rem; }
 

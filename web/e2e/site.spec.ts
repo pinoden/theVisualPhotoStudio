@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 import {
   accessibilityProblems,
   agreeToPolicies,
+  openNotFound,
   bookStudioFirstToPayment,
   byLabel,
   byText,
@@ -334,6 +335,7 @@ test("the browser's Back button goes a step back on the booking screen, and a re
   await page.reload();
   await expect(page.getByRole("heading", { name: "Policies & booking form" })).toBeVisible();
   await expect(page.getByRole("checkbox", { name: /I have read and agree/ })).not.toBeChecked();
+  await expect(page.getByRole("checkbox", { name: /renting studio space only/ })).not.toBeChecked();
   await expect(page).toHaveURL(/\/book#step-policies$/);
 
   // Back from the booking's first step leaves it for the page before it, as it always did.
@@ -842,8 +844,7 @@ test("staff see the day sheet of their assigned day and nothing else", async ({ 
   await expect(byText(page, "Bob Brown")).toHaveCount(0);
   const bobsPage = `/admin/customers/${encodeURIComponent(bob.email)}`;
   for (const path of ["/admin/bookings", "/admin/prices", "/admin/staff", "/admin/customers", bobsPage]) {
-    await page.goto(path);
-    await expect(byText(page, /could not be found/i)).toBeVisible();
+    await openNotFound(page, path);
     await expect(byText(page, "Studio Admin")).toHaveCount(0);
   }
   // The admin's own address leads an attendant to the calendar, not to "not found" (the owners' decision of 2026-11-27).
@@ -862,10 +863,7 @@ test("a customer cannot open the staff or owner areas", async ({ page }) => {
   await signIn(page, bob.email);
   await expect(menu.getByRole("link", { name: "My Account", exact: true })).toBeVisible();
   await expect(menu.getByRole("link", { name: "Log In", exact: true })).toHaveCount(0);
-  for (const path of ["/admin", "/admin/codes", "/staff"]) {
-    await page.goto(path);
-    await expect(byText(page, /could not be found/i)).toBeVisible();
-  }
+  for (const path of ["/admin", "/admin/codes", "/staff"]) await openNotFound(page, path);
   // Signed in, he need not type his own details again: the booking screen fills them in (the owners' decision of
   // 2026-11-27; the preview test of 2026-11-21, point 9). Nothing is booked here.
   await page.goto("/book");
@@ -1345,7 +1343,14 @@ test("the owners write a seasonal question and an agreement, a client answers an
   await signIn(page, FORMS_OWNER, "/admin/forms");
   await expect(page.getByRole("heading", { name: "Booking Forms & Agreements", level: 1 })).toBeVisible();
   await expect(onScreen(page.locator(".admin-card", { hasText: "At checkout every client reads" }))).toContainText("version 1");
-  await byLabel(page, "Question").fill("I understand the Christmas decor stays in place.");
+  // The statements a client initials are rows here too (the owner, 2026-11-27): six to start with, published, the
+  // owners' to change. Their figures are written as live values.
+  const statementRows = page.locator("#questions").getByRole("row", { name: /Initials on a statement/ });
+  await expect(statementRows).toHaveCount(6);
+  await expect(statementRows.filter({ hasText: "I understand that if I cancel less than {refund window} before my start time, my payment is not refunded. *" })).toContainText("Every studio · Rentals");
+  await expect(statementRows.filter({ hasText: "{photography refund window}" })).toContainText("Photography and content creation sessions");
+  await expect(statementRows.filter({ hasText: "Published" })).toHaveCount(6);
+  await byLabel(page, "Question, or statement to initial").fill("I understand the Christmas decor stays in place.");
   await byLabel(page, "Kind").selectOption({ label: "Tick box" });
   await page.locator("#question-form").getByRole("checkbox", { name: "Required" }).check();
   await page.locator("#question-form").getByRole("checkbox", { name: "Studio Dayglow" }).check();
@@ -1361,10 +1366,21 @@ test("the owners write a seasonal question and an agreement, a client answers an
   await byLabel(page, "Studio").selectOption({ label: "Studio Dayglow" });
   await byLabel(page, "Day").fill(day);
   await page.locator("#preview").getByRole("button", { name: "Show" }).click();
-  await expect(onScreen(page.locator(".forms-preview").first())).toContainText("I understand the Christmas decor stays in place. * (draft)");
+  const preview = onScreen(page.locator(".forms-preview").first());
+  await expect(preview).toContainText("I understand the Christmas decor stays in place. * (draft)");
   await byLabel(page, "Studio").selectOption({ label: "Studio Blanche" });
   await page.locator("#preview").getByRole("button", { name: "Show" }).click();
-  await expect(onScreen(page.locator(".forms-preview").first())).toContainText("No question is asked of this booking.");
+  await expect(preview).toContainText("I understand that I am renting studio space only");
+  await expect(preview).not.toContainText("Christmas decor");
+  // The preview reads as a client does: today's figures in the statements, and a rental's five of the six.
+  await expect(preview.locator(".initials-item")).toHaveCount(5);
+  await expect(preview).toContainText("I understand that if I cancel less than 7 days before my start time, my payment is not refunded. *");
+  await expect(preview).toContainText("I may reschedule once at no charge, that each further reschedule costs $20, and that a rescheduled booking is not refunded. *");
+  await byLabel(page, "Booking").selectOption({ label: "Photography or content creation session" });
+  await page.locator("#preview").getByRole("button", { name: "Show" }).click();
+  await expect(preview.locator(".initials-item")).toHaveCount(3);
+  await expect(preview).not.toContainText("renting studio space only");
+  await expect(preview).toContainText("before my session, my payment is not refunded. *");
   await page.locator("#questions").getByRole("row", { name: /Christmas decor/ }).getByRole("button", { name: "Publish" }).click();
   await expect(byText(page, "Published: clients are asked it from now on.")).toBeVisible();
 
@@ -1390,9 +1406,31 @@ test("the owners write a seasonal question and an agreement, a client answers an
   await next(client);
   await expect(onScreen(client.getByRole("region", { name: "Studio policies and booking terms" }))).toContainText("Please handle the lights and stands with care.");
   await expect(client.getByRole("checkbox", { name: /Christmas decor/ })).toBeVisible();
+  // And the statements to initial (the owner, 2026-11-27), below the policies: a rental's five, none initialed for
+  // the client, the initials those of the name just typed.
+  const statements = client.getByRole("group", { name: "Please add your initials" });
+  await expect(statements.getByRole("checkbox")).toHaveCount(5);
+  await expect(statements).toContainText("One click beside each statement adds your initials, CC, taken from the full name you gave.");
+  const studioOnly = statements.getByRole("checkbox", {
+    name: "I understand that I am renting studio space only: no photographer, photography service or edited images are included, and I may bring my own photographer.",
+  });
+  await expect(studioOnly).not.toBeChecked();
+  await expect(statements.getByRole("checkbox", { name: "I understand that if I cancel less than 7 days before my start time, my payment is not refunded." })).not.toBeChecked();
+  await expect(statements.locator(".initials-box")).toHaveText(["Initial", "Initial", "Initial", "Initial", "Initial"]);
+  // One click: her initials stand in the box.
+  await studioOnly.check();
+  await expect(statements.locator(".initials-box")).toHaveText(["CC", "Initial", "Initial", "Initial", "Initial"]);
   await shot(client, "05b-policies-step");
-  expect(await accessibilityProblems(client), "the policies step with a question and an agreement").toEqual([]);
+  expect(await accessibilityProblems(client), "the policies step with a question, an agreement and statements to initial").toEqual([]);
+  // The tick for the whole of the policies does not stand for the statements.
+  await client.getByRole("checkbox", { name: /Christmas decor/ }).check();
+  await client.getByRole("region", { name: "Studio policies and booking terms" }).evaluate((element) => element.scrollTo(0, element.scrollHeight));
+  await client.getByRole("checkbox", { name: /I have read and agree/ }).check();
+  await next(client);
+  await expect(onScreen(client.locator(".flash-error"))).toHaveText("Please add your initials to each statement.");
+  await client.getByRole("checkbox", { name: /Christmas decor/ }).uncheck();
   await agreeToPolicies(client);
+  await expect(statements.locator(".initials-box")).toHaveText(["CC", "CC", "CC", "CC", "CC"]);
   await next(client);
   await expect(onScreen(client.locator(".flash-error"))).toHaveText("Please answer: I understand the Christmas decor stays in place.");
   await client.getByRole("checkbox", { name: /Christmas decor/ }).check();
@@ -1403,6 +1441,10 @@ test("the owners write a seasonal question and an agreement, a client answers an
   const agreed = onScreen(client.locator(".accepted-terms"));
   await expect(agreed).toContainText(/Studio Policies, version 1, accepted/);
   await expect(agreed).toContainText(/Equipment terms, version 1, accepted/);
+  // And the statements she initialed, in the words she read.
+  await expect(agreed).toContainText("You added your initials, CC, to:");
+  await expect(agreed.getByRole("listitem").filter({ hasText: "I understand that" })).toHaveCount(4);
+  await expect(agreed).toContainText("I understand that if I cancel less than 7 days before my start time, my payment is not refunded.");
   await agreed.getByRole("link", { name: "Studio Policies" }).click();
   await expect(client.getByRole("heading", { name: "Studio Policies", level: 1 })).toBeVisible();
   await expect(onScreen(client.locator(".accepted-words"))).toContainText("Cancellations & Rescheduling");
@@ -1423,6 +1465,8 @@ test("the owners write a seasonal question and an agreement, a client answers an
   await expect(forms).toContainText(/Studio Policies\s*Version 1, accepted/);
   await expect(forms).toContainText(/Equipment terms\s*Version 1, accepted/);
   await expect(forms).toContainText(/I understand the Christmas decor stays in place\.\s*Yes/);
+  await expect(forms).toContainText(/and I may bring my own photographer\.\s*Initialed CC by Cora Checkout/);
+  await expect(forms).toContainText(/as the policies set out\.\s*Initialed CC by Cora Checkout/);
   // A new version later: the booking keeps the one its client read.
   await page.goto("/admin/forms");
   await page.locator("#agreements").getByRole("row", { name: /Equipment terms/ }).getByRole("link", { name: "Edit" }).click();
@@ -2416,7 +2460,17 @@ test("a Studio Manager runs the calendar and looks clients up, and sees no price
   // Without prices at her level, the pop-up says so; its Edit leads to the appointment's page.
   const janes = page.getByRole("dialog", { name: /Jane Smith/ });
   await expect(janes).toContainText("Prices and payments are not shown at your level.");
-  expect(await janes.innerText()).not.toContain("$");
+  // What the client initialed is there, in the policies' own words, which name the studio's fee for a later move: no
+  // price of this booking, so the pop-up is read without them.
+  const janesForms = janes.locator('section[aria-labelledby="appt-dialog-forms"]');
+  await expect(janesForms).toContainText("Initialed JS by Jane Smith");
+  const janesWords = await janes.evaluate((dialog) => {
+    const copy = dialog.cloneNode(true) as HTMLElement;
+    copy.querySelector('section[aria-labelledby="appt-dialog-forms"]')?.remove();
+    return copy.textContent ?? "";
+  });
+  expect(janesWords).toContain("Jane Smith");
+  expect(janesWords).not.toContain("$");
   await janes.getByRole("link", { name: "Edit" }).click();
   await expect(page.getByRole("heading", { name: "Jane Smith", level: 1 })).toBeVisible();
   const appointment = onScreen(page.locator(".admin-main"));
@@ -2442,8 +2496,7 @@ test("a Studio Manager runs the calendar and looks clients up, and sees no price
 
   // What the owners keep, and what they have not switched on for managers, cannot be found.
   for (const path of ["/admin/bookings", "/admin/prices", "/admin/studios", "/admin/staff", "/admin/codes", "/admin/settings"]) {
-    await page.goto(path);
-    await expect(byText(page, /could not be found/i)).toBeVisible();
+    await openNotFound(page, path);
     await expect(byText(page, "Studio Admin")).toHaveCount(0);
   }
   // The admin's own address leads a manager to the calendar, not to "not found" (the owners' decision of 2026-11-27).
@@ -2494,6 +2547,10 @@ test("a client without a photographer books a session, and the photographer cann
   await page.getByRole("button", { name: "Apply", exact: true }).click();
   await expect(byText(page, `Code ${discountCode} (20% off session)`)).toBeVisible();
   await agreeToPolicies(page);
+  // A session has the studio's photographer: it is not told that it has none, and it initials its own refund window.
+  await expect(page.getByRole("checkbox", { name: /renting studio space only/ })).toHaveCount(0);
+  await expect(page.getByRole("checkbox", { name: /^I understand that if I cancel less than .+ before my session, my payment is not refunded\.$/ })).toBeChecked();
+  await expect(page.locator(".initials-item input")).toHaveCount(3);
   await next(page);
   await expect(byText(page, /Photography session, Studio Blanche, 1 hour/)).toBeVisible();
   await expect(totalRow(page)).toContainText("$300");

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { connection } from "next/server";
 import { Suspense } from "react";
 import { AccountFrame } from "@/components/AccountFrame";
-import { AcceptedList } from "@/components/AcceptedTerms";
+import { AcceptedList, InitialedList } from "@/components/AcceptedTerms";
 import { BookingSummary } from "@/components/BookingSummary";
 import { ManageBooking } from "@/components/ManageBooking";
 import { VisitStamp, VisitStampBadge } from "@/components/VisitStamp";
@@ -48,11 +48,12 @@ function Status({ booking }: { booking: AccountBooking }) {
 /** What the studio did to the booking's time: the booking keeps its reference and its record. */
 /** The policies and agreements accepted at checkout, each to read again (the November 20 brief). */
 function Agreed({ booking }: { booking: AccountBooking }) {
-  if (booking.accepted.length === 0) return null;
+  if (booking.accepted.length === 0 && booking.initialed.length === 0) return null;
   return (
     <div className="accepted-terms">
       <strong>What you agreed to</strong>
       <AcceptedList accepted={booking.accepted} hrefOf={(id) => `/account/appointments/${booking.ref}/accepted/${id}`} />
+      <InitialedList initialed={booking.initialed} />
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { bookingAcceptances, bookingAnswers, bookings } from "@/db/schema";
+import { bookingAcceptances, bookingAnswers, bookings, settings } from "@/db/schema";
 import {
   acceptedText,
   appliesTo,
@@ -18,14 +18,14 @@ import {
   setQuestionActive,
   type QuestionInput,
 } from "./booking-forms";
-import { agreementKey, policiesKey } from "@/lib/booking-form-keys";
+import { agreementKey, initialsKey, policiesKey } from "@/lib/booking-form-keys";
 import { PDFDocument } from "@cantoo/pdf-lib";
 import { DEFAULT_FRAME } from "@/lib/site/frame";
 import { pageTextHtml } from "@/lib/site/page-text";
 import { acceptedLines, acceptedPdf } from "./receipt-pdf";
 import { toBookingViews } from "./bookings";
 import { ensureBuiltInPages, loadPublishedPage } from "./pages";
-import { createTestWorld, expectOk, NOW, type TestWorld } from "./testing";
+import { createTestWorld, expectOk, FAR, NOW, type TestWorld } from "./testing";
 
 const h = (hours: number) => hours * 60;
 
@@ -82,7 +82,7 @@ describe("Booking Forms & Agreements (the owner's brief of 2026-11-22, items 6 a
       const result = await saveQuestion(world.db, null, question(overrides));
       return result.ok ? null : result.message;
     };
-    expect(await refusal({ label: "?" })).toBe("Write the question in 2 to 200 characters.");
+    expect(await refusal({ label: "?" })).toBe("Write the question in 2 to 300 characters.");
     expect(await refusal({ kind: "essay" })).toBe("Choose the kind of question.");
     expect(await refusal({ options: ["Only one", " Only one "] })).toBe("Give at least two answers to choose from, one on each line.");
     expect(await refusal({ startsOn: "2026-12-10", endsOn: "2026-12-01" })).toBe("The last day must be on or after the first.");
@@ -220,6 +220,61 @@ describe("Booking Forms & Agreements (the owner's brief of 2026-11-22, items 6 a
       { kind: "item", text: "Two – ’three’" },
       { kind: "paragraph", text: "Loose words" },
     ]);
+  });
+
+  it("has a client initial statements, in the words they read, with the initials of their full name (the owner, 2026-11-27)", async () => {
+    await ensureBuiltInPages(world.db, NOW);
+    const policies = (await currentPolicies(world.db))!;
+    const statement = (label: string, overrides: Partial<QuestionInput> = {}) => question({ label, kind: "initials", options: [], required: false, ...overrides });
+    // A condition with no words after it would show an empty statement.
+    expect(await saveQuestion(world.db, null, statement("{if reschedule fee} "))).toEqual({ ok: false, message: "Write the words after the condition." });
+    const studioOnly = expectOk(await saveQuestion(world.db, null, statement("I understand that I am renting studio space only.", { forPhotography: false })));
+    const late = expectOk(await saveQuestion(world.db, null, statement("I understand that if I cancel less than {refund window} before my start time, my payment is not refunded.")));
+    const moves = expectOk(await saveQuestion(world.db, null, statement("{if reschedule fee}I may reschedule {reschedules allowed} at no charge; each further reschedule costs {reschedule fee}.")));
+    for (const id of [studioOnly.id, late.id, moves.id]) await setQuestionActive(world.db, id, true);
+    // Never optional, whatever the form sent.
+    expect((await listQuestions(world.db)).map((q) => q.required)).toEqual([true, true, true]);
+
+    // A client reads the figures of today's settings, and no markers.
+    const rental = { studioIds: [world.ids.blanche], photography: false, date: FAR };
+    const shown = (await checkoutForms(world.db, rental)).questions;
+    expect(shown.map((q) => q.label)).toEqual([
+      "I understand that I am renting studio space only.",
+      "I understand that if I cancel less than 7 days before my start time, my payment is not refunded.",
+      "I may reschedule once at no charge; each further reschedule costs $20.",
+    ]);
+    // A session with the studio's own photographer is not told that it has none.
+    expect((await checkoutForms(world.db, { ...rental, photography: true })).questions.map((q) => q.id)).toEqual([late.id, moves.id]);
+
+    const accepted = [policiesKey(policies.versionId)];
+    const keys = shown.map((q) => initialsKey(q.id, q.label));
+    // Not initialed, or initialed beside other words: the client reads again.
+    expect(await world.book({ accepted })).toMatchObject({ ok: false, code: "policies_changed", status: 409 });
+    expect(await world.book({ accepted: [...accepted, keys[0], keys[1], initialsKey(moves.id, "I may reschedule twice at no charge.")] })).toMatchObject({ ok: false, code: "policies_changed" });
+    const booked = expectOk(await world.book({ accepted: [...accepted, ...keys], customer: { name: "Jane van der Smith-Jones", email: "jane@example.com", phone: "407-555-0100" } }));
+    const [row] = await world.db.select().from(bookings).where(eq(bookings.ref, booked.ref));
+    // The studio reads who initialed what, among the answers; the client, the statements with their initials.
+    expect((await formsOfBooking(world.db, row.id)).answers).toEqual([
+      { label: "I understand that I am renting studio space only.", answer: "Initialed JVDS by Jane van der Smith-Jones" },
+      { label: "I understand that if I cancel less than 7 days before my start time, my payment is not refunded.", answer: "Initialed JVDS by Jane van der Smith-Jones" },
+      { label: "I may reschedule once at no charge; each further reschedule costs $20.", answer: "Initialed JVDS by Jane van der Smith-Jones" },
+    ]);
+    const [view] = await toBookingViews(world.db, [row], NOW);
+    expect(view.initialed).toEqual([
+      { words: "I understand that I am renting studio space only.", initials: "JVDS" },
+      { words: "I understand that if I cancel less than 7 days before my start time, my payment is not refunded.", initials: "JVDS" },
+      { words: "I may reschedule once at no charge; each further reschedule costs $20.", initials: "JVDS" },
+    ]);
+
+    // The owners switch the fee off: the statement about it leaves by itself, and nothing is initialed for it.
+    await world.db.insert(settings).values({ key: "rescheduleFeeCents", value: 0 });
+    expect((await checkoutForms(world.db, rental)).questions.map((q) => q.id)).toEqual([studioOnly.id, late.id]);
+    expectOk(await world.book({ accepted: [...accepted, keys[0], keys[1]], startMinute: h(14) }));
+    // They change the refund window: the words a client read before are not the words now.
+    await world.db.insert(settings).values({ key: "refundWindowHours", value: 48 });
+    expect(await world.book({ accepted: [...accepted, keys[0], keys[1]], startMinute: h(17) })).toMatchObject({ ok: false, code: "policies_changed" });
+    // What the first booking's client initialed stays as they read it.
+    expect((await toBookingViews(world.db, [row], NOW))[0].initialed[1].words).toContain("less than 7 days");
   });
 
   it("asks nothing of a booking the studio makes for a client", async () => {

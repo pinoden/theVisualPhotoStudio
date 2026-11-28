@@ -44,7 +44,7 @@ import { hintsSignedIn } from "@/lib/signed-in-hint";
 import { keptText, readKept, stepHash, stepOfHash, stepToShowAgain, type AppliedCode, type BookingMode, type BookingStep, type KeptBooking } from "@/lib/booking-progress";
 import { count, hoursInWords } from "@/lib/words";
 import type { DayAvailability } from "@/server/availability";
-import { agreementKey, policiesKey, type QuestionKind } from "@/lib/booking-form-keys";
+import { agreementKey, initialsKey, initialsOf, policiesKey, type QuestionKind } from "@/lib/booking-form-keys";
 import type { Catalog } from "@/server/catalog";
 import type { OwnDetails } from "@/server/own-details";
 import { buyerVerification, useCardForm } from "./square-card";
@@ -299,6 +299,12 @@ function BookingWizard({
   const [forms, setForms] = useState<{ key: string; questions: FormQuestion[]; agreements: FormAgreement[] } | null>(null);
   /** The client's answers to the intake questions, by question. */
   const [answers, setAnswers] = useState<Record<string, string | boolean>>(kept?.answers ?? {});
+  /**
+   * The statements the client initialed (the owner, 2026-11-27), by statement: the initials they clicked in, and the
+   * words they stood beside. One counts only while both are still so: another name gives other initials, and other
+   * words are another statement. Like the agreement, not kept through a refresh.
+   */
+  const [initialed, setInitialed] = useState<Record<string, { initials: string; words: string }>>({});
   /** Whether the client has scrolled to the end of the policies: the agreement can be ticked only then. */
   const [readToEnd, setReadToEnd] = useState(false);
   const policiesBox = useRef<HTMLDivElement>(null);
@@ -657,6 +663,13 @@ function BookingWizard({
 
   /** The booking the policies step's questions and agreements were read for. */
   const formsKey = `${studioIds.join(",")}|${date}|${photography ? 1 : 0}`;
+  const studioName = (id: string) => catalog.studios.find((s) => s.id === id)?.name ?? "";
+  const chosenNames = studioIds.map(studioName).join(" + ");
+  /** The client's initials, from the full name they gave at the details. */
+  const initials = initialsOf(name);
+  /** The statements of the booking's form that are initialed, apart from its questions. */
+  const statements = (forms?.questions ?? []).filter((question) => question.kind === "initials");
+  const isInitialed = (statement: FormQuestion) => initials !== "" && initialed[statement.id]?.initials === initials && initialed[statement.id]?.words === statement.label;
 
   /** Read how many of each prop are free at the chosen time (`/api/props-free`). The booking checks again. */
   async function fetchPropsFree() {
@@ -891,9 +904,12 @@ function BookingWizard({
         return "";
       case "policies": {
         if (!forms || forms.key !== formsKey) return "The studio's booking form is still loading.";
-        const missing = forms.questions.find((question) => question.required && (question.kind === "checkbox" ? answers[question.id] !== true : !String(answers[question.id] ?? "").trim()));
+        const missing = forms.questions.find(
+          (question) => question.kind !== "initials" && question.required && (question.kind === "checkbox" ? answers[question.id] !== true : !String(answers[question.id] ?? "").trim()),
+        );
         if (missing) return `Please answer: ${missing.label}`;
         if (!readToEnd) return "Please read the policies to the end.";
+        if (!statements.every(isInitialed)) return "Please add your initials to each statement.";
         if (!terms) return "Please agree to the studio policies to continue.";
         return "";
       }
@@ -1004,8 +1020,13 @@ function BookingWizard({
           service,
           acceptTerms: true,
           // The versions read on the policies step, and the answers given there (the owner's brief of 2026-11-22, item 6).
-          accepted: [...(policies ? [policiesKey(policies.versionId)] : []), ...(forms?.agreements ?? []).map((agreement) => agreementKey(agreement.versionId))],
-          answers: Object.fromEntries(Object.entries(answers).filter(([id]) => forms?.questions.some((question) => question.id === id))),
+          // And the statements initialed, each with the words it stood beside.
+          accepted: [
+            ...(policies ? [policiesKey(policies.versionId)] : []),
+            ...(forms?.agreements ?? []).map((agreement) => agreementKey(agreement.versionId)),
+            ...statements.filter(isInitialed).map((statement) => initialsKey(statement.id, statement.label)),
+          ],
+          answers: Object.fromEntries(Object.entries(answers).filter(([id]) => forms?.questions.some((question) => question.id === id && question.kind !== "initials"))),
           paymentToken,
           expectedTotalCents: price.totalCents,
           requestId: (requestIdRef.current ??= newRequestId()),
@@ -1051,6 +1072,7 @@ function BookingWizard({
       if (data.code === "policies_changed") {
         router.refresh();
         setTerms(false);
+        setInitialed({});
         setReadToEnd(false);
         back(steps.indexOf("policies"), { refetch: true });
       }
@@ -1070,8 +1092,6 @@ function BookingWizard({
   }
 
   // ── Pieces of UI ───────────────────────────────────────────────────────────
-  const studioName = (id: string) => catalog.studios.find((s) => s.id === id)?.name ?? "";
-  const chosenNames = studioIds.map(studioName).join(" + ");
 
   // Studios with one price together are one line (`studioPriceLines`).
   const studioLines = price ? studioPriceLines(price.studioLines.map((line) => ({ name: studioName(line.studioId), priceCents: line.priceCents })), price.multiStudioDiscountCents) : [];
@@ -1730,10 +1750,10 @@ function BookingWizard({
             </div>
           ) : (
             <>
-              {forms.questions.length > 0 && (
+              {forms.questions.length > statements.length && (
                 <fieldset className="intake-form">
                   <legend>A few questions</legend>
-                  {forms.questions.map((question) => (
+                  {forms.questions.filter((question) => question.kind !== "initials").map((question) => (
                     <IntakeField
                       key={question.id}
                       question={question}
@@ -1770,6 +1790,37 @@ function BookingWizard({
                   </section>
                 ))}
               </div>
+              {statements.length > 0 && (
+                <fieldset className="initials-form">
+                  <legend>Please add your initials</legend>
+                  <p className="initials-hint">
+                    One click beside each statement adds your initials{initials && <>, <strong>{initials}</strong></>}, taken from the full name you gave.
+                  </p>
+                  {statements.map((statement) => {
+                    const done = isInitialed(statement);
+                    return (
+                      <label key={statement.id} className={`initials-item${done ? " initialed" : ""}`}>
+                        <input
+                          type="checkbox"
+                          checked={done}
+                          onChange={(event) => {
+                            setInitialed((current) => ({ ...current, [statement.id]: { initials: event.target.checked ? initials : "", words: statement.label } }));
+                            setError("");
+                          }}
+                        />
+                        {/* The box is the tick box as it looks: what it says is the box's own state. */}
+                        <span className="initials-box" aria-hidden="true">
+                          {done ? initials : "Initial"}
+                        </span>
+                        <span>
+                          {statement.label}
+                          {statement.help && <span className="intake-help">{statement.help}</span>}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </fieldset>
+              )}
               <label className={`policies-agree${readToEnd ? "" : " policies-agree-locked"}`}>
                 <input
                   type="checkbox"

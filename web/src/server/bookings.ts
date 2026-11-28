@@ -51,7 +51,7 @@ import {
   type UsablePromo,
 } from "./promos";
 import { loadAccessInstructions } from "./settings";
-import { acceptancesOf, checkForms, recordForms, type AcceptedItem, type CheckedForms } from "./booking-forms";
+import { acceptancesOf, checkForms, initialedOf, recordForms, type AcceptedItem, type CheckedForms, type InitialedItem } from "./booking-forms";
 import { propsProblem } from "./props";
 import { termsAtBooking } from "./terms";
 import { moneyKindNow, moneyKindOf, moneyKindOfCode, OTHER_MONEY_CODE } from "./test-mode";
@@ -393,7 +393,7 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
   // for a client is not: the client has not read the policies there.
   let forms: CheckedForms | null = null;
   if (!deps.madeBy) {
-    const checked = await checkForms(db, { studioIds: input.studioIds, photography: Boolean(session), date: input.date }, { accepted: input.accepted, answers: input.answers }, now);
+    const checked = await checkForms(db, { studioIds: input.studioIds, photography: Boolean(session), date: input.date }, { accepted: input.accepted, answers: input.answers, name: input.customer.name }, now);
     if (!checked.ok) return fail(checked.problem.code === "policies_changed" ? 409 : 422, checked.problem.code === "policies_changed" ? "policies_changed" : "invalid_input", checked.problem.message);
     forms = checked.forms;
   }
@@ -846,6 +846,8 @@ export interface BookingView {
   endRequest: { kind: "cancel" | "reschedule"; at: string } | null;
   /** The policies and agreements the client accepted at checkout, each to be read again (src/server/booking-forms.ts). */
   accepted: AcceptedItem[];
+  /** The statements the client initialed at checkout, in the words they read. */
+  initialed: InitialedItem[];
 }
 
 type BookingRow = typeof bookings.$inferSelect;
@@ -855,7 +857,7 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[], now: Date =
   if (rows.length === 0) return [];
   const ids = rows.map((r) => r.id);
   const codeIds = rows.map((r) => r.promoCodeId).filter((id): id is string => id !== null);
-  const [holdRows, addonRows, codeRows, received, atStudio, throughAcuity, owed, held, charged, creditLeft, creditReturned, refunded, accepted] = await together(db, [
+  const [holdRows, addonRows, codeRows, received, atStudio, throughAcuity, owed, held, charged, creditLeft, creditReturned, refunded, accepted, initialed] = await together(db, [
     () => db
       .select({ bookingId: studioHolds.bookingId, name: studios.name, priceCents: studioHolds.priceCents, sort: studios.sortOrder })
       .from(studioHolds)
@@ -878,6 +880,7 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[], now: Date =
     () => creditReturnedCentsByBooking(db, ids),
     () => refundedCentsByBooking(db, ids),
     () => acceptancesOf(db, ids),
+    () => initialedOf(db, ids),
   ]);
   // Whose session each one is: the service of the person it holds (question 69).
   const personIds = [...new Set(rows.map((row) => row.photographerId).filter((id): id is string => id !== null))];
@@ -932,6 +935,7 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[], now: Date =
     rescheduledCount: booking.rescheduledCount,
     endRequest: booking.endRequest && booking.endRequestedAt ? { kind: booking.endRequest, at: booking.endRequestedAt.toISOString() } : null,
     accepted: accepted.get(booking.id) ?? [],
+    initialed: initialed.get(booking.id) ?? [],
   }));
 }
 

@@ -75,8 +75,18 @@ test("every step of a booking can be used with a screen reader and a keyboard", 
   await agree.focus();
   await page.keyboard.press("Space");
   await expect(agree).toBeChecked();
+  // The statements are initialed from the keyboard too: each is a tick box, taken with the space bar.
+  const statements = await page.locator(".initials-item input").all();
+  expect(statements.length).toBeGreaterThan(0);
+  for (const statement of statements) {
+    await statement.focus();
+    await page.keyboard.press("Space");
+    await expect(statement).toBeChecked();
+  }
+  await check("the statements initialed");
   await next(page);
-  await expect(page.getByRole("button", { name: /^Confirm & pay/ })).toBeVisible();
+  // Enabled once the price and the way to pay have come: until then a button may still be added beside it.
+  await expect(page.getByRole("button", { name: /^Confirm & pay/ })).toBeEnabled();
   await check("the summary and the payment");
 });
 
