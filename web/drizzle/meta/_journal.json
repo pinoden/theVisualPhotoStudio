@@ -610,6 +610,13 @@
       "when": 1795883392662,
       "tag": "0086_late_cancel_code_copy",
       "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1795884214275,
+      "tag": "0087_search_titles_and_descriptions",
+      "breakpoints": true
     }
   ]
 }

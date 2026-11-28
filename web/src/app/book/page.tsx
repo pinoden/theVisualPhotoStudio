@@ -9,7 +9,7 @@ import { checkoutPolicies } from "./checkout-policies";
 import { isPreview, shareMetadata } from "@/server/site";
 
 const TITLE = "Book a Studio";
-const DESCRIPTION = "Reserve one or more studios at The Visuals Photo Studio. Instant confirmation.";
+const DESCRIPTION = "Book a natural-light photo studio in Winter Park, FL by the hour: choose Studio Blanche, Dayglow or Paris, pick a free time and get instant confirmation.";
 
 /**
  * The page's own address for search engines: one page, whichever studio a link chose (`?studio=`). And its own

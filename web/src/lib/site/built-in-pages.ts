@@ -47,6 +47,23 @@ function maker(key: string) {
 
 const META = { title: "", description: "", hidden: false };
 
+/**
+ * What each page the site starts with tells search engines: its title in the results, at most 60 characters, and the
+ * description under it, at most 160 (the owner, 2026-11-28: "optimize each page for search engines"). The owners
+ * change both in the page editor; migration 0087 gives them to stored pages that had none.
+ */
+const SEARCH: Record<string, { title: string; description: string }> = {
+  home: { title: "Winter Park Photo Studio Rental | The Visuals Photo Studio", description: "Three natural-light photo studios in Winter Park, FL, rented by the hour. Book Studio Blanche, Dayglow or Paris online for shoots, content and family sessions." },
+  studios: { title: "Studio Blanche, Dayglow & Paris | The Visuals Photo Studio", description: "See Studio Blanche, Studio Dayglow and Studio Paris: three natural-light studios in Winter Park, FL. Photos, what each includes, and how many guests each takes." },
+  rates: { title: "Photo Studio Rates in Winter Park | The Visuals Photo Studio", description: "Hourly rates for The Visuals Photo Studio in Winter Park: each studio alone, studios booked together, weekday and weekend prices, and photography sessions." },
+  services: { title: "Photographer in Winter Park, FL | The Visuals Photo Studio", description: "Book a session with our in-house photographer at The Visuals Photo Studio, Winter Park. Studio time is included; edited images arrive within 7 to 14 days." },
+  faq: { title: "Guest Information & FAQ | The Visuals Photo Studio", description: "Before your visit to The Visuals Photo Studio: booking, cancelling and rescheduling, parking, pets, guests, equipment and studio rules, answered." },
+  policies: { title: "Studio Policies | The Visuals Photo Studio", description: "The Visuals Photo Studio’s rental policies: cancellations and rescheduling, rental time, guests, pets, food, equipment and care of the space." },
+  memberships: { title: "Studio Memberships in Winter Park | The Visuals Photo Studio", description: "Monthly studio memberships at The Visuals Photo Studio in Winter Park: studio hours every month for photographers and creators who shoot often." },
+  contact: { title: "Contact & Location | The Visuals Photo Studio", description: "Contact The Visuals Photo Studio in Winter Park, FL: ask about bookings and after-hours rentals, or find the studio on the map." },
+};
+const metaOf = (key: string) => ({ ...META, ...(SEARCH[key] ?? {}) });
+
 /** A paragraph, centred. */
 const centred = (html: string) => `<p style="text-align: center">${html}</p>`;
 
@@ -63,7 +80,7 @@ function home(): BuiltInPage {
     slug: "",
     title: "Home",
     content: {
-      meta: META,
+      meta: metaOf("home"),
       blocks: [
         b("Banner", {
           look: "hero",
@@ -129,7 +146,7 @@ function studios(): BuiltInPage {
     slug: "studios",
     title: "Our Studios",
     content: {
-      meta: META,
+      meta: metaOf("studios"),
       blocks: [
         b("Banner", {
           eyebrow: "Our Spaces",
@@ -208,7 +225,7 @@ function rates(): BuiltInPage {
       ],
     }),
   );
-  return { key: "rates", slug: "rates", title: "Rates", content: { meta: META, blocks } };
+  return { key: "rates", slug: "rates", title: "Rates", content: { meta: metaOf("rates"), blocks } };
 }
 
 function services(): BuiltInPage {
@@ -219,7 +236,7 @@ function services(): BuiltInPage {
     slug: "services",
     title: "Professional Photography",
     content: {
-      meta: META,
+      meta: metaOf("services"),
       blocks: [
         b("Banner", {
           eyebrow: "Services",
@@ -423,7 +440,7 @@ function faq(): BuiltInPage {
     slug: "faq",
     title: "Guest Information",
     content: {
-      meta: META,
+      meta: metaOf("faq"),
       blocks: [
         b("Banner", {
           eyebrow: "Common Questions",
@@ -516,7 +533,7 @@ function policies(): BuiltInPage {
     slug: "policies",
     title: "Studio Policies",
     content: {
-      meta: META,
+      meta: metaOf("policies"),
       blocks: [
         b("Banner", {
           eyebrow: "Good to Know",
@@ -574,7 +591,7 @@ function memberships(): BuiltInPage {
     slug: "memberships",
     title: "Memberships",
     content: {
-      meta: META,
+      meta: metaOf("memberships"),
       blocks: [
         b("Banner", {
           eyebrow: "Memberships",
@@ -596,7 +613,7 @@ function contact(): BuiltInPage {
     slug: "contact",
     title: "Contact",
     content: {
-      meta: META,
+      meta: metaOf("contact"),
       blocks: [
         b("Banner", {
           eyebrow: "Get in Touch",

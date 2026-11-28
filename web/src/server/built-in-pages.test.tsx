@@ -370,6 +370,48 @@ describe("the pages the website was built with", () => {
     expect(await world.db.select().from(siteVersions)).toHaveLength(versions);
   });
 
+  it("each tell search engines a title and a description of their own, and get them from migration 0087 where the owners wrote none", async () => {
+    // The owner, 2026-11-28: "optimize each page for search engines".
+    const pages = builtInPages();
+    const titles = new Set(pages.map((page) => page.content.meta.title));
+    const descriptions = new Set(pages.map((page) => page.content.meta.description));
+    expect(titles.size).toBe(pages.length);
+    expect(descriptions.size).toBe(pages.length);
+    for (const page of pages) {
+      expect(page.content.meta.title.length, page.key).toBeGreaterThan(20);
+      expect(page.content.meta.title.length, page.key).toBeLessThanOrEqual(60);
+      expect(page.content.meta.title, page.key).toContain("The Visuals Photo Studio");
+      expect(page.content.meta.description.length, page.key).toBeGreaterThan(80);
+      expect(page.content.meta.description.length, page.key).toBeLessThanOrEqual(160);
+    }
+
+    // A database from before has neither. On one page the owners wrote a description of their own; another waits as a draft.
+    const stored = async (slug: string) => (await world.db.select().from(siteDocuments).where(eq(siteDocuments.slug, slug)))[0];
+    const empty = (content: unknown) => ({ ...(content as object), meta: { title: "", description: "", hidden: false } });
+    for (const slug of ["rates", "contact", "faq"]) {
+      const row = await stored(slug);
+      await world.db.update(siteDocuments).set({ published: empty(row.published) }).where(eq(siteDocuments.id, row.id));
+    }
+    const contact = await stored("contact");
+    const theirs = { ...(contact.published as object), meta: { title: "", description: "Our own words.", hidden: true } };
+    await world.db.update(siteDocuments).set({ published: theirs }).where(eq(siteDocuments.id, contact.id));
+    const faq = await stored("faq");
+    await world.db.update(siteDocuments).set({ draft: empty(faq.published) }).where(eq(siteDocuments.id, faq.id));
+
+    const migration = readFileSync(path.join(process.cwd(), "drizzle", "0087_search_titles_and_descriptions.sql"), "utf8");
+    await world.db.execute(sql.raw(migration));
+    const meta = (content: unknown) => (content as { meta: unknown }).meta;
+    expect(meta((await stored("rates")).published)).toEqual({ title: "Photo Studio Rates in Winter Park | The Visuals Photo Studio", description: pages.find((page) => page.key === "rates")!.content.meta.description, hidden: false });
+    expect(meta((await stored("contact")).published)).toEqual({ title: "", description: "Our own words.", hidden: true });
+    expect(meta((await stored("faq")).draft)).toMatchObject({ title: "Guest Information & FAQ | The Visuals Photo Studio" });
+    expect(meta((await stored("faq")).published)).toMatchObject({ title: "Guest Information & FAQ | The Visuals Photo Studio" });
+    // Visitors read it; run again, nothing changes.
+    expect((await loadPublishedPage(world.db, "rates", NOW))!.content.meta.title).toBe("Photo Studio Rates in Winter Park | The Visuals Photo Studio");
+    const versions = (await world.db.select().from(siteVersions)).length;
+    await world.db.execute(sql.raw(migration));
+    expect(await world.db.select().from(siteVersions)).toHaveLength(versions);
+  });
+
   it("say the percentage off for several studios while no bundle has prices of its own", async () => {
     await world.db.delete(bundlePrices);
     expect(await words("faq")).toContain("You get 20% off when you book 2, 22% off when you book 3 or more.");
