@@ -562,6 +562,7 @@ export async function saveSettingsAction(formData: FormData): Promise<void> {
   await saveSetting(db, "memberWeekendDifference", formData.get("memberWeekendDifference") !== null);
   await saveSetting(db, "lateCancelKeepsCode", formData.get("lateCancelKeepsCode") !== null);
   await saveSetting(db, "weekdayCodeOnWeekdays", formData.get("weekdayCodeOnWeekdays") !== null);
+  await saveSetting(db, "cancelCodeEnabled", formData.get("cancelCodeEnabled") !== null);
   updateTag(CATALOG_TAG);
   if (rejected.length > 0) {
     failed("/admin/settings", `Not saved: ${rejected.join("; ")}. Everything else was saved.`);

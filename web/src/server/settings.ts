@@ -73,6 +73,16 @@ export interface Settings {
   refundFeePercent: number;
   /** A customer can ask for a reschedule code until this many hours before the start. */
   rescheduleCutoffHours: number;
+  /**
+   * A client's cancellation inside the refund window but at least `cancelCodeUntilHours` before the start is not
+   * refunded to the card: what was paid is given as a credit code instead (the owner, 2026-11-28: "If they cancel the
+   * booking between 7 and 2 days ... we will be issuing them a code for the booking automatically", and to be changed
+   * or switched off "for the busy seasons without extra deployment"). Later than that, nothing comes back, and the
+   * owner may refund an emergency by hand. Off: inside the refund window nothing comes back, as before.
+   */
+  cancelCodeEnabled: boolean;
+  /** Where that stops: a cancellation less than this many hours before the start gets no code. 48 is two days. */
+  cancelCodeUntilHours: number;
   /** How many times the same money can be moved to a new booking free of charge. 0 switches moving off. */
   maxReschedules: number;
   /**
@@ -208,6 +218,8 @@ export const DEFAULT_SETTINGS: Settings = {
   photoRefundWindowHours: 336, // 14 days, as on the live site and confirmed on 2026-11-17
   refundFeePercent: 5,
   rescheduleCutoffHours: 24,
+  cancelCodeEnabled: true,
+  cancelCodeUntilHours: 48,
   maxReschedules: 1,
   rescheduleFeeCents: 2000, // the owner's answer of 2026-11-17: the first reschedule is free, each further one $20
   creditValidDays: 90,
@@ -270,6 +282,7 @@ export const NUMBER_SETTING_RANGES = {
   photoRefundWindowHours: [0, 24 * 365],
   refundFeePercent: [0, 100],
   rescheduleCutoffHours: [0, 24 * 365],
+  cancelCodeUntilHours: [0, 24 * 365],
   maxReschedules: [0, 20],
   creditValidDays: [1, 730],
   reminderHours: [0, 24 * 7],
@@ -342,6 +355,8 @@ const VALIDATORS: { [K in Exclude<keyof Settings, "multiStudioPercent">]: (v: un
   photoRefundWindowHours: int(NUMBER_SETTING_RANGES.photoRefundWindowHours),
   refundFeePercent: int(NUMBER_SETTING_RANGES.refundFeePercent),
   rescheduleCutoffHours: int(NUMBER_SETTING_RANGES.rescheduleCutoffHours),
+  cancelCodeEnabled: bool,
+  cancelCodeUntilHours: int(NUMBER_SETTING_RANGES.cancelCodeUntilHours),
   maxReschedules: int(NUMBER_SETTING_RANGES.maxReschedules),
   rescheduleFeeCents: int(MONEY_SETTING_RANGES.rescheduleFeeCents),
   creditValidDays: int(NUMBER_SETTING_RANGES.creditValidDays),

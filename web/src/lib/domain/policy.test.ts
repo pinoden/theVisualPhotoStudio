@@ -139,6 +139,36 @@ describe("cancelling", () => {
   });
 });
 
+describe("a late cancellation's credit code (the owner, 2026-11-28)", () => {
+  // "If they cancel the booking between 7 and 2 days ... we will be issuing them a code for the booking automatically."
+  const on = { ...settings, cancelCodeEnabled: true, cancelCodeUntilHours: 48 };
+
+  it("gives what was paid as a code inside the refund window, until the hours the owners set, and nothing after", () => {
+    expect(cancellationOutcome(booking(), hoursBefore(400), on)).toMatchObject({ why: "refund", refundCents: 16720 });
+    expect(cancellationOutcome(booking(), hoursBefore(335), on)).toMatchObject({ why: "code", codeCents: 17600, refundCents: 0, feeCents: 0 });
+    expect(cancellationOutcome(booking(), hoursBefore(48), on)).toMatchObject({ why: "code", codeCents: 17600 });
+    expect(cancellationOutcome(booking(), hoursBefore(47.9), on)).toMatchObject({ why: "inside_window", refundCents: 0 });
+    // Switched off, for a busy season: nothing inside the window, as before.
+    expect(cancellationOutcome(booking(), hoursBefore(100), { ...on, cancelCodeEnabled: false })).toMatchObject({ why: "inside_window" });
+    expect(cancellationOutcome(booking(), hoursBefore(100), settings)).toMatchObject({ why: "inside_window" });
+  });
+
+  it("counts every payment, studio credit and money paid at the studio included, but no discount and no pet fee returned twice", () => {
+    expect(cancellationOutcome(booking({ cardPaidCents: 2000, creditAppliedCents: 15600, discountCents: 1760, paidAtStudioCents: 500 }), hoursBefore(100), on)).toMatchObject({ why: "code", codeCents: 18100 });
+    // Paid with studio credit alone: the credit comes back as the code.
+    expect(cancellationOutcome(booking({ cardPaidCents: 0, creditAppliedCents: 17600 }), hoursBefore(100), on)).toMatchObject({ why: "code", codeCents: 17600 });
+    expect(cancellationOutcome(booking({ petFeeCents: 4000, petCreditGiven: true }), hoursBefore(100), on)).toMatchObject({ why: "code", codeCents: 13600 });
+    // Nothing paid, or a booking that was moved: nothing.
+    expect(cancellationOutcome(booking({ cardPaidCents: 0, discountCents: 17600 }), hoursBefore(100), on)).toMatchObject({ why: "nothing_paid" });
+    expect(cancellationOutcome(booking({ rescheduledCount: 1, madeWithRescheduleCode: true }), hoursBefore(100), on)).toMatchObject({ why: "rescheduled" });
+  });
+
+  it("is for weekdays when a rental booked for a weekday gives it, while the owners keep that rule", () => {
+    expect(cancellationOutcome(booking({ weekdayRental: true }), hoursBefore(100), { ...on, weekdayCodeOnWeekdays: true })).toMatchObject({ why: "code", weekdaysOnly: true });
+    expect("weekdaysOnly" in cancellationOutcome(booking({ weekdayRental: true }), hoursBefore(100), on)).toBe(false);
+  });
+});
+
 describe("cancelling a booking with a pet fee", () => {
   it("returns the fee as credit when it was paid at the studio, and leaves the rest to be refunded by hand", () => {
     // $78 of studio and a $40 pet fee, paid in cash at the studio.

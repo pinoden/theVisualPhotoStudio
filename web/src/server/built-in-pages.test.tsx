@@ -325,6 +325,51 @@ describe("the pages the website was built with", () => {
     expect(await world.db.select().from(siteVersions)).toHaveLength(versions);
   });
 
+  it("say that a late cancellation gets a credit code while the owners give one, and get the lines from migration 0086", async () => {
+    // The owner, 2026-11-28: "between 7 and 2 days ... a code for the booking automatically", and nothing in the last 48 hours.
+    expect(await words("faq")).toContain("Cancel later than that, but 2 days or more before your start time, and nothing goes back to your card: what you paid is given to you as a credit code for a new booking, valid for 90 days.");
+    expect(await words("faq")).toContain("Cancel less than 2 days before your start time and nothing is refunded or credited. In a real emergency, contact us.");
+    expect(await words("faq")).not.toContain("Closer to the start than that, a cancellation is not refunded.");
+    expect(await words("policies")).toContain("Cancellations made less than 2 days before the appointment receive no refund or credit. A real emergency may be refunded at the owner's discretion.");
+    // Switched off, the pages say what they said before.
+    await setting("cancelCodeEnabled", false);
+    expect(await words("faq")).toContain("Closer to the start than that, a cancellation is not refunded.");
+    expect(await words("faq")).not.toContain("credit code for a new booking");
+    expect(await words("policies")).not.toContain("receive no refund or credit");
+    await setting("cancelCodeEnabled", true);
+
+    // A database from before has the old lines. On a page of their own the owners reworded them.
+    const FAQ_LINES = [
+      "<li>{if not cancel code}Closer to the start than that, a cancellation is not refunded.</li>",
+      "<li>{if cancel code}Cancel later than that, but {cancel code until} or more before your start time, and nothing goes back to your card: what you paid is given to you as a credit code for a new booking, valid for {reschedule code valid}.</li>",
+      "<li>{if cancel code}Cancel less than {cancel code until} before your start time and nothing is refunded or credited. In a real emergency, contact us.</li>",
+    ].join("");
+    const POLICY_LINES = [
+      "<li>{if cancel code}Cancellations made less than {refund window} but {cancel code until} or more before the appointment are not refunded to the card: the amount paid is returned as a credit code for a new booking, valid for {reschedule code valid}.</li>",
+      "<li>{if cancel code}Cancellations made less than {cancel code until} before the appointment receive no refund or credit. A real emergency may be refunded at the owner's discretion.</li>",
+    ].join("");
+    const stored = async (slug: string) => (await world.db.select().from(siteDocuments).where(eq(siteDocuments.slug, slug)))[0];
+    const before = (value: unknown) =>
+      JSON.parse(JSON.stringify(value).replace(JSON.stringify(FAQ_LINES).slice(1, -1), "<li>Closer to the start than that, a cancellation is not refunded.</li>").replace(JSON.stringify(POLICY_LINES).slice(1, -1), ""));
+    for (const slug of ["faq", "policies"]) {
+      const row = await stored(slug);
+      expect(JSON.stringify(row.published), slug).toContain("{if cancel code}");
+      await world.db.update(siteDocuments).set({ published: before(row.published) }).where(eq(siteDocuments.id, row.id));
+      expect(JSON.stringify((await stored(slug)).published), slug).not.toContain("{if cancel code}");
+    }
+    const own = expectOk(await createPage(world.db, owner, { title: "Our Terms" }, NOW)).id;
+    const theirs = parsePage({ blocks: [{ type: "Section", props: { content: [{ type: "Text", props: { html: "<ul><li>Closer to the start, a cancellation is not refunded.</li></ul>" } }] } }] });
+    await world.db.update(siteDocuments).set({ published: theirs }).where(eq(siteDocuments.id, own));
+
+    const migration = readFileSync(path.join(process.cwd(), "drizzle", "0086_late_cancel_code_copy.sql"), "utf8");
+    await world.db.execute(sql.raw(migration));
+    for (const slug of ["faq", "policies"] as const) expect((await stored(slug)).published, slug).toEqual(builtInPages().find((page) => page.slug === slug)!.content);
+    expect((await world.db.select().from(siteDocuments).where(eq(siteDocuments.id, own)))[0].published).toEqual(theirs);
+    const versions = (await world.db.select().from(siteVersions)).length;
+    await world.db.execute(sql.raw(migration));
+    expect(await world.db.select().from(siteVersions)).toHaveLength(versions);
+  });
+
   it("say the percentage off for several studios while no bundle has prices of its own", async () => {
     await world.db.delete(bundlePrices);
     expect(await words("faq")).toContain("You get 20% off when you book 2, 22% off when you book 3 or more.");

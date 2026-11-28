@@ -345,7 +345,9 @@ function faq(): BuiltInPage {
       "Can I cancel, and do I get a refund?",
       "<ul>" +
         "<li>Cancel {refund window with hours} or more before your start time and your payment is refunded to your card automatically, less the {refund fee} payment processing fee.</li>" +
-        "<li>Closer to the start than that, a cancellation is not refunded.</li>" +
+        "<li>{if not cancel code}Closer to the start than that, a cancellation is not refunded.</li>" +
+        "<li>{if cancel code}Cancel later than that, but {cancel code until} or more before your start time, and nothing goes back to your card: what you paid is given to you as a credit code for a new booking, valid for {reschedule code valid}.</li>" +
+        "<li>{if cancel code}Cancel less than {cancel code until} before your start time and nothing is refunded or credited. In a real emergency, contact us.</li>" +
         "<li>{if moving}You can move the booking instead: see the next question.</li>" +
         "<li>{if moving}A booking that has been moved can no longer be refunded.</li>" +
         "<li>{if not codes kept late}A discount code or free hour used for a booking comes back when you cancel in time for a refund. Cancelled later, or after the booking was moved, it is used up. Studio credit used for the booking does not come back by itself then: contact us, and we look at each case.</li>" +
@@ -461,6 +463,8 @@ function policies(): BuiltInPage {
     "<li>Cancellations made {refund window with hours} or more before the appointment are eligible for a full refund, excluding the non-refundable payment processing fee ({refund fee}).</li>" +
     "<li>{if moving}Cancellations made less than {refund window} before the appointment are non-refundable, but may be rescheduled at no additional charge until {reschedule cutoff} before the appointment.</li>" +
     "<li>{if not moving}Cancellations made less than {refund window} before the appointment are non-refundable.</li>" +
+    "<li>{if cancel code}Cancellations made less than {refund window} but {cancel code until} or more before the appointment are not refunded to the card: the amount paid is returned as a credit code for a new booking, valid for {reschedule code valid}.</li>" +
+    "<li>{if cancel code}Cancellations made less than {cancel code until} before the appointment receive no refund or credit. A real emergency may be refunded at the owner's discretion.</li>" +
     "<li>{if reschedule fee}An appointment may be rescheduled {reschedules allowed} at no additional charge. Each additional reschedule is arranged with the studio and costs {reschedule fee}.</li>" +
     "<li>{if moving}Once an appointment has been rescheduled, it is no longer eligible for a refund.</li>" +
     "<li>{if weekday moves}A studio rental booked for a weekday can be rescheduled to another weekday only (Monday to Friday, not a holiday): its reschedule code cannot be used for a weekend.</li>" +

@@ -7,6 +7,7 @@ import { listBookings } from "./admin";
 import { cancelBooking, getManageChoices, ownerCancelBooking, ownerRefund, requestRescheduleCode } from "./manage";
 import { givePetFeeCredit, petFeeCentsOf } from "./pet-fee";
 import { recordHandRefund, recordStudioPayment, voidStudioPayment } from "./studio-payments";
+import { saveSetting } from "./settings";
 import { BASE_URL, createTestWorld, daysAfter, expectOk, FAR, h, NEAR, NOW, type TestWorld } from "./testing";
 
 /**
@@ -331,6 +332,8 @@ describe("cancelling a booking that has a pet fee", () => {
   });
 
   it("too late to be refunded: nothing comes back by itself, the pet fee included", async () => {
+    // The rule before 2026-11-28, still the owners' to choose: a late cancellation gets no credit code.
+    await saveSetting(world.db, "cancelCodeEnabled", false);
     const booked = expectOk(await withPet({ date: NEAR }));
     const result = expectOk(await cancelBooking(world.db, booked.ref, byToken(booked.manageToken), world.manageDeps()));
     expect(result).toMatchObject({ refundCents: 0, creditCents: 0, refund: "none" });

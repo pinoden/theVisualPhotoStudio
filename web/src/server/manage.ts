@@ -162,6 +162,40 @@ function minutesOnCancelText(booking: Pick<BookingRow, "membershipMinutes" | "st
  * email. "" when no code was used, when it comes back (said once it has, `CODE_BACK`), when the studio cancels, and for
  * a reschedule code, whose booking the terms already say is not refunded.
  */
+/** Issue the credit code a late cancellation gives (`CancelOutcome.why` "code"): the client's own, for what was paid. */
+async function issueLateCancelCode(
+  tx: DbLike,
+  booking: BookingRow,
+  decision: Extract<CancelOutcome, { allowed: true }>,
+  terms: Settings,
+  deps: ManageDeps,
+): Promise<{ code: string; expiresAt: Date; bookUrl: string }> {
+  const expiresAt = new Date(deps.now.getTime() + terms.creditValidDays * 86_400_000);
+  // A session's credit is for sessions of either kind, as a reschedule code's is; its link leads to its own booking page.
+  const service = await sessionServiceOf(tx, booking.photographerId);
+  const bookPath: BookPath = service ? SERVICE_WORDS[service].bookPath : "/book";
+  const issued = await issuePromo(tx, {
+    kind: "amount",
+    value: decision.codeCents!,
+    source: "cancel",
+    photographyOnly: booking.photographerId !== null,
+    email: booking.customerEmail,
+    expiresAt,
+    maxUses: 1_000_000, // limited by the money left on it, not by a count
+    originBookingId: booking.id,
+    note: `Credit from ${booking.ref}, cancelled too late for a refund`,
+    issuedAt: deps.now,
+    bookingDays: decision.weekdaysOnly ? WEEKDAYS_ONLY : null,
+  });
+  if (!issued) throw new Error(`A late cancellation's code already exists for ${booking.ref}.`);
+  return { code: issued.code, expiresAt, bookUrl: `${deps.baseUrl.replace(/\/$/, "")}${bookPath}` };
+}
+
+/** The code a late cancellation gave, for the page and the email: the code, until when, and where to book with it. */
+function lateCodeLines(code: { code: string; expiresAt: Date; bookUrl: string }): string[] {
+  return [`Your code is ${code.code}, valid until ${formatInstant(code.expiresAt)}. Book at ${code.bookUrl} and enter it at checkout, with this email address.`];
+}
+
 /** What a client is asked to do about studio credit a cancellation does not give back. */
 const CREDIT_ASK_STUDIO = "Please contact the studio about it: we look at each case.";
 
@@ -171,9 +205,12 @@ function codeOnCancelText(
   terms: Pick<Settings, "refundWindowHours" | "lateCancelKeepsCode">,
   now: Date,
   byStudio: boolean,
+  /** The cancellation gives a credit code for what was paid (`why` "code"): studio credit paid toward it is in the code. */
+  intoCode = false,
 ): string {
   if (byStudio || !booking.promoCodeId || booking.promoDiscountCents <= 0 || facts.madeWithRescheduleCode) return "";
   if (codeComesBack(facts, now, terms)) return "";
+  if (intoCode && booking.creditAppliedCents > 0) return "";
   const why = facts.rescheduledCount > 0 ? "as the booking was moved" : `as the booking is cancelled less than ${hoursInWords(terms.refundWindowHours)} before it starts`;
   // Studio credit is not given back by itself then, but it is not lost either: the studio decides each case (the owner,
   // 2026-11-28: "we should not issue them studio credit right away. We will decide it on case to case basics, so they
@@ -279,7 +316,7 @@ export async function getManageChoices(db: DbLike, ref: string, actor: Actor, no
   // and agrees to, before cancelling.
   const byStudio = actor.kind === "owner";
   const more = choices.cancel.allowed
-    ? [minutesOnCancelText(context.booking, context.terms, now, byStudio), codeOnCancelText(context.booking, context.facts, context.terms, now, byStudio)].filter(Boolean)
+    ? [minutesOnCancelText(context.booking, context.terms, now, byStudio), codeOnCancelText(context.booking, context.facts, context.terms, now, byStudio, context.options.cancel.allowed && context.options.cancel.why === "code")].filter(Boolean)
     : [];
   return {
     ...choices,
@@ -497,8 +534,17 @@ export function cancelOutcomeText(
       }
       return [byHand, pet].filter(Boolean).join(" ");
     }
-    case "inside_window":
-      return `No refund is due, because the booking starts in less than ${hoursInWords(settings.refundWindowHours)}.`;
+    case "inside_window": {
+      // With the credit code for a late cancellation on, the band after it: nothing, and an emergency is the owner's to
+      // look at (the owner, 2026-11-28: "we can refund them everything if they have real emergency, but it is only a
+      // real personal decision by the owner").
+      const codeBand = settings.cancelCodeEnabled && settings.cancelCodeUntilHours < settings.refundWindowHours;
+      return codeBand
+        ? `No refund or credit is due, because the booking starts in less than ${hoursInWords(settings.cancelCodeUntilHours)}. If you have a real emergency, please contact the studio.`
+        : `No refund is due, because the booking starts in less than ${hoursInWords(settings.refundWindowHours)}.`;
+    }
+    case "code":
+      return `Nothing is refunded to your card, because the booking starts in less than ${hoursInWords(settings.refundWindowHours)}. What you paid, ${formatCents(outcome.codeCents ?? 0)}, is given to you as a credit code for a new booking, valid for ${count(settings.creditValidDays, "day")}.${outcome.weekdaysOnly ? ` ${WEEKDAYS_ONLY_TEXT}` : ""}`;
     case "rescheduled":
       return "No refund is due, because this booking was made with a reschedule code.";
     case "moved":
@@ -1199,7 +1245,7 @@ export async function cancelBooking(db: Db, ref: string, actor: Actor, deps: Man
     const minutesText = minutesOnCancelText(booking, terms, asOf, byStudio);
     const place = decision.byHandCents > 0 ? await handPaidPlaceOf(tx, booking.id) : "at the studio";
     // A code or credit the cancellation uses up: said before, with the rest, and in the email.
-    const codeText = codeOnCancelText(booking, facts, terms, asOf, byStudio);
+    const codeText = codeOnCancelText(booking, facts, terms, asOf, byStudio, decision.why === "code");
     const said = [cancelOutcomeText(decision, terms, {}, heldCents, place), minutesText, codeText].filter(Boolean).join(" ");
     if (!askedAt && seen !== undefined && seen !== said) return { kind: "changed" as const };
     // The processor could not say whether the open link was paid: nothing is cancelled until the site knows.
@@ -1223,6 +1269,8 @@ export async function cancelBooking(db: Db, ref: string, actor: Actor, deps: Man
       decision.creditCents > 0
         ? await issuePetCredit(tx, booking, decision.creditCents, { now: deps.now, validDays: terms.creditValidDays })
         : null;
+    // Too late for a refund, early enough for a credit code: what was paid, as a code of the client's own (2026-11-28).
+    const lateCode = decision.why === "code" && (decision.codeCents ?? 0) > 0 ? await issueLateCancelCode(tx, booking, decision, terms, deps) : null;
     await recordEvent(tx, {
       bookingId: booking.id,
       from: labelOf(booking),
@@ -1231,6 +1279,7 @@ export async function cancelBooking(db: Db, ref: string, actor: Actor, deps: Man
       at: deps.now,
       note: [
         decision.refundCents > 0 ? `Refund ${formatCents(decision.refundCents)}` : "No refund",
+        ...(lateCode ? [`what was paid, ${formatCents(decision.codeCents!)}, given as credit code ${lateCode.code}`] : []),
         ...(petCredit ? [`pet fee of ${formatCents(decision.creditCents)} returned as studio credit`] : []),
         ...(booking.membershipMinutes > 0 ? [`${durationLabel(booking.membershipMinutes)} of membership time ${minutesBack ? "given back" : "used"}`] : []),
         ...(codeBack
@@ -1252,7 +1301,8 @@ export async function cancelBooking(db: Db, ref: string, actor: Actor, deps: Man
     });
 
     const refundIds = await recordRefunds(tx, booking.id, decision.refundCents, `Cancellation of ${booking.ref}`, true);
-    const message = `${said}${codeBack ? ` ${CODE_BACK}` : ""}`;
+    const codeLines = lateCode ? lateCodeLines(lateCode) : [];
+    const message = [said, ...(codeBack ? [CODE_BACK] : []), ...codeLines].join(" ");
     // The whole outcome. The card refund is said as sent: if it does not go through, the email is put right (`refundNotSent`).
     const email: CancellationNotice = {
       to: booking.customerEmail,
@@ -1266,6 +1316,7 @@ export async function cancelBooking(db: Db, ref: string, actor: Actor, deps: Man
         minutesText,
         codeText,
         ...(codeBack ? [CODE_BACK] : []),
+        ...codeLines,
       ].filter(Boolean),
       ...(petCredit
         ? {

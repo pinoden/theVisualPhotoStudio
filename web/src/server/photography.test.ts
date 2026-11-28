@@ -23,6 +23,7 @@ import {
   unblockPhotographer,
 } from "./photography";
 import { issuePromo } from "./promos";
+import { saveSetting } from "./settings";
 import { createTestWorld, daysAfter, expectOk, FAR, h, hoursAfter, NEAR, NOW, type TestWorld } from "./testing";
 
 let world: TestWorld;
@@ -415,6 +416,8 @@ describe("the packages", () => {
 
 describe("after a session is booked", () => {
   it("is refunded when cancelled 14 days or more ahead, and frees the studio and the photographer", async () => {
+    // The rule before 2026-11-28, still the owners' to choose: a late cancellation gets no credit code.
+    await saveSetting(world.db, "cancelCodeEnabled", false);
     // Booked 18 days ahead, and cancelled eight days later: ten days before the session.
     const soon = expectOk(await session());
     const tenDaysBefore = daysAfter(NOW, 8);

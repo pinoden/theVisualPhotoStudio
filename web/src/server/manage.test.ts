@@ -109,6 +109,8 @@ describe("cancelling", () => {
   });
 
   it("inside 7 days: cancels without a refund and says why", async () => {
+    // The rule before 2026-11-28, still the owners' to choose: a late cancellation gets no credit code.
+    await saveSetting(world.db, "cancelCodeEnabled", false);
     const booked = expectOk(await world.book({ date: NEAR }));
     const result = expectOk(await cancelBooking(world.db, booked.ref, byToken(booked.manageToken), world.manageDeps()));
     expect(result).toMatchObject({ refundCents: 0, refund: "none" });
@@ -219,6 +221,8 @@ describe("cancelling", () => {
   });
 
   it("uses up a code or studio credit when the client cancels too late for a refund, and says so first (the owners' decision of 2026-11-27)", async () => {
+    // The rule before 2026-11-28, still the owners' to choose: a late cancellation gets no credit code.
+    await saveSetting(world.db, "cancelCodeEnabled", false);
     // NEAR is inside the seven days when nothing is refunded. A code that makes the booking free:
     const promo = (await issuePromo(world.db, { kind: "percent", value: 100, source: "manual", email: null, expiresAt: daysAfter(NOW, 60), maxUses: 5 }))!;
     const uses = async () => (await world.db.select().from(promoCodes).where(eq(promoCodes.id, promo.id)))[0].usedCount;
@@ -279,7 +283,8 @@ describe("cancelling", () => {
 
   it("names the refund window as the owner set it, in days only when it is whole days", () => {
     const late = { allowed: true, refundCents: 0, feeCents: 0, creditCents: 0, byHandCents: 0, why: "inside_window" } as const;
-    const text = (refundWindowHours: number) => cancelOutcomeText(late, { ...DEFAULT_SETTINGS, refundWindowHours });
+    // With the credit code for a late cancellation switched off: the rule before 2026-11-28.
+    const text = (refundWindowHours: number) => cancelOutcomeText(late, { ...DEFAULT_SETTINGS, refundWindowHours, cancelCodeEnabled: false });
     expect(text(336)).toBe("No refund is due, because the booking starts in less than 14 days.");
     expect(text(DEFAULT_SETTINGS.refundWindowHours)).toBe("No refund is due, because the booking starts in less than 7 days.");
     expect(text(168)).toBe("No refund is due, because the booking starts in less than 7 days.");
@@ -288,7 +293,17 @@ describe("cancelling", () => {
     expect(text(1)).toBe("No refund is due, because the booking starts in less than 1 hour.");
   });
 
+  it("names the hours after which a late cancellation gets nothing, with room for an emergency, while the credit code is on", () => {
+    const late = { allowed: true, refundCents: 0, feeCents: 0, creditCents: 0, byHandCents: 0, why: "inside_window" } as const;
+    expect(cancelOutcomeText(late, DEFAULT_SETTINGS)).toBe("No refund or credit is due, because the booking starts in less than 2 days. If you have a real emergency, please contact the studio.");
+    expect(cancelOutcomeText(late, { ...DEFAULT_SETTINGS, cancelCodeUntilHours: 72 })).toBe("No refund or credit is due, because the booking starts in less than 3 days. If you have a real emergency, please contact the studio.");
+    // A code that would stop before the refund window begins gives no band: the window's words, as before.
+    expect(cancelOutcomeText(late, { ...DEFAULT_SETTINGS, cancelCodeUntilHours: 168 })).toBe("No refund is due, because the booking starts in less than 7 days.");
+  });
+
   it("tells the customer in advance what cancelling or moving would do", async () => {
+    // The rule before 2026-11-28, still the owners' to choose: a late cancellation gets no credit code.
+    await saveSetting(world.db, "cancelCodeEnabled", false);
     const early = expectOk(await world.book({ date: FAR }));
     expect(await getManageOptions(world.db, early.ref, byToken(early.manageToken), NOW)).toEqual({
       cancel: { allowed: true, refundCents: 16720, feeCents: 880, creditCents: 0, byHandCents: 0, why: "refund" },
@@ -470,6 +485,77 @@ describe("a refund the processor accepted without completing it", () => {
     expect(await checkUnsettledRefunds(world.db, world.manageDeps())).toEqual({ settled: 0, rejected: 0 });
     expect(await checkUnsettledRefunds(world.db, world.manageDeps({ payments: null }))).toEqual({ settled: 0, rejected: 0 });
     expect((await world.db.select().from(refunds))[0].status).toBe("succeeded");
+  });
+});
+
+describe("a late cancellation's credit code (the owner, 2026-11-28)", () => {
+  // "If they cancel the booking between 7 and 2 days ... we will be issuing them a code for the booking automatically ...
+  // if they cancel within the last 48 hours, we don't refund them anything." NEAR is four days ahead of NOW.
+  const codeOf = async (bookingRef: string) => {
+    const id = (await bookingRow(bookingRef)).id;
+    return (await world.db.select().from(promoCodes).where(eq(promoCodes.originBookingId, id))).find((code) => code.source === "cancel");
+  };
+  const WORDS = "Nothing is refunded to your card, because the booking starts in less than 7 days. What you paid, $176, is given to you as a credit code for a new booking, valid for 90 days.";
+
+  it("gives what was paid as a code of the client's own, says so first and in the email, and the code pays for a new booking", async () => {
+    const booked = expectOk(await world.book({ date: NEAR }));
+    expect((await getManageChoices(world.db, booked.ref, byToken(booked.manageToken), NOW))!.cancel.text).toContain(WORDS);
+    const done = expectOk(await cancelBooking(world.db, booked.ref, byToken(booked.manageToken), world.manageDeps()));
+    expect(done.refundCents).toBe(0);
+    expect(world.refundCalls).toHaveLength(0);
+    const code = (await codeOf(booked.ref))!;
+    expect(code).toMatchObject({ kind: "amount", value: 17600, email: "jane@example.com", photographyOnly: false });
+    expect(code.code).toMatch(/^CREDIT-[0-9A-Z]{4}-[0-9A-Z]{4}$/);
+    // Booked for a weekday: the code is for weekdays (question 92).
+    expect(code.bookingDays).toEqual({ from: null, until: null, weekdays: [1, 2, 3, 4, 5], notOnSpecialDates: true });
+    expect(done.message).toContain(`Your code is ${code.code}, valid until`);
+    const mail = (await world.emails("booking_cancelled")).at(-1)!.body;
+    expect(mail).toContain(WORDS);
+    expect(mail).toContain(`Your code is ${code.code}`);
+    const history = await world.db.select().from(bookingEvents).where(eq(bookingEvents.bookingId, (await bookingRow(booked.ref)).id));
+    expect(history.at(-1)!.note).toContain(`what was paid, $176, given as credit code ${code.code}`);
+    const again = expectOk(await world.book({ date: FAR, promoCode: code.code, paymentToken: undefined }));
+    expect((await bookingRow(again.ref)).totalCents).toBe(0);
+  });
+
+  it("puts studio credit paid toward the booking into the code, without asking the client to contact the studio", async () => {
+    const gift = (await issuePromo(world.db, { kind: "amount", value: 5000, source: "manual", email: null, expiresAt: daysAfter(NOW, 60) }))!;
+    const booked = expectOk(await world.book({ date: NEAR, promoCode: gift.code, expectedTotalCents: 12600 }));
+    const told = (await getManageChoices(world.db, booked.ref, byToken(booked.manageToken), NOW))!.cancel.text;
+    expect(told).toContain("What you paid, $176, is given to you as a credit code");
+    expect(told).not.toContain("contact the studio");
+    expectOk(await cancelBooking(world.db, booked.ref, byToken(booked.manageToken), world.manageDeps()));
+    expect((await codeOf(booked.ref))!.value).toBe(17600);
+  });
+
+  it("gives nothing in the last 48 hours, and says that an emergency is the studio's to look at", async () => {
+    const booked = expectOk(await world.book({ date: NEAR }));
+    const late = hoursAfter(NEAR_START, -30);
+    expect((await getManageChoices(world.db, booked.ref, byToken(booked.manageToken), late))!.cancel.text).toBe(
+      "No refund or credit is due, because the booking starts in less than 2 days. If you have a real emergency, please contact the studio.",
+    );
+    expectOk(await cancelBooking(world.db, booked.ref, byToken(booked.manageToken), world.manageDeps({ now: late })));
+    expect(await codeOf(booked.ref)).toBeUndefined();
+    // An owner can still refund an emergency by hand: everything the card paid.
+    expect(expectOk(await ownerRefund(world.db, booked.ref, { amountCents: 17600, reason: "Emergency" }, world.manageDeps({ now: late }))).refundCents).toBe(17600);
+  });
+
+  it("follows the owners' settings, and keeps the rule a booking was made under", async () => {
+    const under = expectOk(await world.book({ date: NEAR }));
+    // A busy season: switched off. A booking made before keeps its code; one made after gets nothing.
+    expect(await saveSetting(world.db, "cancelCodeEnabled", false)).toBe(true);
+    const after = expectOk(await world.book({ date: NEAR, startMinute: h(14) }));
+    expectOk(await cancelBooking(world.db, under.ref, byToken(under.manageToken), world.manageDeps()));
+    expectOk(await cancelBooking(world.db, after.ref, byToken(after.manageToken), world.manageDeps()));
+    expect((await codeOf(under.ref))!.value).toBe(17600);
+    expect(await codeOf(after.ref)).toBeUndefined();
+    // Switched on again, from 5 days down: four days ahead is then too late.
+    expect(await saveSetting(world.db, "cancelCodeEnabled", true)).toBe(true);
+    expect(await saveSetting(world.db, "cancelCodeUntilHours", 120)).toBe(true);
+    const tight = expectOk(await world.book({ date: NEAR, startMinute: h(17) }));
+    expect((await getManageChoices(world.db, tight.ref, byToken(tight.manageToken), NOW))!.cancel.text).toBe(
+      "No refund or credit is due, because the booking starts in less than 5 days. If you have a real emergency, please contact the studio.",
+    );
   });
 });
 
@@ -722,6 +808,8 @@ describe("the reschedule code", () => {
   });
 
   it("is refused for someone who is not the customer, and after cancelling", async () => {
+    // The rule before 2026-11-28, still the owners' to choose: a late cancellation gets no credit code.
+    await saveSetting(world.db, "cancelCodeEnabled", false);
     const booked = expectOk(await world.book({ date: NEAR }));
     expect(await requestRescheduleCode(world.db, booked.ref, byToken("wrong-token-wrong-token-wrong"), world.manageDeps())).toMatchObject({
       ok: false,

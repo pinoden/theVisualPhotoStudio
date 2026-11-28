@@ -155,7 +155,9 @@ async function Rewards() {
                   ? `${code.value}% off your next ${code.photographyOnly ? "photography session" : "studio rental"}`
                   : code.source === "reschedule"
                     ? `${formatCents(code.value)} ${code.photographyOnly ? "photography " : ""}credit from a rescheduled booking`
-                    : code.source === "pet_fee"
+                    : code.source === "cancel"
+                      ? `${formatCents(code.value)} ${code.photographyOnly ? "photography " : ""}credit from a cancelled booking`
+                      : code.source === "pet_fee"
                       ? `${formatCents(code.value)} studio credit, from a pet fee`
                       : `${formatCents(code.value)} studio credit`}
               </strong>
