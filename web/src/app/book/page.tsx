@@ -6,7 +6,7 @@ import { BookingFlow } from "@/components/BookingFlow";
 import { CodeBalanceCheck } from "@/components/CodeBalanceCheck";
 import { getCatalog } from "@/server/cached";
 import { checkoutPolicies } from "./checkout-policies";
-import { shareMetadata } from "@/server/site";
+import { isPreview, shareMetadata } from "@/server/site";
 
 const TITLE = "Book a Studio";
 const DESCRIPTION = "Reserve one or more studios at The Visuals Photo Studio. Instant confirmation.";
@@ -20,6 +20,11 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default async function BookPage() {
+  // In a preview nothing a first pass draws is kept (Draft Mode), so the cached reads below would be missing in the
+  // final pass, which Next.js logs as an error for each ("Unexpected cache miss after cache warming"): 250 times in a
+  // run of the browser suite, until 2026-11-28. A preview is drawn when it is asked for (`isPreview`), so it is asked
+  // first. For a visitor it answers at once, and the page stays prerendered.
+  await isPreview();
   const [catalog, policies] = await Promise.all([getCatalog(), checkoutPolicies()]);
   return (
     <>

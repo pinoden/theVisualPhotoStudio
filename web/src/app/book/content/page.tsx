@@ -7,7 +7,7 @@ import { sessionsOf } from "@/lib/domain/services";
 import { telHref } from "@/lib/site/frame";
 import { getCatalog } from "@/server/cached";
 import { checkoutPolicies } from "../checkout-policies";
-import { shareMetadata, siteFrame } from "@/server/site";
+import { isPreview, shareMetadata, siteFrame } from "@/server/site";
 
 const TITLE = "Book Content Creation";
 const DESCRIPTION =
@@ -25,6 +25,8 @@ export async function generateMetadata(): Promise<Metadata> {
  * put a session on sale under Admin → Content Creation.
  */
 export default async function BookContentPage() {
+  // As the booking page: a preview is drawn when it is asked for, before the cached reads (src/app/book/page.tsx).
+  await isPreview();
   const [catalog, { frame }, policies] = await Promise.all([getCatalog(), siteFrame(), checkoutPolicies()]);
   const { business } = frame;
   return (
