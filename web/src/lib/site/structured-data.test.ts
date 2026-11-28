@@ -23,6 +23,28 @@ describe("the studio as a business, for search engines", () => {
     });
   });
 
+  it("names its hour's prices, its description and its pages elsewhere, when there are some (2026-11-28)", () => {
+    const rules = [
+      { studioId: "b", dayType: "weekday", durationMinutes: 60, priceCents: 8800 },
+      { studioId: "p", dayType: "weekday", durationMinutes: 60, priceCents: 6800 },
+      { studioId: "p", dayType: "weekend", durationMinutes: 60, priceCents: 9800 },
+      { studioId: "p", dayType: "weekday", durationMinutes: 120, priceCents: 12000 },
+    ] as never;
+    const data = localBusiness({
+      business: DEFAULT_FRAME.business,
+      catalog: { studios: [studio(sameHours)], rules },
+      url: null,
+      image: null,
+      description: "Three natural-light photo studios.",
+      sameAs: ["https://www.instagram.com/thevisuals", "mailto:hello@example.com"],
+    });
+    expect(data).toMatchObject({ priceRange: "$68–$98 an hour", description: "Three natural-light photo studios.", sameAs: ["https://www.instagram.com/thevisuals"] });
+    const bare = localBusiness({ business: DEFAULT_FRAME.business, catalog: { studios: [studio(sameHours)] }, url: null, image: null });
+    expect(bare).not.toHaveProperty("priceRange");
+    expect(bare).not.toHaveProperty("sameAs");
+    expect(bare).not.toHaveProperty("description");
+  });
+
   it("gives the hours of each day, the days with the same hours together", () => {
     const data = localBusiness({ business: DEFAULT_FRAME.business, catalog: { studios: [studio(sameHours)] }, url: null, image: null });
     expect(data.openingHoursSpecification).toEqual([

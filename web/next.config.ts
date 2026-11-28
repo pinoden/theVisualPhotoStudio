@@ -16,7 +16,13 @@ const SECURITY_HEADERS = [
 const nextConfig: NextConfig = {
   poweredByHeader: false,
   async headers() {
-    return [{ source: "/:path*", headers: SECURITY_HEADERS }];
+    return [
+      { source: "/:path*", headers: SECURITY_HEADERS },
+      // The hosted preview's own addresses (*.vercel.app) are kept out of search engines: until the studio's domain
+      // points here, the same pages there would compete with the live website, and afterwards with the domain itself.
+      // The studio's own domain is unaffected.
+      { source: "/:path*", has: [{ type: "host", value: "(?<host>.*)\\.vercel\\.app" }], headers: [{ key: "X-Robots-Tag", value: "noindex" }] },
+    ];
   },
   cacheComponents: true,
   partialPrefetching: true,

@@ -102,7 +102,21 @@ test("public pages show the studios and the live price list", async ({ page }) =
   const business = JSON.parse((await page.locator('script[type="application/ld+json"]').first().textContent()) ?? "{}");
   expect(business).toMatchObject({ "@type": "LocalBusiness", name: "The Visuals Photo Studio", telephone: "(407) 663-6109" });
   expect(business.address).toMatchObject({ addressLocality: "Winter Park", addressRegion: "FL", postalCode: "32792" });
-  await expect(page.locator('meta[property="og:title"]')).toHaveAttribute("content", "The Visuals Photo Studio | Winter Park, FL");
+  // The hour's prices, lowest to highest, and what the page says of itself (the owner, 2026-11-28: search engines).
+  expect(business.priceRange).toMatch(/^\$\d+–\$\d+ an hour$/);
+  expect(business.description).toContain("natural-light photo studios in Winter Park");
+  await expect(page).toHaveTitle("Winter Park Photo Studio Rental | The Visuals Photo Studio");
+  await expect(page.locator('meta[property="og:title"]')).toHaveAttribute("content", "Winter Park Photo Studio Rental | The Visuals Photo Studio");
+  // Each page has a description of its own, not the website's.
+  const descriptions = new Set<string>();
+  for (const path of ["/", "/studios", "/rates", "/services", "/faq", "/policies", "/memberships", "/contact", "/book"]) {
+    const response = await page.request.get(path);
+    const found = /<meta name="description" content="([^"]*)"/.exec(await response.text())?.[1] ?? "";
+    expect(found.length, path).toBeGreaterThan(80);
+    expect(found.length, path).toBeLessThanOrEqual(165);
+    descriptions.add(found);
+  }
+  expect(descriptions.size).toBe(9);
   // The website's own address, made whole with SITE_URL (https against a production build, E2E_BUILD=1).
   await expect(page.locator('link[rel="canonical"]')).toHaveAttribute("href", /^https?:\/\/localhost:\d+\/?$/);
 
@@ -154,7 +168,7 @@ test("guest information answers with the current rules and prices", async ({ pag
   await page.goto("/faq");
   await expect(page.getByRole("heading", { name: "Guest Information" })).toBeVisible();
   // A link to it, shared, says what it is.
-  await expect(page.locator('meta[property="og:title"]')).toHaveAttribute("content", "Guest Information");
+  await expect(page.locator('meta[property="og:title"]')).toHaveAttribute("content", "Guest Information & FAQ | The Visuals Photo Studio");
   await expect(page.locator('link[rel="canonical"]')).toHaveAttribute("href", /\/faq$/);
 
   // Answers are closed until asked for.

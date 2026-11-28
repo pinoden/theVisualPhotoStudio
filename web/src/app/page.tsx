@@ -33,7 +33,14 @@ export default async function HomePage() {
   const [{ frame }, catalog, picture] = await Promise.all([siteFrame(), getCatalog(), sharePicture()]);
   const site = configuredSiteUrl();
   // The studio as a business, for maps and local search results (src/lib/site/structured-data.ts).
-  const business = localBusiness({ business: frame.business, catalog, url: site, image: picture && site ? `${site}${picture.url}` : null });
+  const business = localBusiness({
+    business: frame.business,
+    catalog,
+    url: site,
+    image: picture && site ? `${site}${picture.url}` : null,
+    description: page.content.meta.description || frame.search.description,
+    sameAs: frame.social.map((link) => link.url),
+  });
   return (
     <div className="site-page blk-root">
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(business) }} />

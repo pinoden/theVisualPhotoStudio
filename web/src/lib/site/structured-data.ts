@@ -38,9 +38,22 @@ function openingHours(catalog: Pick<Catalog, "studios">): { "@type": "OpeningHou
   });
 }
 
+/** "$68–$98 an hour": the studios' prices for an hour, lowest to highest; null with none listed. */
+function priceRange(catalog: Pick<Catalog, "rules">): string | null {
+  const hour = catalog.rules.filter((rule) => rule.durationMinutes === 60).map((rule) => rule.priceCents);
+  if (hour.length === 0) return null;
+  const dollars = (cents: number) => `$${Math.round(cents / 100)}`;
+  const [low, high] = [Math.min(...hour), Math.max(...hour)];
+  return low === high ? `${dollars(low)} an hour` : `${dollars(low)}\u2013${dollars(high)} an hour`;
+}
+
 export function localBusiness(input: {
   business: Business;
-  catalog: Pick<Catalog, "studios">;
+  catalog: Pick<Catalog, "studios"> & Partial<Pick<Catalog, "rules">>;
+  /** What the website says of itself to search engines (Admin → Website, the search description). */
+  description?: string;
+  /** The studio's pages elsewhere: Instagram and the other social links of the footer. */
+  sameAs?: string[];
   /** The website's own address, "https://...", when it is known. */
   url: string | null;
   /** The address of a picture of the studio, when there is one. */
@@ -48,13 +61,17 @@ export function localBusiness(input: {
 }): Record<string, unknown> {
   const { business } = input;
   const place = cityStateZip(business.addressLine2);
+  const prices = input.catalog.rules ? priceRange({ rules: input.catalog.rules }) : null;
+  const sameAs = (input.sameAs ?? []).filter((url) => url.startsWith("https://"));
   return {
     "@context": "https://schema.org",
     "@type": "LocalBusiness",
     name: business.name,
     ...(input.url ? { url: input.url } : {}),
     ...(input.image ? { image: input.image } : {}),
+    ...(input.description ? { description: input.description } : {}),
     telephone: business.phone,
+    ...(prices ? { priceRange: prices } : {}),
     address: {
       "@type": "PostalAddress",
       streetAddress: business.addressLine1,
@@ -63,6 +80,7 @@ export function localBusiness(input: {
     },
     hasMap: business.mapsUrl,
     openingHoursSpecification: openingHours(input.catalog),
+    ...(sameAs.length > 0 ? { sameAs } : {}),
   };
 }
 
