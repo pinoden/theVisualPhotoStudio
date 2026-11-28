@@ -92,8 +92,9 @@ async function SettingsForm({ searchParams }: Pick<PageProps<"/admin/settings">,
                   hour or studio credit comes back after any cancellation
                 </label>
                 <p style={{ fontSize: ".78rem", margin: "0 0 1rem" }}>
-                  Off, it comes back only when the client cancels in time for a refund: cancelled later, or after the booking was moved, it
-                  is used up, as money paid is kept then. A cancellation by the studio always gives it back. A booking keeps the rule it was
+                  Off, it comes back only when the client cancels in time for a refund: cancelled later, or after the booking was moved, a
+                  code is used up, as money paid is kept then, and studio credit is not given back by itself: the client is asked to contact the
+                  studio, and you decide each case (Codes gives credit back). A cancellation by the studio always gives it back. A booking keeps the rule it was
                   made under.
                 </p>
                 <label style={{ display: "block", marginBottom: ".4rem", fontSize: ".9rem" }}>

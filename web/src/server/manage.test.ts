@@ -242,10 +242,16 @@ describe("cancelling", () => {
     const left = async () => (await world.db.select().from(promoCodes).where(eq(promoCodes.id, gift.id)))[0].value;
     const part = expectOk(await world.book({ date: NEAR, startMinute: h(14), promoCode: gift.code, expectedTotalCents: 12600 }));
     expect((await getManageChoices(world.db, part.ref, byToken(part.manageToken), NOW))!.cancel.text).toBe(
-      "No refund is due, because the booking starts in less than 7 days. The $50 of studio credit this booking was paid with is not given back, as the booking is cancelled less than 7 days before it starts.",
+      "No refund is due, because the booking starts in less than 7 days. The $50 of studio credit this booking was paid with is not given back automatically, as the booking is cancelled less than 7 days before it starts. Please contact the studio about it: we look at each case.",
     );
     expectOk(await cancelBooking(world.db, part.ref, byToken(part.manageToken), world.manageDeps()));
+    // Not given back by itself: the studio decides each case (the owner, 2026-11-28). The email asks the client to call.
     expect(await left()).toBe(0);
+    expect((await world.emails("booking_cancelled")).at(-1)!.body).toContain(
+      "The $50 of studio credit this booking was paid with is not given back automatically, as the booking is cancelled less than 7 days before it starts. Please contact the studio about it: we look at each case.",
+    );
+    const history = await world.db.select().from(bookingEvents).where(eq(bookingEvents.bookingId, (await bookingRow(part.ref)).id));
+    expect(history.at(-1)!.note).toContain("the $50 of studio credit it was paid with not given back, as the terms refund nothing: the client was asked to contact the studio");
     expect(world.refundCalls).toHaveLength(0);
 
     // When the studio cancels, the client gets the code back, however late.

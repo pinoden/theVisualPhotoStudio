@@ -162,6 +162,9 @@ function minutesOnCancelText(booking: Pick<BookingRow, "membershipMinutes" | "st
  * email. "" when no code was used, when it comes back (said once it has, `CODE_BACK`), when the studio cancels, and for
  * a reschedule code, whose booking the terms already say is not refunded.
  */
+/** What a client is asked to do about studio credit a cancellation does not give back. */
+const CREDIT_ASK_STUDIO = "Please contact the studio about it: we look at each case.";
+
 function codeOnCancelText(
   booking: Pick<BookingRow, "promoCodeId" | "promoDiscountCents" | "creditAppliedCents">,
   facts: Pick<BookingFacts, "startAt" | "rescheduledCount" | "madeWithRescheduleCode">,
@@ -171,10 +174,14 @@ function codeOnCancelText(
 ): string {
   if (byStudio || !booking.promoCodeId || booking.promoDiscountCents <= 0 || facts.madeWithRescheduleCode) return "";
   if (codeComesBack(facts, now, terms)) return "";
-  const what = booking.creditAppliedCents > 0 ? `The ${formatCents(booking.creditAppliedCents)} of studio credit this booking was paid with` : "The code you used for this booking";
-  return facts.rescheduledCount > 0
-    ? `${what} is not given back, as the booking was moved.`
-    : `${what} is not given back, as the booking is cancelled less than ${hoursInWords(terms.refundWindowHours)} before it starts.`;
+  const why = facts.rescheduledCount > 0 ? "as the booking was moved" : `as the booking is cancelled less than ${hoursInWords(terms.refundWindowHours)} before it starts`;
+  // Studio credit is not given back by itself then, but it is not lost either: the studio decides each case (the owner,
+  // 2026-11-28: "we should not issue them studio credit right away. We will decide it on case to case basics, so they
+  // should receive an email to contact the studio"; question 89). The owners give it back under Admin → Codes.
+  if (booking.creditAppliedCents > 0) {
+    return `The ${formatCents(booking.creditAppliedCents)} of studio credit this booking was paid with is not given back automatically, ${why}. ${CREDIT_ASK_STUDIO}`;
+  }
+  return `The code you used for this booking is not given back, ${why}.`;
 }
 
 /** Give a cancelled booking's membership minutes back: a line of `membership_minutes`, which adds them to what is left. */
@@ -1226,7 +1233,13 @@ export async function cancelBooking(db: Db, ref: string, actor: Actor, deps: Man
         decision.refundCents > 0 ? `Refund ${formatCents(decision.refundCents)}` : "No refund",
         ...(petCredit ? [`pet fee of ${formatCents(decision.creditCents)} returned as studio credit`] : []),
         ...(booking.membershipMinutes > 0 ? [`${durationLabel(booking.membershipMinutes)} of membership time ${minutesBack ? "given back" : "used"}`] : []),
-        ...(codeBack ? ["the code or credit it was made with given back"] : codeText ? ["the code or credit it was made with used up, as the terms refund nothing"] : []),
+        ...(codeBack
+          ? ["the code or credit it was made with given back"]
+          : codeText && booking.creditAppliedCents > 0
+            ? [`the ${formatCents(booking.creditAppliedCents)} of studio credit it was paid with not given back, as the terms refund nothing: the client was asked to contact the studio, which decides (Admin → Codes gives credit back)`]
+            : codeText
+              ? ["the code or credit it was made with used up, as the terms refund nothing"]
+              : []),
         ...(decision.byHandCents > 0
           ? [
               afterFee(decision.byHandCents, terms.refundFeePercent) > 0
