@@ -64,12 +64,16 @@ test("the owner changes the design as a draft, sees it in the preview, and visit
   await expect(page.getByRole("button", { name: "Publish", exact: true })).toBeDisabled();
   // The preview is the website itself.
   await expect(preview(page).getByRole("heading", { name: /Where Every Frame/ })).toBeVisible();
-  // The editor says what can and cannot be read, without refusing anything.
+  // The editor says what can and cannot be read, without refusing anything. The site's own colours all can, since the
+  // owners' two tones of the tan (2026-11-27): dark words on a button, and a darker shade of the accent for words.
   await expect(onScreen(page.locator(".editor-checks"))).toContainText("Words on a button in the accent colour");
-  await expect(onScreen(page.locator(".editor-checks li.low").first())).toBeVisible();
+  await expect(onScreen(page.locator(".editor-checks"))).toContainText("Links and small headings in the accent for words, on the page");
+  await expect(page.locator(".editor-checks li.low")).toHaveCount(0);
+  await expect(byLabel(page, "Accent for words, as a colour code")).toHaveValue("#8e6a3e");
 
-  // A colour, a font and the corners of the buttons.
+  // A colour, a font and the corners of the buttons. Dark words cannot be read on this accent, and the list says so.
   await byLabel(page, "Accent, as a colour code").fill("#336699");
+  await expect(onScreen(page.locator(".editor-checks li.low").first())).toContainText("Words on a button in the accent colour");
   await group(page, "Fonts").locator("summary").click();
   await byLabel(page, "Headings").selectOption({ label: "Bebas Neue" });
   await group(page, "Buttons").locator("summary").click();

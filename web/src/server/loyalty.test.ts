@@ -395,9 +395,8 @@ describe("using a free hour", () => {
       allowed: true,
       creditCents: 13200,
       discountCents: 8800,
-      feeCents: 0,
+      nextMovable: false,
       nextFeeCents: 2000,
-      nextMovable: true,
     });
   });
 

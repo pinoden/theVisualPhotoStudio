@@ -348,13 +348,14 @@ function faq(): BuiltInPage {
         "<li>Closer to the start than that, a cancellation is not refunded.</li>" +
         "<li>{if moving}You can move the booking instead: see the next question.</li>" +
         "<li>{if moving}A booking that has been moved can no longer be refunded.</li>" +
+        "<li>{if not codes kept late}A discount code, free hour or studio credit used for a booking comes back when you cancel in time for a refund. Cancelled later, or after the booking was moved, it is used up.</li>" +
         "<li>Cancel from the link in your confirmation email, or from your account (Log In, at the top of the page).</li>" +
         "</ul>",
     ),
     question(
       "{if moving}Can I move my booking to another time?",
       "<p>Yes, until {reschedule cutoff} before it starts. Press Reschedule on your booking page or in your account (Log In, at the top of the page). We release your time and email you a code worth what you paid, plus anything a discount code took off that booking, so the same booking at a new time costs nothing more. Book the new time and enter the code at checkout: if the new booking costs more you pay the difference, and if it costs less the rest stays on the code. The code is valid for {reschedule code valid}.</p>" +
-        "<p>{if reschedule fee}You can move a booking {reschedules allowed} free of charge. Moving it again costs {reschedule fee} each time, which is taken off the code.</p>" +
+        "<p>{if reschedule fee}You can move a booking {reschedules allowed} free of charge. To move it again, contact the studio: each further move costs {reschedule fee}.</p>" +
         "<p>{if not reschedule fee}A booking can be moved {reschedules allowed}.</p>",
     ),
     question("What if I have an emergency and cannot make it?", '<p><a href="/contact">Contact us</a> as soon as possible and we will reschedule your appointment free of charge.</p>'),
@@ -459,8 +460,9 @@ function policies(): BuiltInPage {
     "<li>Cancellations made {refund window with hours} or more before the appointment are eligible for a full refund, excluding the non-refundable payment processing fee ({refund fee}).</li>" +
     "<li>{if moving}Cancellations made less than {refund window} before the appointment are non-refundable, but may be rescheduled at no additional charge until {reschedule cutoff} before the appointment.</li>" +
     "<li>{if not moving}Cancellations made less than {refund window} before the appointment are non-refundable.</li>" +
-    "<li>{if reschedule fee}An appointment may be rescheduled {reschedules allowed} at no additional charge. Each additional reschedule costs {reschedule fee}, which is deducted from the reschedule credit.</li>" +
+    "<li>{if reschedule fee}An appointment may be rescheduled {reschedules allowed} at no additional charge. Each additional reschedule is arranged with the studio and costs {reschedule fee}.</li>" +
     "<li>{if moving}Once an appointment has been rescheduled, it is no longer eligible for a refund.</li>" +
+    "<li>{if not codes kept late}A discount code, free hour or studio credit applied to an appointment is returned only when the appointment is cancelled in time for a refund. If it is cancelled later, or after it has been rescheduled, the code or credit is used up.</li>" +
     "<li>{if photography}Photography sessions with our in-house photographer follow the same terms: a session cancelled {photography refund window} or more before the appointment is refunded, and one cancelled later is not. Sessions are booked at least {photography notice} ahead.</li>" +
     "</ul>" +
     "<h2>Rental Time</h2>" +

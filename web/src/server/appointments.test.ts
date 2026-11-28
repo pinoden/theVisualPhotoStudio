@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { addons, bookingAddons, bookings, settings, staffShifts, studioHolds } from "@/db/schema";
 import { createAdminBooking, getAppointment, moveBooking, moveOptions, setLabel } from "./appointments";
+import { voidCharge } from "./charges";
 import type { AuthUser } from "./auth";
 import { loadCalendar } from "./calendar";
 import { loadCatalog } from "./catalog";
@@ -330,15 +331,93 @@ describe("moving a booking to a new time", () => {
     const options = await getManageOptions(world.db, nextDayRef, { kind: "owner" }, NOW);
     // Moved, not made with a reschedule code: the client is told so, and why.
     expect(options?.cancel).toMatchObject({ allowed: true, refundCents: 0, why: "moved" });
-    // It was their free reschedule: moving it again online costs the fee.
-    expect(options?.reschedule).toEqual({ allowed: true, creditCents: 15600, discountCents: 0, feeCents: 2000, nextFeeCents: 2000, nextMovable: true });
+    // It was their free reschedule: a further move is the studio's to make, for the fee.
+    expect(options?.reschedule).toEqual({ allowed: false, reason: "limit_reached" });
     expect((await getManageChoices(world.db, nextDayRef, { kind: "owner" }, NOW))?.cancel.text).toBe(
       "No refund is due, because this booking was moved at your request: a moved booking is not refunded.",
     );
     const [mail] = await world.emails("booking_moved");
     expect(mail.body).toContain(
-      "As you asked for this change, it counts as a reschedule under the rental terms: if the booking is cancelled now, it is not refunded. Moving it again online costs $20.",
+      "As you asked for this change, it counts as a reschedule under the rental terms: if the booking is cancelled now, it is not refunded. To move it again, ask the studio: each further move costs $20.",
     );
+    expect(mail.body).not.toContain("This move costs");
+  });
+
+  it("has to be told who asked for the move, which decides what it costs the client (the owners' decision of 2026-11-27)", async () => {
+    const unsaid = { date: "2026-12-09", startMinute: h(14), countsAsClientMove: null };
+    expect(await moveBooking(world.db, owner, nextDayRef, unsaid, NOW)).toEqual({ ok: false, reason: "who_asked", message: "Say who asked for this move: the client or the studio." });
+    expect(await world.emails("booking_moved")).toHaveLength(0);
+    // With moving switched off in the booking's terms, nothing depends on it.
+    await madeUnder(nextDayRef, { maxReschedules: 0 });
+    expect(await moveBooking(world.db, owner, nextDayRef, unsaid, NOW)).toMatchObject({ ok: true, feeCents: 0 });
+  });
+
+  it("costs the client nothing and uses up nothing when the studio needs the move, however often", async () => {
+    for (const startMinute of [h(12), h(14), h(16)]) {
+      expect(await moveBooking(world.db, owner, nextDayRef, to(startMinute, "2026-12-09"), NOW)).toMatchObject({ ok: true, feeCents: 0 });
+    }
+    expect(await row(nextDayRef)).toMatchObject({ rescheduledCount: 0 });
+    const appointment = (await getAppointment(world.db, owner, nextDayRef, NOW))!;
+    expect(appointment).toMatchObject({ clientMoves: 0, refundOwed: false, payments: { dueCents: 0 } });
+    expect(appointment.charges!.lines).toEqual([]);
+    // The client keeps the refund and their own free move.
+    const options = await getManageOptions(world.db, nextDayRef, { kind: "owner" }, NOW);
+    expect(options?.cancel).toMatchObject({ allowed: true, why: "refund" });
+    expect(options?.reschedule).toMatchObject({ allowed: true, creditCents: 17600 });
+  });
+
+  it("adds the fee to what the booking owes when the studio makes a move the client asked for after their free one", async () => {
+    // Jane's booking, $176 by card. Her free move, made for her by the studio.
+    expect(await moveBooking(world.db, owner, nextDayRef, to(h(12), "2026-12-09", true), NOW)).toMatchObject({ ok: true, feeCents: 0 });
+    expect(await getAppointment(world.db, owner, nextDayRef, NOW)).toMatchObject({ clientMoves: 1, moveBlocked: null });
+    // Another she asks for: $20, by the terms the booking was made under, whatever the fee is now.
+    await world.db.insert(settings).values({ key: "rescheduleFeeCents", value: 5000 });
+    expect(await moveBooking(world.db, owner, nextDayRef, to(h(14), "2026-12-09", true), NOW)).toMatchObject({ ok: true, feeCents: 2000 });
+    expect(await row(nextDayRef)).toMatchObject({ rescheduledCount: 2, totalCents: 17600 });
+    const appointment = (await getAppointment(world.db, owner, nextDayRef, NOW))!;
+    expect(appointment.charges!.lines).toMatchObject([{ kind: "reschedule", label: "Reschedule fee", amountCents: 2000, voided: false, createdBy: "owner@studio.test" }]);
+    expect(appointment.payments).toMatchObject({ chargesCents: 2000, dueCents: 2000 });
+    expect(appointment.history.at(-1)!.note).toMatch(/, at the client's request\. \$20 added for a move after the free one$/);
+    const mail = (await world.emails("booking_moved")).at(-1)!;
+    expect(mail.body).toContain("This move costs $20: under the rental terms, each move after the free one does.\nStill to pay: $20, at the studio or with a payment link we email you.");
+    expect(mail.body).toContain("it is not refunded. To move it again, ask the studio: each further move costs $20.");
+
+    // The fee stands in the way of no later move: a third costs another, and one the studio needs costs nothing.
+    expect(await moveBooking(world.db, owner, nextDayRef, to(h(16), "2026-12-09", true), NOW)).toMatchObject({ ok: true, feeCents: 2000 });
+    expect(await moveBooking(world.db, owner, nextDayRef, to(h(10), "2026-12-09"), NOW)).toMatchObject({ ok: true, feeCents: 0 });
+    expect(await row(nextDayRef)).toMatchObject({ rescheduledCount: 3 });
+    expect((await getAppointment(world.db, owner, nextDayRef, NOW))!.payments).toMatchObject({ chargesCents: 4000, dueCents: 4000 });
+    // Online, the client moves nothing more and is refunded nothing: the booking was moved at their request.
+    expect(await getManageOptions(world.db, nextDayRef, { kind: "owner" }, NOW)).toEqual({
+      cancel: { allowed: true, refundCents: 0, feeCents: 0, creditCents: 0, byHandCents: 0, why: "moved" },
+      reschedule: { allowed: false, reason: "limit_reached" },
+    });
+  });
+
+  it("lets an owner, and nobody else, let the fee go", async () => {
+    // Bob's booking on a day Sam is assigned, moved once at his request.
+    expectOk(await moveBooking(world.db, owner, morningRef, to(h(11), NEAR, true), NOW));
+    // An attendant who may move bookings cannot let the fee go: it is added all the same.
+    await allow("staffMovesBookings");
+    expect(await moveBooking(world.db, sam, morningRef, { ...to(h(12), NEAR, true), waiveFee: true }, NOW)).toMatchObject({ ok: true, feeCents: 2000 });
+    expect(await moveBooking(world.db, owner, morningRef, { ...to(h(13), NEAR, true), waiveFee: true }, NOW)).toMatchObject({ ok: true, feeCents: 0 });
+    const appointment = (await getAppointment(world.db, owner, morningRef, NOW))!;
+    expect(appointment.charges!.lines).toHaveLength(1);
+    expect(appointment.history.at(-1)!.note).toMatch(/, at the client's request\. The \$20 fee for a move after the free one was waived$/);
+    // The waived move counts as the client's all the same.
+    expect(await row(morningRef)).toMatchObject({ rescheduledCount: 3 });
+    const mail = (await world.emails("booking_moved")).at(-1)!;
+    expect(mail.body).not.toContain("This move costs");
+    // An owner takes back the fee Sam's move added, while it is unpaid: the booking owes nothing again.
+    expect(await voidCharge(world.db, owner, appointment.charges!.lines[0].id, "Agreed on the phone", NOW)).toEqual({ ok: true });
+    expect((await getAppointment(world.db, owner, morningRef, NOW))!.payments).toMatchObject({ chargesCents: 0, dueCents: 0 });
+  });
+
+  it("asks nothing for a move after the free ones while the booking's terms set no fee", async () => {
+    await madeUnder(nextDayRef, { rescheduleFeeCents: 0 });
+    expectOk(await moveBooking(world.db, owner, nextDayRef, to(h(12), "2026-12-09", true), NOW));
+    expect(await moveBooking(world.db, owner, nextDayRef, to(h(14), "2026-12-09", true), NOW)).toMatchObject({ ok: true, feeCents: 0 });
+    expect((await getAppointment(world.db, owner, nextDayRef, NOW))!.charges!.lines).toEqual([]);
   });
 
   it("says a booking moved for the client cannot be moved again online while the owners set no fee", async () => {
@@ -409,7 +488,11 @@ describe("a booking made in the admin for a client", () => {
     expect(booking.totalCents).toBe(16400 + people.priceCents + pet.priceCents);
     const kinds = (await world.db.select().from(bookingAddons).where(eq(bookingAddons.bookingId, booking.id))).map((line) => line.kind).sort();
     expect(kinds).toEqual(["people", "pet"]);
-    expect((await world.emails("booking_confirmation")).at(-1)!.body).toContain(`To pay at the studio: $${(16400 + people.priceCents + pet.priceCents) / 100}`);
+    // The confirmation lists each of them, as the booking's page does: until 2026-11-27 it gave the total alone (the
+    // preview test of 2026-11-21, point 3).
+    expect((await world.emails("booking_confirmation")).at(-1)!.body).toContain(
+      `Studio Dayglow: $164\n${people.name}: $${people.priceCents / 100}\n${pet.name}: $${pet.priceCents / 100}\nTo pay at the studio: $${(16400 + people.priceCents + pet.priceCents) / 100}\n`,
+    );
     // An add-on of another studio is not for this booking.
     expect(await createAdminBooking(world.db, owner, { ...request, studioIds: [world.ids.paris], startMinute: h(17), durationMinutes: 60, addons: [{ addonId: pet.id, quantity: 1 }] }, deps)).toMatchObject({ ok: false });
   });

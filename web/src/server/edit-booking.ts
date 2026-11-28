@@ -13,9 +13,11 @@ import { isBookingRef } from "./bookings";
 import { dayTypeFor, loadCatalog, type Catalog } from "./catalog";
 import { bookingChangedEmail, queueEmail } from "./email";
 import { recordEvent } from "./history";
-import { chargesCentsByBooking, creditLeftCentsByBooking, owedCents } from "./money";
+import { hasVisitCharges } from "./charges";
+import { creditLeftCentsByBooking, owedCents } from "./money";
 import { addBackToCode, creditName, type PromoSource } from "./promos";
 import { propsProblem } from "./props";
+import { noticeRefundOwed, type OwnerNotice } from "./refund-owed";
 import { totalBeforeCredit } from "./reprice";
 import { formatInstant, localDateOf, localMinuteOn, localToUtc } from "./tz";
 
@@ -63,7 +65,7 @@ function whatText(catalog: Catalog, studioIds: string[], minutes: number, addons
   return [names.join(" + ") || "A studio taken off the site", durationLabel(minutes), ...extras].join(", ");
 }
 
-export async function editBooking(db: Db, viewer: AuthUser, ref: string, input: EditInput, now: Date): Promise<EditResult> {
+export async function editBooking(db: Db, viewer: AuthUser, ref: string, input: EditInput, now: Date, notice?: OwnerNotice): Promise<EditResult> {
   if (viewer.role !== "owner") return refuse("Only an owner can change a booking's studios, length, guests or add-ons: it changes its price.");
   if (!isBookingRef(ref)) return refuse("Booking not found.");
   const [found] = await db.select().from(bookings).where(eq(bookings.ref, ref)).limit(1);
@@ -194,6 +196,7 @@ export async function editBooking(db: Db, viewer: AuthUser, ref: string, input: 
       if (again) throw new EditRefused(again);
       const propProblem = await propsProblem(tx, wanted, booking.startAt, endAt, booking.id);
       if (propProblem) throw new EditRefused(propProblem);
+      const creditBeforeCents = (await creditLeftCentsByBooking(tx, [booking])).get(booking.id) ?? 0;
 
       await tx
         .update(bookings)
@@ -264,6 +267,7 @@ export async function editBooking(db: Db, viewer: AuthUser, ref: string, input: 
           priceNote: changePriceText({ wasCents, nowCents, ...money, codeBack }),
         }),
       );
+      await noticeRefundOwed(tx, booking, { beforeCents: creditBeforeCents, afterCents: money.creditLeftCents }, `${viewer.email} changed booking ${booking.ref} from ${before} to ${after}.`, notice);
     });
   } catch (error) {
     if (error instanceof EditRefused) return refuse(error.message);
@@ -283,7 +287,7 @@ async function whyNotEditable(db: DbLike, booking: BookingRow, now: Date): Promi
   if (booking.endRequest) return "The client has asked to cancel or release this booking, and that waits for the card processor: it cannot be changed meanwhile.";
   if (booking.photographerId !== null) return "A session's studio and length are those of the session sold: move it, or cancel it and book another.";
   if (booking.membershipMinutes > 0) return "This booking was paid with membership hours: cancel it and book again, so that the hours go back first.";
-  if ((await chargesCentsByBooking(db, [booking.id])).has(booking.id)) return "This booking has extra charges, so it cannot be changed.";
+  if (await hasVisitCharges(db, booking.id)) return "This booking has extra charges, so it cannot be changed.";
   return null;
 }
 

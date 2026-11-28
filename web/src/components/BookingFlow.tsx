@@ -14,7 +14,6 @@ import {
   type SlotOptions,
 } from "@/lib/domain/availability";
 import { bundleOffer, extraGuestsFor, multiStudioSaving, shownLengths, studioCombinationError } from "@/lib/catalog-view";
-import type { PromoDays } from "@/lib/domain/promo-days";
 import { MonthCalendar } from "./MonthCalendar";
 import { WaitlistJoin } from "./WaitlistJoin";
 import {
@@ -28,7 +27,6 @@ import {
   quote,
   taxLabel,
   taxRuleFor,
-  type PromoKind,
   type Quote,
 } from "@/lib/domain/pricing";
 import {
@@ -41,16 +39,19 @@ import {
   studioToday,
   type DayType,
 } from "@/lib/domain/time";
-import { EMAIL_FIELD, EMAIL_RULE } from "@/lib/parse";
+import { EMAIL_FIELD, EMAIL_RULE, hasPhoneDigits } from "@/lib/parse";
+import { hintsSignedIn } from "@/lib/signed-in-hint";
+import { keptText, readKept, stepHash, stepOfHash, stepToShowAgain, type AppliedCode, type BookingMode, type BookingStep, type KeptBooking } from "@/lib/booking-progress";
 import { count, hoursInWords } from "@/lib/words";
 import type { DayAvailability } from "@/server/availability";
 import { agreementKey, policiesKey, type QuestionKind } from "@/lib/booking-form-keys";
 import type { Catalog } from "@/server/catalog";
+import type { OwnDetails } from "@/server/own-details";
 import { buyerVerification, useCardForm } from "./square-card";
 import { FAKE_PAYMENT_LABEL, FAKE_PAYMENT_NOTE, FAKE_PAYMENT_TOKEN } from "@/lib/fake-payment"; // FAKE PAYMENT
 
-type Mode = "studio" | "time";
-type Step = "studios" | "when" | "details" | "policies" | "pay";
+type Mode = BookingMode;
+type Step = BookingStep;
 
 /**
  * The two booking paths are the same steps in a different order. The day and its start times are one step (the owner's
@@ -78,24 +79,6 @@ function newRequestId(): string {
   bytes[8] = (bytes[8] & 0x3f) | 0x80;
   const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-}
-
-/** A code the server accepted for one email address. */
-interface AppliedCode {
-  code: string;
-  kind: PromoKind;
-  value: number;
-  photographyOnly?: boolean;
-  /** The days a booking with it may be on (question 80); none, any day. */
-  days?: PromoDays | null;
-  /** Where the code came from: "reschedule" for a moved booking's money. */
-  source?: string;
-  /**
-   * A membership's code (follow-up 3): the minutes left on it, and whether weekends pay the difference. It pays with
-   * minutes, never as a discount: `kind` and `value` are not used then.
-   */
-  membership?: { minutesLeft: number; weekendDifference: boolean; studioIds: string[]; studioNames: string[] };
-  email: string;
 }
 
 /** "Studio Blanche or Studio Paris". */
@@ -158,13 +141,66 @@ export interface CheckoutPolicies {
   html: string;
 }
 
-export function BookingFlow({
-  catalog,
-  navigate = loadPage,
-  photography = false,
-  service = "photography",
-  policies = null,
-}: {
+/** What the tab kept for each booking screen, read once when the screen is first drawn in the browser. */
+const keptAtStart = new WeakMap<object, KeptBooking | null>();
+/** Whether a booking screen was drawn already since the document was loaded: a later one was reached inside the site. */
+let screenDrawnBefore = false;
+
+/** Whether the browser brought the document back, by a refresh or its Back and Forward buttons, rather than opened it by a link or a typed address. */
+function documentCameBack(): boolean {
+  const entry = performance.getEntriesByType?.("navigation")[0] as PerformanceNavigationTiming | undefined;
+  return entry?.type === "reload" || entry?.type === "back_forward";
+}
+
+function storedBooking(storageKey: string): KeptBooking | null {
+  try {
+    return readKept(window.sessionStorage.getItem(storageKey), Date.now());
+  } catch {
+    return null; // storage switched off in the browser: nothing was kept
+  }
+}
+
+/** Keep the booking in the making in the tab, or take it away (null, or nothing worth keeping). */
+function storeBooking(storageKey: string, kept: KeptBooking | null): void {
+  try {
+    const text = kept ? keptText(kept) : null;
+    if (text === null) window.sessionStorage.removeItem(storageKey);
+    else window.sessionStorage.setItem(storageKey, text);
+  } catch {
+    // Storage switched off in the browser: nothing is kept, and the booking goes on as before.
+  }
+}
+
+/**
+ * What the tab kept of a booking in the making (src/lib/booking-progress.ts), for a screen that is shown where it was
+ * left: on an entry of the history marked as one of its steps, or in a document the browser brought back by a refresh
+ * or its Back and Forward buttons. A screen opened afresh, by a link or a typed address, starts empty: null.
+ * Undefined on the server and while the page starts, when it has not been read yet: the server draws an empty screen,
+ * and the page has to start as that one.
+ */
+function useKeptBooking(storageKey: string): KeptBooking | null | undefined {
+  const [screen] = useState(() => ({}));
+  return useSyncExternalStore(
+    subscribeNever,
+    () => {
+      if (!keptAtStart.has(screen)) {
+        const first = !screenDrawnBefore;
+        screenDrawnBefore = true;
+        const marked = /^#step-/.test(window.location.hash);
+        const kept = marked || (first && documentCameBack()) ? storedBooking(storageKey) : null;
+        // A screen that starts afresh is a new booking: what an earlier one left in the tab is taken away, here, where
+        // it was decided. The screen itself writes nothing until something on it changes (see its effect): while the
+        // page starts, the empty screen the server drew is on show, and this is read only after its effects have run.
+        if (!kept) storeBooking(storageKey, null);
+        keptAtStart.set(screen, kept);
+      }
+      return keptAtStart.get(screen) ?? null;
+    },
+    () => undefined,
+  );
+}
+
+interface BookingFlowProps {
   catalog: Catalog;
   /**
    * The studio policies of the policies step (the owner's brief of 2026-11-22, item 6), drawn by the booking page from
@@ -180,52 +216,96 @@ export function BookingFlow({
   photography?: boolean;
   /** Whose sessions, in the session flow: the photographer's or the content creator's (question 69). */
   service?: Service;
+}
+
+/**
+ * The booking screen. What a client chose and typed is kept in the tab while the booking is in the making, so that a
+ * refresh, or the browser's Back button from another page, brings it back (src/lib/booking-progress.ts). With something
+ * kept, the screen is made anew from it once the page has started: the server drew it empty.
+ */
+export function BookingFlow(props: BookingFlowProps) {
+  const storageKey = `booking-in-the-making:${props.photography ? (props.service ?? "photography") : "rental"}`;
+  const kept = useKeptBooking(storageKey);
+  return <BookingWizard key={kept ? "kept" : "new"} kept={kept ?? null} ready={kept !== undefined} storageKey={storageKey} {...props} />;
+}
+
+function BookingWizard({
+  catalog,
+  navigate = loadPage,
+  photography = false,
+  service = "photography",
+  policies = null,
+  kept,
+  ready,
+  storageKey,
+}: BookingFlowProps & {
+  /** What the tab kept of this booking, to start from; null for a screen that starts empty. */
+  kept: KeptBooking | null;
+  /**
+   * Whether what the tab kept has been read. Not while the page starts: the screen on show is then the empty one the
+   * server drew, and it leaves the address and the browser's history alone, or it would take away the step's mark
+   * before the screen made from what was kept reads it (the development server's runs of 2026-11-27).
+   */
+  ready: boolean;
+  storageKey: string;
 }) {
   const words = SERVICE_WORDS[service];
   const router = useRouter();
   const searchParams = useSearchParams();
 
   // `?by=date` opens the date-first path, as the home page's "Know the time?" does (the owner's brief of 2026-11-24, item 2).
-  const [mode, setMode] = useState<Mode>(() => (!photography && searchParams.get("by") === "date" ? "time" : "studio"));
-  const [stepIndex, setStepIndex] = useState(0);
+  const [mode, setMode] = useState<Mode>(() => (photography ? "studio" : kept ? kept.mode : searchParams.get("by") === "date" ? "time" : "studio"));
+  // With something kept, the step the address marks, as far as what was kept answers the steps before it.
+  const [stepIndex, setStepIndex] = useState(() => {
+    if (!kept) return 0;
+    const steps = ORDER[photography ? "studio" : kept.mode];
+    return stepToShowAgain(kept, Math.max(0, stepOfHash(window.location.hash, steps)), steps);
+  });
   /** Whether the lengths behind "More" are shown. */
-  const [moreLengths, setMoreLengths] = useState(false);
+  const [moreLengths, setMoreLengths] = useState(kept?.moreLengths ?? false);
   // A link can choose the studios, the day and the length: `?studio=paris,dayglow&date=…&duration=120`, as the
   // waitlist's email does (src/server/waitlist.ts).
   const [studioIds, setStudioIds] = useState<string[]>(() => {
     const slugs = (searchParams.get("studio") ?? "").split(",");
-    const chosen = catalog.studios.filter((s) => slugs.includes(s.slug)).map((s) => s.id);
+    const chosen = catalog.studios.filter((s) => (kept ? kept.studioIds.includes(s.id) : slugs.includes(s.slug))).map((s) => s.id);
     return photography ? chosen.slice(0, 1) : chosen;
   });
   /** What the date field holds. While a date is typed it passes through values such as 0002-12-28. */
   const [dateInput, setDateInput] = useState(() => {
+    if (kept) return kept.date;
     const linked = searchParams.get("date") ?? "";
     return isIsoDate(linked) ? linked : "";
   });
   /** The date chosen: what the field holds, once that is a real date. */
   const date = isIsoDate(dateInput) ? dateInput : "";
-  const [durationChoice, setDuration] = useState(() => Number(searchParams.get("duration")) || 0);
-  const [start, setStart] = useState<number | null>(null);
+  const [durationChoice, setDuration] = useState(() => (kept ? kept.duration : Number(searchParams.get("duration")) || 0));
+  const [start, setStart] = useState<number | null>(kept?.start ?? null);
   /** The time the keyboard last reached: the times' one Tab stop (`moveAmongTimes`). */
   const [timeFocus, setTimeFocus] = useState<number | null>(null);
   /** How many of each add-on: 1 for one ticked, more for one taken in a quantity (an extra guest). */
-  const [addonCounts, setAddonCounts] = useState<Record<string, number>>({});
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
-  const [notes, setNotes] = useState("");
+  const [addonCounts, setAddonCounts] = useState<Record<string, number>>(() =>
+    // An add-on the owners took away since is not brought back.
+    Object.fromEntries(Object.entries(kept?.addonCounts ?? {}).filter(([id]) => catalog.addons.some((addon) => addon.id === id))),
+  );
+  const [name, setName] = useState(kept?.name ?? "");
+  const [email, setEmail] = useState(kept?.email ?? "");
+  const [phone, setPhone] = useState(kept?.phone ?? "");
+  /** A signed-in client's own details were asked for (`fetchOwnDetails`): once for each screen. */
+  const ownAsked = useRef(false);
+  const [notes, setNotes] = useState(kept?.notes ?? "");
+  // The agreement to the policies is not kept: it is given again after a refresh.
   const [terms, setTerms] = useState(false);
   /** The questions and agreements of the policies step, for the booking they were read for (`key`). */
   const [forms, setForms] = useState<{ key: string; questions: FormQuestion[]; agreements: FormAgreement[] } | null>(null);
   /** The client's answers to the intake questions, by question. */
-  const [answers, setAnswers] = useState<Record<string, string | boolean>>({});
+  const [answers, setAnswers] = useState<Record<string, string | boolean>>(kept?.answers ?? {});
   /** Whether the client has scrolled to the end of the policies: the agreement can be ticked only then. */
   const [readToEnd, setReadToEnd] = useState(false);
   const policiesBox = useRef<HTMLDivElement>(null);
   /** How many of each prop are free at the chosen time (the owner's admin brief of 2026-11-22, item 10), for `key`. */
   const [propsFreeNow, setPropsFreeNow] = useState<{ key: string; free: Record<string, number>; away: string[] } | null>(null);
-  const [codeInput, setCodeInput] = useState("");
-  const [applied, setApplied] = useState<AppliedCode | null>(null);
+  const [codeInput, setCodeInput] = useState(kept?.codeInput ?? "");
+  const [applied, setApplied] = useState<AppliedCode | null>(kept?.applied ?? null);
   const [codeError, setCodeError] = useState("");
   const [checkingCode, setCheckingCode] = useState(false);
 
@@ -262,6 +342,54 @@ export function BookingFlow({
 
   const steps = ORDER[mode];
   const step = steps[stepIndex];
+
+  // ── The browser's history, and what the tab keeps (src/lib/booking-progress.ts) ──
+  /**
+   * How many entries of the browser's history, right below this one, are earlier steps of this booking: what "← Back"
+   * goes back through. 0 when the screen cannot tell (it was opened on this step): "← Back" then changes this entry.
+   */
+  const depth = useRef(kept?.depth ?? 0);
+  /** The moves through the history that the screen made itself, each of which the browser reports once: they need no answer. */
+  const ownMoves = useRef(0);
+  /** The address of the page the screen is on: an entry of another page is the router's to show. */
+  const ownPath = useRef("");
+  /** The booking was made: nothing is kept of it any more. */
+  const made = useRef(false);
+  /** What a step reads when it is reached was read for the step the screen started on. */
+  const startRead = useRef(false);
+  // What the browser's events call, as it is on the latest drawing of the screen (set below, after those functions).
+  const onShown = useRef(() => {});
+  const onHistory = useRef(() => {});
+  // Kept in the tab as it changes, until the booking is made. Nothing is written while the screen is as it started:
+  // the empty screen the server drew is on show while the page starts, before what the tab kept is read
+  // (`useKeptBooking`), and writing then would take that away (the development server's and WebKit's runs of
+  // 2026-11-27, where a refresh brought nothing back).
+  const startedAs = useRef<string | null>(null);
+  useEffect(() => {
+    if (made.current) return;
+    const now = {
+      mode,
+      studioIds,
+      date: isIsoDate(dateInput) ? dateInput : "",
+      duration: durationChoice,
+      start,
+      moreLengths,
+      addonCounts: Object.fromEntries(Object.entries(addonCounts).filter(([, count]) => count > 0)),
+      name,
+      email,
+      phone,
+      notes,
+      answers,
+      codeInput,
+      applied,
+    };
+    const state = JSON.stringify([stepIndex, now]);
+    startedAs.current ??= state;
+    if (startedAs.current === state) return;
+    // Changed once, it is written from then on, also when it comes back to how it started.
+    startedAs.current = "";
+    storeBooking(storageKey, { ...now, at: Date.now(), depth: depth.current });
+  }, [storageKey, mode, stepIndex, studioIds, dateInput, durationChoice, start, moreLengths, addonCounts, name, email, phone, notes, answers, codeInput, applied]);
   const { settings, rules, bundlePrices } = catalog;
 
   const dayType: DayType = date ? (catalog.specialDates[date] ?? defaultDayType(date)) : "weekday";
@@ -543,6 +671,31 @@ export function BookingFlow({
     }
   }
 
+  /**
+   * A signed-in client's own name, email address and phone number, into the fields that are still empty, so that they
+   * are not typed again (`/api/own-details`; the owners' decision of 2026-11-27). Asked once, when the details are
+   * first reached, and only when the menu's cookie says someone is signed in: the page is the same for everyone. Not
+   * as the page opens: WebKit reports a request still on its way when a page is left as an error of that page. And not
+   * with the page itself: drawn for each request, the screen came late, and a link pressed meanwhile led nowhere
+   * (React's error #412; CI's WebKit jobs of 2026-11-27).
+   */
+  async function fetchOwnDetails() {
+    if (ownAsked.current || !hintsSignedIn(document.cookie)) return;
+    ownAsked.current = true;
+    try {
+      const response = await fetch("/api/own-details", { cache: "no-store" });
+      const data = (await response.json().catch(() => ({}))) as { details?: OwnDetails | null };
+      const own = response.ok ? data.details : null;
+      if (!own) return;
+      // Only what is still empty: what the client typed, or what a refresh brought back, stays.
+      setName((typed) => typed || own.name);
+      setEmail((typed) => typed || own.email);
+      setPhone((typed) => typed || own.phone);
+    } catch {
+      // Without an answer the fields stay empty, as they were before.
+    }
+  }
+
   /** Read the questions and agreements a booking of these studios on this day meets (`/api/checkout-forms`). */
   async function fetchForms() {
     const key = formsKey;
@@ -567,23 +720,79 @@ export function BookingFlow({
   }
 
   // ── Navigation ─────────────────────────────────────────────────────────────
-  function go(index: number, options: { refetch?: boolean } = {}) {
-    requestIdRef.current = null;
-    cardForm.newAttempt();
-    setError("");
-    setStepIndex(index);
+  /** What a step shows that is read when the step is reached. */
+  function readFor(target: Step, options: { refetch?: boolean } = {}) {
     // Availability is read fresh whenever the customer reaches a step that shows it.
-    const target = steps[index];
     if ((target === "when" || target === "studios") && date && (options.refetch || availability?.date !== date)) {
       void fetchAvailability(date);
     }
     // The month calendar is read fresh on each arrival too: bookings change while the client looks.
     if (target === "when" && duration > 0) void fetchMonth(month, duration);
     // The props free at the chosen time are read on each arrival at the details, where the add-ons are.
-    if (target === "details") void fetchPropsFree();
+    if (target === "details") {
+      void fetchPropsFree();
+      void fetchOwnDetails();
+    }
     // The booking form and agreements are read again for each booking they are shown for.
     if (target === "policies" && (options.refetch || forms?.key !== formsKey)) void fetchForms();
+  }
+
+  /** Show a step. The browser's history is the caller's to move: `next`, `back` and `fromHistory`. */
+  function go(index: number, options: { refetch?: boolean } = {}) {
+    requestIdRef.current = null;
+    cardForm.newAttempt();
+    setError("");
+    setStepIndex(index);
+    readFor(steps[index], options);
     topRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+  }
+
+  /**
+   * To an earlier step, by "← Back" or after the server refused the booking: shown at once, and the browser's history
+   * goes back through this booking's own entries, where they are below this one. Where they are not (the screen was
+   * opened on this step), this entry takes the earlier step's mark.
+   */
+  function back(index: number, options: { refetch?: boolean } = {}) {
+    const by = stepIndex - index;
+    go(index, options);
+    if (by <= 0) return;
+    if (depth.current >= by) {
+      depth.current -= by;
+      ownMoves.current += 1;
+      window.history.go(-by);
+    } else {
+      depth.current = 0;
+      window.history.replaceState(null, "", stepHash(steps[index]));
+    }
+  }
+
+  /** The screen is on show (see the effect before `next`): its entry of the history marks the step it shows, and a screen that started from what was kept reads what its step needs. */
+  function shown() {
+    ownPath.current = window.location.pathname;
+    const marked = stepOfHash(window.location.hash, steps);
+    const below = marked - stepIndex;
+    if (ownMoves.current > 0) {
+      // A move of the screen's own through the history is on its way: React's development mode runs every effect
+      // twice, and the second run would go back once more. The entry it arrives at is looked at there (`fromHistory`).
+    } else if (below > 0 && depth.current >= below) {
+      // An earlier step than this entry marks: the policies, after a refresh on the payment step. The history goes back
+      // to that step's own entry, so that the browser's Back button then shows the step before it.
+      depth.current = Math.min(depth.current - below, stepIndex);
+      ownMoves.current += 1;
+      window.history.go(-below);
+    } else if (marked !== stepIndex && (marked !== -1 || stepIndex > 0)) {
+      // Not the step this entry marked, and the screen does not know of its own entries below: nothing kept answered the
+      // steps before it, or the router brought this screen back on an entry of its own. The entry takes the step's mark.
+      depth.current = 0;
+      window.history.replaceState(null, "", stepIndex > 0 ? stepHash(steps[stepIndex]) : `${window.location.pathname}${window.location.search}`);
+    } else {
+      depth.current = Math.min(depth.current, stepIndex);
+    }
+    if (kept && !startRead.current) {
+      startRead.current = true;
+      // Once this drawing is done: what it reads sets state.
+      void Promise.resolve().then(() => readFor(steps[stepIndex], { refetch: true }));
+    }
   }
 
   function switchMode(next: Mode) {
@@ -593,6 +802,16 @@ export function BookingFlow({
     if (next === "time") setStudioIds([]);
     setError("");
     setStepIndex(0);
+    // The other path begins at its own first step: the history goes back to this booking's first entry, where the
+    // screen knows of it, and that entry takes the first step's mark (`fromHistory`, or here when it is this one).
+    if (stepIndex > 0 && depth.current >= stepIndex) {
+      depth.current = 0;
+      ownMoves.current += 1;
+      window.history.go(-stepIndex);
+    } else {
+      depth.current = 0;
+      if (stepIndex > 0 || stepOfHash(window.location.hash, steps) !== -1) window.history.replaceState(null, "", stepHash(ORDER[next][0]));
+    }
   }
 
   function toggleStudio(id: string) {
@@ -668,7 +887,7 @@ export function BookingFlow({
         if (name.trim().length < 2) return "Please enter your name.";
         // The booking's own rule (src/lib/parse.ts): an address taken here is never refused at "Confirm & pay".
         if (!EMAIL_RULE.test(email.trim())) return "Please enter a valid email address.";
-        if (phone.trim().length < 7) return "Please enter your phone number.";
+        if (!hasPhoneDigits(phone)) return "Please enter a phone number with at least 7 digits.";
         return "";
       case "policies": {
         if (!forms || forms.key !== formsKey) return "The studio's booking form is still loading.";
@@ -683,10 +902,68 @@ export function BookingFlow({
     }
   }
 
+  /**
+   * The browser moved to another entry of its history, by its Back or Forward button: the screen shows that entry's
+   * step. Forward only as far as what is chosen now answers the steps on the way: the client may have changed
+   * something after going back.
+   */
+  function fromHistory() {
+    if (window.location.pathname !== ownPath.current) return;
+    const marked = stepOfHash(window.location.hash, steps);
+    if (ownMoves.current > 0) {
+      ownMoves.current -= 1;
+      // The entry it came to shows the step the screen shows: after the path was switched, its first step is another.
+      if (marked !== stepIndex && (marked !== -1 || stepIndex > 0)) window.history.replaceState(null, "", stepHash(steps[stepIndex]));
+      return;
+    }
+    // An entry with no mark is the booking's first.
+    const target = Math.max(0, marked);
+    if (target === stepIndex) return;
+    if (submitting) {
+      // A booking is on its way: the screen waits for its answer where it is, and the history comes back to it.
+      ownMoves.current += 1;
+      window.history.go(stepIndex - target);
+      return;
+    }
+    if (target < stepIndex) {
+      depth.current = Math.max(0, depth.current - (stepIndex - target));
+      go(target, { refetch: true });
+      return;
+    }
+    let reach = stepIndex;
+    while (reach < target && !validate(steps[reach])) reach += 1;
+    depth.current += target - stepIndex;
+    if (reach !== stepIndex) go(reach, { refetch: true });
+    if (reach !== target) {
+      // This entry now shows an earlier step than the ones below it: "← Back" changes it, and does not go back through them.
+      depth.current = 0;
+      window.history.replaceState(null, "", stepHash(steps[reach]));
+    }
+  }
+
+  useEffect(() => {
+    onShown.current = shown;
+    onHistory.current = fromHistory;
+  });
+  // The screen is on show: when it is first drawn, and again when the router brings back a page it kept (a page that was
+  // left stays in the document, hidden, and its effects end until it shows again).
+  useEffect(() => {
+    if (!ready) return;
+    onShown.current();
+    const moved = () => onHistory.current();
+    window.addEventListener("popstate", moved);
+    return () => window.removeEventListener("popstate", moved);
+  }, [ready]);
+
   function next() {
     const problem = validate(step);
     if (problem) return setError(problem);
+    // Each step is an entry of the browser's history, so that its Back button goes a step back (the owners' decision of
+    // 2026-11-27). The first one gets its mark as it is left: `/book` itself stays a booking that has not begun.
+    if (stepIndex === 0 && stepOfHash(window.location.hash, steps) !== 0) window.history.replaceState(null, "", stepHash(steps[0]));
     go(stepIndex + 1);
+    depth.current += 1;
+    window.history.pushState(null, "", stepHash(steps[stepIndex + 1]));
   }
 
   async function submit(fake = false) {
@@ -744,6 +1021,9 @@ export function BookingFlow({
       if (response.ok && data.ok && data.ref && data.manageToken) {
         // Leave the button disabled: the page is about to be replaced.
         leaving = true;
+        // Made: nothing of it is kept in the tab, and a later visit starts a new booking.
+        made.current = true;
+        storeBooking(storageKey, null);
         navigate(`/booking/${data.ref}?t=${encodeURIComponent(data.manageToken)}`);
         return;
       }
@@ -754,7 +1034,7 @@ export function BookingFlow({
       }
       if (data.code === "slot_taken") {
         setStart(null);
-        go(steps.indexOf("when"), { refetch: true });
+        back(steps.indexOf("when"), { refetch: true });
       }
       // Prices and add-ons on screen came with the page. When they have
       // changed since (a new price, an add-on withdrawn, a duration no longer
@@ -763,16 +1043,16 @@ export function BookingFlow({
       if (offerChanged) router.refresh();
       if (data.code === "invalid_code") {
         setApplied(null);
-        go(steps.indexOf("details"));
+        back(steps.indexOf("details"));
       }
       // A prop chosen was taken by another booking at that time: back to the add-ons, with what is free now.
-      if (data.code === "prop_taken") go(steps.indexOf("details"));
+      if (data.code === "prop_taken") back(steps.indexOf("details"));
       // The policies or an agreement were published again meanwhile: the page shows them as they are now, read again.
       if (data.code === "policies_changed") {
         router.refresh();
         setTerms(false);
         setReadToEnd(false);
-        go(steps.indexOf("policies"), { refetch: true });
+        back(steps.indexOf("policies"), { refetch: true });
       }
       setError(
         data.code === "invalid_price"
@@ -897,7 +1177,7 @@ export function BookingFlow({
   const actions = (nextLabel?: string) => (
     <div className="wizard-actions">
       {stepIndex > 0 ? (
-        <button type="button" className="btn btn-outline" onClick={() => go(stepIndex - 1)} disabled={submitting}>
+        <button type="button" className="btn btn-outline" onClick={() => back(stepIndex - 1)} disabled={submitting}>
           ← Back
         </button>
       ) : (
@@ -1546,7 +1826,7 @@ export function BookingFlow({
             </div>
           )}
           <div className="wizard-actions">
-            <button type="button" className="btn btn-outline" onClick={() => go(stepIndex - 1)} disabled={submitting}>
+            <button type="button" className="btn btn-outline" onClick={() => back(stepIndex - 1)} disabled={submitting}>
               ← Back
             </button>
             {/* FAKE PAYMENT: the wrapper holds the test button beside the real one. */}

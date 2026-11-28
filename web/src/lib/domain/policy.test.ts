@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cancellationOutcome, rescheduleOutcome, type BookingFacts, type PolicySettings } from "./policy";
+import { cancellationOutcome, codeComesBack, rescheduleOutcome, type BookingFacts, type PolicySettings } from "./policy";
 
 /** A photography session's terms: 14 days, 5% kept. A rental's are the same with 7 days (2026-11-17). */
 const settings: PolicySettings = {
@@ -163,19 +163,39 @@ describe("cancelling a booking with a pet fee", () => {
   });
 });
 
+describe("the code or credit a cancelled booking was made with", () => {
+  const rule = { refundWindowHours: 168, lateCancelKeepsCode: false };
+  it("comes back when the client cancels in time for a refund, and is used up later or once the booking was moved (the owners' decision of 2026-11-27)", () => {
+    expect(codeComesBack(booking(), hoursBefore(200), rule)).toBe(true);
+    expect(codeComesBack(booking(), hoursBefore(168), rule)).toBe(true);
+    expect(codeComesBack(booking(), hoursBefore(167.9), rule)).toBe(false);
+    expect(codeComesBack(booking(), hoursBefore(2), rule)).toBe(false);
+    // A moved booking is refunded at no time, and gives nothing back either.
+    expect(codeComesBack(booking({ rescheduledCount: 1 }), hoursBefore(500), rule)).toBe(false);
+    // A session has its own window, kept with the booking.
+    expect(codeComesBack(booking(), hoursBefore(200), { ...rule, refundWindowHours: 336 })).toBe(false);
+  });
+
+  it("comes back after any cancellation while the owners keep the rule as it was", () => {
+    const kept = { ...rule, lateCancelKeepsCode: true };
+    expect(codeComesBack(booking(), hoursBefore(2), kept)).toBe(true);
+    expect(codeComesBack(booking({ rescheduledCount: 2 }), hoursBefore(2), kept)).toBe(true);
+  });
+});
+
 describe("moving a booking", () => {
   it("turns everything paid into credit, including credit already used on it", () => {
     expect(rescheduleOutcome(booking(), hoursBefore(48), settings)).toEqual({
       allowed: true,
       creditCents: 17600,
       discountCents: 0,
-      feeCents: 0,
+      // The one free move is this one: the new booking is then the studio's to move, for the fee.
+      nextMovable: false,
       nextFeeCents: 2000,
-      nextMovable: true,
     });
     expect(
       rescheduleOutcome(booking({ cardPaidCents: 2000, creditAppliedCents: 15600 }), hoursBefore(48), { ...settings, maxReschedules: 2 }),
-    ).toEqual({ allowed: true, creditCents: 17600, discountCents: 0, feeCents: 0, nextFeeCents: 0, nextMovable: true });
+    ).toEqual({ allowed: true, creditCents: 17600, discountCents: 0, nextMovable: true, nextFeeCents: 0 });
   });
 
   it("adds what a discount code took off, so the same booking at a new time costs nothing more", () => {
@@ -184,9 +204,9 @@ describe("moving a booking", () => {
       allowed: true,
       creditCents: 17600,
       discountCents: 1760,
-      feeCents: 0,
+      // The one free move is this one: the new booking is then the studio's to move, for the fee.
+      nextMovable: false,
       nextFeeCents: 2000,
-      nextMovable: true,
     });
     // A booking that a code made free is cancelled instead, which gives the code back.
     expect(rescheduleOutcome(booking({ cardPaidCents: 0, discountCents: 17600 }), hoursBefore(48), settings)).toEqual({
@@ -203,9 +223,9 @@ describe("moving a booking", () => {
       allowed: true,
       creditCents: 7800,
       discountCents: 0,
-      feeCents: 0,
+      // The one free move is this one: the new booking is then the studio's to move, for the fee.
+      nextMovable: false,
       nextFeeCents: 2000,
-      nextMovable: true,
     });
   });
 
@@ -219,57 +239,32 @@ describe("moving a booking", () => {
     expect(rescheduleOutcome(booking(), hoursBefore(0.5), { ...settings, rescheduleCutoffHours: 0 })).toMatchObject({ allowed: true });
   });
 
-  it("is free the first time, and costs the fee each time after (the owner's answer of 2026-11-17)", () => {
-    // A booking made with a reschedule code: $176 of credit paid for it. Moving it again takes $20 off the new code.
+  it("is offered online only while a free move is left: a further one is the studio's to make (the owners' decision of 2026-11-20)", () => {
+    // A booking made with a reschedule code: $176 of credit paid for it. Until 2026-11-27 it could be moved again
+    // online, with $20 taken off the new code.
     const moved = booking({ rescheduledCount: 1, cardPaidCents: 0, creditAppliedCents: 17600 });
-    expect(rescheduleOutcome(moved, hoursBefore(48), settings)).toEqual({ allowed: true, creditCents: 15600, discountCents: 0, feeCents: 2000, nextFeeCents: 2000, nextMovable: true });
-    // And again, on the booking made with that code and $20 by card: the fee each time, never more.
-    const movedTwice = booking({ rescheduledCount: 2, cardPaidCents: 2000, creditAppliedCents: 15600 });
-    expect(rescheduleOutcome(movedTwice, hoursBefore(48), settings)).toEqual({ allowed: true, creditCents: 15600, discountCents: 0, feeCents: 2000, nextFeeCents: 2000, nextMovable: true });
-    // The fee comes off the whole value, a discount code's part included.
-    expect(rescheduleOutcome(booking({ rescheduledCount: 1, cardPaidCents: 15840, discountCents: 1760 }), hoursBefore(48), settings)).toEqual({
-      allowed: true,
-      creditCents: 15600,
-      discountCents: 1760,
-      feeCents: 2000,
-      nextFeeCents: 2000,
-      nextMovable: true,
-    });
-    // With two free moves, the second is free and the third costs the fee.
-    const twoFree = { ...settings, maxReschedules: 2 };
-    expect(rescheduleOutcome(booking(), hoursBefore(48), twoFree)).toMatchObject({ allowed: true, feeCents: 0, nextFeeCents: 0, nextMovable: true });
-    expect(rescheduleOutcome(booking({ rescheduledCount: 1 }), hoursBefore(48), twoFree)).toMatchObject({ allowed: true, creditCents: 17600, feeCents: 0, nextFeeCents: 2000, nextMovable: true });
-    expect(rescheduleOutcome(booking({ rescheduledCount: 2 }), hoursBefore(48), twoFree)).toMatchObject({ allowed: true, creditCents: 15600, feeCents: 2000 });
-    // The cut-off holds for a move that costs the fee too.
-    expect(rescheduleOutcome(moved, hoursBefore(23.9), settings)).toEqual({ allowed: false, reason: "too_late" });
-  });
-
-  it("is refused when the fee would leave no credit", () => {
-    const small = booking({ rescheduledCount: 1, cardPaidCents: 0, creditAppliedCents: 2000 });
-    expect(rescheduleOutcome(small, hoursBefore(48), settings)).toEqual({ allowed: false, reason: "fee_not_covered" });
-    expect(rescheduleOutcome({ ...small, creditAppliedCents: 2001 }, hoursBefore(48), settings)).toEqual({
-      allowed: true,
-      creditCents: 1,
-      discountCents: 0,
-      feeCents: 2000,
-      nextFeeCents: 2000,
-      nextMovable: true,
-    });
-  });
-
-  it("stops at the free moves while the owners set no fee", () => {
-    const noFee = { ...settings, rescheduleFeeCents: 0 };
-    expect(rescheduleOutcome(booking({ rescheduledCount: 1 }), hoursBefore(48), noFee)).toEqual({
+    expect(rescheduleOutcome(moved, hoursBefore(48), settings)).toEqual({ allowed: false, reason: "limit_reached" });
+    expect(rescheduleOutcome(booking({ rescheduledCount: 2, cardPaidCents: 2000, creditAppliedCents: 15600 }), hoursBefore(48), settings)).toEqual({
       allowed: false,
       reason: "limit_reached",
     });
-    expect(rescheduleOutcome(booking({ rescheduledCount: 1 }), hoursBefore(48), { ...noFee, maxReschedules: 2 })).toMatchObject({
-      allowed: true,
-      feeCents: 0,
-      nextFeeCents: 0,
-      // No free move after this one, and no fee for more: the new booking cannot be moved online.
-      nextMovable: false,
-    });
+    // With two free moves, both are made online, and the code is worth everything paid each time.
+    const twoFree = { ...settings, maxReschedules: 2 };
+    expect(rescheduleOutcome(booking(), hoursBefore(48), twoFree)).toMatchObject({ allowed: true, creditCents: 17600, nextMovable: true, nextFeeCents: 0 });
+    expect(rescheduleOutcome(booking({ rescheduledCount: 1 }), hoursBefore(48), twoFree)).toMatchObject({ allowed: true, creditCents: 17600, nextMovable: false, nextFeeCents: 2000 });
+    expect(rescheduleOutcome(booking({ rescheduledCount: 2 }), hoursBefore(48), twoFree)).toEqual({ allowed: false, reason: "limit_reached" });
+    // Whether a fee is set changes nothing online: it is what the studio's move costs afterwards.
+    const noFee = { ...settings, rescheduleFeeCents: 0 };
+    expect(rescheduleOutcome(booking({ rescheduledCount: 1 }), hoursBefore(48), noFee)).toEqual({ allowed: false, reason: "limit_reached" });
+    expect(rescheduleOutcome(booking(), hoursBefore(48), noFee)).toMatchObject({ allowed: true, nextMovable: false, nextFeeCents: 0 });
+  });
+
+  it("says what the studio's move of the new booking would cost by the terms that booking will be made under", () => {
+    // The new booking takes today's settings (question 10). Moving switched off since: the terms then say nothing of a
+    // move, and the studio's costs nothing.
+    expect(rescheduleOutcome(booking(), hoursBefore(48), settings, { maxReschedules: 0, rescheduleFeeCents: 2000 })).toMatchObject({ allowed: true, nextMovable: false, nextFeeCents: 0 });
+    expect(rescheduleOutcome(booking(), hoursBefore(48), settings, { maxReschedules: 1, rescheduleFeeCents: 3500 })).toMatchObject({ allowed: true, nextMovable: false, nextFeeCents: 3500 });
+    expect(rescheduleOutcome(booking(), hoursBefore(48), settings, { maxReschedules: 3, rescheduleFeeCents: 3500 })).toMatchObject({ allowed: true, nextMovable: true, nextFeeCents: 0 });
   });
 
   it("says moving is not offered, not that the booking was already moved, when the owner switched it off", () => {
@@ -296,9 +291,9 @@ describe("moving a booking", () => {
       allowed: true,
       creditCents: 17600,
       discountCents: 0,
-      feeCents: 0,
+      // The one free move is this one: the new booking is then the studio's to move, for the fee.
+      nextMovable: false,
       nextFeeCents: 2000,
-      nextMovable: true,
     });
   });
 });

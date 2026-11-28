@@ -519,6 +519,41 @@
       "when": 1795731036810,
       "tag": "0073_sales_tax",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1795820095028,
+      "tag": "0074_old_addresses",
+      "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1795820861884,
+      "tag": "0075_reschedule_fee_charge",
+      "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1795821059271,
+      "tag": "0076_further_moves_copy",
+      "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1795821582370,
+      "tag": "0077_codes_after_late_cancel_copy",
+      "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1795823342211,
+      "tag": "0078_words_on_the_accent",
+      "breakpoints": true
     }
   ]
 }

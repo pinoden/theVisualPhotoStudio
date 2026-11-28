@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, ne } from "drizzle-orm";
 import { bookingCharges, bookings, priceRules, specialDates, studioHolds, studios } from "@/db/schema";
 import type { Db, DbLike } from "@/db/client";
 import { can } from "@/lib/abilities";
@@ -27,11 +27,17 @@ import { localDateOf } from "./tz";
  * then paid at the studio and recorded ("Mark as paid"), or through a payment link, like the rest. Before the start
  * the booking could still be moved or cancelled for a code or a refund, which must not carry a charge with it.
  * Whoever may record payments may add one; one added by mistake is taken back by an owner, while it is still unpaid.
+ *
+ * A fourth kind is not added by hand: the fee for a move the client asked the studio for after their free ones
+ * (`reschedule`, the owners' decision of 2026-11-27), which `moveBooking` adds with the move (`addRescheduleFee`). It
+ * is the one charge a booking can have before its visit. Such a booking is no longer refunded by itself, nor released
+ * online for a code (src/lib/domain/policy.ts), so the fee travels into neither; and it stands in the way of no later
+ * move or change by the studio (`hasVisitCharges`). An owner takes it back like any other charge, while it is unpaid.
  */
 
 export type { ChargeKind } from "@/lib/charge-label";
 
-const CHARGE_KINDS: Record<ChargeKind, string> = { overtime: "Overtime", cleaning: "Cleaning", damage: "Damage" };
+const CHARGE_KINDS: Record<AddChargeInput["kind"], string> = { overtime: "Overtime", cleaning: "Cleaning", damage: "Damage" };
 
 /** The longest overtime added at once: ten hours. */
 export const OVERTIME_MAX_MINUTES = 600;
@@ -86,6 +92,27 @@ export async function chargesOf(db: DbLike, bookingId: string): Promise<ChargeLi
   }));
 }
 
+
+/**
+ * The booking has a charge of its visit (overtime, cleaning, damage) that was not taken back: it is then neither moved
+ * nor changed (`CHARGES_BLOCK_MOVE` in appointments.ts). A fee for moving it does not count: it was added before the visit.
+ */
+export async function hasVisitCharges(db: DbLike, bookingId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ id: bookingCharges.id })
+    .from(bookingCharges)
+    .where(and(eq(bookingCharges.bookingId, bookingId), isNull(bookingCharges.voidedAt), ne(bookingCharges.kind, "reschedule")))
+    .limit(1);
+  return row !== undefined;
+}
+
+/**
+ * The fee for a move the client asked the studio for after their free ones, added to what the booking owes. Called by
+ * `moveBooking` inside its transaction, on the booking's locked row; the move's own line of the history tells it.
+ */
+export async function addRescheduleFee(tx: DbLike, bookingId: string, amountCents: number, actor: string, now: Date): Promise<void> {
+  await tx.insert(bookingCharges).values({ bookingId, kind: "reschedule", amountCents, note: "", createdBy: actor, createdAt: now });
+}
 
 export type HourlyRate = { ok: true; cents: number } | { ok: false; missing: string[] };
 

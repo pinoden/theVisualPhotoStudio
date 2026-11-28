@@ -1,14 +1,15 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { notFound, redirect } from "next/navigation";
 import { connection } from "next/server";
 import { Suspense } from "react";
 import { getDb } from "@/db/client";
 import { formatCents } from "@/lib/domain/pricing";
-import { countUpcoming, listBookings, listRefundProblems } from "@/server/admin";
+import { countUpcoming, listBookings, listRefundProblems, listRefundsOwed } from "@/server/admin";
 import { resolveEmailTransport } from "@/server/email";
 import { SCHEDULER_STALE_MINUTES, schedulerLastRun, schedulerState } from "@/server/heartbeat";
 import { resolvePayments } from "@/server/payments";
-import { requireOwner } from "@/server/session";
+import { requireUser } from "@/server/session";
 import { otherMoneyNotice } from "@/server/test-mode";
 import { formatInstant, localDateOf } from "@/server/tz";
 import { recordRefundMadeInSquareAction } from "./actions";
@@ -26,15 +27,22 @@ export default function AdminPage(props: PageProps<"/admin">) {
 
 async function Overview({ searchParams }: Pick<PageProps<"/admin">, "searchParams">) {
   await connection();
-  await requireOwner("/admin");
+  // The Overview is the owners'. A manager or an attendant who types the admin's own address is sent to the page they
+  // work from, the calendar, in place of "This page could not be found" (the owners' decision of 2026-11-27; the
+  // preview test of 2026-11-21, point 7). Anyone else gets "not found", as on every page of the owners.
+  const user = await requireUser("/admin");
+  if (user.role === "manager" || user.role === "staff") redirect("/admin/calendar");
+  if (user.role !== "owner") notFound();
   const db = await getDb();
   const now = new Date();
   const today = localDateOf(now);
   const processor = resolvePayments().provider?.name ?? null;
-  const [upcoming, todays, problems, otherMoney, lastRun] = await Promise.all([
+  const [upcoming, todays, problems, owed, otherMoney, lastRun] = await Promise.all([
     countUpcoming(db, now),
     listBookings(db, { from: today, to: today }),
     listRefundProblems(db),
+    // Paid for more than they cost, after a move or a change by the studio (the owners' decision of 2026-11-27).
+    listRefundsOwed(db),
     // Bookings of the other kind of money, written by a server of the other mode since this one started.
     otherMoneyNotice(db, processor),
     schedulerLastRun(db),
@@ -72,6 +80,10 @@ async function Overview({ searchParams }: Pick<PageProps<"/admin">, "searchParam
           <div className="stat-value">{problems.length}</div>
           <div className="stat-label">Refunds not yet through</div>
         </div>
+        <div className="stat-card">
+          <div className="stat-value">{owed.length}</div>
+          <div className="stat-label">Refunds to make</div>
+        </div>
       </div>
 
       {otherMoney && (
@@ -99,6 +111,41 @@ async function Overview({ searchParams }: Pick<PageProps<"/admin">, "searchParam
             {email === null && <li>No email service is configured, so emails (including sign-in codes) wait unsent.</li>}
             {schedulerProblem && <li>{schedulerProblem}</li>}
           </ul>
+        </div>
+      )}
+
+      {owed.length > 0 && (
+        <div className="admin-card" id="refunds-to-make">
+          <h3>Refunds to make</h3>
+          <p style={{ fontSize: ".875rem" }}>
+            Each of these bookings was paid for more than it costs now, after the studio moved or changed it, and the client was told by email
+            that the difference will be refunded. Nothing refunds it by itself: open the appointment and refund it under Payment,
+            &ldquo;Refund the remaining credit&rdquo;. It leaves this list once it is refunded.
+          </p>
+          <div className="data-table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Booking</th>
+                  <th>Customer</th>
+                  <th>Appointment</th>
+                  <th>To refund</th>
+                </tr>
+              </thead>
+              <tbody>
+                {owed.map((row) => (
+                  <tr key={row.ref}>
+                    <td>
+                      <Link href={`/admin/appointments/${row.ref}#payment`}>{row.ref}</Link>
+                    </td>
+                    <td>{row.customerName}</td>
+                    <td>{formatInstant(row.startAt)}</td>
+                    <td>{formatCents(row.cents)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 

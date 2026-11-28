@@ -151,6 +151,45 @@ describe("a notice to the studio (question 40, answered 2026-11-18: every email 
   });
 });
 
+describe("the confirmation's price", () => {
+  const visit = { to: "a@x.test", name: "Jane Smith", ref: "VS-1", studios: "Blanche", when: "W", duration: "2 hours", manageUrl: "U" };
+  const price = (input: Partial<Parameters<typeof emails.bookingConfirmationEmail>[0]>) =>
+    emails.bookingConfirmationEmail({ ...visit, totalCents: 17600, creditCents: 0, cardCents: 17600, ...input }).template!.parts.payment;
+
+  it("is the total alone for one price, and row by row once there is more to it (the owners' decision of 2026-11-27)", () => {
+    const studio = { label: "Studio Blanche", cents: 17600 };
+    expect(price({ rows: [studio] })).toBe("Total: $176");
+    expect(price({})).toBe("Total: $176");
+    // Extra guests, a pet fee and a discount each have their line, and the tax follows them.
+    expect(
+      price({
+        rows: [studio, { label: "Extra guest × 6", cents: 6000 }, { label: "Pet fee", cents: 4000 }, { label: "Discount code", cents: -3520 }],
+        tax: { cents: 1565, basisPoints: 650 },
+        totalCents: 25645,
+        cardCents: 25645,
+      }),
+    ).toBe("Studio Blanche: $176\nExtra guest × 6: $60\nPet fee: $40\nDiscount code: -$35.20\nSales tax (6.5%): $15.65\nTotal: $256.45");
+    // One price with tax: two rows and the total, in place of a total that says what tax it includes.
+    expect(price({ rows: [studio], tax: { cents: 1144, basisPoints: 650 }, totalCents: 18744, cardCents: 18744 })).toBe("Studio Blanche: $176\nSales tax (6.5%): $11.44\nTotal: $187.44");
+    expect(price({ tax: { cents: 1144, basisPoints: 650 }, totalCents: 18744, cardCents: 18744 })).toBe("Total: $187.44 (includes $11.44 sales tax (6.5%))");
+  });
+
+  it("keeps what a code paid and what is left under the rows", () => {
+    expect(
+      price({
+        rows: [
+          { label: "Studio Blanche", cents: 17600 },
+          { label: "Extra guest × 2", cents: 2000 },
+        ],
+        totalCents: 19600,
+        creditCents: 10000,
+        creditName: "studio credit",
+        cardCents: 9600,
+      }),
+    ).toBe("Studio Blanche: $176\nExtra guest × 2: $20\nTotal: $196\nPaid with your studio credit: $100\nCharged to your card: $96");
+  });
+});
+
 describe("every email to a client", () => {
   it("is written from its template, with every part its template lists", () => {
     const visit = { to: "a@x.test", name: "Jane Smith", ref: "VS-1", studios: "Paris", when: "W", duration: "1 hour" };
@@ -185,6 +224,7 @@ describe("every email to a client", () => {
       emails.moveRequestStudioEmail({ to: "o@x.test", client: { name: "Jane", email: "j@x.test", phone: "" }, ref: "VS-1", studios: "Paris", when: "W", duration: "1 hour", message: "M", appointmentUrl: "U" }),
       emails.contactMessageEmail({ to: "o@x.test", name: "N", email: "n@x.test", topic: "T", message: "M" }),
       emails.ownerHandRefundNotice({ to: "o@x.test", ref: "VS-1", customer: "Jane", paidCents: 100, feePercent: 5 }),
+      emails.ownerRefundOwedNotice({ to: "o@x.test", ref: "VS-1", customer: "Jane", cents: 700, change: "C", appointmentUrl: "U" }),
       emails.ownerRefundNotice({ to: "o@x.test", ref: "VS-1", customer: "Jane", amountCents: 100, automatic: true }),
       emails.ownerRefundNotice({ to: "o@x.test", ref: "VS-1", customer: "Jane", amountCents: 100, automatic: true, failedReason: "R" }),
       emails.ownerRefundWaitingNotice({ to: "o@x.test", ref: "VS-1", customer: "Jane", amountCents: 100, reason: "R" }),

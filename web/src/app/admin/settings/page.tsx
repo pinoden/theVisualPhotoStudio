@@ -85,6 +85,19 @@ async function SettingsForm({ searchParams }: Pick<PageProps<"/admin/settings">,
                 </p>
               </>
             )}
+            {group.title === "Cancelling and rescheduling" && (
+              <>
+                <label style={{ display: "block", marginBottom: ".4rem", fontSize: ".9rem" }}>
+                  <input type="checkbox" name="lateCancelKeepsCode" defaultChecked={settings.lateCancelKeepsCode} /> A discount code, free
+                  hour or studio credit comes back after any cancellation
+                </label>
+                <p style={{ fontSize: ".78rem", margin: "0 0 1rem" }}>
+                  Off, it comes back only when the client cancels in time for a refund: cancelled later, or after the booking was moved, it
+                  is used up, as money paid is kept then. A cancellation by the studio always gives it back. A booking keeps the rule it was
+                  made under.
+                </p>
+              </>
+            )}
             {group.title === "Memberships" && (
               <>
                 <label style={{ display: "block", marginBottom: ".4rem", fontSize: ".9rem" }}>

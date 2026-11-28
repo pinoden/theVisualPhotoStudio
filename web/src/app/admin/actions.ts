@@ -527,6 +527,7 @@ export async function saveSettingsAction(formData: FormData): Promise<void> {
   // Loyalty has a switch of its own: switching it on after it was off starts the stamps over (`switchLoyalty`).
   await switchLoyalty(db, formData.get("loyaltyEnabled") !== null, new Date());
   await saveSetting(db, "memberWeekendDifference", formData.get("memberWeekendDifference") !== null);
+  await saveSetting(db, "lateCancelKeepsCode", formData.get("lateCancelKeepsCode") !== null);
   updateTag(CATALOG_TAG);
   if (rejected.length > 0) {
     failed("/admin/settings", `Not saved: ${rejected.join("; ")}. Everything else was saved.`);

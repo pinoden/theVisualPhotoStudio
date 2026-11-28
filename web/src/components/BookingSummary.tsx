@@ -121,7 +121,7 @@ export function BookingSummary({ booking }: { booking: BookingView }) {
         </div>
       )}
       {credit && codeLine}
-      {/* Added once the appointment started: overtime, cleaning, damage (src/server/charges.ts). */}
+      {/* Overtime, cleaning and damage, added once the appointment started, and the fee for a move the client asked for after their free ones (src/server/charges.ts). */}
       {booking.charges.map((charge, index) => (
         <div className="price-row" key={`charge-${index}`}>
           <span>{charge.label}</span>

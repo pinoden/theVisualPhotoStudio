@@ -1,4 +1,7 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { sql } from "drizzle-orm";
 import sharp from "sharp";
 import { settings, siteDocuments, siteVersions } from "@/db/schema";
 import { eachBlock, parsePage, type PageContent } from "@/lib/site/page";
@@ -437,6 +440,34 @@ describe("old addresses", () => {
     expect(await findRedirect(world.db, "/guestinfo")).toBe("/contact");
     expectOk(await removeRedirect(world.db, owner, "/guestinfo"));
     expect(await findRedirect(world.db, "/guestinfo")).toBeNull();
+  });
+
+  it("of the website this one replaced are sent on by migration 0074, except where the owners have decided otherwise", async () => {
+    // The owners have made a page at one of the old addresses, and given another a destination of their own.
+    await make("Events", "events");
+    expectOk(await addRedirect(world.db, owner, { from: "/store", to: "/gift-cards" }));
+    const migration = readFileSync(path.join(process.cwd(), "drizzle", "0074_old_addresses.sql"), "utf8");
+    await world.db.execute(sql.raw(migration));
+    const after = new Map((await listRedirects(world.db, owner))!.map((redirect) => [redirect.from, redirect.to]));
+    expect(Object.fromEntries(after)).toEqual({
+      "/appointments": "/book",
+      "/blanche-1": "/studios#blanche",
+      "/dayglow-1": "/studios#dayglow",
+      "/paris": "/studios#paris",
+      "/membership": "/memberships",
+      "/home-1": "/",
+      "/christmas-2026-dayglow": "/",
+      "/christmas-2026-paris": "/",
+      "/styled-setups": "/studios",
+      "/privacy-policy": "/policies",
+      // Theirs stays, and a page's own address leads nowhere else.
+      "/store": "/gift-cards",
+    });
+    // Each is an address the site's own form would take, so the owners can change it there.
+    for (const [from, to] of after) expect(await addRedirect(world.db, owner, { from, to }), from).toEqual({ ok: true });
+    // Run again, it changes nothing.
+    await world.db.execute(sql.raw(migration));
+    expect((await listRedirects(world.db, owner))!).toHaveLength(after.size);
   });
 
   it("cannot be a page's own address, the site's own, or lead nowhere", async () => {

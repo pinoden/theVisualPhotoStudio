@@ -288,6 +288,35 @@ export function studioPriceLines(studios: readonly { name: string; priceCents: n
   return [{ name: studios.map((studio) => studio.name).join(" + "), priceCents: studios.reduce((sum, studio) => sum + studio.priceCents, 0) }];
 }
 
+/** One row of a booking's price, above its tax and its total: a studio's price, an add-on, or what a discount took off (negative). */
+export interface PriceRow {
+  label: string;
+  cents: number;
+}
+
+/**
+ * A booking's price row by row, as its own page lists it (`BookingSummary`): the studios (`studioPriceLines`), the
+ * discount for several of them, each add-on, and what a percent code or a free hour took off. Credit and membership
+ * hours are not among them: they pay the total. For the confirmation email, which gave only the total until
+ * 2026-11-27 (the preview test of 2026-11-21, point 3: six extra guests paid for, and no line for them).
+ */
+export function priceRows(input: {
+  studios: readonly { name: string; priceCents: number }[];
+  multiStudioDiscountCents: number;
+  addons: readonly { name: string; quantity: number; unitCents: number }[];
+  /** A percent code or a free hour, and what it took off; null for none, and for credit. */
+  discount: { kind: PromoKind; cents: number } | null;
+}): PriceRow[] {
+  return [
+    ...studioPriceLines(input.studios, input.multiStudioDiscountCents).map((studio) => ({ label: studio.name, cents: studio.priceCents })),
+    ...(input.multiStudioDiscountCents > 0 ? [{ label: "Multi-studio discount", cents: -input.multiStudioDiscountCents }] : []),
+    ...input.addons.map((addon) => ({ label: addon.quantity > 1 ? `${addon.name} × ${addon.quantity}` : addon.name, cents: addon.unitCents * addon.quantity })),
+    ...(input.discount && input.discount.kind !== "amount" && input.discount.cents > 0
+      ? [{ label: input.discount.kind === "free_hour" ? "Free hour" : "Discount code", cents: -input.discount.cents }]
+      : []),
+  ];
+}
+
 /**
  * The lengths the owners did not list that can be booked, each priced on the straight line through the listed ones and
  * rounded to a whole dollar. `stepMinutes` is the owners' setting (`betweenLengthsMinutes`): every half hour, every

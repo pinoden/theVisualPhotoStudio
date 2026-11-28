@@ -1,5 +1,7 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { settings, siteDocuments, siteVersions } from "@/db/schema";
 import { DEFAULT_DESIGN, type Design } from "@/lib/site/design";
 import { DEFAULT_FRAME, type SiteFrame } from "@/lib/site/frame";
@@ -222,6 +224,52 @@ describe("the history", () => {
     expect(await restoreVersion(world.db, owner, DESIGN_DOC, "1; drop table site_versions", NOW)).toMatchObject({ ok: false });
     expect(await restoreVersion(world.db, owner, DESIGN_DOC, "00000000-0000-4000-8000-000000000000", NOW)).toMatchObject({ ok: false });
     expect(await publishedAccent()).toBe("#222222");
+  });
+});
+
+describe("the words on the accent, in a design saved before 2026-11-27 (migration 0078)", () => {
+  const migration = () => world.db.execute(sql.raw(readFileSync(path.join(process.cwd(), "drizzle", "0078_words_on_the_accent.sql"), "utf8")));
+  const white = (design: Design): Design => ({ ...design, colors: { ...design.colors, onAccent: "#ffffff" } });
+  /** Save a design as the owner's draft, on top of whatever is there. */
+  const save = async (content: Design) => saveDraft(world.db, owner, DESIGN_DOC, content, { basedOn: (await loadForEditing(world.db, owner, DESIGN_DOC))!.revision, now: NOW });
+
+  it("become dark where the owners left the accent and the words on it as the site had them", async () => {
+    // The owners published a design of their own fonts, with the colours as they were; and have a draft of it.
+    expectOk(await save(white({ ...DEFAULT_DESIGN, fonts: { ...DEFAULT_DESIGN.fonts, heading: "playfair-display" } })));
+    expectOk(await publishDraft(world.db, owner, DESIGN_DOC, NOW));
+    expectOk(await save(white({ ...DEFAULT_DESIGN, fonts: { ...DEFAULT_DESIGN.fonts, heading: "lora" } })));
+    expect((await loadPublished(world.db, DESIGN_DOC)).colors.onAccent).toBe("#ffffff");
+
+    await migration();
+    const published = await loadPublished(world.db, DESIGN_DOC);
+    expect(published.colors).toMatchObject({ accent: "#c8a882", onAccent: "#2c2420", accentText: "#8e6a3e" });
+    expect(published.fonts.heading).toBe("playfair-display");
+    const draft = await loadDraftOrPublished(world.db, DESIGN_DOC);
+    expect(draft.colors.onAccent).toBe("#2c2420");
+    expect(draft.fonts.heading).toBe("lora");
+    // The design's history has the change, and the white words before it.
+    const versions = await world.db.select().from(siteVersions).orderBy(siteVersions.number);
+    expect(versions.map((version) => [version.number, version.note, (version.content as Design).colors.onAccent])).toEqual([
+      [1, "", "#ffffff"],
+      [2, "Dark words on the accent colour", "#2c2420"],
+    ]);
+    // Run again, it changes nothing.
+    await migration();
+    expect((await listVersions(world.db, owner, DESIGN_DOC))!).toHaveLength(2);
+  });
+
+  it("stay as the owners chose them where they chose the accent or its words themselves, and nothing is stored where no design was saved", async () => {
+    await migration();
+    expect(await world.db.select().from(siteDocuments)).toEqual([]);
+    // A design nobody saved reads the site's own colours.
+    expect((await loadPublished(world.db, DESIGN_DOC)).colors).toMatchObject({ onAccent: "#2c2420", accentText: "#8e6a3e" });
+
+    const own = white({ ...DEFAULT_DESIGN, colors: { ...DEFAULT_DESIGN.colors, accent: "#7a5c3a" } });
+    expectOk(await save(own));
+    expectOk(await publishDraft(world.db, owner, DESIGN_DOC, NOW));
+    await migration();
+    expect((await loadPublished(world.db, DESIGN_DOC)).colors).toMatchObject({ accent: "#7a5c3a", onAccent: "#ffffff" });
+    expect((await listVersions(world.db, owner, DESIGN_DOC))!).toHaveLength(1);
   });
 });
 

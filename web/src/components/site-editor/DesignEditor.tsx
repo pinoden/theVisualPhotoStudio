@@ -18,9 +18,10 @@ import { useStarted } from "@/components/use-started";
 import { useDocumentEditor } from "./useDocumentEditor";
 
 const COLORS: { key: keyof Design["colors"]; label: string; help: string }[] = [
-  { key: "accent", label: "Accent", help: "Links, the small headings above titles, and the buttons that ask to book." },
-  { key: "accentHover", label: "Accent, under the pointer", help: "What an accent button or a link turns into when the pointer is on it." },
+  { key: "accent", label: "Accent", help: "The buttons that ask to book, and words in the accent colour on the dark parts, such as the footer." },
+  { key: "accentHover", label: "Accent, under the pointer", help: "What an accent button turns into when the pointer is on it." },
   { key: "accentSoft", label: "Accent, pale", help: "Soft highlights." },
+  { key: "accentText", label: "Accent for words", help: "Links, the small headings above titles and prices, on the page and on cards: a shade of the accent dark enough to read there." },
   { key: "onAccent", label: "Words on the accent", help: "The words of a button that is filled with the accent colour." },
   { key: "background", label: "Page", help: "Behind everything." },
   { key: "surface", label: "Cards", help: "Cards, and every second section of a page." },

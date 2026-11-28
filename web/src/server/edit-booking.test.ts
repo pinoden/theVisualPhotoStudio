@@ -4,8 +4,10 @@ import { bookingAddons, bookingEvents, bookings, promoCodes, studioHolds } from 
 import { createManualCode, saveAddon } from "./admin";
 import type { AuthUser } from "./auth";
 import { loadCatalog } from "./catalog";
+import { formatCents } from "@/lib/domain/pricing";
+import { getAppointment, moveBooking } from "./appointments";
 import { editBooking } from "./edit-booking";
-import { createTestWorld, expectOk, FAR, h, NOW, type TestWorld } from "./testing";
+import { BASE_URL, createTestWorld, expectOk, FAR, h, NOW, OWNER_EMAIL, type TestWorld } from "./testing";
 
 /**
  * A booking's studios, length, guests and add-ons changed by an owner (the owner's admin brief of 2026-11-22, item 5;
@@ -64,11 +66,30 @@ describe("an owner changes a booking", () => {
     // A booking of two hours made one: paid for two, the difference is the client's, to refund.
     const longer = expectOk(await world.book({ date: FAR, studioIds: [world.ids.blanche], startMinute: h(14), durationMinutes: 120, customer: bob }));
     const paid = (await rowOf(longer.ref)).totalCents;
-    const halved = await editBooking(world.db, owner, longer.ref, { studioIds: [world.ids.blanche], durationMinutes: 60, addons: [] }, NOW);
+    expect(await world.emails("owner_refund_owed")).toHaveLength(0);
+    const halved = await editBooking(world.db, owner, longer.ref, { studioIds: [world.ids.blanche], durationMinutes: 60, addons: [] }, NOW, { ownerEmail: OWNER_EMAIL, baseUrl: BASE_URL });
     if (!halved.ok) throw new Error(halved.message);
     expect(halved.creditLeftCents).toBe(paid - halved.nowCents);
     expect(halved.creditLeftCents).toBeGreaterThan(0);
     expect((await world.emails("booking_changed")).at(-1)!.body).toContain("more than that: we will refund it to you.");
+    // The owners are told of the refund that promises (the owners' decision of 2026-11-27).
+    const [notice] = await world.emails("owner_refund_owed");
+    expect(notice).toMatchObject({ toEmail: OWNER_EMAIL, subject: `ACTION NEEDED: ${formatCents(halved.creditLeftCents)} to refund for ${longer.ref}` });
+    expect(notice.body).toContain(`owner@studio.test changed booking ${longer.ref} from Studio Blanche, 2 hours to Studio Blanche, 1 hour.`);
+    expect(notice.body).toContain(`${BASE_URL}/admin/appointments/${longer.ref}`);
+  });
+
+  it("can still change a booking that carries the fee for a move, which is no charge of its visit", async () => {
+    const booked = expectOk(await world.book({ date: FAR, studioIds: [world.ids.blanche], durationMinutes: 60 }));
+    // The client's free move, then one more made for them: $20.
+    expectOk(await moveBooking(world.db, owner, booked.ref, { date: FAR, startMinute: h(12), countsAsClientMove: true }, NOW));
+    expect(await moveBooking(world.db, owner, booked.ref, { date: FAR, startMinute: h(14), countsAsClientMove: true }, NOW)).toMatchObject({ ok: true, feeCents: 2000 });
+    const before = (await rowOf(booked.ref)).totalCents;
+    const longer = await editBooking(world.db, owner, booked.ref, { studioIds: [world.ids.blanche], durationMinutes: 120, addons: [] }, NOW);
+    if (!longer.ok) throw new Error(longer.message);
+    // What it owes is the longer booking's difference and the fee together.
+    expect(longer.owedCents).toBe(longer.nowCents - before + 2000);
+    expect((await getAppointment(world.db, owner, booked.ref, NOW))!.payments).toMatchObject({ chargesCents: 2000, dueCents: longer.owedCents });
   });
 
   it("gives back on its code the credit the new price no longer needs", async () => {

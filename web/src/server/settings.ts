@@ -83,6 +83,13 @@ export interface Settings {
   rescheduleFeeCents: number;
   /** Days a reschedule code stays valid. */
   creditValidDays: number;
+  /**
+   * What becomes of the discount code, free hour or studio credit a booking was made with when its client cancels and
+   * the terms refund nothing: too late for a refund, or after the booking was moved. Off, the default (the owners'
+   * decision of 2026-11-27): it is used up, as money paid is kept then. On: it comes back after any cancellation by
+   * the client, as it did until that day. A cancellation by the studio always gives it back.
+   */
+  lateCancelKeepsCode: boolean;
 
   /**
    * How many hours before the start the reminder email goes out (the owner's answer of 2026-11-17: 24). 0 sends none.
@@ -198,6 +205,7 @@ export const DEFAULT_SETTINGS: Settings = {
   maxReschedules: 1,
   rescheduleFeeCents: 2000, // the owner's answer of 2026-11-17: the first reschedule is free, each further one $20
   creditValidDays: 90,
+  lateCancelKeepsCode: false,
 
   reminderHours: 24,
   memberReturnHours: 48,
@@ -333,6 +341,7 @@ const VALIDATORS: { [K in Exclude<keyof Settings, "multiStudioPercent">]: (v: un
   reminderHours: int(NUMBER_SETTING_RANGES.reminderHours),
   memberReturnHours: int(NUMBER_SETTING_RANGES.memberReturnHours),
   memberWeekendDifference: bool,
+  lateCancelKeepsCode: bool,
   twoStudioGuestLimit: int(NUMBER_SETTING_RANGES.twoStudioGuestLimit),
   threeStudioGuestLimit: int(NUMBER_SETTING_RANGES.threeStudioGuestLimit),
   loyaltyEnabled: bool,

@@ -29,15 +29,17 @@ import {
   type CreateBookingResult,
 } from "./bookings";
 import { dayTypeFor, loadCatalog } from "./catalog";
-import { chargesOf, hourlyRateOf, type ChargeLine } from "./charges";
+import { formatCents } from "@/lib/domain/pricing";
+import { addRescheduleFee, chargesOf, hasVisitCharges, hourlyRateOf, type ChargeLine } from "./charges";
 import { storedTerms, termsChangedSince, termsFor, type BookingTerms } from "./terms";
 import { bookingMovedEmail, queueEmail } from "./email";
 import { listEvents, recordEvent, withoutAmounts, type BookingEvent } from "./history";
-import { chargesCentsByBooking, creditLeftCentsByBooking, owedCents } from "./money";
+import { creditLeftCentsByBooking, owedCents } from "./money";
 import { openPayLinkOf, type PayLinkView } from "./pay-links";
 import type { Made, PaymentProvider } from "./payments";
 import { PET_CREDIT_BLOCK_TEXT, petCreditStanding, petFeeReturnedCents } from "./pet-fee";
 import { addBackToCode } from "./promos";
+import { noticeRefundOwed, type OwnerNotice } from "./refund-owed";
 import { movePriceText, priceOnNewDay, repriceNote, totalBeforeCredit } from "./reprice";
 import { loadSettings, type Settings } from "./settings";
 import { canViewDay } from "./staff";
@@ -107,21 +109,36 @@ export interface Appointment {
   may: Record<"setLabels" | "move" | "recordPayment" | "changePayments" | "openCustomer" | "refund", boolean>;
   /** Why the booking cannot be moved, where the viewer may otherwise move it: it has extra charges (`CHARGES_BLOCK_MOVE`). */
   moveBlocked: string | null;
+  /**
+   * The moves that count as the client's so far: their own online, and the studio's at their request. With the terms,
+   * it says what the next one they ask for costs (`moveFeeCents`).
+   */
+  clientMoves: number;
+  /**
+   * The booking was paid for more than it costs, after a move or a change by the studio: a refund is owed, which an
+   * owner makes (src/server/refund-owed.ts). For every viewer, as a fact without its amount: one who cannot see the
+   * booking's payments is told that much on its page.
+   */
+  refundOwed: boolean;
 }
 
 /**
- * A booking with extra charges is not moved (the tester's fourth pass of 2026-11-18). A charge is added once its visit
+ * What a move the client asked the studio for costs them now, by the terms the booking was made under: nothing while
+ * a free move is left, or while moving is switched off, and the fee after that (the owners' decision of 2026-11-27).
+ */
+export function moveFeeCents(clientMoves: number, terms: Pick<Settings, "maxReschedules" | "rescheduleFeeCents">): number {
+  return terms.maxReschedules > 0 && clientMoves >= terms.maxReschedules ? terms.rescheduleFeeCents : 0;
+}
+
+/**
+ * A booking with extra charges of its visit is not moved (the tester's fourth pass of 2026-11-18; the fee for an
+ * earlier move is no such charge, `hasVisitCharges`). A charge is added once its visit
  * has started, so the visit has taken place, at least in part; and moved to a day of another price, one booking would
  * hold the price paid for the visit, its charges and the price of the new day, which no reading of its money keeps
  * apart: what paid which, what a refund gave back, what goes into a code. The rest of a shoot is a new booking.
  */
 export const CHARGES_BLOCK_MOVE =
   "This booking has extra charges, added once its visit had started, so it cannot be moved. Book the rest of the shoot as a new booking (Calendar, New booking), or first take back a charge added by mistake.";
-
-/** The booking has an extra charge that was not taken back. */
-async function hasCharges(db: DbLike, bookingId: string): Promise<boolean> {
-  return (await chargesCentsByBooking(db, [bookingId])).has(bookingId);
-}
 
 /** The viewer may see this booking: owners always, staff on the days they may see. */
 async function maySee(db: DbLike, viewer: AuthUser, startAt: Date): Promise<boolean> {
@@ -208,7 +225,9 @@ export async function getAppointment(db: DbLike, viewer: AuthUser, ref: string, 
       openCustomer: may("seeCustomers"),
       refund: may("refund"),
     },
-    moveBlocked: mayMove && (await hasCharges(db, booking.id)) ? CHARGES_BLOCK_MOVE : null,
+    moveBlocked: mayMove && (await hasVisitCharges(db, booking.id)) ? CHARGES_BLOCK_MOVE : null,
+    clientMoves: booking.rescheduledCount,
+    refundOwed: money.creditLeftCents > 0,
   };
 }
 
@@ -382,7 +401,7 @@ export async function moveOptions(
   if (!isBookingRef(ref) || !can(viewer, "moveBookings", settings)) return { ok: false, message: "Booking not found." };
   const [booking] = await db.select().from(bookings).where(eq(bookings.ref, ref)).limit(1);
   if (!booking || !(await maySee(db, viewer, booking.startAt))) return { ok: false, message: "Booking not found." };
-  if (await hasCharges(db, booking.id)) return { ok: false, message: CHARGES_BLOCK_MOVE };
+  if (await hasVisitCharges(db, booking.id)) return { ok: false, message: CHARGES_BLOCK_MOVE };
   const free = await freeStartsFor(
     db,
     {
@@ -414,8 +433,11 @@ export async function moveOptions(
 }
 
 export type MoveResult =
-  | { ok: true; startAt: Date; endAt: Date }
-  | { ok: false; reason: "forbidden" | "not_found" | "not_movable" | "invalid_time" | "slot_taken" | "no_price"; message: string };
+  | { ok: true; startAt: Date; endAt: Date; /** The fee this move added to what the booking owes: 0 for none. */ feeCents: number }
+  | { ok: false; reason: "forbidden" | "not_found" | "not_movable" | "invalid_time" | "slot_taken" | "no_price" | "who_asked"; message: string };
+
+/** The move's form was sent without saying who asked for it, which decides what it costs the client. */
+const WHO_ASKED = "Say who asked for this move: the client or the studio.";
 
 /**
  * Move a booking to a new date or time, in the same studios and for the same
@@ -427,13 +449,22 @@ export type MoveResult =
  * gap between appointments; and the database refuses an overlap whatever
  * happens here. A booking with extra charges is not moved (`CHARGES_BLOCK_MOVE`).
  *
- * `countsAsClientMove` says the client asked for the move. While moving is
- * offered (`maxReschedules` above 0), it then counts as
- * a reschedule of theirs: the booking is no longer refunded automatically,
- * and once the free moves are used the client moves it again themselves only
- * for the fee (`rescheduleFeeCents`), or not at all while that is 0, as the
- * rental terms say. Leave it off when the studio is the one that needs the
- * change.
+ * `countsAsClientMove` says who asked for the move: true for the client,
+ * false for the studio, and null when the form did not say, which is refused
+ * while the booking's terms offer moving (the owners' decision of 2026-11-27:
+ * the box that said it started ticked, and a move the studio needed then used
+ * up the client's free one). A move the studio needs costs the client nothing
+ * and counts for nothing. One the client asked for counts as a reschedule of
+ * theirs while moving is offered (`maxReschedules` above 0): the booking is
+ * no longer refunded automatically, as the rental terms say. Their free moves
+ * are the ones they can also make online; after those, each move is the
+ * studio's to make and costs the fee of the booking's terms
+ * (`rescheduleFeeCents`), added to what the booking owes (a charge,
+ * `addRescheduleFee`) and paid at the studio or through a payment link. An
+ * owner can let the fee go (`waiveFee`).
+ *
+ * When the move leaves the booking paid for more than it now costs, the
+ * owners are told (`notice`, src/server/refund-owed.ts).
  */
 export async function moveBooking(
   db: Db,
@@ -442,11 +473,14 @@ export async function moveBooking(
   input: {
     date: string;
     startMinute: number;
-    countsAsClientMove: boolean;
+    countsAsClientMove: boolean | null;
+    /** An owner lets the fee for this move go. Ignored for anyone else, and when the move costs nothing. */
+    waiveFee?: boolean;
     /** An owner's override (question 79): the keys of what the new time passes over, read in the pop-up. */
     override?: string[] | null;
   },
   now: Date,
+  notice?: OwnerNotice,
 ): Promise<MoveResult> {
   const refuse = (reason: Extract<MoveResult, { ok: false }>["reason"], message: string): MoveResult => ({ ok: false, reason, message });
   const settings = await loadSettings(db);
@@ -460,7 +494,7 @@ export async function moveBooking(
     return refuse("not_movable", "Only a booking that is still to come can be moved.");
   }
   if (found.endRequest) return refuse("not_movable", waitingBlocksMove(found.endRequest));
-  if (await hasCharges(db, found.id)) return refuse("not_movable", CHARGES_BLOCK_MOVE);
+  if (await hasVisitCharges(db, found.id)) return refuse("not_movable", CHARGES_BLOCK_MOVE);
   if (!isIsoDate(input.date) || !Number.isInteger(input.startMinute) || input.startMinute < 0 || input.startMinute >= 1440) {
     return refuse("invalid_time", "Choose a date and a time.");
   }
@@ -471,7 +505,8 @@ export async function moveBooking(
   // The terms the booking was made under (question 10). With moving switched off in them, the rental terms say nothing
   // about a move, so one made for the client costs them nothing.
   const terms = termsFor(found, settings);
-  const clientMove = input.countsAsClientMove && terms.maxReschedules > 0;
+  if (input.countsAsClientMove === null && terms.maxReschedules > 0) return refuse("who_asked", WHO_ASKED);
+  const clientMove = input.countsAsClientMove === true && terms.maxReschedules > 0;
   // Across the hour the clocks change, the booking would not last as long as it was paid for.
   if (endAt.getTime() - startAt.getTime() !== found.durationMinutes * 60_000) {
     return refuse("slot_taken", "The clocks change at that time, so the booking cannot move there. Choose another.");
@@ -522,7 +557,7 @@ export async function moveBooking(
       if (!booking || booking.status !== "confirmed") return refuse("not_movable", "Only a booking that is still to come can be moved.");
       if (booking.endRequest) return refuse("not_movable", waitingBlocksMove(booking.endRequest));
       // A charge added since the check above: adding one locks the same row (`addCharge`).
-      if (await hasCharges(tx, booking.id)) return refuse("not_movable", CHARGES_BLOCK_MOVE);
+      if (await hasVisitCharges(tx, booking.id)) return refuse("not_movable", CHARGES_BLOCK_MOVE);
       // Its props must be free at the new time too (src/server/props.ts): their rows are locked until the move is written.
       const props = await tx.select({ addonId: bookingAddons.addonId, quantity: bookingAddons.quantity }).from(bookingAddons).where(eq(bookingAddons.bookingId, booking.id));
       const propProblem = await propsProblem(tx, props, startAt, endAt, booking.id);
@@ -531,6 +566,12 @@ export async function moveBooking(
       const price = await priceOnNewDay(tx, booking, input.date, catalog);
       if (price.kind === "refused") return refuse("no_price", price.message);
       const repriced = price.kind === "new" ? price : null;
+      // A move the client asked for after their free ones costs the fee of the booking's terms, unless an owner lets it go.
+      const feeDueCents = clientMove ? moveFeeCents(booking.rescheduledCount, terms) : 0;
+      const waived = feeDueCents > 0 && input.waiveFee === true && viewer.role === "owner";
+      const feeCents = waived ? 0 : feeDueCents;
+      const freeMoves = `the free ${terms.maxReschedules === 1 ? "one" : "ones"}`;
+      const creditBeforeCents = (await creditLeftCentsByBooking(tx, [booking])).get(booking.id) ?? 0;
 
       await tx
         .update(bookings)
@@ -573,6 +614,7 @@ export async function moveBooking(
       }
       // Credit the new price no longer needs goes back on the code it came from, as a cancellation by the studio gives it back.
       if (repriced?.codeBack) await addBackToCode(tx, repriced.codeBack.codeId, repriced.codeBack.cents);
+      if (feeCents > 0) await addRescheduleFee(tx, booking.id, feeCents, viewer.email, now);
 
       if (photographer) {
         const heldUntil = new Date(endAt.getTime() + photographer.bufferMinutes * 60_000);
@@ -590,17 +632,28 @@ export async function moveBooking(
         to: "rescheduled",
         actor: viewer.email,
         at: now,
-        note: `Moved from ${was} to ${is}${clientMove ? ", at the client's request" : ""}${passedOver.length > 0 ? `, over: ${passedOver.map((conflict) => conflict.text).join("; ")}` : ""}${repriced ? repriceNote(repriced, booking) : ""}`,
+        note: `Moved from ${was} to ${is}${clientMove ? ", at the client's request" : ""}${passedOver.length > 0 ? `, over: ${passedOver.map((conflict) => conflict.text).join("; ")}` : ""}${repriced ? repriceNote(repriced, booking) : ""}${
+          feeCents > 0
+            ? `. ${formatCents(feeCents)} added for a move after ${freeMoves}`
+            : waived
+              ? `. The ${formatCents(feeDueCents)} fee for a move after ${freeMoves} was waived`
+              : ""
+        }`,
       });
-      const priceNote = repriced?.announced
-        ? movePriceText({
-            dayType: repriced.dayType,
-            wasCents: totalBeforeCredit(booking),
-            nowCents: totalBeforeCredit({ totalCents: repriced.quote.totalCents, creditAppliedCents: repriced.creditAppliedCents, membershipCents: repriced.quote.membershipCents }),
-            ...(await moneyAfter(tx, booking, repriced.quote.totalCents, now)),
-            codeBack: repriced.codeBack,
-          })
-        : "";
+      // What the booking owes and was paid beyond its price now, the fee counted.
+      const money = await moneyAfter(tx, booking, repriced ? repriced.quote.totalCents : booking.totalCents, now);
+      const priceNote = movePriceText({
+        price: repriced?.announced
+          ? {
+              dayType: repriced.dayType,
+              wasCents: totalBeforeCredit(booking),
+              nowCents: totalBeforeCredit({ totalCents: repriced.quote.totalCents, creditAppliedCents: repriced.creditAppliedCents, membershipCents: repriced.quote.membershipCents }),
+              codeBack: repriced.codeBack,
+            }
+          : null,
+        fee: { cents: feeCents, freeMoves: terms.maxReschedules },
+        ...money,
+      });
       await queueEmail(
         tx,
         bookingMovedEmail({
@@ -615,7 +668,8 @@ export async function moveBooking(
           ...(clientMove ? { clientAsked: movesLeft(booking.rescheduledCount + 1, terms) } : {}),
         }),
       );
-      return { ok: true, startAt, endAt };
+      await noticeRefundOwed(tx, booking, { beforeCents: creditBeforeCents, afterCents: money.creditLeftCents }, `${viewer.email} moved booking ${booking.ref} from ${was} to ${is}.`, notice);
+      return { ok: true, startAt, endAt, feeCents };
     });
   } catch (error) {
     // Someone took the time between the check above and the move.
@@ -632,10 +686,9 @@ function waitingBlocksMove(request: "cancel" | "reschedule"): string {
   return `The client has asked to ${request === "cancel" ? "cancel this booking" : "release this booking for a reschedule code"}, and that waits until the site knows whether its payment link was paid, so it cannot be moved meanwhile. See the payment link on this page.`;
 }
 
-/** After `count` moves: whether the client can move the booking again online, and what that costs. */
-function movesLeft(count: number, settings: Pick<Settings, "maxReschedules" | "rescheduleFeeCents">): { canMoveAgain: boolean; againFeeCents: number } {
-  const free = count < settings.maxReschedules;
-  return { canMoveAgain: free || settings.rescheduleFeeCents > 0, againFeeCents: free ? 0 : settings.rescheduleFeeCents };
+/** After `count` moves: whether the client can move the booking again online (while free moves are left), and what the studio's move costs them once they cannot. */
+function movesLeft(count: number, terms: Pick<Settings, "maxReschedules" | "rescheduleFeeCents">): { canMoveAgain: boolean; againFeeCents: number } {
+  return { canMoveAgain: count < terms.maxReschedules, againFeeCents: moveFeeCents(count, terms) };
 }
 
 // ── A booking made in the admin for a client ─────────────────────────────────

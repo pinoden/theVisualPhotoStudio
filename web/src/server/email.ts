@@ -3,7 +3,7 @@ import { SERVICE_WORDS, type Service } from "@/lib/domain/services";
 import { emailOutbox } from "@/db/schema";
 import type { DbLike } from "@/db/client";
 import { afterFee } from "@/lib/domain/policy";
-import { taxLabel } from "@/lib/domain/pricing";
+import { taxLabel, type PriceRow } from "@/lib/domain/pricing";
 import { durationLabel, longDateLabel } from "@/lib/domain/time";
 import { EMAIL_TEMPLATES, firstNameOf, renderEmail, type TemplateKey } from "@/lib/email-templates";
 import { mayUseTestTools } from "./browser-test-server";
@@ -271,6 +271,12 @@ export function bookingConfirmationEmail(input: {
   duration: string;
   /** Price after discounts, sales tax included. */
   totalCents: number;
+  /**
+   * The price row by row, before tax (`priceRows`): listed above the total when there is more to it than one price,
+   * so that extra guests, a pet fee or a discount are each read in the email, as on the booking's page (the owners'
+   * decision of 2026-11-27). Left out, or one price with no tax: the total alone, as before.
+   */
+  rows?: PriceRow[];
   /** The sales tax in that total, when there is any. */
   tax?: { cents: number; basisPoints: number };
   /** Part of the total covered by an amount code: a reschedule code, or studio credit. */
@@ -292,15 +298,23 @@ export function bookingConfirmationEmail(input: {
   // studio made, at the studio.
   // Nothing left after the code or the hours: no line says a card was charged, or that anything is to pay (the tester's
   // finding of 2026-11-18: "Charged to your card: $0" for a booking the studio made).
-  const taxNote = input.tax ? ` (includes ${money(input.tax.cents)} ${taxLabel(input.tax.basisPoints).toLowerCase()})` : "";
-  const payment =
-    input.creditCents > 0
+  const rows = input.rows ?? [];
+  const listed = rows.length > 1 || (rows.length === 1 && input.tax !== undefined);
+  // The rows, and the tax as a row of its own after them; without rows the total says what tax it includes.
+  const priced = listed
+    ? [...rows.map((row) => `${row.label}: ${money(row.cents)}`), ...(input.tax ? [`${taxLabel(input.tax.basisPoints)}: ${money(input.tax.cents)}`] : [])]
+    : [];
+  const taxNote = input.tax && !listed ? ` (includes ${money(input.tax.cents)} ${taxLabel(input.tax.basisPoints).toLowerCase()})` : "";
+  const payment = [
+    ...priced,
+    ...(input.creditCents > 0
       ? [
           `Total: ${money(input.totalCents)}${taxNote}`,
           `Paid with your ${input.creditName ?? "reschedule code"}: ${money(input.creditCents)}`,
           ...(input.cardCents > 0 ? [input.payAtStudio ? `To pay at the studio: ${money(input.cardCents)}` : `Charged to your card: ${money(input.cardCents)}`] : []),
         ]
-      : [`${input.payAtStudio && input.totalCents > 0 ? "To pay at the studio" : "Total"}: ${money(input.totalCents)}${taxNote}`];
+      : [`${input.payAtStudio && input.totalCents > 0 ? "To pay at the studio" : "Total"}: ${money(input.totalCents)}${taxNote}`]),
+  ];
   return written(
     "booking_confirmation",
     { to: input.to, kind: "booking_confirmation" },
@@ -408,23 +422,25 @@ export function bookingMovedEmail(input: {
   duration: string;
   /**
    * Set when the client asked for the move: it counts as their reschedule, which the rental terms do not refund.
-   * `againFeeCents`: what moving it again online costs, 0 when the next move is free.
+   * `canMoveAgain`: whether they can move it again online, which they can only while free moves are left. Afterwards
+   * the studio moves it, for `againFeeCents` each time (0: for nothing).
    */
   clientAsked?: { canMoveAgain: boolean; againFeeCents?: number };
   /**
-   * Set when the new day priced the booking differently (follow-up 5, `movePriceText` in reprice.ts): its new total, and
-   * what is still to pay, what comes back to the client, or what went back on their code.
+   * Set when the new day priced the booking differently (follow-up 5), or when the move itself cost a fee (`movePriceText`
+   * in reprice.ts): its new total, the fee, and what is still to pay, what comes back to the client, or what went back on
+   * their code.
    */
   priceNote?: string;
 }): QueuedEmail {
   const asked = input.clientAsked;
   const again = !asked
     ? ""
-    : !asked.canMoveAgain
-      ? ", and it cannot be moved again online."
+    : asked.canMoveAgain
+      ? "."
       : (asked.againFeeCents ?? 0) > 0
-        ? `. Moving it again online costs ${money(asked.againFeeCents!)}.`
-        : ".";
+        ? `. To move it again, ask the studio: each further move costs ${money(asked.againFeeCents!)}.`
+        : ", and it cannot be moved again online.";
   return written(
     "booking_moved",
     { to: input.to, kind: "booking_moved" },
@@ -673,6 +689,19 @@ export function payLinkEmail(input: {
 }
 
 /**
+ * A move or a change by the studio left a booking paid for more than it now costs. The client's email says "we will
+ * refund it to you", and nothing gives it back by itself: an owner refunds it on the appointment's page
+ * (src/server/refund-owed.ts; the owners' decision of 2026-11-27).
+ */
+export function ownerRefundOwedNotice(input: { to: string; ref: string; customer: string; cents: number; change: string; appointmentUrl: string }): QueuedEmail {
+  return written(
+    "owner_refund_owed",
+    { to: input.to, kind: "owner_refund_owed" },
+    { customer: input.customer, reference: input.ref, amount: money(input.cents), change: input.change, appointment_link: input.appointmentUrl },
+  );
+}
+
+/**
  * A booking paid at the studio, or through Acuity before this website (`place`, `handPaidPlaceOf`), was cancelled
  * early enough to be refunded. The site cannot send that money back, so the owner is asked to.
  */
@@ -751,20 +780,15 @@ export function rescheduleCodeEmail(input: {
   valueCents: number;
   /** The part of the value that is a discount the customer's code gave, not money paid. */
   discountCents?: number;
-  /** The fee for a move after the free ones, already taken off the value. */
-  feeCents?: number;
   expires: string;
   bookUrl: string;
   /** Said of a release that waited for the card processor: when the client asked, and why it waited (`askedOn` in manage.ts). */
   note?: string | null;
 }): QueuedEmail {
-  const fee = (input.feeCents ?? 0) > 0 ? `less the ${money(input.feeCents!)} fee for moving a booking again` : "";
   const credit =
     (input.discountCents ?? 0) > 0
-      ? `Your booking ${input.ref} has been released. What you paid, plus the ${money(input.discountCents!)} your discount code took off${fee ? `, ${fee}` : ""}, is now a credit of ${money(input.valueCents)}.`
-      : fee
-        ? `Your booking ${input.ref} has been released. What you paid, ${fee}, is now a credit of ${money(input.valueCents)}.`
-        : `Your booking ${input.ref} has been released, and what you paid is now a credit of ${money(input.valueCents)}.`;
+      ? `Your booking ${input.ref} has been released. What you paid, plus the ${money(input.discountCents!)} your discount code took off, is now a credit of ${money(input.valueCents)}.`
+      : `Your booking ${input.ref} has been released, and what you paid is now a credit of ${money(input.valueCents)}.`;
   return written(
     "reschedule_code",
     { to: input.to, kind: "reschedule_code" },

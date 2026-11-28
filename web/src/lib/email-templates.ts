@@ -60,6 +60,7 @@ export const TEMPLATE_KEYS = [
   "move_request_studio",
   "contact_message",
   "owner_hand_refund",
+  "owner_refund_owed",
   "owner_refund_sent",
   "owner_refund_failed",
   "owner_refund_waiting",
@@ -166,7 +167,7 @@ const TEMPLATES: readonly EmailTemplateSpec[] = [
       {
         key: "payment",
         label:
-          "What the booking costs: “Total”, or “To pay at the studio” for a booking the studio made; and, when a code paid part of it, what the code paid and the card was charged",
+          "What the booking costs: each studio, add-on and discount on a line of its own when there is more than one price, then “Total”, or “To pay at the studio” for a booking the studio made; and, when a code paid part of it, what the code paid and the card was charged",
         lines: true,
         required: true,
         sample: "Total: $176",
@@ -286,7 +287,7 @@ const TEMPLATES: readonly EmailTemplateSpec[] = [
         only: "Only when the studio moved it at the client's request",
         required: true,
         sample:
-          "As you asked for this change, it counts as a reschedule under the rental terms: if the booking is cancelled now, it is not refunded. Moving it again online costs $20.",
+          "As you asked for this change, it counts as a reschedule under the rental terms: if the booking is cancelled now, it is not refunded. To move it again, ask the studio: each further move costs $20.",
       },
     ],
   },
@@ -987,6 +988,27 @@ const NOTICES: readonly EmailTemplateSpec[] = [
         required: true,
         sample: "Of what was paid at the studio, $136.50 is refunded by the rental terms, less the 5% fee: $129.68. The site cannot send that back.",
       },
+    ],
+  },
+  {
+    key: "owner_refund_owed",
+    title: "A refund to make after a booking was moved or changed",
+    group: "Notices to the studio",
+    when: "When the studio moves or changes a paid booking and it then costs less than what was paid for it.",
+    subject: "ACTION NEEDED: {{amount}} to refund for {{reference}}",
+    body: lines(
+      "{{change}}",
+      "",
+      "{{customer}} has now paid {{amount}} more than booking {{reference}} costs, and was told by email that it will be refunded. Nothing refunds it by itself.",
+      "",
+      "Open the appointment and refund it under Payment, “Refund the remaining credit”: {{appointment_link}}",
+    ),
+    parts: [
+      CUSTOMER,
+      NOTICE_REFERENCE,
+      AMOUNT("What was paid beyond what the booking now costs", "$7.00"),
+      { key: "change", label: "What was done to the booking, and by whom", required: true, sample: "mia@example.com moved booking VS-7K2M9Q from Sat, Dec 12, 2026, 10:00 AM to Mon, Dec 14, 2026, 10:00 AM." },
+      { key: "appointment_link", label: "The link to the appointment in the admin", link: true, required: true, sample: "/admin/appointments/VS-7K2M9Q" },
     ],
   },
   {

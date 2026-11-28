@@ -147,12 +147,28 @@ describe("whether a design can be read", () => {
     const of = (start: string) => checks.find((check) => check.what.startsWith(start))!;
     expect(of("Running text on the page").ok).toBe(true);
     expect(of("Headings on the page").ok).toBe(true);
-    // The site as built: white words on the tan accent are hard to read. The editor says so; it does not refuse.
-    expect(of("Words on a button in the accent colour")).toMatchObject({ ok: false, needed: 4.5 });
-    expect(of("Words on a button in the accent colour").ratio).toBeLessThan(3);
-    const fixed = clone(DEFAULT_DESIGN);
-    fixed.colors.onAccent = "#2c2420";
-    expect(readabilityChecks(fixed).find((check) => check.what.startsWith("Words on a button"))!.ok).toBe(true);
+    // The site's own colours all stand out enough since 2026-11-27 (the owners' decision: the buttons keep the brand's
+    // tan, with dark words on it, and words in the accent take a darker shade of it).
+    expect(checks.filter((check) => !check.ok)).toEqual([]);
+    expect(of("Words on a button in the accent colour")).toMatchObject({ ok: true, needed: 4.5, ratio: 6.7 });
+    expect(of("Words on a button in the accent colour, under the pointer")).toMatchObject({ ok: true, ratio: 4.5 });
+    expect(of("Links and small headings in the accent for words, on the page")).toMatchObject({ ok: true, needed: 4.5, ratio: 4.5 });
+    expect(of("Links and small headings in the accent for words, on cards")).toMatchObject({ ok: true, ratio: 4.7 });
+    expect(of("Words in the accent colour on the dark parts")).toMatchObject({ ok: true, ratio: 6.7 });
+    // As the site was built: white words on the tan, and the tan itself for words. The editor says so; it does not refuse.
+    const before = clone(DEFAULT_DESIGN);
+    before.colors.onAccent = "#ffffff";
+    before.colors.accentText = before.colors.accent;
+    const said = readabilityChecks(before);
+    expect(said.find((check) => check.what === "Words on a button in the accent colour")).toMatchObject({ ok: false, ratio: 2.2 });
+    expect(said.find((check) => check.what === "Links and small headings in the accent for words, on the page")).toMatchObject({ ok: false, ratio: 2 });
+  });
+
+  it("gives a design saved before the accent had a shade for words the site's own shade", () => {
+    const saved = parseDesign({ colors: { accent: "#c8a882", onAccent: "#ffffff", background: "#f9f5f0" } });
+    expect(saved.colors.accentText).toBe("#8e6a3e");
+    // What the owners saved stays theirs: migration 0078 changes the words on the accent where both are still the site's.
+    expect(saved.colors.onAccent).toBe("#ffffff");
   });
 
   it("points out a font that makes running text hard to read", () => {

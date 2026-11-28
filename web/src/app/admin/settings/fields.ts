@@ -34,11 +34,11 @@ export const SETTING_GROUPS: { title: string; fields: SettingField[] }[] = [
       { key: "photoRefundWindowHours", label: "Refund window for photography and content creation (hours before start)", help: "336 is 14 days." },
       { key: "refundFeePercent", label: "Processing fee kept (%)", help: "0 refunds in full." },
       { key: "rescheduleCutoffHours", label: "Reschedule cut-off (hours before start)", help: "After this, customers must call." },
-      { key: "maxReschedules", label: "Free reschedules per booking", help: "0 switches reschedule codes off." },
+      { key: "maxReschedules", label: "Free reschedules per booking", help: "The moves a client makes online, with a reschedule code. 0 switches them off." },
       {
         key: "rescheduleFeeCents",
         label: "Fee for each further reschedule ($)",
-        help: "Taken off the reschedule code. With 0, a booking cannot be moved online again after the free ones.",
+        help: "After the free ones, the studio moves the booking when the client asks, and this is added to what the booking owes. 0 asks nothing.",
         money: true,
       },
       { key: "creditValidDays", label: "Reschedule code valid for (days)", help: "" },

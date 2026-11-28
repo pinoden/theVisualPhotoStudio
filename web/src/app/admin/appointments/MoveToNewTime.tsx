@@ -2,7 +2,7 @@ import { formatCents } from "@/lib/domain/pricing";
 import { durationLabel, longDateLabel } from "@/lib/domain/time";
 import { OverrideSubmit } from "@/components/OverrideSubmit";
 import { startLabel } from "@/lib/start-label";
-import type { Appointment, MovePricePreview, moveOptions } from "@/server/appointments";
+import { moveFeeCents, type Appointment, type MovePricePreview, type moveOptions } from "@/server/appointments";
 import { PRICED_AS } from "@/server/reprice";
 import { localDateOf } from "@/server/tz";
 import { moveBookingAction, moveConflictsAction } from "./actions";
@@ -18,6 +18,19 @@ function movePriceSentence(price: MovePricePreview, date: string, seesPrices: bo
     ...(price.creditLeftCents > 0 ? [`The client will then have paid ${formatCents(price.creditLeftCents)} more than its price: it is theirs, to refund.`] : []),
     "The client is emailed the new price.",
   ].join(" ");
+}
+
+/** What a move the client asked for does, beside that choice: it counts as theirs, and after their free ones it costs the fee. */
+function clientMoveSentence(appointment: Appointment): string {
+  const { maxReschedules, rescheduleFeeCents } = appointment.terms;
+  const free = maxReschedules === 1 ? "their free move" : `their ${maxReschedules} free moves`;
+  const notRefunded = "the booking is then no longer refunded automatically, as the rental terms say";
+  if (appointment.clientMoves < maxReschedules) {
+    return `It counts as a reschedule of theirs, ${maxReschedules === 1 ? "their free one" : `one of ${free}`}: ${notRefunded}.`;
+  }
+  return rescheduleFeeCents > 0
+    ? `They have used ${free}, so this one costs them ${formatCents(rescheduleFeeCents)}: it is added to what the booking owes, to take at the studio or through a payment link. It counts as a reschedule of theirs: ${notRefunded}.`
+    : `They have used ${free}. This one costs them nothing, as the rental terms set no fee, and counts as a reschedule of theirs: ${notRefunded}.`;
 }
 
 /**
@@ -54,6 +67,7 @@ export function MoveToNewTime({
 }) {
   if (appointment.moveBlocked) return <p className="move-blocked">{appointment.moveBlocked}</p>;
   const day = localDateOf(new Date(appointment.startAt));
+  const fee = moveFeeCents(appointment.clientMoves, appointment.terms);
   return (
     <>
       <form method="get" action={dateForm.action} className="admin-form-row">
@@ -116,14 +130,23 @@ export function MoveToNewTime({
             )}
           </div>
           {appointment.terms.maxReschedules > 0 ? (
-            <label style={{ display: "block", fontSize: ".85rem" }}>
-              <input type="checkbox" name="countsAsClientMove" defaultChecked /> The client asked for this move. It counts as a reschedule of
-              theirs: the booking is then no longer refunded automatically, as the rental terms say
-              {appointment.terms.rescheduleFeeCents > 0
-                ? `, and each move beyond their ${appointment.terms.maxReschedules === 1 ? "free one" : `${appointment.terms.maxReschedules} free ones`} costs them ${formatCents(appointment.terms.rescheduleFeeCents)} online`
-                : ""}
-              . Untick it when the studio needs the change.
-            </label>
+            // Who asked decides what the move costs the client, so neither is chosen to begin with (the owners' decision of
+            // 2026-11-27): the box that said it started ticked, and a move the studio needed used up the client's free one.
+            <fieldset className="move-asked">
+              <legend>Who asked for this move?</legend>
+              <label>
+                <input type="radio" name="asked" value="client" required /> <strong>The client.</strong> {clientMoveSentence(appointment)}
+              </label>
+              <label>
+                <input type="radio" name="asked" value="studio" required /> <strong>The studio.</strong> It costs the client nothing and does not count as a
+                reschedule of theirs: the booking keeps its refund and their free {appointment.terms.maxReschedules === 1 ? "move" : "moves"}.
+              </label>
+              {owner && fee > 0 && (
+                <label className="move-waive">
+                  <input type="checkbox" name="waiveFee" /> No fee this time (owners only): the client asked, and the {formatCents(fee)} is let go.
+                </label>
+              )}
+            </fieldset>
           ) : (
             <p style={{ fontSize: ".85rem", margin: 0 }}>
               Moving is switched off under Settings, so the rental terms say nothing about it: the move does not count against the client, and

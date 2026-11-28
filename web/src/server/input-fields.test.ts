@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { emailField, lineField, textField } from "./input-fields";
+import { PHONE_FIELD } from "@/lib/parse";
+import { emailField, lineField, phoneField, textField } from "./input-fields";
 
 describe("what a client types", () => {
   it("keeps a name and a phone number on one line", () => {
@@ -13,6 +14,32 @@ describe("what a client types", () => {
     expect(name.safeParse(" \n A \n ").success).toBe(false);
     expect(name.safeParse("N".repeat(121)).success).toBe(false);
     expect(lineField(7, 40).parse("407-555-0100\n407-555-0101")).toBe("407-555-0100 407-555-0101");
+  });
+
+  it("takes a phone number with at least seven digits, however it is written, and the field's pattern agrees", () => {
+    // The pattern a field gives the browser, read as a browser reads it.
+    const field = (text: string) => text.length >= PHONE_FIELD.minLength && text.length <= PHONE_FIELD.maxLength && new RegExp(`^(?:${PHONE_FIELD.pattern})$`, "v").test(text);
+    const numbers: [string, boolean][] = [
+      ["4075550100", true],
+      ["407-555-0100", true],
+      ["(407) 555-0100", true],
+      ["+1 407 555 0100 ext. 2", true],
+      ["555-0100", true],
+      ["407.555.0100, after 5 pm", true],
+      // Words in place of a number were taken before (the preview test of 2026-11-21, point 13).
+      ["no phone", false],
+      ["none given", false],
+      ["555-010", false],
+      ["call me", false],
+      ["1 2 3 4 5 6", false],
+      ["", false],
+      [`${"1".repeat(41)}`, false],
+    ];
+    for (const [text, taken] of numbers) {
+      expect(phoneField.safeParse(text).success, text).toBe(taken);
+      expect(field(text), `the field, for "${text}"`).toBe(taken);
+    }
+    expect(phoneField.parse(" 407-555-0100\n407-555-0101 ")).toBe("407-555-0100 407-555-0101");
   });
 
   it("keeps the lines of notes, with each line break counted once", () => {

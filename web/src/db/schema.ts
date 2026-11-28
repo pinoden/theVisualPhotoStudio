@@ -758,7 +758,8 @@ export const bookingCharges = pgTable(
     bookingId: uuid("booking_id")
       .notNull()
       .references(() => bookings.id, { onDelete: "cascade" }), // removed with a test-mode booking, as its holds are
-    kind: text("kind", { enum: ["overtime", "cleaning", "damage"] }).notNull(),
+    /** `reschedule`: the fee for a move the client asked the studio for after their free ones, added before the visit. */
+    kind: text("kind", { enum: ["overtime", "cleaning", "damage", "reschedule"] }).notNull(),
     amountCents: integer("amount_cents").notNull(),
     /** Overtime only: the minutes the client stayed past the end. */
     minutes: integer("minutes"),
@@ -772,7 +773,7 @@ export const bookingCharges = pgTable(
   },
   (t) => [
     index("booking_charges_booking_idx").on(t.bookingId),
-    check("booking_charges_kind", sql`${t.kind} in ('overtime', 'cleaning', 'damage')`),
+    check("booking_charges_kind", sql`${t.kind} in ('overtime', 'cleaning', 'damage', 'reschedule')`),
     check("booking_charges_amount", sql`${t.amountCents} > 0`),
   ],
 );

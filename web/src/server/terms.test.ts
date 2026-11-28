@@ -39,6 +39,7 @@ describe("a booking keeps the terms it was made under", () => {
       rescheduleFeeCents: 2000,
       creditValidDays: 90,
       memberReturnHours: 48,
+      lateCancelKeepsCode: false,
     });
   });
 
@@ -62,7 +63,7 @@ describe("a booking keeps the terms it was made under", () => {
     await change("creditValidDays", 10);
     const options = (await getManageOptions(world.db, booked.ref, byToken(booked.manageToken), NOW))!;
     expect(options.cancel).toMatchObject({ refundCents: 16720, feeCents: 880 }); // still 5%
-    expect(options.reschedule).toMatchObject({ allowed: true, creditCents: 17600, feeCents: 0 });
+    expect(options.reschedule).toMatchObject({ allowed: true, creditCents: 17600 });
     const moved = expectOk(await requestRescheduleCode(world.db, booked.ref, byToken(booked.manageToken), world.manageDeps()));
     const [code] = await world.db.select().from(promoCodes).where(eq(promoCodes.code, moved.code));
     expect(code.expiresAt).toEqual(daysAfter(NOW, 90));
@@ -71,10 +72,13 @@ describe("a booking keeps the terms it was made under", () => {
   it("takes its fee for a further move as it was, whatever the fee is now", async () => {
     const booked = expectOk(await world.book({ date: FAR }));
     const moved = expectOk(await requestRescheduleCode(world.db, booked.ref, byToken(booked.manageToken), world.manageDeps()));
-    // The new booking, made with the code before the owners change the fee, keeps $20 for its next move.
+    // The new booking, made with the code before the owners change the fee, keeps $20 for its next move, which the
+    // studio makes (the owners' decision of 2026-11-20): the fee is added to what the booking owes.
     const second = expectOk(await world.book({ date: FAR, startMinute: h(14), promoCode: moved.code, paymentToken: undefined }));
     await change("rescheduleFeeCents", 5000);
-    expect((await getManageOptions(world.db, second.ref, byToken(second.manageToken), NOW))!.reschedule).toMatchObject({ allowed: true, feeCents: 2000, creditCents: 15600 });
+    expect((await getManageOptions(world.db, second.ref, byToken(second.manageToken), NOW))!.reschedule).toEqual({ allowed: false, reason: "limit_reached" });
+    expect((await getManageChoices(world.db, second.ref, byToken(second.manageToken), NOW))!.reschedule.text).toContain("each further move costs $20.");
+    expect(await moveBooking(world.db, owner, second.ref, { date: FAR, startMinute: h(16), countsAsClientMove: true }, NOW)).toMatchObject({ ok: true, feeCents: 2000 });
   });
 
   it("counts a move the studio makes at the client's request under the booking's own terms", async () => {
@@ -119,7 +123,12 @@ describe("reading terms back", () => {
       rescheduleFeeCents: 2000,
       creditValidDays: 90,
       memberReturnHours: 48,
+      lateCancelKeepsCode: false,
     });
     expect(storedTerms({ photographerId: null, terms: "nonsense" }, DEFAULT_SETTINGS)).toEqual(termsAtBooking(DEFAULT_SETTINGS, false));
+    // Whether a late cancellation gives a code back is kept as yes or no; a booking from before it was kept follows the setting.
+    expect(storedTerms({ photographerId: null, terms: { lateCancelKeepsCode: true } }, DEFAULT_SETTINGS).lateCancelKeepsCode).toBe(true);
+    expect(storedTerms({ photographerId: null, terms: { lateCancelKeepsCode: "yes" } }, DEFAULT_SETTINGS).lateCancelKeepsCode).toBe(false);
+    expect(storedTerms({ photographerId: null, terms: {} }, { ...DEFAULT_SETTINGS, lateCancelKeepsCode: true }).lateCancelKeepsCode).toBe(true);
   });
 });
