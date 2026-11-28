@@ -169,6 +169,8 @@ export async function editBooking(db: Db, viewer: AuthUser, ref: string, input: 
       promo,
       // The tax rule it was made under: a booking from before tax stays without.
       tax: taxRuleOf(found),
+      // And the sale: what the studio adds or takes away is priced as the booking was sold.
+      sale: found.sale,
     });
   } catch (error) {
     if (error instanceof PricingError) return refuse(error.message);
@@ -210,6 +212,7 @@ export async function editBooking(db: Db, viewer: AuthUser, ref: string, input: 
           creditAppliedCents,
           taxCents: priced.taxCents,
           totalCents: priced.totalCents,
+          saleCents: priced.saleCents ?? 0,
         })
         .where(eq(bookings.id, booking.id));
       // Its studios, each with its own gap after the booking and its price now. The database refuses two bookings of

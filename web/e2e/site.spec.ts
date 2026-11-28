@@ -49,6 +49,7 @@ const REPRICE_SATURDAY = dateAhead(150, "saturday"); // and for the booking the 
 const REPRICE_WEEKDAY = dateAhead(164);
 const TAX_DAY = dateAhead(171); // and for the booking made while the owners charge a sales tax
 const CODE_DAYS_SATURDAY = dateAhead(157, "saturday"); // a Saturday a weekdays-only code is tried on, and nothing booked
+const SALE_DAY = dateAhead(87); // and for the booking made at a sale's price
 
 const jane = { name: "Jane Smith", email: "jane.e2e@example.com", phone: "407-555-0100" };
 const bob = { name: "Bob Brown", email: "bob.e2e@example.com", phone: "407-555-0111" };
@@ -70,6 +71,8 @@ const INBOX_OWNER = "owner15@studio.test";
 const FORMS_OWNER = "owner16@studio.test";
 /** Looks at the fully booked day. */
 const FULL_DAY_OWNER = "owner17@studio.test";
+/** Puts a studio on sale. */
+const SALE_OWNER = "owner19@studio.test";
 const STAFF = "sam.e2e@studio.test";
 const MANAGER = "mia.e2e@studio.test";
 
@@ -1254,6 +1257,75 @@ test("the owner sets a weekend price and the booking screen charges it on Saturd
   await client.getByRole("button", { name: "1 hr", exact: true }).click();
   await expect(totalRow(client)).toContainText("$68");
   await expect(client.locator(".price-row.price-tax")).toHaveCount(0);
+  await client.context().close();
+});
+
+test("the owners put a studio on sale: its usual price is crossed out on the Rates page and the booking screen, the sale's price is charged, and it ends when they end it", async ({ page, browser }) => {
+  // The owner, 2026-11-27: "it is Black Friday weekend and the owner wants to decrease the price for one or whole
+  // studios. So I want them to be able to do that without extra deployment, and I want the price be crossed out, like
+  // not 78 but 65 hours only today and tomorrow" (question 87 in ProjectLibrary.md). Dayglow's hour is $78.
+  const tomorrow = longDateLabel(addDays(todayInStudio(), 1));
+  await signIn(page, SALE_OWNER, "/admin/prices");
+  await expect(page.locator("#sales")).toContainText("No sale yet.");
+  const form = page.locator("#sale-form");
+  await byLabel(page, "Name, as clients read it").fill("Black Friday");
+  await byLabel(page, "Percent off").fill("17");
+  await form.getByRole("checkbox", { name: "Studio Dayglow" }).check();
+  // From today, as the form starts, until tomorrow.
+  await byLabel(page, "Booked until (the last day)").fill(addDays(todayInStudio(), 1));
+  await form.getByRole("button", { name: "Add the sale" }).click();
+  await expect(byText(page, "Sale added. It begins and ends by itself, on its days.")).toBeVisible();
+  const saleRow = page.locator("#sales").getByRole("row", { name: /Black Friday/ });
+  await expect(saleRow).toContainText(`17% off Studio Dayglow when you book by ${tomorrow}.`);
+  await expect(saleRow).toContainText("On now");
+  await shot(page, "17d-admin-sale");
+  expect(await accessibilityProblems(page), "Prices, with a sale").toEqual([]);
+
+  // A visitor reads on the Rates page what is on, and Dayglow's usual prices crossed out beside the sale's.
+  const client = await (await browser.newContext()).newPage();
+  await client.goto("/rates");
+  await expect(onScreen(client.locator(".sale-note"))).toHaveText(`Black Friday: 17% off Studio Dayglow when you book by ${tomorrow}.`);
+  // A studio's own card: a session's card with the same heading is a section.
+  const ratesOf = (name: string) => onScreen(client.locator("div.rate-card", { has: client.getByRole("heading", { name, exact: true }) }));
+  await expect(ratesOf("Studio Dayglow").locator(".rate-price")).toHaveText("Usual price $78 now $65");
+  await expect(ratesOf("Studio Dayglow").locator(".rate-price s")).toHaveText("$78");
+  await expect(ratesOf("Studio Dayglow").locator(".rate-price s")).toHaveCSS("text-decoration-line", "line-through");
+  // Paris is not on sale.
+  await expect(ratesOf("Studio Paris").locator(".rate-price")).toHaveText("$68");
+  await expect(ratesOf("Studio Paris").locator("s")).toHaveCount(0);
+  await shot(client, "17e-rates-sale");
+  expect(await accessibilityProblems(client, { contrast: true }), "the Rates page with a sale").toEqual([]);
+
+  // The booking screen says the same, and an hour of Dayglow is charged $65.
+  await client.goto("/book");
+  await expect(onScreen(client.locator(".sale-banner"))).toHaveText(`Black Friday: 17% off Studio Dayglow when you book by ${tomorrow}.`);
+  await expect(onScreen(client.locator("label.studio-option", { hasText: "Studio Dayglow" })).locator(".studio-option-rate")).toHaveText("From Usual price $78 now $65 / hour");
+  await expect(onScreen(client.locator("label.studio-option", { hasText: "Studio Paris" })).locator(".studio-option-rate")).toHaveText("From $68 / hour");
+  await bookStudioFirstToPayment(client, { studios: ["Studio Dayglow"], date: SALE_DAY, duration: "1 hr", time: "10:00 AM", customer: { name: "Sally Saver", email: "sally.e2e@example.com", phone: "407-555-0177" } });
+  await expect(onScreen(client.locator(".price-row", { hasText: "Studio Dayglow, 1 hour" }))).toContainText("Usual price $78 now $65");
+  await expect(onScreen(client.locator(".price-row.price-sale-note"))).toHaveText("Black Friday: $13 off the usual price");
+  await expect(totalRow(client)).toContainText("$65");
+  await shot(client, "17f-checkout-sale");
+  expect(await accessibilityProblems(client, { contrast: true }), "checkout with a sale").toEqual([]);
+  await confirmAndGetRef(client, "Confirm & pay $65");
+  // The booking's page says what it was sold at.
+  await expect(onScreen(client.locator(".price-row.price-sale-note"))).toHaveText("Black Friday: $13 off the usual price");
+  await expect(totalRow(client)).toContainText("$65");
+  const bookingPage = client.url();
+
+  // The owners end it: the usual price everywhere, for the tests that follow too. The booking keeps its price.
+  await saleRow.getByRole("button", { name: "End now: Black Friday" }).click();
+  await expect(byText(page, "The sale has ended. The bookings made under it keep their prices.")).toBeVisible();
+  await expect(page.locator("#sales")).toContainText("No sale yet.");
+  await client.goto("/rates");
+  await expect(ratesOf("Studio Dayglow").locator(".rate-price")).toHaveText("$78");
+  await expect(client.locator(".sale-note")).toHaveCount(0);
+  await client.goto("/book");
+  await expect(client.locator(".sale-banner")).toHaveCount(0);
+  await expect(onScreen(client.locator("label.studio-option", { hasText: "Studio Dayglow" })).locator(".studio-option-rate")).toHaveText("From $78 / hour");
+  await client.goto(bookingPage);
+  await expect(onScreen(client.locator(".price-row.price-sale-note"))).toHaveText("Black Friday: $13 off the usual price");
+  await expect(totalRow(client)).toContainText("$65");
   await client.context().close();
 });
 

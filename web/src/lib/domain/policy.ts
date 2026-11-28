@@ -34,6 +34,8 @@ export interface BookingFacts {
   creditAppliedCents: number;
   /** Taken off the price by a percent code (a loyalty code, for example), with the sales tax it saved. That code is used up. */
   discountCents: number;
+  /** Taken off the studios' prices by a sale the booking was made under (sale.ts), with the sales tax it saved. Left out: none. */
+  saleCents?: number;
   /**
    * The pet fee on the booking. The owner's rule (2026-11-15): it is never
    * refunded to the card, and when the pet does not come it is returned as
@@ -157,8 +159,10 @@ export type RescheduleOutcome =
       allowed: true;
       /** What the new code is worth. */
       creditCents: number;
-      /** The part of it that is the discount a percent code gave on this booking, not money paid. */
+      /** The part of it that is no money paid: what a percent code and a sale took off this booking. */
       discountCents: number;
+      /** The part of `discountCents` that a sale took off: there only when one did. */
+      saleCents?: number;
       /**
        * Whether the new booking can be moved online again, by the terms it will be made under: only while free moves are
        * left, and not while the owners have moving switched off (the tester's third pass of 2026-11-18).
@@ -204,9 +208,18 @@ export function rescheduleOutcome(
   const paidCents = booking.cardPaidCents + booking.creditAppliedCents + Math.max(0, booking.paidAtStudioCents ?? 0) - returnedCents;
   // A booking that cost nothing is cancelled instead: that gives its code back.
   if (paidCents <= 0) return { allowed: false, reason: "nothing_paid" };
-  const discountCents = Math.max(0, booking.discountCents);
+  // What a sale took off travels like a discount code's saving: the same booking at a new time, when the sale is
+  // over, costs nothing more (the builder's reading, question 87).
+  const saleCents = Math.max(0, booking.saleCents ?? 0);
+  const discountCents = Math.max(0, booking.discountCents) + saleCents;
   const nextMovable = booking.rescheduledCount + 1 < nextTerms.maxReschedules;
   // With moving switched off in the new booking's terms, they say nothing about a move: the studio's costs nothing.
   const nextFeeCents = nextMovable || nextTerms.maxReschedules <= 0 ? 0 : nextTerms.rescheduleFeeCents;
-  return { allowed: true, creditCents: paidCents + discountCents, discountCents, nextMovable, nextFeeCents };
+  return { allowed: true, creditCents: paidCents + discountCents, discountCents, ...(saleCents > 0 ? { saleCents } : {}), nextMovable, nextFeeCents };
+}
+
+/** Whose saving a reschedule code carries besides the money paid: "your discount code", "the sale price", or both. */
+export function savingWords(amounts: { discountCents: number; saleCents?: number }): string {
+  const sale = amounts.saleCents ?? 0;
+  return sale <= 0 ? "your discount code" : sale >= amounts.discountCents ? "the sale price" : "your discount code and the sale price";
 }

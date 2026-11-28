@@ -45,6 +45,8 @@ const PAID_ONLINE: BookingView = {
   endRequest: null,
   accepted: [],
   initialed: [],
+  saleName: null,
+  saleCents: 0,
 };
 
 /** The summary's last row, as its two sides read. */

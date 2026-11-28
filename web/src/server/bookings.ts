@@ -17,6 +17,7 @@ import { extraGuestsFor, studioCombinationError } from "@/lib/catalog-view";
 import { businessDaysInWords, isStartFree, noticeHours } from "@/lib/domain/availability";
 import { labelOf, type LabelKey } from "@/lib/domain/labels";
 import { formatCents, priceRows, PricingError, promoMisfitText, quote, taxRuleFor, type PromoKind, type Quote } from "@/lib/domain/pricing";
+import { saleFor } from "@/lib/domain/sale";
 import type { PromoDays } from "@/lib/domain/promo-days";
 import { count, hoursInWords } from "@/lib/words";
 import { durationLabel, isIsoDate } from "@/lib/domain/time";
@@ -55,7 +56,7 @@ import { acceptancesOf, checkForms, initialedOf, recordForms, type AcceptedItem,
 import { propsProblem } from "./props";
 import { termsAtBooking } from "./terms";
 import { moneyKindNow, moneyKindOf, moneyKindOfCode, OTHER_MONEY_CODE } from "./test-mode";
-import { formatInstant, localToUtc } from "./tz";
+import { formatInstant, localDateOf, localToUtc } from "./tz";
 
 const addonsField = z
   .array(z.object({ addonId: z.uuid(), quantity: z.number().int().min(1).max(20) }))
@@ -316,6 +317,8 @@ export async function quoteSelection(db: DbLike, rawInput: unknown, now: Date, p
       membership,
       photoPackage: session,
       tax: taxRuleFor(catalog.settings, session !== null),
+      // The sale on now, for that day's studio time: worked out here as the booking will be (`createBooking`).
+      sale: session ? null : saleFor(catalog.sales, localDateOf(now), input.date, input.studioIds),
     });
     // A code that exists but cannot be used on this selection is refused with the reason.
     if (price.promoMisfit) return fail(422, "invalid_code", promoMisfitText(price.promoMisfit, promo, { date: input.date, special: input.date in catalog.specialDates }));
@@ -420,6 +423,9 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
   }
 
   const taxRule = taxRuleFor(catalog.settings, session !== null);
+  // The sale the booking is made under: by the studio's day now, and the day of its studio time (sale.ts). One the
+  // studio makes for a client gets it like any other.
+  const sale = session ? null : saleFor(catalog.sales, localDateOf(now), input.date, input.studioIds);
   let price: Quote;
   try {
     price = quote({
@@ -437,6 +443,7 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
       membership: member ? { minutesLeft: member.minutesLeft, weekendDifference: catalog.settings.memberWeekendDifference } : null,
       photoPackage: session,
       tax: taxRule,
+      sale,
     });
   } catch (error) {
     if (error instanceof PricingError) return fail(422, "invalid_price", error.message);
@@ -557,6 +564,9 @@ export async function createBooking(db: Db, rawInput: unknown, deps: BookingDeps
             ...(price.taxBasisPoints > 0 ? { taxBasisPoints: price.taxBasisPoints, taxStudio: taxRule.studio, taxAddons: taxRule.addons } : {}),
             // The kind of day it is priced as, which a move by the studio compares the new day with (follow-up 5).
             pricedAs: day.dayType,
+            // The sale it was sold under, and what that took off: both stay with the booking.
+            sale: price.saleCents ? sale : null,
+            saleCents: price.saleCents ?? 0,
             // Money that was already moved once stays "moved" on the new booking.
             rescheduledCount: spendsCode && promo!.source === "reschedule" ? promo!.rescheduleGeneration : 0,
             manageTokenHash: hashToken(manageToken),
@@ -848,6 +858,9 @@ export interface BookingView {
   accepted: AcceptedItem[];
   /** The statements the client initialed at checkout, in the words they read. */
   initialed: InitialedItem[];
+  /** The sale it was made under, by name, and what that took off the studios' prices; null and 0 for none. */
+  saleName: string | null;
+  saleCents: number;
 }
 
 type BookingRow = typeof bookings.$inferSelect;
@@ -936,6 +949,8 @@ export async function toBookingViews(db: DbLike, rows: BookingRow[], now: Date =
     endRequest: booking.endRequest && booking.endRequestedAt ? { kind: booking.endRequest, at: booking.endRequestedAt.toISOString() } : null,
     accepted: accepted.get(booking.id) ?? [],
     initialed: initialed.get(booking.id) ?? [],
+    saleName: booking.saleCents > 0 ? (booking.sale?.name ?? null) : null,
+    saleCents: booking.saleCents,
   }));
 }
 

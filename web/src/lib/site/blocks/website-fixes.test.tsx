@@ -53,6 +53,7 @@ const catalog: Catalog = {
     plan("m-pd5", "Paris and Dayglow, 5 hours a month", [P, D], 5, 520),
     plan("m-all5", "All three studios, 5 hours a month", [P, D, B], 5, 780),
   ],
+  sales: [],
 };
 const site = { ...EMPTY_SITE, catalog } as SiteContext;
 const block = (type: BlockName, props: Record<string, unknown> = {}): StoredBlock => ({ type, props: { ...startProps(BLOCKS[type].fields), ...props, id: `${type}-1` } });

@@ -4,7 +4,7 @@ import type { Design } from "@/lib/site/design";
 import type { CustomFont } from "@/lib/site/fonts";
 import { announcementShows, type SiteFrame } from "@/lib/site/frame";
 import { currentPolicies, type PoliciesVersion } from "./booking-forms";
-import { loadCatalog, type Catalog } from "./catalog";
+import { loadCatalog, salesAround, type Catalog } from "./catalog";
 import { loadCustomFonts } from "./fonts";
 import { loadPictures, type Picture } from "./media";
 import { findRedirect, loadPublishedPage, type ShownPage } from "./pages";
@@ -25,7 +25,8 @@ export async function getCatalog(): Promise<Catalog> {
   cacheTag(CATALOG_TAG);
   cacheLife("minutes");
   const db = await getDb();
-  return loadCatalog(db);
+  // Worked out again every few minutes, so a sale begins and ends on the pages by itself.
+  return salesAround(await loadCatalog(db), localDateOf(new Date()));
 }
 
 /** The design, with the owners' own fonts that it may name. */

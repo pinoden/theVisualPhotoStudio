@@ -11,6 +11,7 @@ import { LONGEST_BOOKINGS } from "@/server/settings";
 import { localDateOf } from "@/server/tz";
 import { addBundleLengthAction, addDurationAction, saveLengthsAction, saveBundlePricesAction, saveDiscountAction, savePricesAction, saveSalesTaxAction, specialDateAction } from "../actions";
 import { AdminFrame, AdminLoading } from "../frame";
+import { SalesCard } from "./sales-card";
 
 export const metadata: Metadata = { title: "Prices", robots: { index: false } };
 
@@ -39,11 +40,13 @@ async function Prices({ searchParams }: Pick<PageProps<"/admin/prices">, "search
     .map((ids) => ({ ids, name: bundleName(catalog, ids), prices: tables.find((table) => table.studioIds.length === ids.length && ids.every((id) => table.studioIds.includes(id)))?.prices ?? [] }))
     // As the Rates page lists them: the fewest studios first, then the cheapest; one without prices after those with.
     .sort((a, b) => a.ids.length - b.ids.length || (a.prices[0]?.priceCents ?? Infinity) - (b.prices[0]?.priceCents ?? Infinity));
+  const query = await searchParams;
+  const editingSale = typeof query.sale === "string" ? (catalog.sales.find((sale) => sale.id === query.sale) ?? null) : null;
   const between = catalog.settings.betweenLengthsMinutes;
   const longest = catalog.settings.longestBookingMinutes;
 
   return (
-    <AdminFrame active="/admin/prices" title="Prices" query={await searchParams}>
+    <AdminFrame active="/admin/prices" title="Prices" query={query}>
       <div className="admin-card">
         <h3>How prices work</h3>
         <p style={{ fontSize: ".875rem", margin: 0 }}>
@@ -103,6 +106,8 @@ async function Prices({ searchParams }: Pick<PageProps<"/admin/prices">, "search
           other length behind &ldquo;More&rdquo;.
         </p>
       </div>
+
+      <SalesCard sales={catalog.sales} catalog={catalog} today={today} editing={editingSale} />
 
       <div className="admin-card">
         <h3>Sales tax</h3>

@@ -5,6 +5,7 @@
  * (the only result that is ever charged).
  */
 import { promoDayMisfitText, promoFitsDay, type PromoDays } from "./promo-days";
+import { listsOnSale, type BookingSale } from "./sale";
 import type { DayType, IsoDate } from "./time";
 
 export interface PriceRule {
@@ -159,6 +160,11 @@ export interface QuoteInput {
   membership?: { minutesLeft: number; weekendDifference: boolean } | null;
   /** The sales tax to add. Left out, or at a rate of 0: none. */
   tax?: TaxRule | null;
+  /**
+   * The sale the booking is made under (sale.ts): what comes off each studio. `rules` and `bundlePrices` are the usual
+   * lists; the sale lowers them here. Never for a session, which has a price of its own.
+   */
+  sale?: Pick<BookingSale, "percents"> | null;
 }
 
 /** The most guests in all for studios booked together, by how many: the owners' settings (10 for two, 20 for three). */
@@ -210,6 +216,12 @@ export interface Quote {
   taxBasisPoints: number;
   /** What is left to pay: the prices, less discounts and membership hours, plus tax, less credit. */
   totalCents: number;
+  /**
+   * Only when a sale lowered the studios' prices: what it took off them, after the discount for several studios, and
+   * the studios' lines as they would be without it, in the order of `studioLines`, to show crossed out.
+   */
+  saleCents?: number;
+  usualStudioLines?: { studioId: string; priceCents: number }[];
 }
 
 export type PricingErrorCode =
@@ -427,7 +439,9 @@ export function unpriced(
 }
 
 export function quote(input: QuoteInput): Quote {
-  const { studioIds, dayType, durationMinutes, rules } = input;
+  const { studioIds, dayType, durationMinutes } = input;
+  const sale = input.sale && !input.photoPackage ? input.sale : null;
+  const { rules, bundlePrices } = listsOnSale(input.rules, input.bundlePrices, sale);
   if (studioIds.length === 0) throw new PricingError("NO_STUDIOS", "Select at least one studio.");
   if (new Set(studioIds).size !== studioIds.length) {
     throw new PricingError("DUPLICATE_STUDIO", "A studio was selected twice.");
@@ -441,7 +455,7 @@ export function quote(input: QuoteInput): Quote {
     }
   }
   // Studios with a price list together cost what it says, on any day, and nothing more comes off for booking several.
-  const together = photoPackage ? [] : bundleList(studioIds, input.bundlePrices);
+  const together = photoPackage ? [] : bundleList(studioIds, bundlePrices);
   const own = (studioId: string) => findPrice(studioId, dayType, durationMinutes, rules);
   let studioLines: Quote["studioLines"];
   if (together.length > 0) {
@@ -569,6 +583,10 @@ export function quote(input: QuoteInput): Quote {
   const beforeCreditCents = studioPartCents + addonsPartCents + taxCents;
   creditCents = Math.min(creditCents, beforeCreditCents);
 
+  // Under a sale: what the studios would cost without it, to say what it took off.
+  const usual = sale ? quote({ ...input, sale: null, addons: [], promo: null, membership: null, tax: null }) : null;
+  const saleCents = usual ? usual.studiosSubtotalCents - usual.multiStudioDiscountCents - (studiosSubtotalCents - multiStudioDiscountCents) : 0;
+
   return {
     studioLines,
     studiosSubtotalCents,
@@ -583,6 +601,7 @@ export function quote(input: QuoteInput): Quote {
     taxCents,
     taxBasisPoints: tax ? tax.basisPoints : 0,
     totalCents: beforeCreditCents - creditCents,
+    ...(usual && saleCents > 0 ? { saleCents, usualStudioLines: usual.studioLines } : {}),
   };
 }
 
