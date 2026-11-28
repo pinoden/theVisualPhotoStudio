@@ -27,6 +27,7 @@ const SOURCE_LABEL: Record<string, string> = {
   reschedule: "Reschedule credit",
   manual: "Made by you",
   pet_fee: "Pet fee returned",
+  cancel: "Late cancellation's credit",
   membership: "A membership",
 };
 

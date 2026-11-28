@@ -35,6 +35,7 @@ import {
 import type { PaymentProvider } from "./payments";
 import { moneyOf, recordStudioPayment, voidStudioPayment } from "./studio-payments";
 import { runScheduledTasks } from "./tasks";
+import { saveSetting } from "./settings";
 import { BASE_URL, createTestWorld, expectOk, FAR, h, minutesAfter, NEAR, NOW, type TestWorld } from "./testing";
 import { formatInstant } from "./tz";
 
@@ -394,6 +395,8 @@ describe("a booking that stops being active", () => {
   });
 
   it("counts a payment the client made just before cancelling: the terms of the cancellation apply to it", async () => {
+    // The rule before 2026-11-28, still the owners' to choose: a late cancellation gets no credit code.
+    await saveSetting(world.db, "cancelCodeEnabled", false);
     const made = await madeInAdmin(); // four days ahead: inside the refund window
     expectOk(await sendPayLink(world.db, owner, made.ref, deps()));
     clientPays();
@@ -544,6 +547,8 @@ describe("a booking that stops being active", () => {
 
 describe("what a client is told before cancelling or moving", () => {
   it("counts a payment made on the processor's page that the site has not seen yet", async () => {
+    // The rule before 2026-11-28, still the owners' to choose: a late cancellation gets no credit code.
+    await saveSetting(world.db, "cancelCodeEnabled", false);
     const made = await madeInAdmin(); // four days ahead: inside the refund window
     expectOk(await sendPayLink(world.db, owner, made.ref, deps()));
     clientPays();

@@ -35,6 +35,8 @@ describe("a booking keeps the terms it was made under", () => {
       refundWindowHours: 168,
       refundFeePercent: 5,
       rescheduleCutoffHours: 24,
+      cancelCodeEnabled: true,
+      cancelCodeUntilHours: 48,
       maxReschedules: 1,
       rescheduleFeeCents: 2000,
       creditValidDays: 90,
@@ -45,6 +47,8 @@ describe("a booking keeps the terms it was made under", () => {
   });
 
   it("is refunded by the window it was made under, while one made after the change follows the new window", async () => {
+    // The rule before 2026-11-28, still the owners' to choose: a late cancellation gets no credit code.
+    await change("cancelCodeEnabled", false);
     const before = expectOk(await world.book({ date: FAR })); // $176, 25 days ahead
     await change("refundWindowHours", 24 * 30); // 30 days: neither booking would be refundable under it
     const after = expectOk(await world.book({ date: FAR, startMinute: h(14) }));
@@ -98,6 +102,8 @@ describe("a booking keeps the terms it was made under", () => {
   });
 
   it("follows the settings of the day for a booking made before terms were kept", async () => {
+    // The rule before 2026-11-28, still the owners' to choose: a late cancellation gets no credit code.
+    await change("cancelCodeEnabled", false);
     const booked = expectOk(await world.book({ date: FAR }));
     await world.db.update(bookings).set({ terms: null }).where(eq(bookings.ref, booked.ref));
     await change("refundWindowHours", 24 * 30);
@@ -120,6 +126,8 @@ describe("reading terms back", () => {
       refundWindowHours: 168,
       refundFeePercent: 5,
       rescheduleCutoffHours: 24,
+      cancelCodeEnabled: true,
+      cancelCodeUntilHours: 48,
       maxReschedules: 2,
       rescheduleFeeCents: 2000,
       creditValidDays: 90,

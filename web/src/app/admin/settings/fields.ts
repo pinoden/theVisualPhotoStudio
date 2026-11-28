@@ -33,6 +33,11 @@ export const SETTING_GROUPS: { title: string; fields: SettingField[] }[] = [
       { key: "refundWindowHours", label: "Refund window (hours before start)", help: "168 is 7 days. Earlier cancellations are refunded automatically." },
       { key: "photoRefundWindowHours", label: "Refund window for photography and content creation (hours before start)", help: "336 is 14 days." },
       { key: "refundFeePercent", label: "Processing fee kept (%)", help: "0 refunds in full." },
+      {
+        key: "cancelCodeUntilHours",
+        label: "Credit code for a late cancellation until (hours before start)",
+        help: "48 is two days. Cancelled inside the refund window but at least this long before, a client gets what they paid as a credit code; later, nothing. Switched on and off below.",
+      },
       { key: "rescheduleCutoffHours", label: "Reschedule cut-off (hours before start)", help: "After this, customers must call." },
       { key: "maxReschedules", label: "Free reschedules per booking", help: "The moves a client makes online, with a reschedule code. 0 switches them off." },
       {

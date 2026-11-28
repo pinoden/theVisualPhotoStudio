@@ -223,6 +223,12 @@ async function AppointmentDetails({
                 ? "A code or studio credit it was made with comes back after any cancellation."
                 : "A code or studio credit it was made with comes back only when the client cancels in time for a refund, or the studio cancels. Studio credit not given back is yours to decide: the client is asked to contact the studio."}
             </li>
+            {appointment.terms.cancelCodeEnabled && appointment.terms.cancelCodeUntilHours < appointment.terms.refundWindowHours && (
+              <li>
+                Cancelled later than that, but {hoursInWords(appointment.terms.cancelCodeUntilHours)} or more before it starts: what was paid becomes a credit
+                code. Later: nothing, unless an owner refunds it.
+              </li>
+            )}
             {appointment.terms.weekdayCodeOnWeekdays && <li>Booked for a weekday, the code it is released for works on weekdays only (Monday to Friday, not a holiday).</li>}
           </ul>
           {appointment.terms.changedSince && (

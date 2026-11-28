@@ -17,6 +17,12 @@ export interface PolicySettings {
   rescheduleFeeCents: number;
   /** Whether the code for a rental booked for a weekday is for weekdays only (the owner, 2026-11-28). Left out: it is not. */
   weekdayCodeOnWeekdays?: boolean;
+  /**
+   * A cancellation inside the refund window but at least `cancelCodeUntilHours` before the start gives what was paid as
+   * a credit code (the owner, 2026-11-28). Left out: it gives nothing, as before.
+   */
+  cancelCodeEnabled?: boolean;
+  cancelCodeUntilHours?: number;
 }
 
 export interface BookingFacts {
@@ -75,9 +81,16 @@ export type CancelOutcome =
       byHandCents: number;
       /** The booking's pet fee, when it has one: `creditCents` can be less, when part of it was refunded already. */
       petFeeCents?: number;
+      /** `why` "code": what was paid, given as a credit code for a new booking instead of a refund. */
+      codeCents?: number;
+      /** That code is for weekdays only: the booking is a rental booked for a weekday (`rescheduleOutcome`'s rule). */
+      weekdaysOnly?: true;
       /** Why the refund is what it is. */
-      /** `rescheduled`: made with a reschedule code. `moved`: moved by the studio at the client's request. */
-      why: "refund" | "inside_window" | "rescheduled" | "moved" | "nothing_paid" | "paid_at_studio";
+      /**
+       * `rescheduled`: made with a reschedule code. `moved`: moved by the studio at the client's request. `code`: inside
+       * the refund window, early enough for a credit code. `inside_window`: too late for either.
+       */
+      why: "refund" | "inside_window" | "code" | "rescheduled" | "moved" | "nothing_paid" | "paid_at_studio";
     };
 
 const HOUR = 3_600_000;
@@ -109,8 +122,20 @@ export function cancellationOutcome(booking: BookingFacts, now: Date, settings: 
   });
   const atStudioCents = Math.max(0, booking.paidAtStudioCents ?? 0);
   if (booking.rescheduledCount > 0) return nothing(booking.madeWithRescheduleCode === false ? "moved" : "rescheduled");
+  const hours = hoursUntil(booking.startAt, now);
+  if (hours < settings.refundWindowHours && settings.cancelCodeEnabled === true && hours >= (settings.cancelCodeUntilHours ?? Infinity)) {
+    // Too late for a refund, early enough for a credit code: everything paid for the booking, studio credit and what
+    // was paid at the studio included, as a reschedule code carries it; a pet fee already returned as credit is not
+    // given twice. A discount is no money, and is not part of it.
+    const returnedCents = booking.petCreditGiven ? Math.max(0, booking.petFeeCents ?? 0) : 0;
+    const codeCents = booking.cardPaidCents + booking.creditAppliedCents + atStudioCents - returnedCents;
+    if (codeCents > 0) {
+      const weekdays = settings.weekdayCodeOnWeekdays === true && booking.weekdayRental === true;
+      return { ...nothing("code"), codeCents, ...(weekdays ? { weekdaysOnly: true as const } : {}) };
+    }
+  }
   if (booking.cardPaidCents <= 0 && atStudioCents <= 0) return nothing("nothing_paid");
-  if (hoursUntil(booking.startAt, now) < settings.refundWindowHours) return nothing("inside_window");
+  if (hours < settings.refundWindowHours) return nothing("inside_window");
   // Cancelled in time. The pet fee stays out of every refund, and so out of the fee: it comes back whole, as credit,
   // taken first from what the card paid and then from what was paid at the studio, which is the studio's to give back.
   const petFeeCents = Math.max(0, booking.petFeeCents ?? 0);

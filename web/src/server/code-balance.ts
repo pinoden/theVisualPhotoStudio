@@ -145,7 +145,7 @@ export interface StudioCodeCheck {
   balance: CodeBalance;
   /** The address it works with; null when anyone may use it. */
   whose: string | null;
-  origin: "loyalty" | "reschedule" | "manual" | "pet_fee" | "membership";
+  origin: "loyalty" | "reschedule" | "manual" | "pet_fee" | "cancel" | "membership";
   /** The booking it was issued for: the visit rewarded, or the booking moved. */
   originRef: string | null;
   /** What a code of credit was worth when it was issued: "$136". */

@@ -14,7 +14,7 @@ import { isLimiting, readPromoDays, type PromoDays } from "@/lib/domain/promo-da
  *  - free_hour: the price of one hour of one studio, usable `maxUses` times
  *    (the loyalty reward: once). `value` is the free minutes, 60.
  */
-export type PromoSource = "loyalty" | "reschedule" | "manual" | "pet_fee";
+export type PromoSource = "loyalty" | "reschedule" | "manual" | "pet_fee" | "cancel";
 
 /** What an amount code is, in the customer's words: a moved booking's money, or credit from the studio. */
 export function creditName(source: PromoSource): string {
@@ -205,7 +205,7 @@ export interface IssuePromoInput {
   bookingDays?: PromoDays | null;
 }
 
-const PREFIX: Record<PromoSource, string> = { loyalty: "THANKS", reschedule: "MOVE", manual: "VS", pet_fee: "PET" };
+const PREFIX: Record<PromoSource, string> = { loyalty: "THANKS", reschedule: "MOVE", manual: "VS", pet_fee: "PET", cancel: "CREDIT" };
 
 /**
  * Create a new code. Returns null when the code already exists: one for the

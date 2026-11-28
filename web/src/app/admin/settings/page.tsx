@@ -88,6 +88,16 @@ async function SettingsForm({ searchParams }: Pick<PageProps<"/admin/settings">,
             {group.title === "Cancelling and rescheduling" && (
               <>
                 <label style={{ display: "block", marginBottom: ".4rem", fontSize: ".9rem" }}>
+                  <input type="checkbox" name="cancelCodeEnabled" defaultChecked={settings.cancelCodeEnabled} /> A late cancellation gets a credit
+                  code
+                </label>
+                <p style={{ fontSize: ".78rem", margin: "0 0 1rem" }}>
+                  On, a client who cancels inside the refund window but at least the hours above before the start gets what they paid as a code
+                  for a new booking, valid as long as a reschedule code; nothing goes back to the card. Switch it off for a busy season: a late
+                  cancellation then gets nothing. Either way, a cancellation closer to the start gets nothing, and an owner can still refund an
+                  emergency from the booking (Bookings, Refund). A booking keeps the rule it was made under.
+                </p>
+                <label style={{ display: "block", marginBottom: ".4rem", fontSize: ".9rem" }}>
                   <input type="checkbox" name="lateCancelKeepsCode" defaultChecked={settings.lateCancelKeepsCode} /> A discount code, free
                   hour or studio credit comes back after any cancellation
                 </label>

@@ -10,6 +10,7 @@ import { netCardPaidCents, paidAtStudioCents } from "./money";
 import { loadReceipts } from "./receipts";
 import { settleReservedPayments } from "./reserved";
 import { moneyOf, recordHandRefund, recordStudioPayment, voidStudioPayment } from "./studio-payments";
+import { saveSetting } from "./settings";
 import { BASE_URL, createTestWorld, expectOk, FAR, h, hoursAfter, minutesAfter, NEAR, NOW, OWNER_EMAIL, type TestWorld } from "./testing";
 
 /**
@@ -369,6 +370,8 @@ describe("money taken at the studio and the site's own refunds", () => {
   });
 
   it("cancelled too late, or before anything was paid: the owner has nothing to do", async () => {
+    // The rule before 2026-11-28, still the owners' to choose: a late cancellation gets no credit code.
+    await saveSetting(world.db, "cancelCodeEnabled", false);
     const paid = await madeInAdmin(); // four days ahead
     expectOk(await recordStudioPayment(world.db, owner, paid.ref, cash(17600), NOW));
     const late = expectOk(await cancelBooking(world.db, paid.ref, { kind: "customer", email: "dana@example.com" }, world.manageDeps()));

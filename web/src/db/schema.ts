@@ -53,7 +53,8 @@ export const refundStatus = pgEnum("refund_status", ["pending", "succeeded", "fa
 export const paymentLinkStatus = pgEnum("payment_link_status", ["open", "paid", "cancelled"]);
 export const promoKind = pgEnum("promo_kind", ["percent", "amount", "free_hour"]);
 /** `pet_fee`: the pet fee of a booking, given back as studio credit because the pet did not come. */
-export const promoSource = pgEnum("promo_source", ["loyalty", "reschedule", "manual", "pet_fee"]);
+/** `cancel`: what was paid for a booking cancelled too late for a refund but early enough for a code (2026-11-28). */
+export const promoSource = pgEnum("promo_source", ["loyalty", "reschedule", "manual", "pet_fee", "cancel"]);
 export const cancelReason = pgEnum("cancel_reason", ["customer", "rescheduled", "owner"]);
 /** What a client asked for that waits for the card processor (`bookings.endRequest`): a cancellation, or a release for a reschedule code. */
 export const endRequest = pgEnum("end_request", ["cancel", "reschedule"]);

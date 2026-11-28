@@ -13,6 +13,9 @@ export interface BookingTerms {
   refundWindowHours: number;
   refundFeePercent: number;
   rescheduleCutoffHours: number;
+  /** Whether a late cancellation gets a credit code, and until how many hours before the start (`Settings.cancelCode*`). */
+  cancelCodeEnabled: boolean;
+  cancelCodeUntilHours: number;
   maxReschedules: number;
   rescheduleFeeCents: number;
   creditValidDays: number;
@@ -25,7 +28,7 @@ export interface BookingTerms {
 }
 
 /** The terms that are switches. A booking made before one was kept follows the setting of the day, like one made before any terms were. */
-const SWITCHES = ["lateCancelKeepsCode", "weekdayCodeOnWeekdays"] as const satisfies readonly (keyof BookingTerms)[];
+const SWITCHES = ["lateCancelKeepsCode", "weekdayCodeOnWeekdays", "cancelCodeEnabled"] as const satisfies readonly (keyof BookingTerms)[];
 /** The terms that are numbers, each within its setting's range. */
 type NumberTerm = Exclude<keyof BookingTerms, (typeof SWITCHES)[number]>;
 
@@ -33,6 +36,7 @@ const RANGES: Record<NumberTerm, readonly [number, number]> = {
   refundWindowHours: NUMBER_SETTING_RANGES.refundWindowHours,
   refundFeePercent: NUMBER_SETTING_RANGES.refundFeePercent,
   rescheduleCutoffHours: NUMBER_SETTING_RANGES.rescheduleCutoffHours,
+  cancelCodeUntilHours: NUMBER_SETTING_RANGES.cancelCodeUntilHours,
   maxReschedules: NUMBER_SETTING_RANGES.maxReschedules,
   rescheduleFeeCents: MONEY_SETTING_RANGES.rescheduleFeeCents,
   creditValidDays: NUMBER_SETTING_RANGES.creditValidDays,
@@ -47,6 +51,8 @@ export function termsAtBooking(settings: Settings, photography: boolean): Bookin
     refundWindowHours: photography ? settings.photoRefundWindowHours : settings.refundWindowHours,
     refundFeePercent: settings.refundFeePercent,
     rescheduleCutoffHours: settings.rescheduleCutoffHours,
+    cancelCodeEnabled: settings.cancelCodeEnabled,
+    cancelCodeUntilHours: settings.cancelCodeUntilHours,
     maxReschedules: settings.maxReschedules,
     rescheduleFeeCents: settings.rescheduleFeeCents,
     creditValidDays: settings.creditValidDays,
