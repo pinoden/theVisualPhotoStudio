@@ -1,4 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
+import type { IsoDate } from "@/lib/domain/time";
 import type { Catalog } from "@/server/catalog";
 import type { Picture } from "@/server/media";
 import { WHEN_OPTIONS, type Holds } from "../conditions";
@@ -34,6 +35,8 @@ export interface SiteContext {
   photography?: string[];
   /** The studios, their prices, hours and add-ons, and the settings: for the blocks that show the studio's data. */
   catalog?: Catalog;
+  /** The studio's day when the page was drawn: a sale is on, or not, by it (src/lib/domain/sale.ts). */
+  today?: IsoDate;
   /** The studio's name and contact details. */
   business?: Business;
   /** The live values a page's text can name (src/lib/site/live-values.ts), by name. */

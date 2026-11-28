@@ -70,6 +70,7 @@ const catalog: Catalog = {
   ],
   accessInfoSent: false,
   membershipPlans: [],
+  sales: [],
 };
 
 /** Taken time per studio that the fake server reports. */
@@ -417,6 +418,52 @@ describe("studio-first flow", () => {
       ],
       answers: {},
     });
+  });
+
+  it("shows a sale's prices beside the usual ones crossed out, and books at them (the owner, 2026-11-27)", async () => {
+    const blackFriday = { id: "sale-1", name: "Black Friday", percent: 25, studioIds: [P], bookFrom: "2000-01-01", bookUntil: "2999-12-31", visitFrom: null, visitUntil: null };
+    render(<BookingFlow catalog={{ ...catalog, sales: [blackFriday] }} navigate={nav.push} />);
+    // What is on, above the steps.
+    expect(screen.getByText(/25% off Studio Paris when you book by \w+, December 31, 2999\.$/).closest("p")!.textContent).toMatch(/^Black Friday: 25% off Studio Paris/);
+    // Paris, an hour: the usual $68 crossed out, and $51 beside it. Blanche is not on sale.
+    const rateOf = (name: string) => studioBox(name).closest("label")!.querySelector(".studio-option-rate")!;
+    expect(rateOf("Studio Paris").querySelector("s")!.textContent).toBe("$68");
+    expect(rateOf("Studio Paris").textContent).toBe("From Usual price $68 now $51 / hour");
+    expect(rateOf("Studio Blanche").textContent).toBe("From $88 / hour");
+    await user.click(studioBox("Studio Paris"));
+    await next();
+    pickDate(WED);
+    await pickDuration("2 hr");
+    await pickTime("9:00 AM");
+    await next();
+    // The summary: the studio's line at the sale's price, the usual one crossed out, and what came off.
+    const summary = [...document.querySelectorAll(".price-summary")].find((box) => box.textContent?.startsWith("When"))!;
+    expect(summary.textContent).toContain("Usual price $136 now $102");
+    expect(summary.textContent).toContain("Black Friday: $34 off the usual price");
+    await fillDetails();
+    await next();
+    await user.click(await screen.findByRole("button", { name: "Confirm & pay $102" }));
+    expect(posted[0]).toMatchObject({ studioIds: [P], expectedTotalCents: 10200 });
+  });
+
+  it("leaves a sale out for a day of studio time it is not for", async () => {
+    const untilNewYear = { id: "sale-1", name: "Black Friday", percent: 25, studioIds: [P], bookFrom: "2000-01-01", bookUntil: "2999-12-31", visitFrom: null, visitUntil: "2029-12-31" };
+    render(<BookingFlow catalog={{ ...catalog, sales: [untilNewYear] }} navigate={nav.push} />);
+    // Before a day is chosen the sale shows, as on a price list, with the days it is for.
+    expect(screen.getByText(/for studio time until Monday, December 31, 2029\.$/)).toBeTruthy();
+    expect(studioBox("Studio Paris").closest("label")!.querySelector("s")!.textContent).toBe("$68");
+    await user.click(studioBox("Studio Paris"));
+    await next();
+    // The ninth of January 2030 is past its days: the usual price, and no word of a sale.
+    pickDate(WED);
+    await pickDuration("2 hr");
+    await pickTime("9:00 AM");
+    await next();
+    expect(screen.queryByText(/25% off Studio Paris/)).toBeNull();
+    const summary = [...document.querySelectorAll(".price-summary")].find((box) => box.textContent?.startsWith("When"))!;
+    expect(summary.textContent).toContain("$136");
+    expect(summary.textContent).not.toContain("Usual price");
+    expect(summary.querySelector("s")).toBeNull();
   });
 
   it("sends the client back to read the policies again when they were published meanwhile", async () => {

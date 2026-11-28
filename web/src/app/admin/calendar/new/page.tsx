@@ -5,6 +5,7 @@ import { connection } from "next/server";
 import { Suspense } from "react";
 import { getDb } from "@/db/client";
 import { bookableDurations, formatCents, PricingError, quote, taxLabel, taxRuleFor } from "@/lib/domain/pricing";
+import { saleFor } from "@/lib/domain/sale";
 import { durationLabel, isIsoDate, longDateLabel } from "@/lib/domain/time";
 import { can } from "@/lib/abilities";
 import { extraGuestsFor, studioCombinationError } from "@/lib/catalog-view";
@@ -92,6 +93,8 @@ async function NewBooking({ searchParams }: Pick<PageProps<"/admin/calendar/new"
         bundlePrices: catalog.bundlePrices,
         multiStudioPercent: catalog.settings.multiStudioPercent,
         tax: taxRuleFor(catalog.settings, false),
+        // A sale on today is the client's, whoever types the booking in (`createBooking`).
+        sale: saleFor(catalog.sales, localDateOf(new Date()), date, studioIds),
       }).totalCents;
     } catch (error) {
       if (!(error instanceof PricingError)) throw error;

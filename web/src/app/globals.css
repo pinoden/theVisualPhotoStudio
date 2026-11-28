@@ -1488,6 +1488,21 @@ button { font-family: inherit; }
 @media (max-width: 560px) { .form-grid { grid-template-columns: 1fr; } }
 .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 4rem; align-items: center; }
 @media (max-width: 768px) { .two-col { grid-template-columns: 1fr; gap: 2rem; } }
+/* A sale (src/lib/domain/sale.ts): the usual price crossed out before the sale's, and the line that says what is on. */
+.price-usual { color: var(--color-muted); font-weight: 400; text-decoration-thickness: 1px; }
+.rate-price .price-usual { font-size: .6em; }
+.price-on-sale { color: var(--color-dark); font-weight: 700; }
+.sale-banner, .sale-note {
+  margin: 0 0 1.25rem;
+  padding: .7rem 1rem;
+  border-left: 3px solid var(--color-rose);
+  background: #fff;
+  color: var(--color-dark);
+  font-size: .92rem;
+  text-align: left;
+}
+.sale-notes .sale-note:last-child { margin-bottom: 1.5rem; }
+.price-sale-note { color: var(--color-muted); font-size: .85rem; }
 .price-table { width: 100%; border-collapse: collapse; font-size: .875rem; }
 .price-table td { padding: .35rem 0; border-bottom: 1px solid var(--color-border); }
 .price-table td:last-child { text-align: right; color: var(--color-dark); }
@@ -2848,7 +2863,7 @@ fieldset { min-inline-size: 0; }
 /* ── The bundles' prices, and the lengths between the listed ones (the owner's answers of 2026-11-25) ── */
 .rates-grid.bundle-prices { grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); }
 /* The line under the studios' prices spans the grid. */
-.rates-grid > .rates-note { grid-column: 1 / -1; text-align: center; font-size: .9rem; margin: .5rem auto 0; max-width: 46rem; }
+.rates-note { text-align: center; font-size: .9rem; margin: 2rem auto 0; max-width: 46rem; }
 /* The booking screen's list of the lengths between the buttons'. */
 /* "More": the lengths besides the first six (the owner, 2026-11-25). */
 .duration-btn.duration-more { border-style: dashed; }

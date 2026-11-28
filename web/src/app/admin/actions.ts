@@ -31,6 +31,8 @@ import {
   voidCode,
 } from "@/server/admin";
 import { CATALOG_TAG } from "@/server/cached";
+import { deleteSale, endSale, saveSale } from "@/server/sales";
+import { localDateOf } from "@/server/tz";
 import { FREE_HOUR_MINUTES } from "@/server/loyalty";
 import { ownerCancelBooking, ownerRefund, recordRefundMadeInSquare, type RefundsState } from "@/server/manage";
 import { resolvePayments } from "@/server/payments";
@@ -306,6 +308,36 @@ export async function saveSalesTaxAction(formData: FormData): Promise<void> {
   for (const key of ["taxStudioTime", "taxSessions", "taxAddons"] as const) await saveSetting(db, key, formData.get(key) === "on");
   updateTag(CATALOG_TAG);
   done("/admin/prices", basisPoints === 0 ? "No sales tax is added now." : `Sales tax saved: ${taxPercent(basisPoints)}, for bookings made from now on.`);
+}
+
+/** Add a sale, or change one (Admin → Prices, "Sales"; src/server/sales.ts). */
+export async function saveSaleAction(formData: FormData): Promise<void> {
+  await requireOwner("/admin/prices");
+  const id = text(formData, "id") || null;
+  const result = await saveSale(await getDb(), id, {
+    name: text(formData, "name"),
+    percent: text(formData, "percent"),
+    studioIds: formData.getAll("studio").map(String),
+    bookFrom: text(formData, "bookFrom"),
+    bookUntil: text(formData, "bookUntil"),
+    visitFrom: text(formData, "visitFrom"),
+    visitUntil: text(formData, "visitUntil"),
+  });
+  if (!result.ok) failed(id ? `/admin/prices?sale=${id}` : "/admin/prices", result.message);
+  updateTag(CATALOG_TAG); // the price lists and the booking screen show a sale
+  done("/admin/prices", id ? "Sale saved." : "Sale added. It begins and ends by itself, on its days.");
+}
+
+/** End a sale now, or delete one. The bookings made under it keep their prices. */
+export async function saleAction(formData: FormData): Promise<void> {
+  await requireOwner("/admin/prices");
+  const db = await getDb();
+  const id = text(formData, "id");
+  const intent = text(formData, "intent");
+  const found = intent === "end" ? await endSale(db, id, localDateOf(new Date())) : intent === "delete" ? await deleteSale(db, id) : false;
+  if (!found) failed("/admin/prices", "That sale is gone.");
+  updateTag(CATALOG_TAG);
+  done("/admin/prices", intent === "end" ? "The sale has ended. The bookings made under it keep their prices." : "Sale deleted. The bookings made under it keep their prices.");
 }
 
 export async function specialDateAction(formData: FormData): Promise<void> {

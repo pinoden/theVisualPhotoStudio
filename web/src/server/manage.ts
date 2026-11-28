@@ -12,6 +12,7 @@ import {
   cancellationOutcome,
   codeComesBack,
   rescheduleOutcome,
+  savingWords,
   type BookingFacts,
   type CancelBlock,
   type CancelOutcome,
@@ -116,6 +117,8 @@ async function factsFor(db: DbLike, booking: BookingRow): Promise<BookingFacts> 
     // off the studio price before sales tax, so it saved its tax too: a reschedule code carries both, or the same
     // booking at a new time, taxed on its whole price and paid with the code, would owe the tax on the discount.
     discountCents: withTaxOn(booking.promoDiscountCents - booking.creditAppliedCents, booking),
+    // And so did a sale: it lowered the studio price before the tax.
+    saleCents: withTaxOn(booking.saleCents, booking),
     petFeeCents,
     petCreditGiven: petFeeCents > 0 && (await petCreditOf(db, booking.id)) !== null,
     paidAtStudioCents: await paidAtStudioCents(db, booking.id),
@@ -243,7 +246,7 @@ function rescheduleOfferText(
   outcome: Extract<RescheduleOutcome, { allowed: true }>,
   settings: Pick<Settings, "creditValidDays">,
 ): string {
-  const discount = outcome.discountCents > 0 ? ` That is what you paid plus the ${formatCents(outcome.discountCents)} your discount code took off.` : "";
+  const discount = outcome.discountCents > 0 ? ` That is what you paid plus the ${formatCents(outcome.discountCents)} ${savingWords(outcome)} took off.` : "";
   // The client is told, before they use it, that the new booking cannot be moved online, and what the studio's move costs.
   const next = outcome.nextMovable
     ? ""
@@ -1406,6 +1409,7 @@ export async function requestRescheduleCode(db: Db, ref: string, actor: Actor, d
         code: issued.code,
         valueCents: decision.creditCents,
         discountCents: decision.discountCents,
+        saleCents: decision.saleCents,
         expires: formatInstant(expiresAt),
         bookUrl: `${deps.baseUrl.replace(/\/$/, "")}${bookPath}`,
         note: askedAt ? askedOn(askedAt) : null,

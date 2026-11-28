@@ -10,7 +10,7 @@ import { builtInPage, builtInPages } from "@/lib/site/built-in-pages";
 import { conditionsOf } from "@/lib/site/conditions";
 import { paragraphs } from "@/lib/site/rich-text";
 import type { AuthUser } from "./auth";
-import { loadCatalog } from "./catalog";
+import { loadCatalog, salesAround } from "./catalog";
 import { collectionShows, loadCollection } from "./collections";
 import { loadPhotographyPhotos, showsPhotographyPhotos } from "./photography-photos";
 import { loadPictures } from "./media";
@@ -128,7 +128,8 @@ async function pageSite(db: DbLike, content: PageContent, now: Date): Promise<Si
     pictures: Object.fromEntries(pictures),
     collections,
     ...(photography ? { photography: photography.map((picture) => picture.id) } : {}),
-    catalog,
+    catalog: salesAround(catalog, today),
+    today,
     business,
     values,
     conditions: conditionsOf(catalog),

@@ -2,7 +2,7 @@ import { and, asc, eq, isNull, lt, lte, sql } from "drizzle-orm";
 import { SERVICE_WORDS, type Service } from "@/lib/domain/services";
 import { emailOutbox } from "@/db/schema";
 import type { DbLike } from "@/db/client";
-import { afterFee } from "@/lib/domain/policy";
+import { afterFee, savingWords } from "@/lib/domain/policy";
 import { taxLabel, type PriceRow } from "@/lib/domain/pricing";
 import { durationLabel, longDateLabel } from "@/lib/domain/time";
 import { EMAIL_TEMPLATES, firstNameOf, renderEmail, type TemplateKey } from "@/lib/email-templates";
@@ -778,8 +778,10 @@ export function rescheduleCodeEmail(input: {
   ref: string;
   code: string;
   valueCents: number;
-  /** The part of the value that is a discount the customer's code gave, not money paid. */
+  /** The part of the value that is no money paid: what the customer's code and a sale took off. */
   discountCents?: number;
+  /** The part of `discountCents` that a sale took off. */
+  saleCents?: number;
   expires: string;
   bookUrl: string;
   /** Said of a release that waited for the card processor: when the client asked, and why it waited (`askedOn` in manage.ts). */
@@ -787,7 +789,7 @@ export function rescheduleCodeEmail(input: {
 }): QueuedEmail {
   const credit =
     (input.discountCents ?? 0) > 0
-      ? `Your booking ${input.ref} has been released. What you paid, plus the ${money(input.discountCents!)} your discount code took off, is now a credit of ${money(input.valueCents)}.`
+      ? `Your booking ${input.ref} has been released. What you paid, plus the ${money(input.discountCents!)} ${savingWords({ discountCents: input.discountCents!, saleCents: input.saleCents })} took off, is now a credit of ${money(input.valueCents)}.`
       : `Your booking ${input.ref} has been released, and what you paid is now a credit of ${money(input.valueCents)}.`;
   return written(
     "reschedule_code",

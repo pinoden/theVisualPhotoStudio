@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm";
+import type { BookingSale } from "../lib/domain/sale";
 import { SERVICES } from "../lib/domain/services";
 import {
   type AnyPgColumn,
@@ -313,6 +314,27 @@ export const bundlePrices = pgTable(
   ],
 );
 
+/**
+ * The owners' sales (src/lib/domain/sale.ts; question 87 in ProjectLibrary.md): a percentage off the studios' prices
+ * for bookings made on some days and, when the owners limit them, for studio time on some days. No studio named:
+ * every studio. A booking keeps what it was sold at (`bookings.sale`), so a sale is changed or deleted freely.
+ */
+export const sales = pgTable(
+  "sales",
+  {
+    id: id(),
+    name: text("name").notNull(),
+    percent: integer("percent").notNull(),
+    studioIds: jsonb("studio_ids").$type<string[]>().notNull().default([]),
+    bookFrom: date("book_from", { mode: "string" }).notNull(),
+    bookUntil: date("book_until", { mode: "string" }).notNull(),
+    visitFrom: date("visit_from", { mode: "string" }),
+    visitUntil: date("visit_until", { mode: "string" }),
+    createdAt: createdAt(),
+  },
+  (t) => [check("sales_percent", sql`${t.percent} between 1 and 90`), check("sales_days", sql`${t.bookUntil} >= ${t.bookFrom}`)],
+);
+
 /** Dates priced as a different day type than the calendar says (holidays). */
 export const specialDates = pgTable("special_dates", {
   day: date("day", { mode: "string" }).primaryKey(),
@@ -485,6 +507,14 @@ export const bookings = pgTable(
      * special date added since). Null for a booking made before it was kept (migration 0046 filled those in).
      */
     pricedAs: dayType("priced_as"),
+    /**
+     * The sale it was made under: what came off each of its studios, and the sale's name (`BookingSale`). Kept with the
+     * booking, so that a move or a change by the studio prices it as it was sold, whatever the sales are by then. Null
+     * for a booking at the usual prices.
+     */
+    sale: jsonb("sale").$type<BookingSale | null>(),
+    /** What the sale took off its studios' prices. A code given for moving the booking carries it (manage.ts). */
+    saleCents: integer("sale_cents").notNull().default(0),
 
     /** A booking that has been moved can no longer be refunded. */
     rescheduledCount: integer("rescheduled_count").notNull().default(0),

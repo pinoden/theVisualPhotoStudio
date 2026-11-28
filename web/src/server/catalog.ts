@@ -1,10 +1,11 @@
-import { asc, eq } from "drizzle-orm";
+import { asc, desc, eq } from "drizzle-orm";
 import type { Service } from "@/lib/domain/services";
-import { addons, bundlePrices, membershipPlans, membershipPlanStudios, photoPackages, photographers, priceRules, specialDates, studioHours, studios } from "@/db/schema";
+import { addons, bundlePrices, membershipPlans, membershipPlanStudios, photoPackages, photographers, priceRules, sales, specialDates, studioHours, studios } from "@/db/schema";
 import { together, type DbLike } from "@/db/client";
 import type { AddonKind } from "@/lib/addon-kinds";
 import { bundlePricesWithBetween, rulesWithBetween, type AddonDef, type BundlePrice, type PriceRule } from "@/lib/domain/pricing";
-import { defaultDayType, type DayType, type IsoDate } from "@/lib/domain/time";
+import type { Sale } from "@/lib/domain/sale";
+import { addDays, defaultDayType, type DayType, type IsoDate } from "@/lib/domain/time";
 import { parseStudioFacts, type StudioFacts } from "@/lib/studio-facts";
 import { loadPictures, type Picture } from "./media";
 import { loadAccessInstructions, loadSettings, type Settings } from "./settings";
@@ -84,10 +85,16 @@ export interface Catalog {
   accessInfoSent: boolean;
   /** The memberships on sale, in the owners' order: plans that are offered, all of whose studios are open. */
   membershipPlans: CatalogMembershipPlan[];
+  /**
+   * The owners' sales (src/lib/domain/sale.ts), the one that ends last first. Read from the database: every one, since
+   * pricing reads their dates against its own clock. Handed to a page: those that can be booked today or within a day
+   * of it (`salesAround`), so that a sale to come is not told before its day.
+   */
+  sales: Sale[];
 }
 
 export async function loadCatalog(db: DbLike): Promise<Catalog> {
-  const [studioRows, hourRows, ruleRows, addonRows, specialRows, settings, access, packageRows, photographerRows, photos, planRows, planStudioRows, bundleRows] = await together(db, [
+  const [studioRows, hourRows, ruleRows, addonRows, specialRows, settings, access, packageRows, photographerRows, photos, planRows, planStudioRows, bundleRows, saleRows] = await together(db, [
     () => db.select().from(studios).where(eq(studios.active, true)).orderBy(asc(studios.sortOrder), asc(studios.name)),
     () => db.select().from(studioHours),
     () => db.select().from(priceRules),
@@ -101,6 +108,7 @@ export async function loadCatalog(db: DbLike): Promise<Catalog> {
     () => db.select().from(membershipPlans).where(eq(membershipPlans.active, true)).orderBy(asc(membershipPlans.sortOrder), asc(membershipPlans.createdAt)),
     () => db.select().from(membershipPlanStudios),
     () => db.select().from(bundlePrices),
+    () => db.select().from(sales).orderBy(desc(sales.bookUntil), desc(sales.createdAt)).limit(200),
   ]);
 
   const activeIds = new Set(studioRows.map((s) => s.id));
@@ -187,7 +195,26 @@ export async function loadCatalog(db: DbLike): Promise<Catalog> {
         studioIds: studioRows.filter((studio) => planStudioRows.some((link) => link.planId === plan.id && link.studioId === studio.id)).map((studio) => studio.id),
       }))
       .filter((plan) => plan.studioIds.length > 0 && plan.studioIds.length === planStudioRows.filter((link) => link.planId === plan.id).length),
+    sales: saleRows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      percent: row.percent,
+      studioIds: row.studioIds,
+      bookFrom: row.bookFrom,
+      bookUntil: row.bookUntil,
+      visitFrom: row.visitFrom,
+      visitUntil: row.visitUntil,
+    })),
   };
+}
+
+/**
+ * A catalog as a page is handed it: with the sales that can be booked on `today` or within a day of it. A page is
+ * drawn a few minutes before it is read, and the device that reads it has its own clock, so the day before and the
+ * day after come too; the booking screen and the price lists then keep to the studio's day.
+ */
+export function salesAround<T extends Pick<Catalog, "sales">>(catalog: T, today: IsoDate): T {
+  return { ...catalog, sales: catalog.sales.filter((sale) => sale.bookFrom <= addDays(today, 1) && sale.bookUntil >= addDays(today, -1)) };
 }
 
 export function dayTypeFor(catalog: Pick<Catalog, "specialDates">, date: IsoDate): DayType {

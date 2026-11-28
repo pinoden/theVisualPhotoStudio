@@ -90,6 +90,13 @@ export function BookingSummary({ booking }: { booking: BookingView }) {
           <span>{formatCents(studio.priceCents)}</span>
         </div>
       ))}
+      {booking.saleCents > 0 && booking.saleName && (
+        <div className="price-row price-sale-note">
+          <span>
+            {booking.saleName}: {formatCents(booking.saleCents)} off the usual price
+          </span>
+        </div>
+      )}
       {booking.multiStudioDiscountCents > 0 && (
         <div className="price-row price-discount">
           <span>Multi-studio discount</span>

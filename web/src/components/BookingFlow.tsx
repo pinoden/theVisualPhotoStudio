@@ -45,8 +45,10 @@ import { keptText, readKept, stepHash, stepOfHash, stepToShowAgain, type Applied
 import { count, hoursInWords } from "@/lib/words";
 import type { DayAvailability } from "@/server/availability";
 import { agreementKey, initialsKey, initialsOf, policiesKey, type QuestionKind } from "@/lib/booking-form-keys";
+import { bookingSale, listsOnSale, salesInForce, saleWords } from "@/lib/domain/sale";
 import type { Catalog } from "@/server/catalog";
 import type { OwnDetails } from "@/server/own-details";
+import { SalePrice } from "./SalePrice";
 import { buyerVerification, useCardForm } from "./square-card";
 import { FAKE_PAYMENT_LABEL, FAKE_PAYMENT_NOTE, FAKE_PAYMENT_TOKEN } from "@/lib/fake-payment"; // FAKE PAYMENT
 
@@ -397,6 +399,13 @@ function BookingWizard({
     storeBooking(storageKey, { ...now, at: Date.now(), depth: depth.current });
   }, [storageKey, mode, stepIndex, studioIds, dateInput, durationChoice, start, moreLengths, addonCounts, name, email, phone, notes, answers, codeInput, applied]);
   const { settings, rules, bundlePrices } = catalog;
+  // The sales on now (src/lib/domain/sale.ts), by the studio's day: for the day chosen, and before one is chosen for
+  // any day, as a price list shows them. A session has a price of its own and is never on sale. The server works the
+  // same out again for what it charges.
+  const salesNow = useMemo(() => (photography ? [] : salesInForce(catalog.sales, today, date || null)), [photography, catalog.sales, today, date]);
+  const sale = useMemo(() => bookingSale(salesNow, catalog.studios.map((studio) => studio.id)), [salesNow, catalog.studios]);
+  /** The studios' prices as the sale lowers them, to show beside the usual ones. */
+  const saleRules = useMemo(() => listsOnSale(rules, bundlePrices, sale).rules, [rules, bundlePrices, sale]);
 
   const dayType: DayType = date ? (catalog.specialDates[date] ?? defaultDayType(date)) : "weekday";
   /**
@@ -566,13 +575,14 @@ function BookingWizard({
         membership: member?.membership ?? null,
         photoPackage: session ? { priceCents: session.priceCents, service: session.service } : null,
         tax: taxRuleFor(settings, Boolean(session)),
+        sale,
       });
     } catch {
       return null;
     }
     // availableAddons, guestsAllowed and mostOf are derived from studioIds and the catalog.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [studioIds, date, dayType, duration, rules, bundlePrices, settings.multiStudioPercent, catalog.addons, addonCounts, promo, member, photography, session, combinationError]);
+  }, [studioIds, date, dayType, duration, rules, bundlePrices, sale, settings.multiStudioPercent, catalog.addons, addonCounts, promo, member, photography, session, combinationError]);
 
   const needsCard = price !== null && price.totalCents > 0;
   // The payment configuration and Square's card form, on the payment step of a booking that costs money.
@@ -1095,6 +1105,10 @@ function BookingWizard({
 
   // Studios with one price together are one line (`studioPriceLines`).
   const studioLines = price ? studioPriceLines(price.studioLines.map((line) => ({ name: studioName(line.studioId), priceCents: line.priceCents })), price.multiStudioDiscountCents) : [];
+  // Under a sale, the same lines at the usual prices, to cross out beside them.
+  const usualLines = price?.usualStudioLines
+    ? studioPriceLines(price.usualStudioLines.map((line) => ({ name: studioName(line.studioId), priceCents: line.priceCents })), price.multiStudioDiscountCents)
+    : null;
 
   /** The sales tax, where the owners charge one: a line of its own, as the prices leave it out. */
   const taxLine = price && price.taxCents > 0 && (
@@ -1126,7 +1140,7 @@ function BookingWizard({
           {longDateLabel(date)}, {minutesToLabel(start)} – {minutesToLabel(start + duration)}
         </span>
       </div>
-      {studioLines.map((line) => (
+      {studioLines.map((line, index) => (
         <div className="price-row" key={line.name}>
           <span>
             {session && `${words.Session}, `}
@@ -1138,9 +1152,18 @@ function BookingWizard({
               </>
             )}
           </span>
-          <span>{formatCents(line.priceCents)}</span>
+          <span>
+            <SalePrice cents={line.priceCents} usual={usualLines?.[index]?.priceCents} />
+          </span>
         </div>
       ))}
+      {price.saleCents !== undefined && sale && (
+        <div className="price-row price-sale-note">
+          <span>
+            {sale.name}: {formatCents(price.saleCents)} off the usual price
+          </span>
+        </div>
+      )}
       {price.multiStudioDiscountCents > 0 && (
         <div className="price-row price-discount">
           <span>Multi-studio discount ({price.multiStudioPercent}%)</span>
@@ -1370,6 +1393,11 @@ function BookingWizard({
 
   return (
     <div className="wizard-container" ref={topRef} style={{ scrollMarginTop: 90 }}>
+      {salesNow.map((on) => (
+        <p className="sale-banner" key={on.id}>
+          <strong>{on.name}:</strong> {saleWords(on, catalog.studios)}.
+        </p>
+      ))}
       {!photography && (
         <div className="mode-toggle" role="radiogroup" aria-label="How would you like to book?">
           <button
@@ -1435,8 +1463,10 @@ function BookingWizard({
                   ? Math.min(...sessions.map((p) => p.priceCents))
                   : null
                 : mode === "time"
-                  ? findPrice(studio.id, dayType, duration, rules)
-                  : findPrice(studio.id, "weekday", 60, rules);
+                  ? findPrice(studio.id, dayType, duration, saleRules)
+                  : findPrice(studio.id, "weekday", 60, saleRules);
+              // What it costs without the sale, to cross out.
+              const usual = photography ? null : mode === "time" ? findPrice(studio.id, dayType, duration, rules) : findPrice(studio.id, "weekday", 60, rules);
               return (
                 <label className={`studio-option${unavailable ? " disabled" : ""}`} key={studio.id}>
                   <input
@@ -1461,9 +1491,15 @@ function BookingWizard({
                             ? mode === "time" && pricedStudioIds.includes(studio.id)
                               ? `For ${durationLabel(duration)}, in a bundle only`
                               : ""
-                            : mode === "time"
-                              ? `${formatCents(cents)} for ${durationLabel(duration)}`
-                              : `From ${formatCents(cents)} / hour`}
+                            : mode === "time" ? (
+                              <>
+                                <SalePrice cents={cents} usual={usual} /> for {durationLabel(duration)}
+                              </>
+                            ) : (
+                              <>
+                                From <SalePrice cents={cents} usual={usual} /> / hour
+                              </>
+                            )}
                     </div>
                   </div>
                 </label>

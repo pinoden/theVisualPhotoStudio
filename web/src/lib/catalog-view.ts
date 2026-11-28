@@ -1,7 +1,8 @@
 import { appointmentLook } from "@/lib/domain/appointment-look";
 import type { Catalog, CatalogStudio } from "@/server/catalog";
 import { extraGuestsAllowed, formatCents, multiStudioPercentFor } from "@/lib/domain/pricing";
-import { durationLabel, weekdayName, minutesToLabel } from "@/lib/domain/time";
+import { bookingSale, listsOnSale, salesInForce, type Sale } from "@/lib/domain/sale";
+import { durationLabel, weekdayName, minutesToLabel, type IsoDate } from "@/lib/domain/time";
 
 /** Blanche and Dayglow can be reserved together as part of the three-studio bundle. */
 export function studioCombinationError(studios: readonly Pick<CatalogStudio, "id" | "slug">[], studioIds: readonly string[]): string | null {
@@ -11,6 +12,18 @@ export function studioCombinationError(studios: readonly Pick<CatalogStudio, "id
     return "To book Blanche and Dayglow together, add Paris or choose a different combination.";
   }
   return null;
+}
+
+/**
+ * The catalog as today's sales lower it, for a price list: the studios' and the bundles' prices on sale, each with the
+ * usual one beside it (`usualCents`), and the sales themselves. The catalog as it is when no sale is on, or when the
+ * page does not know the day. A list knows no day of studio time, so a sale limited to some days shows too, and its
+ * line says which (`saleWords`).
+ */
+export function catalogOnSale(catalog: Catalog, today: IsoDate | undefined): { shown: Catalog; sales: Sale[] } {
+  const sales = today ? salesInForce(catalog.sales, today) : [];
+  const sale = bookingSale(sales, catalog.studios.map((studio) => studio.id));
+  return sale ? { shown: { ...catalog, ...listsOnSale(catalog.rules, catalog.bundlePrices, sale) }, sales } : { shown: catalog, sales: [] };
 }
 
 /** Lowest weekday price for one hour, used for "from $X/hour" labels. */

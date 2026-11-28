@@ -1,8 +1,10 @@
 import Image from "next/image";
 import { ContactForm as ContactFormView } from "@/components/ContactForm";
 import { PictureRow } from "@/components/site/PictureRow";
-import { bundleName, bundleTables, hasWeekendPricing, hourlyFromCents, hoursLines, openingHours, priceTable } from "@/lib/catalog-view";
+import { SalePrice } from "@/components/SalePrice";
+import { bundleName, bundleTables, catalogOnSale, hasWeekendPricing, hourlyFromCents, hoursLines, openingHours, priceTable } from "@/lib/catalog-view";
 import { formatCents } from "@/lib/domain/pricing";
+import { saleWords, type Sale } from "@/lib/domain/sale";
 import { sessionsOf } from "@/lib/domain/services";
 import { durationLabel } from "@/lib/domain/time";
 import { FACT_LABELS, sectionParts } from "@/lib/studio-facts";
@@ -38,13 +40,15 @@ export const StudioCards = defineBlock({
   render: ({ look, prices, viewLabel, bookLabel, site, editing }) => {
     const catalog = site.catalog;
     if (!catalog) return <EditorNote editing={editing}>{MISSING}</EditorNote>;
+    const { shown } = catalogOnSale(catalog, site.today);
     if (look === "arches") {
       // As the old website's home page showed the studios: each picture under an arch, the studio's name under it, and
       // the picture and the name leading to the studio. No button shows the studio: the arch does.
       return (
         <ul className="blk studio-arches">
           {catalog.studios.map((studio) => {
-            const from = hourlyFromCents(catalog, studio.id);
+            const from = hourlyFromCents(shown, studio.id);
+            const usualFrom = hourlyFromCents(catalog, studio.id);
             const photo = studio.photos[0];
             return (
               <li className="studio-arch" key={studio.id}>
@@ -58,7 +62,12 @@ export const StudioCards = defineBlock({
                   </span>
                   <span className="studio-arch-name">{studio.name}</span>
                 </SiteAnchor>
-                {prices && from !== null && <p className="studio-price">From {formatCents(from)}/hour</p>}
+                {prices && from !== null && (
+                  <p className="studio-price">
+                    From <SalePrice cents={from} usual={usualFrom} />
+                    /hour
+                  </p>
+                )}
                 {bookLabel && (
                   <SiteAnchor href={`/book?studio=${studio.slug}`} className="btn btn-outline" editing={editing}>
                     {bookLabel}
@@ -73,7 +82,8 @@ export const StudioCards = defineBlock({
     return (
       <div className="blk studios-grid">
         {catalog.studios.map((studio) => {
-          const from = hourlyFromCents(catalog, studio.id);
+          const from = hourlyFromCents(shown, studio.id);
+          const usualFrom = hourlyFromCents(catalog, studio.id);
           const photo = studio.photos[0];
           return (
             <div className="studio-card" key={studio.id}>
@@ -87,7 +97,12 @@ export const StudioCards = defineBlock({
               <div className="studio-card-body">
                 <h3>{studio.name}</h3>
                 <p>{studio.tagline}</p>
-                {prices && from !== null && <p className="studio-price">From {formatCents(from)}/hour</p>}
+                {prices && from !== null && (
+                  <p className="studio-price">
+                    From <SalePrice cents={from} usual={usualFrom} />
+                    /hour
+                  </p>
+                )}
                 {(viewLabel || bookLabel) && (
                   <div className="studio-card-buttons">
                     {viewLabel && (
@@ -120,10 +135,12 @@ export const StudioDetails = defineBlock({
   render: ({ bookLabel, site, editing }) => {
     const catalog = site.catalog;
     if (!catalog) return <EditorNote editing={editing}>{MISSING}</EditorNote>;
+    const { shown } = catalogOnSale(catalog, site.today);
     return (
       <div className="blk blk-studio-details">
         {catalog.studios.map((studio, index) => {
-          const from = hourlyFromCents(catalog, studio.id);
+          const from = hourlyFromCents(shown, studio.id);
+          const usualFrom = hourlyFromCents(catalog, studio.id);
           const [photo, ...more] = studio.photos;
           return (
             <section id={studio.slug} key={studio.id} className={`section ${index % 2 === 0 ? "section-cream" : "section-ivory"}`} style={{ scrollMarginTop: 72 }}>
@@ -161,7 +178,11 @@ export const StudioDetails = defineBlock({
                       {hoursLines(studio).map((line) => (
                         <li key={line}>{line}</li>
                       ))}
-                      {from !== null && <li>From {formatCents(from)} per hour</li>}
+                      {from !== null && (
+                        <li>
+                          From <SalePrice cents={from} usual={usualFrom} /> per hour
+                        </li>
+                      )}
                     </ul>
                     {(Object.keys(FACT_LABELS) as (keyof typeof FACT_LABELS)[]).some((name) => studio.facts[name] !== "") && (
                       <dl className="studio-facts">
@@ -247,6 +268,20 @@ export const StudioDetails = defineBlock({
 
 const BETWEEN_NOTE = "Need a different length? Every studio and bundle can be booked for {booking lengths}: the booking page shows the price of each.";
 
+/** The sales on now, above a price list: each says what comes off, until when, and for which days. */
+function SaleNotes({ sales, catalog }: { sales: Sale[]; catalog: { studios: { id: string; name: string }[] } }) {
+  if (sales.length === 0) return null;
+  return (
+    <div className="sale-notes">
+      {sales.map((sale) => (
+        <p className="sale-note" key={sale.id}>
+          <strong>{sale.name}:</strong> {saleWords(sale, catalog.studios)}.
+        </p>
+      ))}
+    </div>
+  );
+}
+
 export const RateCards = defineBlock({
   label: "Prices of the studios",
   group: "site",
@@ -263,52 +298,67 @@ export const RateCards = defineBlock({
   render: ({ bookLabel, betweenNote, site, editing }) => {
     const catalog = site.catalog;
     if (!catalog) return <EditorNote editing={editing}>{MISSING}</EditorNote>;
+    const { shown, sales } = catalogOnSale(catalog, site.today);
     const weekend = hasWeekendPricing(catalog);
     return (
-      <div className="blk rates-grid">
-        {catalog.studios.map((studio) => {
-          const from = hourlyFromCents(catalog, studio.id);
-          return (
-            <div className="rate-card" key={studio.id}>
-              <h3>{studio.name}</h3>
-              {from !== null && (
-                <>
-                  <div className="rate-price">{formatCents(from)}</div>
-                  <div className="rate-unit">per hour</div>
-                </>
-              )}
-              <hr className="rate-divider" />
-              <table className="price-table">
-                {weekend && (
-                  <thead>
-                    <tr>
-                      <th scope="col"><span className="visually-hidden">Duration</span></th>
-                      <th scope="col" style={{ textAlign: "right" }}>Mon–Fri</th>
-                      <th scope="col">Sat–Sun</th>
-                    </tr>
-                  </thead>
+      <>
+        {/* Above the cards, not among them: a line across the grid would keep a column the cards do not fill. */}
+        <SaleNotes sales={sales} catalog={catalog} />
+        <div className="blk rates-grid">
+          {catalog.studios.map((studio) => {
+            const from = hourlyFromCents(shown, studio.id);
+            const usualFrom = hourlyFromCents(catalog, studio.id);
+            const usualRows = priceTable(catalog, studio.id);
+            return (
+              <div className="rate-card" key={studio.id}>
+                <h3>{studio.name}</h3>
+                {from !== null && (
+                  <>
+                    <div className="rate-price">
+                      <SalePrice cents={from} usual={usualFrom} />
+                    </div>
+                    <div className="rate-unit">per hour</div>
+                  </>
                 )}
-                <tbody>
-                  {priceTable(catalog, studio.id).map((row) => (
-                    <tr key={row.durationMinutes}>
-                      <td style={{ textAlign: "left" }}>{durationLabel(row.durationMinutes)}</td>
-                      {weekend && <td style={{ textAlign: "right" }}>{row.weekdayCents === null ? "—" : formatCents(row.weekdayCents)}</td>}
-                      <td>{(weekend ? row.weekendCents : row.weekdayCents) === null ? "—" : formatCents((weekend ? row.weekendCents : row.weekdayCents)!)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <p style={{ fontSize: ".8rem", marginTop: "1rem" }}>Up to {studio.includedGuests} guests included.</p>
-              {bookLabel && (
-                <SiteAnchor href={`/book?studio=${studio.slug}`} className="btn btn-primary mt-2 rate-book" editing={editing}>
-                  {bookLabel}
-                </SiteAnchor>
-              )}
-            </div>
-          );
-        })}
+                <hr className="rate-divider" />
+                <table className="price-table">
+                  {weekend && (
+                    <thead>
+                      <tr>
+                        <th scope="col"><span className="visually-hidden">Duration</span></th>
+                        <th scope="col" style={{ textAlign: "right" }}>Mon–Fri</th>
+                        <th scope="col">Sat–Sun</th>
+                      </tr>
+                    </thead>
+                  )}
+                  <tbody>
+                    {priceTable(shown, studio.id).map((row, index) => {
+                      // The same lengths in the same order: a sale lowers prices and takes none away.
+                      const usual = usualRows[index];
+                      const last = weekend ? row.weekendCents : row.weekdayCents;
+                      return (
+                        <tr key={row.durationMinutes}>
+                          <td style={{ textAlign: "left" }}>{durationLabel(row.durationMinutes)}</td>
+                          {weekend && <td style={{ textAlign: "right" }}>{row.weekdayCents === null ? "—" : <SalePrice cents={row.weekdayCents} usual={usual?.weekdayCents} />}</td>}
+                          <td>{last === null ? "—" : <SalePrice cents={last} usual={weekend ? usual?.weekendCents : usual?.weekdayCents} />}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                <p style={{ fontSize: ".8rem", marginTop: "1rem" }}>Up to {studio.includedGuests} guests included.</p>
+                {bookLabel && (
+                  <SiteAnchor href={`/book?studio=${studio.slug}`} className="btn btn-primary mt-2 rate-book" editing={editing}>
+                    {bookLabel}
+                  </SiteAnchor>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        {/* Below the cards, not among them, for the same reason (it was among them from 2026-11-25 to 2026-11-28). */}
         {betweenNote && [...catalog.rules, ...catalog.bundlePrices].some((row) => row.between) && <p className="rates-note">{betweenNote}</p>}
-      </div>
+      </>
     );
   },
 });
@@ -329,6 +379,8 @@ export const BundlePrices = defineBlock({
     const catalog = site.catalog;
     if (!catalog) return <EditorNote editing={editing}>{MISSING}</EditorNote>;
     const tables = bundleTables(catalog);
+    const { shown } = catalogOnSale(catalog, site.today);
+    const onSale = new Map(bundleTables(shown).map((table) => [table.studioIds.join("+"), table]));
     if (tables.length === 0) {
       return <EditorNote editing={editing}>No bundle has prices of its own under Admin → Prices, so visitors see nothing here.</EditorNote>;
     }
@@ -337,24 +389,31 @@ export const BundlePrices = defineBlock({
       <div className="blk rates-grid bundle-prices">
         {tables.map((table) => {
           const members = table.studioIds.flatMap((id) => studios.get(id) ?? []);
-          const hour = table.prices.find((price) => price.durationMinutes === 60);
+          // The same lengths in the same order as the usual prices: a sale lowers prices and takes none away.
+          const sold = onSale.get(table.studioIds.join("+"))?.prices ?? table.prices;
+          const hourAt = table.prices.findIndex((price) => price.durationMinutes === 60);
+          const hour = hourAt < 0 ? null : table.prices[hourAt];
           const guests = members.reduce((sum, studio) => sum + studio.includedGuests, 0);
           return (
             <section className="rate-card" key={table.studioIds.join("+")} aria-label={table.name}>
               <h3>{table.name}</h3>
               {hour && (
                 <>
-                  <div className="rate-price">{formatCents(hour.priceCents)}</div>
+                  <div className="rate-price">
+                    <SalePrice cents={sold[hourAt].priceCents} usual={hour.priceCents} />
+                  </div>
                   <div className="rate-unit">per hour</div>
                 </>
               )}
               <hr className="rate-divider" />
               <table className="price-table">
                 <tbody>
-                  {table.prices.map((price) => (
+                  {table.prices.map((price, index) => (
                     <tr key={price.durationMinutes}>
                       <td style={{ textAlign: "left" }}>{durationLabel(price.durationMinutes)}</td>
-                      <td>{formatCents(price.priceCents)}</td>
+                      <td>
+                        <SalePrice cents={sold[index].priceCents} usual={price.priceCents} />
+                      </td>
                     </tr>
                   ))}
                 </tbody>
