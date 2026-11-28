@@ -2,10 +2,10 @@ import type { Metadata } from "next";
 import { sessionsOf } from "@/lib/domain/services";
 import Link from "next/link";
 import { Suspense } from "react";
+import { BookingFlow } from "@/components/BookingFlow";
 import { CodeBalanceCheck } from "@/components/CodeBalanceCheck";
 import { telHref } from "@/lib/site/frame";
 import { getCatalog } from "@/server/cached";
-import { BookingScreen } from "../booking-screen";
 import { checkoutPolicies } from "../checkout-policies";
 import { shareMetadata, siteFrame } from "@/server/site";
 
@@ -59,7 +59,7 @@ export default async function BookPhotographyPage() {
                 </div>
               }
             >
-              <BookingScreen catalog={catalog} photography service="photography" policies={policies} />
+              <BookingFlow catalog={catalog} photography service="photography" policies={policies} />
             </Suspense>
           </>
         )}

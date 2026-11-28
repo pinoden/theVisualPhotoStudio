@@ -40,6 +40,7 @@ import {
   type DayType,
 } from "@/lib/domain/time";
 import { EMAIL_FIELD, EMAIL_RULE, hasPhoneDigits } from "@/lib/parse";
+import { hintsSignedIn } from "@/lib/signed-in-hint";
 import { keptText, readKept, stepHash, stepOfHash, stepToShowAgain, type AppliedCode, type BookingMode, type BookingStep, type KeptBooking } from "@/lib/booking-progress";
 import { count, hoursInWords } from "@/lib/words";
 import type { DayAvailability } from "@/server/availability";
@@ -215,12 +216,6 @@ interface BookingFlowProps {
   photography?: boolean;
   /** Whose sessions, in the session flow: the photographer's or the content creator's (question 69). */
   service?: Service;
-  /**
-   * A signed-in client's own name, email address and phone number, which the page reads with their session
-   * (src/app/book/booking-screen.tsx): the details step starts with them, so that they are not typed again (the
-   * owners' decision of 2026-11-27). Null, or left out, for a visitor.
-   */
-  own?: OwnDetails | null;
 }
 
 /**
@@ -240,7 +235,6 @@ function BookingWizard({
   photography = false,
   service = "photography",
   policies = null,
-  own = null,
   kept,
   ready,
   storageKey,
@@ -293,10 +287,11 @@ function BookingWizard({
     // An add-on the owners took away since is not brought back.
     Object.fromEntries(Object.entries(kept?.addonCounts ?? {}).filter(([id]) => catalog.addons.some((addon) => addon.id === id))),
   );
-  // What was kept of a booking in the making, else a signed-in client's own details, else empty.
-  const [name, setName] = useState(kept?.name || own?.name || "");
-  const [email, setEmail] = useState(kept?.email || own?.email || "");
-  const [phone, setPhone] = useState(kept?.phone || own?.phone || "");
+  const [name, setName] = useState(kept?.name ?? "");
+  const [email, setEmail] = useState(kept?.email ?? "");
+  const [phone, setPhone] = useState(kept?.phone ?? "");
+  /** A signed-in client's own details were asked for (`fetchOwnDetails`): once for each screen. */
+  const ownAsked = useRef(false);
   const [notes, setNotes] = useState(kept?.notes ?? "");
   // The agreement to the policies is not kept: it is given again after a refresh.
   const [terms, setTerms] = useState(false);
@@ -676,6 +671,31 @@ function BookingWizard({
     }
   }
 
+  /**
+   * A signed-in client's own name, email address and phone number, into the fields that are still empty, so that they
+   * are not typed again (`/api/own-details`; the owners' decision of 2026-11-27). Asked once, when the details are
+   * first reached, and only when the menu's cookie says someone is signed in: the page is the same for everyone. Not
+   * as the page opens: WebKit reports a request still on its way when a page is left as an error of that page. And not
+   * with the page itself: drawn for each request, the screen came late, and a link pressed meanwhile led nowhere
+   * (React's error #412; CI's WebKit jobs of 2026-11-27).
+   */
+  async function fetchOwnDetails() {
+    if (ownAsked.current || !hintsSignedIn(document.cookie)) return;
+    ownAsked.current = true;
+    try {
+      const response = await fetch("/api/own-details", { cache: "no-store" });
+      const data = (await response.json().catch(() => ({}))) as { details?: OwnDetails | null };
+      const own = response.ok ? data.details : null;
+      if (!own) return;
+      // Only what is still empty: what the client typed, or what a refresh brought back, stays.
+      setName((typed) => typed || own.name);
+      setEmail((typed) => typed || own.email);
+      setPhone((typed) => typed || own.phone);
+    } catch {
+      // Without an answer the fields stay empty, as they were before.
+    }
+  }
+
   /** Read the questions and agreements a booking of these studios on this day meets (`/api/checkout-forms`). */
   async function fetchForms() {
     const key = formsKey;
@@ -709,7 +729,10 @@ function BookingWizard({
     // The month calendar is read fresh on each arrival too: bookings change while the client looks.
     if (target === "when" && duration > 0) void fetchMonth(month, duration);
     // The props free at the chosen time are read on each arrival at the details, where the add-ons are.
-    if (target === "details") void fetchPropsFree();
+    if (target === "details") {
+      void fetchPropsFree();
+      void fetchOwnDetails();
+    }
     // The booking form and agreements are read again for each booking they are shown for.
     if (target === "policies" && (options.refetch || forms?.key !== formsKey)) void fetchForms();
   }

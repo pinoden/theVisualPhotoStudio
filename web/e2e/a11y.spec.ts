@@ -35,6 +35,8 @@ test("the public pages can be used with a screen reader and a keyboard", async (
   for (const path of PUBLIC_PAGES) {
     await page.goto(path);
     await expect(page.locator("main h1, main h2").first()).toBeVisible();
+    // The booking screen comes once the page has started, and its first step fades in.
+    if (path.startsWith("/book")) await expect(page.locator(".wizard-panel h3").first()).toBeVisible();
     expect(await accessibilityProblems(page, { contrast: true }), path).toEqual([]);
   }
   // On a phone the menu folds behind a button, which opens it.

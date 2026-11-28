@@ -95,6 +95,9 @@ let bookingReply: { status: number; body: Record<string, unknown> };
 let lostAnswers: number;
 /** What `/api/booking-config` answers: how the browser is to collect payment. */
 let paymentConfig: { mode: string; fakePayment?: true };
+/** What `/api/own-details` answers a signed-in client, once `ownDetailsWait` lets it. */
+let ownDetails: { name: string; email: string; phone: string } | null;
+let ownDetailsWait: Promise<void>;
 
 function reply(body: unknown, status = 200) {
   return { ok: status < 400, status, json: async () => body };
@@ -105,6 +108,9 @@ beforeEach(() => {
   // (the tab's storage, the step its address marks) would otherwise pass from one test to the next.
   window.sessionStorage.clear();
   window.history.replaceState(null, "", "/book");
+  document.cookie = "vs_signed_in=; max-age=0; path=/";
+  ownDetails = null;
+  ownDetailsWait = Promise.resolve();
   busy = {};
   availabilityCalls = 0;
   monthAsked = [];
@@ -171,6 +177,10 @@ beforeEach(() => {
             busy: (busy[s.id] ?? []).map(([start, end]) => ({ start, end })),
           })),
         });
+      }
+      if (input === "/api/own-details") {
+        await ownDetailsWait;
+        return reply({ ok: true, details: ownDetails });
       }
       if (input === "/api/booking-config") return reply(paymentConfig);
       // The server accepts any code as a free hour for the address that asks.
@@ -1277,36 +1287,39 @@ describe("the browser's Back button, a refresh, and a signed-in client (the owne
     second.unmount();
   });
 
-  it("starts the details with a signed-in client's own name, email address and phone number", async () => {
-    render(<BookingFlow catalog={catalog} navigate={nav.push} own={{ name: "Jane Smith", email: "jane@example.com", phone: "407-555-0100" }} />);
+  const asked = (address: string) => vi.mocked(fetch).mock.calls.filter(([input]) => input === address).length;
+
+  it("fills in a signed-in client's own name, email address and phone number at the details, and leaves what they typed", async () => {
+    document.cookie = "vs_signed_in=1; path=/";
+    ownDetails = { name: "Jane Smith", email: "jane@example.com", phone: "407-555-0100" };
+    let answer = () => {};
+    ownDetailsWait = new Promise((resolve) => {
+      answer = resolve;
+    });
+    render(<BookingFlow catalog={catalog} navigate={nav.push} />);
+    // Nothing is asked as the page opens: only once the details are reached.
+    await user.click(studioBox("Studio Paris"));
+    expect(asked("/api/own-details")).toBe(0);
+    await user.click(studioBox("Studio Paris"));
     await toDetails();
-    expect((screen.getByLabelText("Full name *") as HTMLInputElement).value).toBe("Jane Smith");
-    expect((screen.getByLabelText("Email address *") as HTMLInputElement).value).toBe("jane@example.com");
-    expect((screen.getByLabelText("Phone number *") as HTMLInputElement).value).toBe("407-555-0100");
-    // Nothing is left to type: the next step opens. And what she changes stays hers.
-    await user.clear(screen.getByLabelText("Full name *"));
+    expect(asked("/api/own-details")).toBe(1);
+    // She has begun to type another name before the answer comes: it stays.
     await user.type(screen.getByLabelText("Full name *"), "Jane S. Smith");
+    await act(async () => answer());
+    await waitFor(() => expect((screen.getByLabelText("Email address *") as HTMLInputElement).value).toBe("jane@example.com"));
+    expect((screen.getByLabelText("Phone number *") as HTMLInputElement).value).toBe("407-555-0100");
+    expect((screen.getByLabelText("Full name *") as HTMLInputElement).value).toBe("Jane S. Smith");
+    // Nothing is left to type: the next step opens. Coming back to the details asks nothing again.
     await next();
     expect(await screen.findByRole("checkbox", { name: /I have read and agree/ })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "← Back" }));
-    expect((screen.getByLabelText("Full name *") as HTMLInputElement).value).toBe("Jane S. Smith");
+    expect(asked("/api/own-details")).toBe(1);
   });
 
-  it("keeps what she typed over her own details after a refresh, and a visitor's fields start empty", async () => {
-    const own = { name: "Jane Smith", email: "jane@example.com", phone: "407-555-0100" };
-    const first = render(<BookingFlow catalog={catalog} navigate={nav.push} own={own} />);
-    await toDetails();
-    await user.clear(screen.getByLabelText("Phone number *"));
-    await user.type(screen.getByLabelText("Phone number *"), "(407) 555-0199");
-    first.unmount();
-    const second = render(<BookingFlow catalog={catalog} navigate={nav.push} own={own} />);
-    expect((await screen.findByLabelText("Phone number *") as HTMLInputElement).value).toBe("(407) 555-0199");
-    expect((screen.getByLabelText("Full name *") as HTMLInputElement).value).toBe("Jane Smith");
-    second.unmount();
-    window.sessionStorage.clear();
-    window.history.pushState(null, "", "/book");
+  it("asks nothing about a visitor who is not signed in", async () => {
     render(<BookingFlow catalog={catalog} navigate={nav.push} />);
     await toDetails();
+    expect(asked("/api/own-details")).toBe(0);
     expect((screen.getByLabelText("Full name *") as HTMLInputElement).value).toBe("");
   });
 });

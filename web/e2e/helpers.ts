@@ -222,6 +222,8 @@ export async function accessibilityProblems(page: Page, options: { exclude?: str
     // Words that are dimmed while an answer is on its way are read as paler than they are: the month calendar's days and
     // weekdays, until the month has come (CI's development-server runs of 2026-11-27).
     await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
+    // And a part of the page that is still on its way shows a spinner in its place: the booking screen, while it starts.
+    await expect(page.locator(".spinner").filter({ visible: true })).toHaveCount(0);
     // And words that are still fading in: a step of the booking screen takes 0.3 s to show.
     await page.evaluate(() =>
       Promise.all(
