@@ -233,9 +233,13 @@ export const byText = (scope: Scope, text: string | RegExp) => onScreen(scope.ge
 
 /**
  * What axe-core finds wrong on the page as it is now, against WCAG 2.1 A and
- * AA, one line for each kind of problem, naming up to three places. Colour
- * contrast is left out: see e2e/a11y.spec.ts. `exclude` leaves out parts of
- * the page that are not the site's own (the page editor's canvas is Puck's).
+ * AA, one line for each kind of problem, naming up to three places. `exclude`
+ * leaves out parts of the page that are not the site's own (the page editor's
+ * canvas is Puck's).
+ *
+ * Colour contrast is part of every scan since 2026-11-28 (the public pages and the booking steps since 2026-11-27,
+ * the account and the admin since the admin's ground and the green of a discount's line were put right). `contrast:
+ * false` leaves it out, for a page whose colours are not the site's: the page editor around Puck's canvas.
  */
 export async function accessibilityProblems(page: Page, options: { exclude?: string[]; contrast?: boolean } = {}): Promise<string[]> {
   // After a form is sent, the framework draws the page and puts its title back a moment later. Scanned in between,
@@ -245,11 +249,11 @@ export async function accessibilityProblems(page: Page, options: { exclude?: str
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
     // The development server's own button, which visitors never get.
     .exclude("nextjs-portal");
-  // Colour contrast is checked where a test asks for it (`contrast`): on the public pages and the booking steps, whose
-  // colours all pass since 2026-11-27. The logo's second half keeps the brand's tan: a logotype needs no contrast (WCAG
-  // 1.4.3), and the scan cannot know it is one. Elsewhere the rule stays off: the admin's pages were not gone through.
-  builder = options.contrast ? builder.exclude(".site-logo span") : builder.disableRules(["color-contrast"]);
-  if (options.contrast) {
+  // The logo's second half keeps the brand's tan: a logotype needs no contrast (WCAG 1.4.3), and the scan cannot know
+  // it is one. The design's and the menu's editors show the website in a frame of their own, where it is left out too.
+  const contrast = options.contrast ?? true;
+  builder = contrast ? builder.exclude(".site-logo span").exclude(["iframe", ".site-logo span"]) : builder.disableRules(["color-contrast"]);
+  if (contrast) {
     // Words that are dimmed while an answer is on its way are read as paler than they are: the month calendar's days and
     // weekdays, until the month has come (CI's development-server runs of 2026-11-27).
     await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
@@ -259,20 +263,30 @@ export async function accessibilityProblems(page: Page, options: { exclude?: str
     // on a ground of nearly their own colour: after "Next" the pointer lies where the payment step puts its buttons
     // (`master`'s WebKit run of 2026-11-28, on the "Fake Payment" button). The pointer is taken off the page's controls.
     await page.mouse.move(0, 0);
-    // And words that are still fading in: a step of the booking screen takes 0.3 s to show.
-    await page.evaluate(() =>
-      Promise.all(
-        document
-          .getAnimations()
-          .filter((animation) => animation.effect?.getComputedTiming().iterations !== Infinity)
-          .map((animation) => animation.finished.catch(() => undefined)),
-      ),
-    );
+    // And words that are still fading in: a step of the booking screen takes 0.3 s to show. Not for ever: on the menu
+    // editor's page the wait once never came back (a production build, 2026-11-28; which animation it was is not
+    // known). One that has not ended after 3 s is named in the log, and the scan goes on.
+    const moving = await page.evaluate(() => {
+      const unfinished = () =>
+        document.getAnimations().filter((animation) => animation.effect?.getComputedTiming().iterations !== Infinity && animation.playState !== "finished");
+      const named = (animation: Animation) => {
+        const target = (animation.effect as KeyframeEffect | null)?.target;
+        const what = (animation as Partial<CSSAnimation>).animationName ?? (animation as Partial<CSSTransition>).transitionProperty ?? animation.id;
+        return `${animation.playState} "${what}" on ${target?.nodeName.toLowerCase() ?? "?"}.${String(target?.className ?? "").slice(0, 60)}`;
+      };
+      return Promise.race([
+        Promise.all(unfinished().map((animation) => animation.finished.catch(() => undefined))).then(() => ""),
+        new Promise<string>((resolve) => setTimeout(() => resolve(unfinished().map(named).join("; ")), 3_000)),
+      ]);
+    });
+    if (moving) console.warn(`accessibilityProblems: on ${page.url()} this had not ended after 3 s: ${moving}`);
   }
   for (const selector of options.exclude ?? []) builder = builder.exclude(selector);
   const result = await builder.analyze();
-  // The scan finishes in a blank page of its own, which it then closes. In WebKit a press 1 ms after that did nothing
-  // (the membership test, 2026-11-21, HANDOFF.md "Now" 5), so the page under test is made the active one again first.
+  // The scan finishes in a blank page of its own, which it then closes, and the page under test is made the active one
+  // again. This was the remedy of 2026-11-21 for a press on "Pay $300 and join" that seemed lost just after a scan. When
+  // the same test failed the same way on 2026-11-28, its trace showed the name field empty instead (`fillDetails`), so
+  // the press was most likely never lost; the call is kept, as it costs nothing.
   await page.bringToFront();
   return result.violations.map(
     (violation) =>
@@ -338,23 +352,69 @@ export const pickStudio = (page: Page, name: string) => onScreen(page.locator("l
 /** The total row of the price summary currently on screen. */
 export const totalRow = (scope: Scope) => onScreen(scope.locator(".price-row.total"));
 
+/**
+ * Keeps, in the page, what the browser does to its fields from now on (the focus coming and going, text going in), for
+ * `fillDetails` to print when a field loses its value.
+ */
+function recordFills() {
+  const scope = window as unknown as { recordedFills?: string[] };
+  if (scope.recordedFills) return;
+  const fills: string[] = (scope.recordedFills = []);
+  for (const type of ["focusin", "focusout", "beforeinput", "input"]) {
+    document.addEventListener(
+      type,
+      (event) => {
+        const field = event.target as Partial<HTMLInputElement> | null;
+        if (fills.length < 120) fills.push(`${Math.round(performance.now())} ${type} ${field?.id || field?.nodeName} ${JSON.stringify(field?.value ?? null)}`);
+      },
+      true,
+    );
+  }
+}
+
+/**
+ * The name, the email address and the phone number of a form that asks for the three (the booking screen's details
+ * step, the membership's checkout), each checked once all are in.
+ *
+ * In WebKit a fill made as such a form appears has ended with its field empty, with no error from the fill, four times
+ * that were read: the details step twice on 2026-11-23 and the membership's checkout on 2026-11-28 (and, most likely,
+ * on 2026-11-21). Each time an answer the form had asked for arrived within the same few milliseconds and drew it
+ * again (`/api/props-free`, `/api/booking-config`). The membership's "Pay" then did nothing: the browser's own check of
+ * a required field stops the form. How the value is lost is not proved ("Conventions and gotchas" in
+ * ProjectLibrary.md): drawing the form again just before or just after the text goes in lost nothing in 348 tries on a
+ * Mac. So a field that lost its value is filled again, and what the browser did to it is printed: whether the text
+ * ever went in ("input", with the value) is what the next reading needs.
+ */
 export async function fillDetails(page: Page, customer: { name: string; email: string; phone: string }): Promise<void> {
   const fields = [
     ["Full name *", customer.name],
     ["Email address *", customer.email],
     ["Phone number *", customer.phone],
   ] as const;
-  // In WebKit a fill made as the details step opens has twice ended with its field empty, with no error, while the
-  // props' counts arrived (`/api/props-free`) and drew the step again ("Conventions and gotchas" in ProjectLibrary.md).
-  // So each value is checked once all are in, and a field that lost its value is filled again.
+  await page.evaluate(recordFills);
+  const filled = new Set<string>();
   await expect(async () => {
     for (const [label, value] of fields) {
       const field = byLabel(page, label);
-      if ((await field.inputValue()) !== value) await field.fill(value);
+      const held = await field.inputValue();
+      if (held === value) continue;
+      if (filled.has(label)) {
+        const seen = await page.evaluate(() => (window as unknown as { recordedFills?: string[] }).recordedFills?.join(" | ") ?? "nothing kept: the page was loaded again");
+        console.warn(`fillDetails: "${label}" held ${JSON.stringify(held)} after it was filled with ${JSON.stringify(value)}. The browser: ${seen}`);
+      }
+      await field.fill(value);
+      filled.add(label);
     }
     for (const [label, value] of fields) await expect(byLabel(page, label)).toHaveValue(value, { timeout: 1_000 });
   }).toPass({ timeout: 15_000 });
 }
+
+/**
+ * A box's height for `expect.poll`. While the page is being drawn again the element has no box for a moment, and
+ * `expect.poll` gives up on a callback that throws (the fully booked day's zoom, `webkit-production` on 2026-11-25): no
+ * box reads as not a number, which is neither more nor less than anything, so the poll asks again.
+ */
+export const heightOf = async (locator: Locator): Promise<number> => (await locator.boundingBox())?.height ?? Number.NaN;
 
 /**
  * The policies step (the owner's brief of 2026-11-22, item 6): on to it from the details when not there yet, the

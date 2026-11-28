@@ -56,6 +56,11 @@
      as the headings, or pale on something dark. */
   --accent-words: var(--color-accent-text);
   --accent-words-hover: var(--color-dark);
+
+  /* The ground of the admin's pages, under their cards. The site's running text and its words in the accent lie on it
+     as they do on the public pages, so it is as light as the page's cream: 4.5 to 1 is asked of them, and on the
+     #f4f1ee it had until 2026-11-28 they came to 4.38 and 4.36. */
+  --admin-ground: #f9f5f0;
 }
 /* The dark parts: a dark section, a band with a picture behind its words, the footer, the admin's sidebar. */
 :is(.section-dark, .blk-bg-dark, .blk-banner.has-picture, .blk-slideshow[data-shade="dark"], .site-footer, .admin-sidebar) {
@@ -1095,7 +1100,9 @@ details.faq-item[open] .faq-icon { transform: rotate(45deg); }
   font-size: 1rem;
   color: var(--color-dark);
 }
-.price-discount { color: #4a8a4a; }
+/* What comes off a price, and a refund. A green that reads on the page, on cards and on white: 4.7 to 1 at the least
+   (the #4a8a4a it had until 2026-11-28 came to 4.0 on a card, where 4.5 is asked). */
+.price-discount { color: #3e7b3e; }
 
 /* Payment type toggle */
 .payment-toggle { display: flex; gap: 1rem; margin-bottom: 1.5rem; }
@@ -1194,7 +1201,7 @@ details.faq-item[open] .faq-icon { transform: rotate(45deg); }
   flex: 1;
   padding: 2rem;
   overflow-y: auto;
-  background: #f4f1ee;
+  background: var(--admin-ground);
 }
 .admin-header {
   display: flex;
@@ -2123,7 +2130,7 @@ button { font-family: inherit; }
 .editor-bar {
   position: sticky; top: 72px; z-index: 50;
   margin: -1rem 0 1.25rem; padding: .75rem 0;
-  background: #f4f1ee; border-bottom: 1px solid var(--color-border);
+  background: var(--admin-ground); border-bottom: 1px solid var(--color-border);
 }
 .editor-status { margin: 0 0 .5rem; font-size: .875rem; color: var(--color-dark); }
 .editor-actions { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }

@@ -7,12 +7,13 @@ import { accessibilityProblems, byLabel, dateAhead, fillDetails, next, pickStudi
  * the public pages, on every step of a booking, on a customer's account and
  * on the pages of the admin.
  *
- * Colour contrast is checked on the public pages and on every step of a
- * booking since 2026-11-27, when the owners' two tones of the tan made the
- * site's own colours readable (buttons keep the tan, with dark words; words in
- * the accent take a darker shade). The account and the admin are not checked
- * for it yet. The colours stay the owners' choice: the design editor's
- * readability list advises them.
+ * Colour contrast is part of every scan: on the public pages and on every
+ * step of a booking since 2026-11-27, when the owners' two tones of the tan
+ * made the site's own colours readable (buttons keep the tan, with dark
+ * words; words in the accent take a darker shade), and in the account and the
+ * admin since 2026-11-28. The colours stay the owners' choice: the design
+ * editor's readability list advises them, and these tests check the design
+ * the site starts with.
  *
  * This file sorts first, so it runs on the database as the site was built. It
  * books nothing (the booking stops before it is paid), and signs in a
@@ -37,18 +38,18 @@ test("the public pages can be used with a screen reader and a keyboard", async (
     await expect(page.locator("main h1, main h2").first()).toBeVisible();
     // The booking screen comes once the page has started, and its first step fades in.
     if (path.startsWith("/book")) await expect(page.locator(".wizard-panel h3").first()).toBeVisible();
-    expect(await accessibilityProblems(page, { contrast: true }), path).toEqual([]);
+    expect(await accessibilityProblems(page), path).toEqual([]);
   }
   // On a phone the menu folds behind a button, which opens it.
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
-  expect(await accessibilityProblems(page, { contrast: true }), "the home page on a phone").toEqual([]);
+  expect(await accessibilityProblems(page), "the home page on a phone").toEqual([]);
   await page.locator(".site-nav").getByRole("button", { name: "Menu" }).click();
-  expect(await accessibilityProblems(page, { contrast: true }), "the home page on a phone, with the menu open").toEqual([]);
+  expect(await accessibilityProblems(page), "the home page on a phone, with the menu open").toEqual([]);
 });
 
 test("every step of a booking can be used with a screen reader and a keyboard", async ({ page }) => {
-  const check = async (step: string) => expect(await accessibilityProblems(page, { contrast: true }), step).toEqual([]);
+  const check = async (step: string) => expect(await accessibilityProblems(page), step).toEqual([]);
   await page.goto("/book");
   // The step fades in once the page has started: scanned before it is there, its words are read as paler than they are.
   await expect(page.getByRole("heading", { name: "Select studio(s)" })).toBeVisible();

@@ -10,6 +10,7 @@ import {
   dateAhead,
   fillDetails,
   followLink,
+  heightOf,
   latestEmail,
   next,
   onScreen,
@@ -954,7 +955,7 @@ test("the calendar shows a day, a week and a month, one studio or all, and a boo
   const before = (await bobs.boundingBox())!.height;
   await zoom().selectOption({ label: "1.5×" });
   await expect(page).toHaveURL(/zoom=1\.5/);
-  await expect.poll(async () => (await page.getByRole("link", { name: /Bob Brown/ }).boundingBox())!.height).toBeGreaterThan(before * 1.4);
+  await expect.poll(() => heightOf(page.getByRole("link", { name: /Bob Brown/ }))).toBeGreaterThan(before * 1.4);
   await expect(page.getByRole("link", { name: /Bob Brown/ })).toContainText("10:00 AM – 11:00 AM");
   await page.getByRole("navigation", { name: "Calendar view" }).getByRole("link", { name: "Week" }).click();
   await expect(page).toHaveURL(/view=week.*zoom=1\.5/);
@@ -1166,6 +1167,10 @@ test("the calendar shows a day, a week and a month, one studio or all, and a boo
   expect(box.x + box.width).toBeGreaterThan((await dayglowHead.boundingBox())!.x);
   await expect(onScreen(page.locator(".cal-key"))).toContainText("Paris + Dayglow");
   await page.getByRole("navigation", { name: "Calendar view" }).getByRole("link", { name: "Week" }).click();
+  // The Day view holds the one link too: the scan waits for the week itself, not to read a page that is changing
+  // (`webkit` on 2026-11-25: "document-title", as the week came).
+  await expect(page).toHaveURL(/view=week/);
+  await expect(onScreen(page.locator(".cal-week"))).toBeVisible();
   await expect(page.getByRole("link", { name: /Bea Bundle/ })).toHaveCount(1);
   expect(await accessibilityProblems(page), "the calendar's week, with a bundle").toEqual([]);
 
@@ -1294,7 +1299,7 @@ test("the owners put a studio on sale: its usual price is crossed out on the Rat
   await expect(ratesOf("Studio Paris").locator(".rate-price")).toHaveText("$68");
   await expect(ratesOf("Studio Paris").locator("s")).toHaveCount(0);
   await shot(client, "17e-rates-sale");
-  expect(await accessibilityProblems(client, { contrast: true }), "the Rates page with a sale").toEqual([]);
+  expect(await accessibilityProblems(client), "the Rates page with a sale").toEqual([]);
 
   // The booking screen says the same, and an hour of Dayglow is charged $65.
   await client.goto("/book");
@@ -1306,7 +1311,7 @@ test("the owners put a studio on sale: its usual price is crossed out on the Rat
   await expect(onScreen(client.locator(".price-row.price-sale-note"))).toHaveText("Black Friday: $13 off the usual price");
   await expect(totalRow(client)).toContainText("$65");
   await shot(client, "17f-checkout-sale");
-  expect(await accessibilityProblems(client, { contrast: true }), "checkout with a sale").toEqual([]);
+  expect(await accessibilityProblems(client), "checkout with a sale").toEqual([]);
   await confirmAndGetRef(client, "Confirm & pay $65");
   // The booking's page says what it was sold at.
   await expect(onScreen(client.locator(".price-row.price-sale-note"))).toHaveText("Black Friday: $13 off the usual price");
@@ -1790,17 +1795,17 @@ test("a fully booked day: the calendar draws every appointment once and apart, a
   const zoom = () => page.getByRole("combobox", { name: "Zoom" });
   await zoom().selectOption({ label: "1.5×" });
   await expect(page).toHaveURL(/zoom=1\.5/);
-  await expect.poll(async () => (await page.getByRole("link", { name: /Ada Ames/ }).boundingBox())!.height).toBeGreaterThan(normal * 1.4);
+  await expect.poll(() => heightOf(page.getByRole("link", { name: /Ada Ames/ }))).toBeGreaterThan(normal * 1.4);
   await readable("zoom 1.5");
   await zoom().selectOption({ label: "2×" });
-  await expect.poll(async () => (await page.getByRole("link", { name: /Ada Ames/ }).boundingBox())!.height).toBeGreaterThan(normal * 1.9);
+  await expect.poll(() => heightOf(page.getByRole("link", { name: /Ada Ames/ }))).toBeGreaterThan(normal * 1.9);
   await readable("zoom 2");
   await zoom().selectOption({ label: "0.5×" });
-  await expect.poll(async () => (await page.getByRole("link", { name: /Ada Ames/ }).boundingBox())!.height).toBeLessThan(normal * 0.6);
+  await expect.poll(() => heightOf(page.getByRole("link", { name: /Ada Ames/ }))).toBeLessThan(normal * 0.6);
   await readable("zoom 0.5", false);
   await zoom().selectOption({ label: "0.25×" });
   await expect(page).toHaveURL(/zoom=0\.25/);
-  await expect.poll(async () => (await page.getByRole("link", { name: /Ada Ames/ }).boundingBox())!.height).toBeLessThan(normal * 0.3);
+  await expect.poll(() => heightOf(page.getByRole("link", { name: /Ada Ames/ }))).toBeLessThan(normal * 0.3);
   await readable("zoom 0.25", false);
   expect(await accessibilityProblems(page), "the calendar at its smallest").toEqual([]);
   // On an iPad held upright, too.
@@ -2002,9 +2007,8 @@ test("a client buys a membership, gets its code, sees it in their account and ca
   await plan.getByRole("link", { name: "Join: Studio Paris, 5 hours a month" }).click();
 
   await expect(page.getByRole("heading", { name: "Studio Paris, 5 hours a month" })).toBeVisible();
-  await byLabel(page, "Full name *").fill(max.name);
-  await byLabel(page, "Email address *").fill(max.email);
-  await byLabel(page, "Phone number *").fill(max.phone);
+  // Each value checked: the name was lost here on 2026-11-28, and "Pay" then did nothing (`fillDetails`).
+  await fillDetails(page, max);
   await expect(byText(page, /No card processor is connected/)).toBeVisible();
   await page.getByRole("checkbox", { name: /membership terms/ }).check();
   expect(await accessibilityProblems(page)).toEqual([]);
